@@ -931,7 +931,7 @@ def RvE():
 					image_string = now.strftime("PROJECT_Date_%m_%d_%Y")
 
 					dt_string = str(rand_num) + dt_string
-					image_string = str(rand_num) + image_string
+					image_string = str(rxand_num) + image_string
 
 					full_path = os.path.join(sub_mymainpath, dt_string)
 
@@ -5163,6 +5163,7 @@ def track_trace(run_num):
 def track_angles():
 	from tqdm import tqdm
 	from collections import defaultdict
+	import matplotlib.colors as colors
 
 	def create_dictionaries(all_angle_list, all_len_list, all_energy_list):
 		len_dict = defaultdict(list)
@@ -5440,7 +5441,7 @@ def track_angles():
 		if len(int_charge_0to10) > 0:
 			plt.rcParams['figure.figsize'] = [10, 10]
 			plt.subplot(3, 3, 1)
-			plt.hist2d(np.asarray(int_charge_0to10), np.asarray(range_0to10), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_0to10), np.asarray(range_0to10), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('0 - 10 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5464,7 +5465,7 @@ def track_angles():
 		int_charge_10to20 = [item for sublist in int_charge_10to20 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_10to20) > 0:
 			plt.subplot(3, 3, 2)
-			plt.hist2d(np.asarray(int_charge_10to20), np.asarray(range_10to20), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_10to20), np.asarray(range_10to20), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('10 - 20 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5488,7 +5489,7 @@ def track_angles():
 		int_charge_20to30 = [item for sublist in int_charge_20to30 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_20to30) > 0:
 			plt.subplot(3, 3, 3)
-			plt.hist2d(np.asarray(int_charge_20to30), np.asarray(range_20to30), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_20to30), np.asarray(range_20to30), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('20 - 30 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5512,7 +5513,7 @@ def track_angles():
 		int_charge_30to40 = [item for sublist in int_charge_30to40 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_30to40) > 0:
 			plt.subplot(3, 3, 4)
-			plt.hist2d(np.asarray(int_charge_30to40), np.asarray(range_30to40), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_30to40), np.asarray(range_30to40), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('30 - 40 Degrees', fontdict = {'fontsize' :  10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5536,7 +5537,7 @@ def track_angles():
 		int_charge_40to50 = [item for sublist in int_charge_40to50 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_40to50) > 0:
 			plt.subplot(3, 3, 5)
-			plt.hist2d(np.asarray(int_charge_40to50), np.asarray(range_40to50), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_40to50), np.asarray(range_40to50), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('40 - 50 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5560,7 +5561,7 @@ def track_angles():
 		int_charge_50to60 = [item for sublist in int_charge_50to60 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_50to60) > 0:
 			plt.subplot(3, 3, 6)
-			plt.hist2d(np.asarray(int_charge_50to60), np.asarray(range_50to60), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_50to60), np.asarray(range_50to60), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('50 - 60 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5584,7 +5585,7 @@ def track_angles():
 		int_charge_60to70 = [item for sublist in int_charge_60to70 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_60to70) > 0:
 			plt.subplot(3, 3, 7)
-			plt.hist2d(np.asarray(int_charge_60to70), np.asarray(range_60to70), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_60to70), np.asarray(range_60to70), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('60 - 70 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5608,7 +5609,7 @@ def track_angles():
 		int_charge_70to80 = [item for sublist in int_charge_70to80 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_70to80) > 0:
 			plt.subplot(3, 3, 8)
-			plt.hist2d(np.asarray(int_charge_70to80), np.asarray(range_70to80), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_70to80), np.asarray(range_70to80), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('70 - 80 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5632,7 +5633,7 @@ def track_angles():
 		int_charge_80to90 = [item for sublist in int_charge_80to90 for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_80to90) > 0:
 			plt.subplot(3, 3, 9)
-			plt.hist2d(np.asarray(int_charge_80to90), np.asarray(range_80to90), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_80to90), np.asarray(range_80to90), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('80 - 90 Degrees', fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
@@ -5813,7 +5814,7 @@ def track_angles():
 		range_deg = [item for sublist in range_deg for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		int_charge_deg = [item for sublist in int_charge_deg for item in (sublist if hasattr(sublist, '__iter__') else [sublist])]
 		if len(int_charge_deg) > 0:
-			plt.hist2d(np.asarray(int_charge_deg), np.asarray(range_deg), (num_bins, num_bins), cmap=plt.cm.jet)
+			plt.hist2d(np.asarray(int_charge_deg), np.asarray(range_deg), (num_bins, num_bins), cmap=plt.cm.jet, norm=colors.LogNorm())
 			plt.colorbar()
 			plt.title('{} - {} Degrees'.format(start_deg, end_deg), fontdict = {'fontsize' : 10})
 			plt.ylabel('Range (mm)', fontdict = {'fontsize' : 10})
