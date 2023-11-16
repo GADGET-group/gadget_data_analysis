@@ -50,6 +50,9 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
+    ax.set_xlim3d(-35, 35)
+    ax.set_ylim3d(-35, 35)
+    ax.set_zlim3d(0, 35)
 
     cdict={'red':  ((0.0, 0.0, 0.0),
                    (0.25, 0.0, 0.0),
