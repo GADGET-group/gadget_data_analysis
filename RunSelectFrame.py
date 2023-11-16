@@ -90,7 +90,7 @@ class RunSelectFrame(ttk.Frame):
         self.run_data = None
 
     def load_button_clicked(self):
-        self.run_number = self.load_run_number_entry.get()
+        self.run_number = int(self.load_run_number_entry.get())
         default_path = GadgetRunH5.get_default_path(self.run_number)
         selected_path = tk.filedialog.askdirectory(initialdir=default_path, title='Select a Directory')
         if selected_path:

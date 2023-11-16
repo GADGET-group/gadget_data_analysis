@@ -22,6 +22,7 @@ from BaselineRemoval import BaselineRemoval
 from sklearn.cluster import DBSCAN
 from scipy.signal import savgol_filter
 from skspatial.objects import Line
+import raw_viewer.raw_trace_viewer as raw_trace_viewer
 
 def run_num_to_str(run_num):
     run_num = int(run_num)
@@ -50,6 +51,8 @@ class GadgetRunH5:
         self.trace_list = np.load(os.path.join(folder_path, 'trace_list.npy'), allow_pickle=True)
         #
         self.angle_list = np.load(os.path.join(folder_path, 'angle_list.npy'), allow_pickle=True)
+
+        self.h5_file = raw_trace_viewer.load_run(run_num)
 
         #TODO: decide how to store calibration information with runs
         calib_point_1 = (0.806, 156745)
