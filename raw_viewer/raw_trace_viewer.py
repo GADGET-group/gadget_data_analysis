@@ -33,7 +33,7 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
         pad = pad_data[4]
         if pad < len(padxy):
             x, y = padxy[pad]
-            zscale = 1.#400./512 #TODO: correct this
+            zscale = 1.45#from GadgetRunH5
             zs.append(np.arange(len(time_data))*zscale)
             xs.append(np.ones(len(time_data))*x)
             ys.append(np.ones(len(time_data))*y)
