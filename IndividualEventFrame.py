@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 import matplotlib.pyplot as plt
 import numpy as np
+from raw_viewer import raw_trace_viewer
 import scipy.stats
 
 from sklearn.neighbors import NearestNeighbors
@@ -26,19 +27,19 @@ class IndividualEventFrame(ttk.Frame):
         self.event_num_entry = gadget_widgets.GEntry(self.event_select_frame,
                                                       text='Enter Event #')
         self.event_num_entry.grid(row=0, column=1)
-        track_w_trace_button = ttk.Button(self.event_select_frame,
+
+        self.threeD_frame = ttk.LabelFrame(self, text='Point Cloud Viewer')
+        track_w_trace_button = ttk.Button(self.threeD_frame,
                                           text='Show Track w/ Trace',
                                           command = self.track_w_trace)
-        track_w_trace_button.grid(row=1, column=0, columnspan=2)
-
-        self.threeD_frame = ttk.LabelFrame(self, text='3D Point Cloud Viewer')
-        ttk.Button(self.threeD_frame, text='Plot 3D Track', 
-                   command=self.plot_3d_track).grid(row=1)
-        ttk.Button(self.threeD_frame, text='Plot Dense 3D Track',
-                   command=self.plot_dense_3d_track).grid(row=2)
+        track_w_trace_button.grid(row=0, column=0, columnspan=2)
+        ttk.Button(self.threeD_frame, text='3D Point Cloud', 
+                   command=self.show_point_cloud).grid(row=1, column=0)
+        ttk.Button(self.threeD_frame, text='3D Dense Point Cloud',
+                   command=self.plot_dense_3d_track).grid(row=1, column=1)
         self.threeD_frame.pack()
 
-        fitting_frame = ttk.LabelFrame(self, text='Fitting Tools')
+        fitting_frame = ttk.LabelFrame(self, text='Point Cloud Fitting Tools')
         fitting_frame.pack()
         ttk.Label(fitting_frame, text='Bandwidth Factor:').grid(row=0, column=0)
         self.bandwidth_entry = ttk.Entry(fitting_frame)
@@ -46,8 +47,31 @@ class IndividualEventFrame(ttk.Frame):
         ttk.Button(fitting_frame, text='Project onto Principle Axis',
                    command=self.project_trace).grid(row=1, columnspan=2)
         
+        trace_frame = ttk.LabelFrame(self, text='Original Trace Data')
+        ttk.Label(trace_frame, text='threshold').grid(row=0, column=0)
+        self.threshold_entry = ttk.Entry(trace_frame)
+        self.threshold_entry.grid(row=0, column=1)
+        ttk.Button(trace_frame, text='show raw traces', 
+                   command=self.plot_traces).grid(row=1, column=0)
+        ttk.Button(trace_frame, text='3D trace plot', 
+                   command=self.plot_3d_traces).grid(row=1, column=1)
+        trace_frame.pack()
+
+    def plot_traces(self):
+        event_num = int(self.event_num_entry.get())
+        raw_trace_viewer.plot_traces(self.run_data.h5_file, event_num, False)
+
+    def plot_3d_traces(self):
+        event_num = int(self.event_num_entry.get())
+        threshold = self.threshold_entry.get()
+        if len(threshold) == 0:
+            threshold = 0
+        else:
+            threshold = float(threshold)
+        raw_trace_viewer.plot_3d_traces(self.run_data.h5_file, event_num, threshold, False)
+
     def project_trace(self):
-        debug = False
+        debug = True
 
         index = self.run_data.get_index(int(self.event_num_entry.get()))
         bandwidth = float(self.bandwidth_entry.get())
@@ -105,7 +129,7 @@ class IndividualEventFrame(ttk.Frame):
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
-        ax.set_title(f"3D Point-cloud of Event {event_num}\nLength: {self.run_data.len_list[index]:.2f}\nAngle: {self.run_data.angle_list[event_num]:.2f}", fontdict = {'fontsize' : 10})
+        ax.set_title(f"3D Point-cloud of Event {event_num}", fontdict = {'fontsize' : 10})
         ax.scatter(xHit, yHit, zHit-np.min(zHit), c=eHit, cmap='RdBu_r')
         cbar = fig.colorbar(ax.get_children()[0])
         plt.show(block=False) 
@@ -116,7 +140,7 @@ class IndividualEventFrame(ttk.Frame):
         plt.figure()
         self.run_data.make_image(index, show=True)
 
-    def plot_3d_track(self):
+    def show_point_cloud(self):
         event_num = int(self.event_num_entry.get())
         xHit, yHit, zHit, eHit = self.run_data.get_hit_lists(event_num)
         self.show_plot(xHit, yHit, zHit, eHit)

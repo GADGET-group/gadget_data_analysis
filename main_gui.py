@@ -1,5 +1,6 @@
 import os
 import gadget_widgets
+import subprocess
 
 from tkinter import ttk
 import tkinter as tk
@@ -31,7 +32,8 @@ class GadgetAnalysisGUI(tk.Tk):
             text="GADGET II Analysis Gadget",bg=bg_color,
             fg="white", font = ('times','22'))
         self.title_label.grid(row=0)
-        self.version_label = tk.Label(self.title_frame, text="Version 4.23",
+        git_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
+        self.version_label = tk.Label(self.title_frame, text='hash=%s'%git_hash,
                                         bg="#18453b", fg="white", font = ('times','12'))
         self.version_label.grid(row=1)
 
