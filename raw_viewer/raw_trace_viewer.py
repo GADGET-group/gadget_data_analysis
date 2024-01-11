@@ -1,9 +1,11 @@
 import os
+import re
 
 import matplotlib.pylab as plt
 from matplotlib.colors import LinearSegmentedColormap
 import h5py
 import numpy as np
+
 
 def load_run(run_number):
     h5_dir = '/mnt/analysis/e21072/h5test/'
@@ -22,6 +24,10 @@ def plot_traces(file, event_number, block=True):
         plt.plot(data[5:], label='%d'%pad)
     plt.legend()
     plt.show(block=block)
+
+def get_first_good_event_number(file):
+    return int(re.search('\d+', list(file['get'].keys())[0]).group(0))
+
 
 def plot_3d_traces(file, event_number, threshold=0, block=True):
     event = file['get']['evt%d_data'%event_number]
@@ -52,7 +58,7 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
     ax.set_zlabel("z")
     ax.set_xlim3d(-35, 35)
     ax.set_ylim3d(-35, 35)
-    ax.set_zlim3d(0, 35)
+    ax.set_zlim3d(0, 400)
 
     cdict={'red':  ((0.0, 0.0, 0.0),
                    (0.25, 0.0, 0.0),
