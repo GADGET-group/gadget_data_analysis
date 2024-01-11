@@ -129,7 +129,7 @@ class IndividualEventFrame(ttk.Frame):
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
-        ax.set_title(f"3D Point-cloud of Event {event_num}\nLength: {self.run_data.len_list[index]:.2f}\nAngle: {self.run_data.angle_list[event_num]:.2f}", fontdict = {'fontsize' : 10})
+        ax.set_title(f"3D Point-cloud of Event {event_num}", fontdict = {'fontsize' : 10})
         ax.scatter(xHit, yHit, zHit-np.min(zHit), c=eHit, cmap='RdBu_r')
         cbar = fig.colorbar(ax.get_children()[0])
         plt.show(block=False) 
