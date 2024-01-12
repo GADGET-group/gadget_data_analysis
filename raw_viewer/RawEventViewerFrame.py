@@ -28,6 +28,14 @@ class IndividualEventFrame(ttk.Frame):
 
         next_button = ttk.Button(self, text='next', command=self.next)
         next_button.grid(row=2, column=1)
+
+        show_2D_button = ttk.Button(self, text='x-y proj', command=self.show_xy_proj)
+        show_2D_button.grid(row=3)
+
+        ttk.Label(self, text='# pad threshold:').grid(row=4, column=0)
+        self.num_pad_threshold_entry = ttk.Entry(self)
+        self.num_pad_threshold_entry.insert(0, 10)
+        self.num_pad_threshold_entry.grid(row=4, column=2)
     
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
@@ -37,9 +45,16 @@ class IndividualEventFrame(ttk.Frame):
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
+        pads_threshold = int(self.num_pad_threshold_entry.get())
+        while raw_trace_viewer.get_pads_fired(self.h5_file, event_number) < pads_threshold:
+            event_number += 1
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
         self.show_3d_cloud()
+
+    def show_xy_proj(self):
+        event_number = int(self.event_number_entry.get())
+        raw_trace_viewer.show_2d_projection(self.h5_file, event_number, block=False)
 
 if __name__ == '__main__':
     root = tk.Tk()

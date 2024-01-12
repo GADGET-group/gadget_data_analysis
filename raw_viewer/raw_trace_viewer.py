@@ -28,6 +28,16 @@ def plot_traces(file, event_number, block=True):
 def get_first_good_event_number(file):
     return int(re.search('\d+', list(file['get'].keys())[0]).group(0))
 
+def get_pads_fired(file, event_number):
+    event = file['get']['evt%d_data'%event_number]
+    dirname = os.path.dirname(__file__)
+    padxy = np.loadtxt(os.path.join(dirname, 'padxy.txt'), delimiter=',')
+    to_return = 0
+    for pad_data in event:
+        pad = pad_data[4]
+        if pad < len(padxy):
+            to_return += 1
+    return to_return
 
 def plot_3d_traces(file, event_number, threshold=0, block=True):
     event = file['get']['evt%d_data'%event_number]
@@ -79,17 +89,50 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
                    (1.0, 0.0, 0.0))
         }
     cdict['alpha'] = ((0.0, 0.0, 0.0),
-                    # (0.3,0.05, 0.05),
-                    # (0.8,1.0, 1.0),
-                    (1.0, 1.0, 1.0))
+                      (0.3,0.2, 0.2),
+                      (0.8,1.0, 1.0),
+                     (1.0, 1.0, 1.0))
     cmap = LinearSegmentedColormap('test',cdict)
-
+    ax.view_init(elev=90, azim=0)
     ax.scatter(xs, ys, zs, c=es, cmap=cmap)
     cbar = fig.colorbar(ax.get_children()[0])
     plt.show(block=block)
 
-if __name__ == '__main__':
-    eventid=2007
-    print(eventid)
-    plot_3d_traces(load_run(316), eventid, threshold=500)
-    #plot_traces(load_run(316), 235)
+def show_2d_projection(file, event_number, block=True):
+    cdict={'red':  ((0.0, 0.0, 0.0),
+                    (0.25, 0.0, 0.0),
+                    (0.5, 0.8, 1.0),
+                    (0.75, 1.0, 1.0),
+                    (1.0, 0.4, 1.0)),
+
+            'green': ((0.0, 0.0, 0.0),
+                    (0.25, 0.0, 0.0),
+                    (0.5, 0.9, 0.9),
+                    (0.75, 0.0, 0.0),
+                    (1.0, 0.0, 0.0)),
+
+            'blue':  ((0.0, 0.0, 0.4),
+                    (0.25, 1.0, 1.0),
+                    (0.5, 1.0, 0.8),
+                    (0.75, 0.0, 0.0),
+                    (1.0, 0.0, 0.0))
+            }
+    cmap = LinearSegmentedColormap('test',cdict)
+
+    event = file['get']['evt%d_data'%event_number]
+    dirname = os.path.dirname(__file__)
+    padxy = np.loadtxt(os.path.join(dirname, 'padxy.txt'), delimiter=',')
+    image = np.ones((72,72))*-1
+    for pad_data in event:
+        time_data = pad_data[5:]
+        pad = pad_data[4]
+        if pad < len(padxy):
+            x, y = padxy[pad]
+            x = int(x/1.1+36)
+            y = int(y/1.1+36)
+            image[x][y]=np.sum(time_data)
+    image = np.ma.array(image, mask=(image==-1))#don't mess up the color map with pixels that didn't fire
+    fig = plt.figure()
+    plt.imshow(image, cmap=cmap)
+    cbar = plt.colorbar()
+    plt.show(block=block)
