@@ -66,8 +66,8 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
-    ax.set_xlim3d(-35, 35)
-    ax.set_ylim3d(-35, 35)
+    ax.set_xlim3d(-200, 200)
+    ax.set_ylim3d(-200, 200)
     ax.set_zlim3d(0, 400)
 
     cdict={'red':  ((0.0, 0.0, 0.0),
@@ -93,7 +93,7 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
                       (0.8,1.0, 1.0),
                      (1.0, 1.0, 1.0))
     cmap = LinearSegmentedColormap('test',cdict)
-    ax.view_init(elev=90, azim=0)
+    ax.view_init(elev=45, azim=45)
     ax.scatter(xs, ys, zs, c=es, cmap=cmap)
     cbar = fig.colorbar(ax.get_children()[0])
     plt.show(block=block)

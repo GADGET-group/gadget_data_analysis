@@ -63,6 +63,7 @@ class GadgetAnalysisGUI(tk.Tk):
         self.notebook.add(rve_frame, text='Range vs Energy')
         single_event_frame = IndividualEventFrame(self.notebook, self.run_select_frame.run_data)
         self.notebook.add(single_event_frame, text='Individual Events')
+        self.run_specific_tabs.append(single_event_frame)
 
 #function to close all matplot windows, if this is run as main program
 def on_closing():
