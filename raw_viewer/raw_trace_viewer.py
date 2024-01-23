@@ -96,6 +96,7 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
     ax.view_init(elev=45, azim=45)
     ax.scatter(xs, ys, zs, c=es, cmap=cmap)
     cbar = fig.colorbar(ax.get_children()[0])
+    plt.title('event %d, total counts=%d'%(event_number, get_counts_in_event(file, event_number)))
     plt.show(block=block)
 
 def show_2d_projection(file, event_number, block=True):
@@ -135,4 +136,32 @@ def show_2d_projection(file, event_number, block=True):
     fig = plt.figure()
     plt.imshow(image, cmap=cmap)
     cbar = plt.colorbar()
+    plt.title('event %d, total counts=%d'%(event_number, get_counts_in_event(file, event_number)))
     plt.show(block=block)
+
+def get_first_event_num(file):
+    return file['meta']['meta'][0]
+
+
+def get_counts_in_event(file, event_number):
+    event = file['get']['evt%d_data'%event_number]
+    return np.sum(event[:,5:])
+
+def get_counts_array(file):
+    '''
+    returns an array, where each element is the total number of counts in an image
+    '''
+    to_return = []
+    get = file['get']
+    for entry in get:
+        if '_data' in entry: #these are data entries. The others are meta data
+            to_return.append(np.sum(file['get'][entry][:,5:]))
+    return to_return
+
+'''
+import h5py
+file = h5py.File('/mnt/analysis/e21072/gastest_h5_files/run_0032.h5', 'r')
+a=file['get']['evt3057_data']
+
+'''
+
