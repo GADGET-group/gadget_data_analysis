@@ -5,6 +5,14 @@ import h5py
 import matplotlib.pylab as plt
 from matplotlib.colors import LinearSegmentedColormap
 
+'''
+Notes for tomorrow:
+--make main_gui.py work with recent updates
+--background subtraction, outlier removal, PCA, RvE plot
+--are some pads more noisy than other? Are they all on one cobo or ASAD board or AGET chip?
+'''
+
+VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 
 class raw_h5_file:
     def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
@@ -86,13 +94,13 @@ class raw_h5_file:
         Pad numbers are determined from AGET, COBO, and channel number, rather than the pad number written during
         the merging process.
         '''
-        pad, pad_data = [], []
+        pads, pad_datas = [], []
         event_data =  self.h5_file['get']['evt%d_data'%event_number]
         for pad_data in event_data:
             chnl_info = tuple(pad_data[0:4])
-            pad.append(self.chnls_to_pad[chnl_info])
-            pad_data.append(pad_data[5:])
-        return pad, pad_data
+            pads.append(self.chnls_to_pad[chnl_info])
+            pad_datas.append(pad_data[5:])
+        return pads, pad_datas
     
     def get_num_pads_fired(self, event_number):
         event = self.h5_file['get']['evt%d_data'%event_number]

@@ -11,15 +11,24 @@ import matplotlib.pylab as plt
 from matplotlib.colors import LinearSegmentedColormap
 import h5py
 import numpy as np
+from raw_h5_file import VETO_PADS
 
 
 def plot_traces(pads, pad_data, block=True, fig_name=None):
+    '''
+    Note: veto pads are plotted as dotted lines
+    '''
     plt.figure(fig_name)
     plt.clf()
     for pad, data in zip(pads, pad_data):
         pad = data[4]
-        if pad < len(padxy):
-            plt.plot(data[5:], label='%d'%pad)
+        r = pad/1024
+        g = (pad%512)/512
+        b = (pad%256)/256
+        if pad in VETO_PADS:
+            plt.plot(data[5:], '--', color=(r,g,b), label='%d'%pad)
+        else:
+            plt.plot(data[5:], color=(r,g,b), label='%d'%pad)
     plt.legend()
     plt.show(block=block)
 
@@ -72,10 +81,10 @@ def plot_3d_traces(xs, ys, zs, es, threshold=0, block=True, fig_name=None):
                 (0.75, 0.0, 0.0),
                 (1.0, 0.0, 0.0))
         }
-    cdict['alpha'] = ((0.0, 0.0, 0.0),
-                    (0.3,0.2, 0.2),
-                    (0.8,1.0, 1.0),
-                    (1.0, 1.0, 1.0))
+    # cdict['alpha'] = ((0.0, 0.0, 0.0),
+    #                 (0.3,0.2, 0.2),
+    #                 (0.8,1.0, 1.0),
+    #                 (1.0, 1.0, 1.0))
     cmap = LinearSegmentedColormap('test',cdict)
     ax.view_init(elev=45, azim=45)
     ax.scatter(xs, ys, zs, c=es, cmap=cmap)

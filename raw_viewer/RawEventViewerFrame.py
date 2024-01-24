@@ -71,7 +71,7 @@ class IndividualEventFrame(ttk.Frame):
 
     def show_raw_traces(self):
         event_number = int(self.event_number_entry.get())
-        raw_trace_viewer.plot_traces(self.h5_file, event_number, block=False)
+        raw_trace_viewer.plot_traces(*self.file.get_pad_traces(event_number), block=False)
 
     def show_xy_proj(self):
         #TODO: update to use new raw_h5_file interface
