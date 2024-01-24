@@ -19,7 +19,7 @@ class IndividualEventFrame(ttk.Frame):
 
         ttk.Label(individual_event_frame, text='event #:').grid(row=0, column=0)
         self.event_number_entry = ttk.Entry(individual_event_frame)
-        self.event_number_entry.insert(0, raw_trace_viewer.get_first_good_event_number(self.h5_file))
+        self.event_number_entry.insert(0, raw_trace_viewer.get_first_event_num(self.h5_file))
         self.event_number_entry.grid(row=0, column=1)
 
         ttk.Label(individual_event_frame, text='threshold:').grid(row=1, column=0)
