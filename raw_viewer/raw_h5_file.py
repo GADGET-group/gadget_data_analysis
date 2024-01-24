@@ -7,13 +7,6 @@ from matplotlib.colors import LinearSegmentedColormap
 
 
 class raw_h5_file:
-    '''
-    Things this class should be able to do:
-        Return x,y,z,e arrays
-        Perform background subtraction based on 
-        Return
-
-    '''
     def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
         self.h5_file = h5py.File(file_path, 'r')
         self.padxy = np.loadtxt('padxy.txt', delimiter=',')
@@ -28,7 +21,7 @@ class raw_h5_file:
             self.flat_lookup = np.loadtxt(flat_lookup_csv, delimiter=',', dtype=int)
         
         pad_plane = np.genfromtxt('PadPlane.csv',delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
-        self.pad_to_xy_index = {} #maps tuples of (asad, aget, channel) to (x_index,y_index)
+        self.pad_to_xy_index = {} #maps pad number to (x_index,y_index)
         for y in range(len(pad_plane)):
             for x in range(len(pad_plane[0])):
                 pad = pad_plane[x,y]
@@ -79,48 +72,33 @@ class raw_h5_file:
         x,y,t,e = self.get_xyte(event_number)
         return x,y, t*self.zscale ,e
     
+    def get_counts_in_event(self, event_number):
+        event = self.h5_file['get']['evt%d_data'%event_number]
+        return np.sum(event[:,5:])
     
-def plot_3d_traces(xs, ys, zs, es, threshold=0, block=True):
+    def get_event_num_bounds(self):
+        #returns first event number, last event number
+        return int(self.h5_file['meta']['meta'][0]), int(self.h5_file['meta']['meta'][2])
+    
+    def get_pad_traces(self, event_number):
+        '''
+        returns [pads which fired], [[time series data for first pad], [time series data for 2nd pad], ...]
+        Pad numbers are determined from AGET, COBO, and channel number, rather than the pad number written during
+        the merging process.
+        '''
+        pad, pad_data = [], []
+        event_data =  self.h5_file['get']['evt%d_data'%event_number]
+        for pad_data in event_data:
+            chnl_info = tuple(pad_data[0:4])
+            pad.append(self.chnls_to_pad[chnl_info])
+            pad_data.append(pad_data[5:])
+        return pad, pad_data
+    
+    def get_num_pads_fired(self, event_number):
+        event = self.h5_file['get']['evt%d_data'%event_number]
+        return len(event)
+    
 
-    fig = plt.figure(figsize=(6,6))
-    ax = plt.axes(projection='3d')
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    ax.set_xlim3d(-200, 200)
-    ax.set_ylim3d(-200, 200)
-    ax.set_zlim3d(0, 400)
-
-    cdict={'red':  ((0.0, 0.0, 0.0),
-                (0.25, 0.0, 0.0),
-                (0.5, 0.8, 1.0),
-                (0.75, 1.0, 1.0),
-                (1.0, 0.4, 1.0)),
-
-        'green': ((0.0, 0.0, 0.0),
-                (0.25, 0.0, 0.0),
-                (0.5, 0.9, 0.9),
-                (0.75, 0.0, 0.0),
-                (1.0, 0.0, 0.0)),
-
-        'blue':  ((0.0, 0.0, 0.4),
-                (0.25, 1.0, 1.0),
-                (0.5, 1.0, 0.8),
-                (0.75, 0.0, 0.0),
-                (1.0, 0.0, 0.0))
-        }
-    cdict['alpha'] = ((0.0, 0.0, 0.0),
-                    (0.3,0.2, 0.2),
-                    (0.8,1.0, 1.0),
-                    (1.0, 1.0, 1.0))
-    cmap = LinearSegmentedColormap('test',cdict)
-    ax.view_init(elev=45, azim=45)
-    ax.scatter(xs, ys, zs, c=es, cmap=cmap)
-    cbar = fig.colorbar(ax.get_children()[0])
-    #plt.title('event %d, total counts=%d'%(event_number, get_counts_in_event(file, event_number)))
-    plt.show(block=block)
-
-        
 
 
 

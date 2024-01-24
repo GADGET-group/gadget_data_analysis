@@ -4,14 +4,14 @@ import tkinter.filedialog
 import matplotlib.pyplot as plt
 import numpy as np
 import raw_trace_viewer
-import h5py
+import raw_h5_file
 
 class IndividualEventFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         #get file path and load file
         file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select a Directory')
-        self.h5_file = h5py.File(file_path, 'r')
+        self.file = raw_h5_file.raw_h5_file(file_path)
         self.winfo_toplevel().title(file_path)
         
         #widget setup in individual_event_Frame
@@ -19,7 +19,7 @@ class IndividualEventFrame(ttk.Frame):
 
         ttk.Label(individual_event_frame, text='event #:').grid(row=0, column=0)
         self.event_number_entry = ttk.Entry(individual_event_frame)
-        self.event_number_entry.insert(0, raw_trace_viewer.get_first_event_num(self.h5_file))
+        self.event_number_entry.insert(0, self.file.get_event_num_bounds()[0])
         self.event_number_entry.grid(row=0, column=1)
 
         ttk.Label(individual_event_frame, text='threshold:').grid(row=1, column=0)
@@ -57,13 +57,13 @@ class IndividualEventFrame(ttk.Frame):
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
         threshold = int(self.threshold_entry.get())
-        raw_trace_viewer.plot_3d_traces(self.h5_file, event_number, threshold=threshold, block=False)
+        raw_trace_viewer.plot_3d_traces(*self.file.get_xyze(event_number), threshold=threshold, block=False)
     
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
         pads_threshold = int(self.num_pad_threshold_entry.get())
-        while raw_trace_viewer.get_pads_fired(self.h5_file, event_number) < pads_threshold:
+        while self.file.get_num_pads_fired(event_number) < pads_threshold:
             event_number += 1
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
@@ -74,10 +74,12 @@ class IndividualEventFrame(ttk.Frame):
         raw_trace_viewer.plot_traces(self.h5_file, event_number, block=False)
 
     def show_xy_proj(self):
+        #TODO: update to use new raw_h5_file interface
         event_number = int(self.event_number_entry.get())
         raw_trace_viewer.show_2d_projection(self.h5_file, event_number, block=False)
 
     def show_count_hist(self):
+        #TODO
         hist = raw_trace_viewer.get_counts_array(self.h5_file)
         bins=int(self.bins_entry.get())
         plt.figure()

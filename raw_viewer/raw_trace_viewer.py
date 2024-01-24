@@ -1,3 +1,9 @@
+'''
+File containing functions for visualizing data from the GADGET II TPC.
+The raw_h4_file module contains functions for extracting and manipulating data from the h5
+files generated when merging GRAW files.
+'''
+
 import os
 import re
 
@@ -7,44 +13,17 @@ import h5py
 import numpy as np
 
 
-def load_run(run_number):
-    h5_dir = '/mnt/analysis/e21072/h5test/'
-    file_path = h5_dir + 'run_' + ('%4d'%run_number).replace(' ', '0') + '.h5'
-    return h5py.File(file_path, 'r')
-
-def plot_traces(file, event_number, block=True):
-    event = file['get']['evt%d_data'%event_number]
-    '''
-    For each event, the the first 5 columns are CoBo, AsAd, AGET, channel and pad number.
-    The following 512 columns are the time buckets.
-    '''
-    plt.figure()
-    dirname = os.path.dirname(__file__)
-    padxy = np.loadtxt(os.path.join(dirname, 'padxy.txt'), delimiter=',')
-    for data in event:
+def plot_traces(pads, pad_data, block=True, fig_name=None):
+    plt.figure(fig_name)
+    plt.clf()
+    for pad, data in zip(pads, pad_data):
         pad = data[4]
         if pad < len(padxy):
             plt.plot(data[5:], label='%d'%pad)
     plt.legend()
     plt.show(block=block)
 
-def get_pads_fired(file, event_number):
-    event = file['get']['evt%d_data'%event_number]
-    dirname = os.path.dirname(__file__)
-    padxy = np.loadtxt(os.path.join(dirname, 'padxy.txt'), delimiter=',')
-    to_return = 0
-    for pad_data in event:
-        pad = pad_data[4]
-        if pad < len(padxy):
-            to_return += 1
-    return to_return
 
-def get_first_event_num(file):
-    return int(file['meta']['meta'][0])
-
-def get_counts_in_event(file, event_number):
-    event = file['get']['evt%d_data'%event_number]
-    return np.sum(event[:,5:])
 
 def get_counts_array(file):
     '''
@@ -57,29 +36,11 @@ def get_counts_array(file):
             to_return.append(np.sum(file['get'][entry][:,5:]))
     return to_return
 
-def plot_3d_traces(file, event_number, threshold=0, block=True):
-    event = file['get']['evt%d_data'%event_number]
-    dirname = os.path.dirname(__file__)
-    padxy = np.loadtxt(os.path.join(dirname, 'padxy.txt'), delimiter=',')
-    xs, ys, zs, es = [], [], [], []
-    for pad_data in event:
-        time_data = pad_data[5:]
-        pad = pad_data[4]
-        if pad < len(padxy):
-            x, y = padxy[pad]
-            zscale = 1.45#from GadgetRunH5
-            zs.append(np.arange(len(time_data))*zscale)
-            xs.append(np.ones(len(time_data))*x)
-            ys.append(np.ones(len(time_data))*y)
-            es.append(time_data)
-    es = np.array(es).flatten()
-    xs = np.array(xs).flatten()[es>threshold]
-    ys = np.array(ys).flatten()[es>threshold]
-    zs = np.array(zs).flatten()[es>threshold]
-    zs -= np.min(zs)    
-    es = es[es>threshold]
 
-    fig = plt.figure(figsize=(6,6))
+def plot_3d_traces(xs, ys, zs, es, threshold=0, block=True, fig_name=None):
+
+    fig = plt.figure(fig_name, figsize=(6,6))
+    plt.clf()
     ax = plt.axes(projection='3d')
     ax.set_xlabel("x")
     ax.set_ylabel("y")
@@ -88,33 +49,38 @@ def plot_3d_traces(file, event_number, threshold=0, block=True):
     ax.set_ylim3d(-200, 200)
     ax.set_zlim3d(0, 400)
 
+    xs = xs[es>threshold]
+    ys = ys[es>threshold]
+    zs = zs[es>threshold]
+    es = es[es>threshold]
+
     cdict={'red':  ((0.0, 0.0, 0.0),
-                   (0.25, 0.0, 0.0),
-                   (0.5, 0.8, 1.0),
-                   (0.75, 1.0, 1.0),
-                   (1.0, 0.4, 1.0)),
+                (0.25, 0.0, 0.0),
+                (0.5, 0.8, 1.0),
+                (0.75, 1.0, 1.0),
+                (1.0, 0.4, 1.0)),
 
-         'green': ((0.0, 0.0, 0.0),
-                   (0.25, 0.0, 0.0),
-                   (0.5, 0.9, 0.9),
-                   (0.75, 0.0, 0.0),
-                   (1.0, 0.0, 0.0)),
+        'green': ((0.0, 0.0, 0.0),
+                (0.25, 0.0, 0.0),
+                (0.5, 0.9, 0.9),
+                (0.75, 0.0, 0.0),
+                (1.0, 0.0, 0.0)),
 
-         'blue':  ((0.0, 0.0, 0.4),
-                   (0.25, 1.0, 1.0),
-                   (0.5, 1.0, 0.8),
-                   (0.75, 0.0, 0.0),
-                   (1.0, 0.0, 0.0))
+        'blue':  ((0.0, 0.0, 0.4),
+                (0.25, 1.0, 1.0),
+                (0.5, 1.0, 0.8),
+                (0.75, 0.0, 0.0),
+                (1.0, 0.0, 0.0))
         }
     cdict['alpha'] = ((0.0, 0.0, 0.0),
-                      (0.3,0.2, 0.2),
-                      (0.8,1.0, 1.0),
-                     (1.0, 1.0, 1.0))
+                    (0.3,0.2, 0.2),
+                    (0.8,1.0, 1.0),
+                    (1.0, 1.0, 1.0))
     cmap = LinearSegmentedColormap('test',cdict)
     ax.view_init(elev=45, azim=45)
     ax.scatter(xs, ys, zs, c=es, cmap=cmap)
     cbar = fig.colorbar(ax.get_children()[0])
-    plt.title('event %d, total counts=%d'%(event_number, get_counts_in_event(file, event_number)))
+    #plt.title('event %d, total counts=%d'%(event_number, get_counts_in_event(file, event_number)))
     plt.show(block=block)
 
 def show_2d_projection(file, event_number, block=True):
