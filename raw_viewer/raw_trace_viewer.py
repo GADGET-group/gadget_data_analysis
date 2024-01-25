@@ -14,23 +14,8 @@ import numpy as np
 from raw_h5_file import VETO_PADS
 
 
-def plot_traces(pads, pad_data, block=True, fig_name=None):
-    '''
-    Note: veto pads are plotted as dotted lines
-    '''
-    plt.figure(fig_name)
-    plt.clf()
-    for pad, data in zip(pads, pad_data):
-        pad = data[4]
-        r = pad/1024
-        g = (pad%512)/512
-        b = (pad%256)/256
-        if pad in VETO_PADS:
-            plt.plot(data[5:], '--', color=(r,g,b), label='%d'%pad)
-        else:
-            plt.plot(data[5:], color=(r,g,b), label='%d'%pad)
-    plt.legend()
-    plt.show(block=block)
+
+
 
 
 
@@ -46,51 +31,7 @@ def get_counts_array(file):
     return to_return
 
 
-def plot_3d_traces(xs, ys, zs, es, threshold=0, block=True, fig_name=None):
 
-    fig = plt.figure(fig_name, figsize=(6,6))
-    plt.clf()
-    ax = plt.axes(projection='3d')
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    ax.set_xlim3d(-200, 200)
-    ax.set_ylim3d(-200, 200)
-    ax.set_zlim3d(0, 400)
-
-    xs = xs[es>threshold]
-    ys = ys[es>threshold]
-    zs = zs[es>threshold]
-    es = es[es>threshold]
-
-    cdict={'red':  ((0.0, 0.0, 0.0),
-                (0.25, 0.0, 0.0),
-                (0.5, 0.8, 1.0),
-                (0.75, 1.0, 1.0),
-                (1.0, 0.4, 1.0)),
-
-        'green': ((0.0, 0.0, 0.0),
-                (0.25, 0.0, 0.0),
-                (0.5, 0.9, 0.9),
-                (0.75, 0.0, 0.0),
-                (1.0, 0.0, 0.0)),
-
-        'blue':  ((0.0, 0.0, 0.4),
-                (0.25, 1.0, 1.0),
-                (0.5, 1.0, 0.8),
-                (0.75, 0.0, 0.0),
-                (1.0, 0.0, 0.0))
-        }
-    # cdict['alpha'] = ((0.0, 0.0, 0.0),
-    #                 (0.3,0.2, 0.2),
-    #                 (0.8,1.0, 1.0),
-    #                 (1.0, 1.0, 1.0))
-    cmap = LinearSegmentedColormap('test',cdict)
-    ax.view_init(elev=45, azim=45)
-    ax.scatter(xs, ys, zs, c=es, cmap=cmap)
-    cbar = fig.colorbar(ax.get_children()[0])
-    #plt.title('event %d, total counts=%d'%(event_number, get_counts_in_event(file, event_number)))
-    plt.show(block=block)
 
 def show_2d_projection(file, event_number, block=True):
     cdict={'red':  ((0.0, 0.0, 0.0),

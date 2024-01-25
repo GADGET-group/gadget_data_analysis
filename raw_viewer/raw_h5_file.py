@@ -28,11 +28,11 @@ class raw_h5_file:
         else:
             self.flat_lookup = np.loadtxt(flat_lookup_csv, delimiter=',', dtype=int)
         
-        pad_plane = np.genfromtxt('PadPlane.csv',delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
+        self.pad_plane = np.genfromtxt('PadPlane.csv',delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
         self.pad_to_xy_index = {} #maps pad number to (x_index,y_index)
-        for y in range(len(pad_plane)):
-            for x in range(len(pad_plane[0])):
-                pad = pad_plane[x,y]
+        for y in range(len(self.pad_plane)):
+            for x in range(len(self.pad_plane[0])):
+                pad = self.pad_plane[x,y]
                 if pad != -1:
                     self.pad_to_xy_index[int(pad)] = (x,y)
 
@@ -47,6 +47,33 @@ class raw_h5_file:
             self.chnls_to_xy_index[chnls] = self.pad_to_xy_index[pad]
         
         self.zscale = zscale #conversion factor from time bin to mm
+
+        self.pad_backgrounds = None #initialize with determine_pad_backgrounds
+
+        #color map for plotting
+        cdict={'red':  ((0.0, 0.0, 0.0),
+                    (0.25, 0.0, 0.0),
+                    (0.5, 0.8, 1.0),
+                    (0.75, 1.0, 1.0),
+                    (1.0, 0.4, 1.0)),
+
+            'green': ((0.0, 0.0, 0.0),
+                    (0.25, 0.0, 0.0),
+                    (0.5, 0.9, 0.9),
+                    (0.75, 0.0, 0.0),
+                    (1.0, 0.0, 0.0)),
+
+            'blue':  ((0.0, 0.0, 0.4),
+                    (0.25, 1.0, 1.0),
+                    (0.5, 1.0, 0.8),
+                    (0.75, 0.0, 0.0),
+                    (1.0, 0.0, 0.0))
+            }
+        # cdict['alpha'] = ((0.0, 0.0, 0.0),
+        #                 (0.3,0.2, 0.2),
+        #                 (0.8,1.0, 1.0),
+        #                 (1.0, 1.0, 1.0))
+        self.cmap = LinearSegmentedColormap('test',cdict)
 
 
     def get_xyte(self, event_number):
@@ -106,8 +133,114 @@ class raw_h5_file:
         event = self.h5_file['get']['evt%d_data'%event_number]
         return len(event)
     
+    def determine_pad_backgrounds(self, num_background_bins=200):
+        '''
+        Assume the first num_background_bins of each pad's data only include background.
+        Determine average value of this pad and stddev across all events in which the pad fired.
+        Store this information in a dictionairy member variable.
 
+        Pad background will be stored in self.pad_backgrounds, which is a dictionairy indexed by pad
+        number which stores (background average, background standard deviation) pairs.
+        '''
+        first, last = self.get_event_num_bounds()
 
+        #compute average
+        running_averages = {}
+        for event_num in range(first, last+1):
+            event_data = self.h5_file['get']['evt%d_data'%event_num]
+            for line in event_data:
+                chnl_info = tuple(line[0:4])
+                pad = self.chnls_to_pad[chnl_info]
+                if pad not in running_averages:
+                    running_averages[pad] = (0,0) #running everage, events processed
+                ave_this = np.average(line[5:num_background_bins+5])
+                ave_last, n = running_averages[pad]
+                running_averages[pad] = ((n*ave_last + ave_this)/(n+1), n+1)
+        #compute standard deviation
+        running_stddev = {}
+        for event_num in range(first, last+1):
+            event_data = self.h5_file['get']['evt%d_data'%event_num]
+            for line in event_data:
+                chnl_info = tuple(line[0:4])
+                pad = self.chnls_to_pad[chnl_info]
+                if pad not in running_stddev:
+                    running_stddev[pad] = (0,0)
+                std_this = np.std(line[5:num_background_bins+5])
+                std_last, n = running_stddev[pad]
+                running_stddev[pad] = ((n*std_last + std_this)/(n+1), n+1)
+        self.pad_backgrounds = {}
+        for pad in running_averages:
+            self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
+
+    def show_pad_backgrounds(self, fig_name=None, block=True):
+        ave_image = np.zeros(np.shape(self.pad_plane))
+        std_image = np.zeros(np.shape(self.pad_plane))
+        for pad in self.pad_backgrounds:
+            x,y = self.pad_to_xy_index[pad]
+            ave, std = self.pad_backgrounds[pad]
+            ave_image[x,y] = ave
+            std_image[x,y] = std
+
+        fig=plt.figure(fig_name)
+        plt.clf()
+        ave_ax = plt.subplot(1,2,1)
+        ave_ax.set_title('average counts')
+        ave_shown = ave_ax.imshow(ave_image, cmap=self.cmap)
+        fig.colorbar(ave_shown, ax=ave_ax)
+
+        std_ax = plt.subplot(1,2,2)
+        std_ax.set_title('standard deviation')
+        std_shown=std_ax.imshow(std_image, cmap=self.cmap)
+        fig.colorbar(std_shown, ax=std_ax)
+        #plt.colorbar(ax=std_plot)
+        #plt.colorbar())
+        plt.show(block=block)
+
+    def plot_traces(self, event_num, block=True, fig_name=None):
+        '''
+        Note: veto pads are plotted as dotted lines
+        '''
+        plt.figure(fig_name)
+        plt.clf()
+        pads, pad_data = self.get_pad_traces(event_num)
+        for pad, data in zip(pads, pad_data):
+            pad = data[4]
+            r = pad/1024
+            g = (pad%512)/512
+            b = (pad%256)/256
+            if pad in VETO_PADS:
+                plt.plot(data[5:], '--', color=(r,g,b), label='%d'%pad)
+            else:
+                plt.plot(data[5:], color=(r,g,b), label='%d'%pad)
+        plt.legend()
+        plt.show(block=block)
+
+    def plot_3d_traces(self, event_num, threshold=0, block=True, fig_name=None):
+        fig = plt.figure(fig_name, figsize=(6,6))
+        plt.clf()
+        ax = plt.axes(projection='3d')
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
+        ax.set_xlim3d(-200, 200)
+        ax.set_ylim3d(-200, 200)
+        ax.set_zlim3d(0, 400)
+
+        xs, ys, zs, es = self.get_xyze(event_num)
+        xs = xs[es>threshold]
+        ys = ys[es>threshold]
+        zs = zs[es>threshold]
+        es = es[es>threshold]
+
+        ax.view_init(elev=45, azim=45)
+        ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
+        cbar = fig.colorbar(ax.get_children()[0])
+        #TODO
+        #plt.title('event %d, total counts=%d'%(event_num, get_counts_in_event(file, event_number)))
+        plt.show(block=block)
+    
+
+        
 
 
 '''

@@ -11,7 +11,7 @@ class IndividualEventFrame(ttk.Frame):
         super().__init__(parent)
         #get file path and load file
         file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select a Directory')
-        self.file = raw_h5_file.raw_h5_file(file_path)
+        self.data = raw_h5_file.raw_h5_file(file_path)
         self.winfo_toplevel().title(file_path)
         
         #widget setup in individual_event_Frame
@@ -19,7 +19,7 @@ class IndividualEventFrame(ttk.Frame):
 
         ttk.Label(individual_event_frame, text='event #:').grid(row=0, column=0)
         self.event_number_entry = ttk.Entry(individual_event_frame)
-        self.event_number_entry.insert(0, self.file.get_event_num_bounds()[0])
+        self.event_number_entry.insert(0, self.data.get_event_num_bounds()[0])
         self.event_number_entry.grid(row=0, column=1)
 
         ttk.Label(individual_event_frame, text='threshold:').grid(row=1, column=0)
@@ -45,25 +45,32 @@ class IndividualEventFrame(ttk.Frame):
 
         individual_event_frame.grid()
 
-        #widgets in run_frame
-        run_frame = ttk.LabelFrame(self, text='Entire Run')
-        ttk.Label(run_frame, text='# bins:').grid(row=0, column=0)
-        self.bins_entry = ttk.Entry(run_frame)
+        
+        count_hist_frame = ttk.LabelFrame(self, text='Counts Histogram')
+        ttk.Label(count_hist_frame, text='# bins:').grid(row=0, column=0)
+        self.bins_entry = ttk.Entry(count_hist_frame)
         self.bins_entry.grid(row=0, column=1)
-        count_hist_button = ttk.Button(run_frame, text='count histogram', command=self.show_count_hist)
+        count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
         count_hist_button.grid()
-        run_frame.grid()
+
+        background_frame = ttk.LabelFrame(self, text='Pad Backgrounds')
+        ttk.Label(background_frame, text='# background time bins:').grid(row=0, column=0)
+        self.background_bins_entry = ttk.Entry(background_frame)
+        self.background_bins_entry.grid(row=0, column=1)
+        show_backgrounds_button = ttk.Button(background_frame, text='show pad backgrounds', command=self.show_backgrounds)
+        show_backgrounds_button.grid()
+        background_frame.grid()
     
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
         threshold = int(self.threshold_entry.get())
-        raw_trace_viewer.plot_3d_traces(*self.file.get_xyze(event_number), threshold=threshold, block=False)
+        self.data.plot_3d_traces(event_number, threshold=threshold, block=False)
     
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
         pads_threshold = int(self.num_pad_threshold_entry.get())
-        while self.file.get_num_pads_fired(event_number) < pads_threshold:
+        while self.data.get_num_pads_fired(event_number) < pads_threshold:
             event_number += 1
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
@@ -71,7 +78,7 @@ class IndividualEventFrame(ttk.Frame):
 
     def show_raw_traces(self):
         event_number = int(self.event_number_entry.get())
-        raw_trace_viewer.plot_traces(*self.file.get_pad_traces(event_number), block=False)
+        self.data.plot_traces(event_number, block=False)
 
     def show_xy_proj(self):
         #TODO: update to use new raw_h5_file interface
@@ -86,6 +93,11 @@ class IndividualEventFrame(ttk.Frame):
         plt.hist(hist, bins)
         plt.yscale('log')
         plt.show(block=False)
+
+    def show_backgrounds(self):
+        background_bins = int(self.background_bins_entry.get())
+        self.data.determine_pad_backgrounds(background_bins)
+        self.data.show_pad_backgrounds()
 
 if __name__ == '__main__':
     root = tk.Tk()
