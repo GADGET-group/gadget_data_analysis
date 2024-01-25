@@ -18,7 +18,7 @@ class GadgetAnalysisGUI(tk.Tk):
         bg_color = "#18453b"
 
         #set up window
-        self.title('GADGET II Analysis Gadget')
+        self.title('GADGET II Analysis')
         if "nt" == os.name:
             self.wm_iconbitmap(bitmap = "/mnt/projects/e21072/OfflineAnalysis/backups/icons8-physics-48.ico")
         else:
@@ -64,6 +64,7 @@ class GadgetAnalysisGUI(tk.Tk):
         single_event_frame = IndividualEventFrame(self.notebook, self.run_select_frame.run_data)
         self.notebook.add(single_event_frame, text='Individual Events')
         self.run_specific_tabs.append(single_event_frame)
+        self.title('GADGET II Analysis: Run '+str(self.run_select_frame.run_data.run_num))
 
 #function to close all matplot windows, if this is run as main program
 def on_closing():
