@@ -49,9 +49,14 @@ class IndividualEventFrame(ttk.Frame):
         count_hist_frame = ttk.LabelFrame(self, text='Counts Histogram')
         ttk.Label(count_hist_frame, text='# bins:').grid(row=0, column=0)
         self.bins_entry = ttk.Entry(count_hist_frame)
+        self.bins_entry.insert(0, '100')
         self.bins_entry.grid(row=0, column=1)
+        ttk.Label(count_hist_frame, text='veto pad threshold').grid(row=1, column=0)
+        self.veto_threshold_entry = ttk.Entry(count_hist_frame)
+        self.veto_threshold_entry.insert(0,'100')
+        self.veto_threshold_entry.grid(row=1, column=1)
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
-        count_hist_button.grid()
+        count_hist_button.grid(row=2, column=0)
         count_hist_frame.grid()
 
         settings_frame = ttk.LabelFrame(self, text='Processing Settings')
@@ -96,13 +101,9 @@ class IndividualEventFrame(ttk.Frame):
         self.data.show_2d_projection(event_number, False)
 
     def show_count_hist(self):
-        #TODO
-        hist = raw_trace_viewer.get_counts_array(self.h5_file)
-        bins=int(self.bins_entry.get())
-        plt.figure()
-        plt.hist(hist, bins)
-        plt.yscale('log')
-        plt.show(block=False)
+        threshold = float(self.veto_threshold_entry.get())
+        bins = int(self.bins_entry.get())
+        self.data.show_counts_histogram(num_bins=bins, veto_threshold=threshold, block=False)
 
     def get_backgrounds(self):
         background_bins = int(self.background_bins_entry.get())

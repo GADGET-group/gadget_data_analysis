@@ -27,7 +27,7 @@ class raw_h5_file:
             if  len(self.h5_file['meta']) == 9: #2 COBO configuration
                 self.flat_lookup = np.loadtxt('flatlookup2cobos.csv', delimiter=',', dtype=int)
             else:
-                assert False
+                self.flat_lookup = np.loadtxt('flatlookup4cobos.csv', delimiter=',', dtype=int)
         else:
             self.flat_lookup = np.loadtxt(flat_lookup_csv, delimiter=',', dtype=int)
         
@@ -100,7 +100,11 @@ class raw_h5_file:
         if self.apply_background_subtraction or self.remove_outliers:
             for line in data:
                 chnl_info = tuple(line[0:4])
-                pad = self.chnls_to_pad[chnl_info]
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                else:
+                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                    continue
                 if self.apply_background_subtraction:
                     line[FIRST_DATA_BIN:] -= self.pad_backgrounds[pad][0]
                 if self.remove_outliers:
@@ -113,7 +117,11 @@ class raw_h5_file:
             new_data = []
             for line in data: #only copy over pads in the bigest blob
                 chnl_info = tuple(line[0:4])
-                pad = self.chnls_to_pad[chnl_info]
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                else:
+                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                    continue
                 x,y = self.pad_to_xy_index[pad]
                 if labeled_image[x,y] == bigest_label:
                     new_data.append(line)
@@ -134,6 +142,9 @@ class raw_h5_file:
         #after this look, xs=[x1, x2, ...], same for ys, es=[[1st pad data], [2nd pad data], ...]
         for pad_data in event_data:
             chnl_info = tuple(pad_data[0:4])
+            if chnl_info not in self.chnls_to_xy_coord:
+                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                continue
             x,y = self.chnls_to_xy_coord[chnl_info]
             xs.append(x)
             ys.append(y)
@@ -171,10 +182,15 @@ class raw_h5_file:
         '''
         pads, pad_datas = [], []
         event_data =  self.get_data(event_number)
-        for pad_data in event_data:
-            chnl_info = tuple(pad_data[0:4])
-            pads.append(self.chnls_to_pad[chnl_info])
-            pad_datas.append(pad_data[FIRST_DATA_BIN:])
+        for line in event_data:
+            chnl_info = tuple(line[0:4])
+            if chnl_info in self.chnls_to_pad:
+                pad = self.chnls_to_pad[chnl_info]
+            else:
+                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                continue
+            pads.append(pad)
+            pad_datas.append(line[FIRST_DATA_BIN:])
         return pads, pad_datas
     
     def get_num_pads_fired(self, event_number):
@@ -227,6 +243,31 @@ class raw_h5_file:
         self.pad_backgrounds = {}
         for pad in running_averages:
             self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
+
+    def get_count_array(self, veto_threshold=0):
+        '''
+        Returns an array containing the total number of counts in each event in which no
+        veto pad went above the given threshold.
+
+        TODO: apply veto condition PRIOR to removing outliers
+        '''
+        to_return = []
+        for i in range(*self.get_event_num_bounds()):
+            to_add = 0
+            for pad, trace in zip(*self.get_pad_traces(i)):
+                if pad in VETO_PADS:
+                    if np.any(trace>veto_threshold):
+                        continue
+                to_add += np.sum(trace)
+            to_return.append(to_add)
+        return to_return
+
+    def show_counts_histogram(self, num_bins, veto_threshold=0, fig_name=None, block=True):
+        data = self.get_count_array(veto_threshold)
+        plt.figure(fig_name)
+        plt.hist(data, bins=num_bins)
+        plt.show(block=block)
+
 
     def show_pad_backgrounds(self, fig_name=None, block=True):
         ave_image = np.zeros(np.shape(self.pad_plane))
@@ -298,7 +339,11 @@ class raw_h5_file:
         data = self.get_data(event_number)
         image = np.zeros(np.shape(self.pad_plane))
         for line in data:
-            pad = self.chnls_to_pad[tuple(line[0:4])]
+            chnl_info = tuple(line[0:4])
+            if chnl_info not in self.chnls_to_pad:
+                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                continue
+            pad = self.chnls_to_pad[chnl_info]
             x,y = self.pad_to_xy_index[pad]
             image[x,y] = np.sum(line[FIRST_DATA_BIN:])
         image[image<0]=0
