@@ -52,14 +52,25 @@ class IndividualEventFrame(ttk.Frame):
         self.bins_entry.grid(row=0, column=1)
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
         count_hist_button.grid()
+        count_hist_frame.grid()
 
-        background_frame = ttk.LabelFrame(self, text='Pad Backgrounds')
-        ttk.Label(background_frame, text='# background time bins:').grid(row=0, column=0)
-        self.background_bins_entry = ttk.Entry(background_frame)
+        settings_frame = ttk.LabelFrame(self, text='Processing Settings')
+        ttk.Label(settings_frame, text='# background time bins:').grid(row=0, column=0)
+        self.background_bins_entry = ttk.Entry(settings_frame)
         self.background_bins_entry.grid(row=0, column=1)
-        show_backgrounds_button = ttk.Button(background_frame, text='show pad backgrounds', command=self.show_backgrounds)
-        show_backgrounds_button.grid()
-        background_frame.grid()
+        get_backgrounds_button = ttk.Button(settings_frame, text='get pad backgrounds', command=self.get_backgrounds)
+        get_backgrounds_button.grid(row = 1, column=0)
+        show_backgrounds_button = ttk.Button(settings_frame, text='show pad backgrounds', command=self.show_backgrounds)
+        show_backgrounds_button.grid(row=1, column=1)
+        self.background_subtract_var = tk.IntVar()
+        background_subtract_check = ttk.Checkbutton(settings_frame, text='background subtraction', variable=self.background_subtract_var, 
+                                                         command=self.check_state_changed)
+        background_subtract_check.grid(row=2, column=0)
+        self.remove_outlier_var = tk.IntVar()
+        remove_outliers_check = ttk.Checkbutton(settings_frame, text='remove outlier pads', variable=self.remove_outlier_var, 
+                                                         command=self.check_state_changed)
+        remove_outliers_check.grid(row=2, column=1)
+        settings_frame.grid()
     
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
@@ -81,9 +92,8 @@ class IndividualEventFrame(ttk.Frame):
         self.data.plot_traces(event_number, block=False)
 
     def show_xy_proj(self):
-        #TODO: update to use new raw_h5_file interface
         event_number = int(self.event_number_entry.get())
-        raw_trace_viewer.show_2d_projection(self.h5_file, event_number, block=False)
+        self.data.show_2d_projection(event_number, False)
 
     def show_count_hist(self):
         #TODO
@@ -94,10 +104,16 @@ class IndividualEventFrame(ttk.Frame):
         plt.yscale('log')
         plt.show(block=False)
 
-    def show_backgrounds(self):
+    def get_backgrounds(self):
         background_bins = int(self.background_bins_entry.get())
         self.data.determine_pad_backgrounds(background_bins)
+
+    def show_backgrounds(self):
         self.data.show_pad_backgrounds()
+
+    def check_state_changed(self):
+        self.data.apply_background_subtraction = (self.background_subtract_var.get() == 1)
+        self.data.remove_outliers = (self.remove_outlier_var.get() == 1)
 
 if __name__ == '__main__':
     root = tk.Tk()

@@ -5,6 +5,8 @@ import h5py
 import matplotlib.pylab as plt
 from matplotlib.colors import LinearSegmentedColormap
 
+import skimage.measure
+
 '''
 Notes for tomorrow:
 --make main_gui.py work with recent updates
@@ -13,6 +15,7 @@ Notes for tomorrow:
 '''
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
+FIRST_DATA_BIN = 6
 
 class raw_h5_file:
     def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
@@ -75,6 +78,49 @@ class raw_h5_file:
         #                 (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
+        self.apply_background_subtraction = False
+        self.remove_outliers = False
+
+    def get_data(self, event_number):
+        '''
+        Get data for event, with background subtraction and pad outlier removal applied as specified
+        by member variables.
+
+        Outlier removal:
+        1. Populate a pad plane image with all zeros, except for pads which fired
+        2. Use skimage.measure.label to determine to label pads based on connectivity
+        3. Make a new datacube which just has the pads from the largest blob
+        '''
+        data = self.h5_file['get']['evt%d_data'%event_number]
+        data = np.array(data, copy=True, dtype=np.float)
+        if self.remove_outliers:
+            pad_image = np.zeros(np.shape(self.pad_plane))
+        #Loop over each pad, performing background subtraction and marking the pad in the pad image
+        #which will be used for outlier removal.
+        if self.apply_background_subtraction or self.remove_outliers:
+            for line in data:
+                chnl_info = tuple(line[0:4])
+                pad = self.chnls_to_pad[chnl_info]
+                if self.apply_background_subtraction:
+                    line[FIRST_DATA_BIN:] -= self.pad_backgrounds[pad][0]
+                if self.remove_outliers:
+                    x,y = self.pad_to_xy_index[pad]
+                    pad_image[x,y]=1
+        if self.remove_outliers:
+            labeled_image = skimage.measure.label(pad_image, background=0)
+            labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
+            bigest_label = labels[np.argmax(counts)]
+            new_data = []
+            for line in data: #only copy over pads in the bigest blob
+                chnl_info = tuple(line[0:4])
+                pad = self.chnls_to_pad[chnl_info]
+                x,y = self.pad_to_xy_index[pad]
+                if labeled_image[x,y] == bigest_label:
+                    new_data.append(line)
+            data = np.array(new_data)
+
+        return data
+
 
     def get_xyte(self, event_number):
         '''
@@ -84,14 +130,14 @@ class raw_h5_file:
                  and es[i] gives the charge that arrived at that pad at the given time.
         '''
         xs, ys, es = [], [], []
-        event_data =  self.h5_file['get']['evt%d_data'%event_number]
+        event_data =  self.get_data(event_number)
         #after this look, xs=[x1, x2, ...], same for ys, es=[[1st pad data], [2nd pad data], ...]
         for pad_data in event_data:
             chnl_info = tuple(pad_data[0:4])
             x,y = self.chnls_to_xy_coord[chnl_info]
             xs.append(x)
             ys.append(y)
-            es.append(pad_data[5:])
+            es.append(pad_data[FIRST_DATA_BIN:])
         #reshape as needed to get to final format for x,y,e
         xs = np.repeat(xs, 512)
         ys = np.repeat(ys, 512)
@@ -108,13 +154,14 @@ class raw_h5_file:
         return x,y, t*self.zscale ,e
     
     def get_counts_in_event(self, event_number):
-        event = self.h5_file['get']['evt%d_data'%event_number]
-        return np.sum(event[:,5:])
+        event = self.get_data(event_number)
+        return np.sum(event[:,FIRST_DATA_BIN:])
     
     def get_event_num_bounds(self):
         #returns first event number, last event number
         return int(self.h5_file['meta']['meta'][0]), int(self.h5_file['meta']['meta'][2])
-    
+
+
     def get_pad_traces(self, event_number):
         '''
         returns [pads which fired], [[time series data for first pad], [time series data for 2nd pad], ...]
@@ -122,15 +169,15 @@ class raw_h5_file:
         the merging process.
         '''
         pads, pad_datas = [], []
-        event_data =  self.h5_file['get']['evt%d_data'%event_number]
+        event_data =  self.get_data(event_number)
         for pad_data in event_data:
             chnl_info = tuple(pad_data[0:4])
             pads.append(self.chnls_to_pad[chnl_info])
-            pad_datas.append(pad_data[5:])
+            pad_datas.append(pad_data[FIRST_DATA_BIN:])
         return pads, pad_datas
     
     def get_num_pads_fired(self, event_number):
-        event = self.h5_file['get']['evt%d_data'%event_number]
+        event = self.get_data(event_number)
         return len(event)
     
     def determine_pad_backgrounds(self, num_background_bins=200):
@@ -150,10 +197,14 @@ class raw_h5_file:
             event_data = self.h5_file['get']['evt%d_data'%event_num]
             for line in event_data:
                 chnl_info = tuple(line[0:4])
-                pad = self.chnls_to_pad[chnl_info]
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                else:
+                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                    continue
                 if pad not in running_averages:
                     running_averages[pad] = (0,0) #running everage, events processed
-                ave_this = np.average(line[5:num_background_bins+5])
+                ave_this = np.average(line[FIRST_DATA_BIN:num_background_bins+FIRST_DATA_BIN])
                 ave_last, n = running_averages[pad]
                 running_averages[pad] = ((n*ave_last + ave_this)/(n+1), n+1)
         #compute standard deviation
@@ -162,10 +213,14 @@ class raw_h5_file:
             event_data = self.h5_file['get']['evt%d_data'%event_num]
             for line in event_data:
                 chnl_info = tuple(line[0:4])
-                pad = self.chnls_to_pad[chnl_info]
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                else:
+                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                    continue
                 if pad not in running_stddev:
                     running_stddev[pad] = (0,0)
-                std_this = np.std(line[5:num_background_bins+5])
+                std_this = np.std(line[FIRST_DATA_BIN:num_background_bins+FIRST_DATA_BIN])
                 std_last, n = running_stddev[pad]
                 running_stddev[pad] = ((n*std_last + std_this)/(n+1), n+1)
         self.pad_backgrounds = {}
@@ -204,14 +259,13 @@ class raw_h5_file:
         plt.clf()
         pads, pad_data = self.get_pad_traces(event_num)
         for pad, data in zip(pads, pad_data):
-            pad = data[4]
             r = pad/1024
             g = (pad%512)/512
             b = (pad%256)/256
             if pad in VETO_PADS:
-                plt.plot(data[5:], '--', color=(r,g,b), label='%d'%pad)
+                plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
             else:
-                plt.plot(data[5:], color=(r,g,b), label='%d'%pad)
+                plt.plot(data, color=(r,g,b), label='%d'%pad)
         plt.legend()
         plt.show(block=block)
 
@@ -239,6 +293,24 @@ class raw_h5_file:
         #plt.title('event %d, total counts=%d'%(event_num, get_counts_in_event(file, event_number)))
         plt.show(block=block)
     
+    def show_2d_projection(self, event_number, block=True, fig_name=None):
+        data = self.get_data(event_number)
+        image = np.zeros(np.shape(self.pad_plane))
+        for line in data:
+            pad = self.chnls_to_pad[tuple(line[0:4])]
+            x,y = self.pad_to_xy_index[pad]
+            image[x,y] = np.sum(line[FIRST_DATA_BIN:])
+        image[image<0]=0
+        trace = np.sum(data[:,FIRST_DATA_BIN:],0)
+        
+
+        fig = plt.figure(fig_name, figsize=(6,6))
+        plt.clf()
+        plt.subplot(2,1,1)
+        plt.imshow(image)
+        plt.subplot(2,1,2)
+        plt.plot(trace)
+        plt.show(block=block)
 
         
 
@@ -249,8 +321,11 @@ file = h5py.File('/mnt/analysis/e21072/gastest_h5_files/run_0032.h5', 'r')
 a=file['get']['evt3057_data']
 
 import raw_h5_file
-file = raw_h5_file.raw_h5_file('/mnt/analysis/e21072/gastest_h5_files/run_0032.h5')
-raw_h5_file.plot_3d_traces(*file.get_xyze(3057))
+from importlib import reload
+reload(raw_h5_file)
+file = raw_h5_file.raw_h5_file('/mnt/analysis/e21072/gastest_h5_files/run_0037.h5')
+file.remove_outliers=True
+file.get_data(553)
 '''
 
 
