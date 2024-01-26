@@ -139,11 +139,12 @@ class raw_h5_file:
             ys.append(y)
             es.append(pad_data[FIRST_DATA_BIN:])
         #reshape as needed to get to final format for x,y,e
-        xs = np.repeat(xs, 512)
-        ys = np.repeat(ys, 512)
+        tb_length = 512+5-FIRST_DATA_BIN
+        xs = np.repeat(xs, tb_length)
+        ys = np.repeat(ys, tb_length)
         es = np.array(es).flatten()
         #make time bins data
-        ts = np.tile(np.arange(0, 512), int(len(xs)/512))
+        ts = np.tile(np.arange(0, tb_length), int(len(xs)/tb_length))
         return xs, ys, ts, es
     
     def get_xyze(self, event_number):
