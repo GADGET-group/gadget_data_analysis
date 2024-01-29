@@ -200,25 +200,18 @@ class raw_h5_file:
         event = self.get_data(event_number)
         return len(event)
     
-    def get_track_length(self, event_number, threshold_sigma=20):
+    def get_track_length(self, event_number, threshold):
         '''
         1. Remove all points which are less than threshold sigma above background
         2. Find max distance between any of the two remaining points.
         Should replace this with something more robust in the future. This will NOT
         well work if outlier removal and background subtraction haven't been performed.
         '''
-        assert self.apply_background_subtraction == True
-        pads, traces = self.get_pad_traces(event_number)
-        z_from_index = np.arange(NUM_TIME_BINS)*self.zscale
-        points = []
-        for pad, trace in zip(pads, traces):
-            threshold = threshold_sigma*self.pad_backgrounds[pad][1]
-            x,y = self.padxy[pad]
-            zs = z_from_index[trace > threshold]
-            xs = np.tile(x, len(zs))
-            ys = np.tile(y, len(zs))
-            points.append(np.vstack((xs, ys, zs)).T)
-        points = np.concatenate(points)
+        xs, ys, zs, es = self.get_xyze(event_number)
+        xs = xs[es>=threshold]
+        ys = ys[es>=threshold]
+        zs = zs[es>=threshold]
+        points = np.vstack((xs, ys, zs)).T
         #print(points)
         #find max distance using this algorithm
         #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points

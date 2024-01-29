@@ -122,7 +122,8 @@ class IndividualEventFrame(ttk.Frame):
         
     def show_track_info(self):
         event_number = int(self.event_number_entry.get())
-        length = self.data.get_track_length(event_number)
+        threshold = float(self.threshold_entry.get())
+        length = self.data.get_track_length(event_number, threshold)
         tk.messagebox.showinfo(message='track length = %f mm'%length)
 
 
