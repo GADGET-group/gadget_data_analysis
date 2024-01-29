@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 import tkinter.filedialog
+import tkinter.messagebox
+
 import matplotlib.pyplot as plt
 import numpy as np
 import raw_trace_viewer
@@ -42,6 +44,8 @@ class IndividualEventFrame(ttk.Frame):
         self.num_pad_threshold_entry = ttk.Entry(individual_event_frame)
         self.num_pad_threshold_entry.insert(0, 10)
         self.num_pad_threshold_entry.grid(row=4, column=2)
+
+        ttk.Button(individual_event_frame, text='show track info', command=self.show_track_info).grid()
 
         individual_event_frame.grid()
 
@@ -115,6 +119,12 @@ class IndividualEventFrame(ttk.Frame):
     def check_state_changed(self):
         self.data.apply_background_subtraction = (self.background_subtract_var.get() == 1)
         self.data.remove_outliers = (self.remove_outlier_var.get() == 1)
+        
+    def show_track_info(self):
+        event_number = int(self.event_number_entry.get())
+        length = self.data.get_track_length(event_number)
+        tk.messagebox.showinfo(message='track length = %f mm'%length)
+
 
 if __name__ == '__main__':
     root = tk.Tk()

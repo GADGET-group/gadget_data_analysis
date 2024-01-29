@@ -1,6 +1,8 @@
 import os
 
 import numpy as np
+import scipy.spatial
+import scipy.spatial.distance
 import h5py
 import matplotlib.pylab as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -16,6 +18,7 @@ Notes for tomorrow:
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 FIRST_DATA_BIN = 6
+NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
 
 class raw_h5_file:
     def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
@@ -150,12 +153,12 @@ class raw_h5_file:
             ys.append(y)
             es.append(pad_data[FIRST_DATA_BIN:])
         #reshape as needed to get to final format for x,y,e
-        tb_length = 512+5-FIRST_DATA_BIN
-        xs = np.repeat(xs, tb_length)
-        ys = np.repeat(ys, tb_length)
+        NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
+        xs = np.repeat(xs, NUM_TIME_BINS)
+        ys = np.repeat(ys, NUM_TIME_BINS)
         es = np.array(es).flatten()
         #make time bins data
-        ts = np.tile(np.arange(0, tb_length), int(len(xs)/tb_length))
+        ts = np.tile(np.arange(0, NUM_TIME_BINS), int(len(xs)/NUM_TIME_BINS))
         return xs, ys, ts, es
     
     def get_xyze(self, event_number):
@@ -196,6 +199,35 @@ class raw_h5_file:
     def get_num_pads_fired(self, event_number):
         event = self.get_data(event_number)
         return len(event)
+    
+    def get_track_length(self, event_number, threshold_sigma=20):
+        '''
+        1. Remove all points which are less than threshold sigma above background
+        2. Find max distance between any of the two remaining points.
+        Should replace this with something more robust in the future. This will NOT
+        well work if outlier removal and background subtraction haven't been performed.
+        '''
+        assert self.apply_background_subtraction == True
+        pads, traces = self.get_pad_traces(event_number)
+        z_from_index = np.arange(NUM_TIME_BINS)*self.zscale
+        points = []
+        for pad, trace in zip(pads, traces):
+            threshold = threshold_sigma*self.pad_backgrounds[pad][1]
+            x,y = self.padxy[pad]
+            zs = z_from_index[trace > threshold]
+            xs = np.tile(x, len(zs))
+            ys = np.tile(y, len(zs))
+            points.append(np.vstack((xs, ys, zs)).T)
+        points = np.concatenate(points)
+        #print(points)
+        #find max distance using this algorithm
+        #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
+        hull = scipy.spatial.ConvexHull(points)
+        hullpoints = points[hull.vertices,:]
+        #print(hullpoints)
+        hdist = scipy.spatial.distance.cdist(hullpoints, hullpoints, metric='euclidean')
+        return np.max(hdist)
+
     
     def determine_pad_backgrounds(self, num_background_bins=200):
         '''
