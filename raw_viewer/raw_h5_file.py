@@ -7,6 +7,7 @@ import h5py
 import matplotlib.pylab as plt
 import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
+import tqdm
 
 import skimage.measure
 
@@ -83,7 +84,9 @@ class raw_h5_file:
         self.cmap = LinearSegmentedColormap('test',cdict)
 
         self.apply_background_subtraction = False
+        self.background_subtract_mode = 'per event' #or 'entire run'
         self.remove_outliers = False
+        self.num_background_bins = 0 #number of time bins to use for per event background subtraction
 
     def get_data(self, event_number):
         '''
@@ -107,10 +110,15 @@ class raw_h5_file:
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
                 else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                    #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                     continue
-                if self.apply_background_subtraction:
+                if self.apply_background_subtraction and self.background_subtract_mode == 'entire run':
                     line[FIRST_DATA_BIN:] -= self.pad_backgrounds[pad][0]
+                elif self.apply_background_subtraction and self.background_subtract_mode == 'per event':
+                    line[FIRST_DATA_BIN:] -= np.average(line[FIRST_DATA_BIN:FIRST_DATA_BIN + self.num_background_bins])
+                elif self.background_subtract_mode:
+                    print('unkown background subtraction mode')
+                    assert False
                 if self.remove_outliers:
                     x,y = self.pad_to_xy_index[pad]
                     pad_image[x,y]=1
@@ -124,7 +132,7 @@ class raw_h5_file:
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
                 else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                    #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                     continue
                 x,y = self.pad_to_xy_index[pad]
                 if labeled_image[x,y] == bigest_label:
@@ -148,7 +156,7 @@ class raw_h5_file:
         for pad_data in event_data:
             chnl_info = tuple(pad_data[0:4])
             if chnl_info not in self.chnls_to_xy_coord:
-                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                 continue
             x,y = self.chnls_to_xy_coord[chnl_info]
             xs.append(x)
@@ -185,6 +193,7 @@ class raw_h5_file:
     def get_event_num_bounds(self):
         #returns first event number, last event number
         return int(self.h5_file['meta']['meta'][0]), int(self.h5_file['meta']['meta'][2])
+        #return int(self.h5_file['meta']['meta'][0]), np.min((int(self.h5_file['meta']['meta'][2]), int(self.h5_file['meta']['meta'][0])+10000))#TODO
 
 
     def get_pad_traces(self, event_number):
@@ -200,7 +209,7 @@ class raw_h5_file:
             if chnl_info in self.chnls_to_pad:
                 pad = self.chnls_to_pad[chnl_info]
             else:
-                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                 continue
             pads.append(pad)
             pad_datas.append(line[FIRST_DATA_BIN:])
@@ -292,7 +301,7 @@ class raw_h5_file:
         TODO: apply veto condition PRIOR to removing outliers
         '''
         to_return = []
-        for i in range(*self.get_event_num_bounds()):
+        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
             if range_bounds != None:
                 length = self.get_track_length(i, threshold)
                 if length < range_bounds[0] or length > range_bounds[1]:
@@ -308,7 +317,7 @@ class raw_h5_file:
     
     def get_length_array(self, threshold, veto_threshold=0, range_bounds=None):
         to_return = []
-        for i in range(*self.get_event_num_bounds()):
+        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
             for pad, trace in zip(*self.get_pad_traces(i)):
                 if pad in VETO_PADS:
                     if np.any(trace>veto_threshold):

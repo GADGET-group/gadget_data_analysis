@@ -5,7 +5,6 @@ import tkinter.messagebox
 
 import matplotlib.pyplot as plt
 import numpy as np
-import raw_trace_viewer
 import raw_h5_file
 
 class IndividualEventFrame(ttk.Frame):
@@ -13,7 +12,7 @@ class IndividualEventFrame(ttk.Frame):
         super().__init__(parent)
         #get file path and load file
         file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select a Directory')
-        self.data = raw_h5_file.raw_h5_file(file_path)
+        self.data = raw_h5_file.raw_h5_file(file_path, zscale=1.45)
         self.winfo_toplevel().title(file_path)
         
         #widget setup in individual_event_Frame
@@ -74,12 +73,13 @@ class IndividualEventFrame(ttk.Frame):
         ttk.Label(settings_frame, text='# background time bins:').grid(row=0, column=0)
         self.background_bins_entry = ttk.Entry(settings_frame)
         self.background_bins_entry.grid(row=0, column=1)
+        self.background_bins_entry.bind('<FocusOut>', self.entry_changed)
         get_backgrounds_button = ttk.Button(settings_frame, text='get pad backgrounds', command=self.get_backgrounds)
         get_backgrounds_button.grid(row = 1, column=0)
         show_backgrounds_button = ttk.Button(settings_frame, text='show pad backgrounds', command=self.show_backgrounds)
         show_backgrounds_button.grid(row=1, column=1)
-        self.background_subtract_var = tk.IntVar()
-        background_subtract_check = ttk.Checkbutton(settings_frame, text='background subtraction', variable=self.background_subtract_var, 
+        self.background_subtract_enable_var = tk.IntVar()
+        background_subtract_check = ttk.Checkbutton(settings_frame, text='background subtraction', variable=self.background_subtract_enable_var, 
                                                          command=self.check_state_changed)
         background_subtract_check.grid(row=2, column=0)
         self.remove_outlier_var = tk.IntVar()
@@ -89,7 +89,7 @@ class IndividualEventFrame(ttk.Frame):
         self.zscale_entry = ttk.Entry(settings_frame)
         self.zscale_entry.insert(0, '1')
         self.zscale_entry.grid(row=3,column=1)
-        ttk.Button(settings_frame, text='apply zscale', command=self.apply_zscale).grid(row=3,column=2)
+        self.zscale_entry.bind('<FocusOut>', self.entry_changed)
 
         remove_outliers_check.grid(row=2, column=1)
         settings_frame.grid()
@@ -135,7 +135,7 @@ class IndividualEventFrame(ttk.Frame):
         self.data.show_pad_backgrounds()
 
     def check_state_changed(self):
-        self.data.apply_background_subtraction = (self.background_subtract_var.get() == 1)
+        self.data.apply_background_subtraction = (self.background_subtract_enable_var.get() == 1)
         self.data.remove_outliers = (self.remove_outlier_var.get() == 1)
         
     def show_track_info(self):
@@ -153,8 +153,9 @@ class IndividualEventFrame(ttk.Frame):
         self.data.show_rve_histogram(num_e_bins=bins, num_range_bins=bins, threshold=threshold, 
                                      veto_threshold=threshold, block=False, range_bounds=(min_range, max_range))
 
-    def apply_zscale(self):
+    def entry_changed(self, event):
         self.data.zscale = float(self.zscale_entry.get())
+        self.data.num_background_bins = int(self.background_bins_entry.get())
 
 if __name__ == '__main__':
     root = tk.Tk()
