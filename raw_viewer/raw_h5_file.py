@@ -87,6 +87,10 @@ class raw_h5_file:
         self.background_subtract_mode = 'per event' #or 'entire run'
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
+        self.range_bounds = (0, 100)
+        self.ic_bounds = (0, 1e6)
+        self.threshold = 100 #only use voxels which exceed this value when calculating length and integrated charge
+        self.veto_threshold = 100 #veto events for which any veto pad exceeds this value at some point
 
     def get_data(self, event_number):
         '''
@@ -145,7 +149,7 @@ class raw_h5_file:
         return data
 
 
-    def get_xyte(self, event_number, threshold=-np.inf):
+    def get_xyte(self, event_number):
         '''
         Returns: xs, ys, ts, es
                  Where each of these is an array s.t. each "pixel" in the in the raw TPC data is represented.
@@ -175,24 +179,19 @@ class raw_h5_file:
         ts = np.tile(np.arange(0, NUM_TIME_BINS), int(len(xs)/NUM_TIME_BINS))
 
         #apply thresholding
-        if threshold != -np.inf:
-            xs = xs[es>threshold]
-            ys = ys[es>threshold]
-            ts = ts[es>threshold]
-            es = es[es>threshold]
+        if self.threshold != -np.inf:
+            xs = xs[es>self.threshold]
+            ys = ys[es>self.threshold]
+            ts = ts[es>self.threshold]
+            es = es[es>self.threshold]
         return xs, ys, ts, es
     
-    def get_xyze(self, event_number, threshold=-np.inf):
+    def get_xyze(self, event_number):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
-        x,y,t,e = self.get_xyte(event_number, threshold)
+        x,y,t,e = self.get_xyte(event_number)
         return x,y, t*self.zscale ,e
-    
-    def get_counts_in_event(self, event_number, threshold):
-        event = self.get_data(event_number)
-        all_traces = event[:,FIRST_DATA_BIN:]
-        return np.sum(all_traces[all_traces>threshold])
     
     def get_event_num_bounds(self):
         #returns first event number, last event number
@@ -223,14 +222,14 @@ class raw_h5_file:
         event = self.get_data(event_number)
         return len(event)
     
-    def get_track_length(self, event_number, threshold):
+    def get_track_length(self, event_number):
         '''
         1. Remove all points which are less than threshold sigma above background
         2. Find max distance between any of the two remaining points.
         Should replace this with something more robust in the future. This will NOT
         well work if outlier removal and background subtraction haven't been performed.
         '''
-        xs, ys, zs, es = self.get_xyze(event_number, threshold)
+        xs, ys, zs, es = self.get_xyze(event_number)
         if len(xs) == 0:
             return 0
         points = np.vstack((xs, ys, zs)).T
@@ -295,31 +294,45 @@ class raw_h5_file:
         for pad in running_averages:
             self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
     
-    def get_histogram_arrays(self, threshold, veto_threshold=0, range_bounds=None):
+    def get_histogram_arrays(self):
         range_hist = []
         counts_hist = []
         for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
-            counts = 0
-            for pad, trace in zip(*self.get_pad_traces(i)):
-                if pad in VETO_PADS:
-                    if np.any(trace>veto_threshold):
-                        continue
-                counts += np.sum(trace[trace>threshold])
-            length = self.get_track_length(i, threshold)
-            if range_bounds == None or (length >= range_bounds[0] and length <= range_bounds[1]):
-                range_hist.append(length)
-                counts_hist.append(counts)
+            should_veto, range, energy = self.process_event(i)
+            if not should_veto:
+                range_hist.append(range)
+                counts_hist.append(energy)
 
-        return range_hist, counts_hist
+        return np.array(range_hist), np.array(counts_hist)
+    
+    def process_event(self, event_num):
+        '''
+        Returns: should veto, range, energy
+        '''
+        should_veto=False
+        counts = 0
+        for pad, trace in zip(*self.get_pad_traces(event_num)):
+            if pad in VETO_PADS:
+                if np.any(trace>self.veto_threshold):
+                    should_veto = True
+            counts += np.sum(trace[trace>self.threshold])
+        length = self.get_track_length(event_num)
+        if self.range_bounds != None:
+            if length > self.range_bounds[1] or length < self.range_bounds[0]:
+                should_veto = True
+        if self.ic_bounds != None:
+            if counts < self.ic_bounds[0] or counts > self.ic_bounds[1]:
+                should_veto = True
+        return should_veto, length, counts
 
-    def show_counts_histogram(self, num_bins, threshold=-np.nan, veto_threshold=0, fig_name=None, block=True, range_bounds=None):
-        ranges, counts = self.get_histogram_arrays(threshold=threshold, veto_threshold=veto_threshold, range_bounds=range_bounds)
+    def show_counts_histogram(self, num_bins, fig_name=None, block=True):
+        ranges, counts = self.get_histogram_arrays()
         plt.figure(fig_name)
         plt.hist(counts, bins=num_bins)
         plt.show(block=block)
 
-    def show_rve_histogram(self, num_e_bins, num_range_bins, threshold, veto_threshold=0, fig_name=None, block=True, range_bounds=None):
-        ranges, counts = self.get_histogram_arrays(threshold=threshold, veto_threshold=veto_threshold, range_bounds=range_bounds)
+    def show_rve_histogram(self, num_e_bins, num_range_bins, fig_name=None, block=True):
+        ranges, counts = self.get_histogram_arrays()
         plt.figure(fig_name)
         plt.hist2d(counts, ranges, 
                    bins=(num_e_bins, num_range_bins), norm=colors.LogNorm())
@@ -370,7 +383,7 @@ class raw_h5_file:
         plt.legend()
         plt.show(block=block)
 
-    def plot_3d_traces(self, event_num, threshold=0, block=True, fig_name=None):
+    def plot_3d_traces(self, event_num, block=True, fig_name=None):
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
         ax = plt.axes(projection='3d')
@@ -381,13 +394,13 @@ class raw_h5_file:
         ax.set_ylim3d(-200, 200)
         ax.set_zlim3d(0, 400)
 
-        xs, ys, zs, es = self.get_xyze(event_num, threshold)
+        xs, ys, zs, es = self.get_xyze(event_num)
 
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
-        #TODO
-        plt.title('event %d, total counts=%d, length=%f mm'%(event_num, self.get_counts_in_event(event_num, threshold), self.get_track_length(event_num, threshold)))
+        should_veto, energy, length = self.process_event(event_num)
+        plt.title('event %d, total counts=%d, length=%f mm, veto=%d'%(event_num, energy, length, should_veto))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
@@ -411,6 +424,8 @@ class raw_h5_file:
         plt.imshow(image)
         plt.subplot(2,1,2)
         plt.plot(trace)
+        should_veto, energy, length = self.process_event(event_number)
+        plt.title('event %d, total counts=%d, length=%f mm, veto=%d'%(event_number, energy, length, should_veto))
         plt.show(block=block)
 
         
