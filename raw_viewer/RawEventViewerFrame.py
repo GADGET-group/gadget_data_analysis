@@ -59,8 +59,15 @@ class IndividualEventFrame(ttk.Frame):
         self.veto_threshold_entry = ttk.Entry(count_hist_frame)
         self.veto_threshold_entry.insert(0,'100')
         self.veto_threshold_entry.grid(row=1, column=1)
+        ttk.Label(count_hist_frame,text='range min/max (mm):').grid(row=2, column=0)
+        self.range_min_entry, self.range_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
+        self.range_min_entry.grid(row=2, column=1)
+        self.range_min_entry.insert(0, '0')
+        self.range_max_entry.grid(row=2, column=2)
+        self.range_max_entry.insert(0, '1000')
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
-        count_hist_button.grid(row=2, column=0)
+        count_hist_button.grid(row=3, column=0)
+        rve_hist_button = ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=3, column=1)
         count_hist_frame.grid()
 
         settings_frame = ttk.LabelFrame(self, text='Processing Settings')
@@ -78,6 +85,12 @@ class IndividualEventFrame(ttk.Frame):
         self.remove_outlier_var = tk.IntVar()
         remove_outliers_check = ttk.Checkbutton(settings_frame, text='remove outlier pads', variable=self.remove_outlier_var, 
                                                          command=self.check_state_changed)
+        ttk.Label(settings_frame, text='zscale (mm/time bin):').grid(row=3,column=0)
+        self.zscale_entry = ttk.Entry(settings_frame)
+        self.zscale_entry.insert(0, '1')
+        self.zscale_entry.grid(row=3,column=1)
+        ttk.Button(settings_frame, text='apply zscale', command=self.apply_zscale).grid(row=3,column=2)
+
         remove_outliers_check.grid(row=2, column=1)
         settings_frame.grid()
     
@@ -105,9 +118,14 @@ class IndividualEventFrame(ttk.Frame):
         self.data.show_2d_projection(event_number, False)
 
     def show_count_hist(self):
-        threshold = float(self.veto_threshold_entry.get())
+        threshold = float(self.threshold_entry.get())
+        veto_threshold = float(self.veto_threshold_entry.get())
         bins = int(self.bins_entry.get())
-        self.data.show_counts_histogram(num_bins=bins, veto_threshold=threshold, block=False)
+        min_range = float(self.range_min_entry.get())
+        max_range = float(self.range_max_entry.get())
+        self.data.show_counts_histogram(num_bins=bins, threshold=threshold, 
+                                        veto_threshold=veto_threshold,
+                                        range_bounds=(min_range, max_range),block=False)
 
     def get_backgrounds(self):
         background_bins = int(self.background_bins_entry.get())
@@ -126,6 +144,17 @@ class IndividualEventFrame(ttk.Frame):
         length = self.data.get_track_length(event_number, threshold)
         tk.messagebox.showinfo(message='track length = %f mm'%length)
 
+    def show_rve_plot(self):
+        threshold = float(self.threshold_entry.get())
+        veto_threshold = float(self.veto_threshold_entry.get())
+        bins = int(self.bins_entry.get())
+        min_range = float(self.range_min_entry.get())
+        max_range = float(self.range_max_entry.get())
+        self.data.show_rve_histogram(num_e_bins=bins, num_range_bins=bins, threshold=threshold, 
+                                     veto_threshold=threshold, block=False, range_bounds=(min_range, max_range))
+
+    def apply_zscale(self):
+        self.data.zscale = float(self.zscale_entry.get())
 
 if __name__ == '__main__':
     root = tk.Tk()

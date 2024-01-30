@@ -5,6 +5,7 @@ import scipy.spatial
 import scipy.spatial.distance
 import h5py
 import matplotlib.pylab as plt
+import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 
 import skimage.measure
@@ -133,12 +134,13 @@ class raw_h5_file:
         return data
 
 
-    def get_xyte(self, event_number):
+    def get_xyte(self, event_number, threshold=-np.inf):
         '''
         Returns: xs, ys, ts, es
                  Where each of these is an array s.t. each "pixel" in the in the raw TPC data is represented.
                  eg, (xs[i], ys[i], ts[i]) gives the position of a pad and time bin number,
                  and es[i] gives the charge that arrived at that pad at the given time.
+                 Only data where the charge deposition is greater than the threshold is included.
         '''
         xs, ys, es = [], [], []
         event_data =  self.get_data(event_number)
@@ -157,15 +159,23 @@ class raw_h5_file:
         xs = np.repeat(xs, NUM_TIME_BINS)
         ys = np.repeat(ys, NUM_TIME_BINS)
         es = np.array(es).flatten()
+
         #make time bins data
         ts = np.tile(np.arange(0, NUM_TIME_BINS), int(len(xs)/NUM_TIME_BINS))
+
+        #apply thresholding
+        if threshold != -np.inf:
+            xs = xs[es>threshold]
+            ys = ys[es>threshold]
+            ts = ts[es>threshold]
+            es = es[es>threshold]
         return xs, ys, ts, es
     
-    def get_xyze(self, event_number):
+    def get_xyze(self, event_number, threshold=-np.inf):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
-        x,y,t,e = self.get_xyte(event_number)
+        x,y,t,e = self.get_xyte(event_number, threshold)
         return x,y, t*self.zscale ,e
     
     def get_counts_in_event(self, event_number):
@@ -207,18 +217,21 @@ class raw_h5_file:
         Should replace this with something more robust in the future. This will NOT
         well work if outlier removal and background subtraction haven't been performed.
         '''
-        xs, ys, zs, es = self.get_xyze(event_number)
-        xs = xs[es>=threshold]
-        ys = ys[es>=threshold]
-        zs = zs[es>=threshold]
+        xs, ys, zs, es = self.get_xyze(event_number, threshold)
+        if len(xs) == 0:
+            return 0
         points = np.vstack((xs, ys, zs)).T
         #print(points)
         #find max distance using this algorithm
         #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
-        hull = scipy.spatial.ConvexHull(points)
-        hullpoints = points[hull.vertices,:]
-        #print(hullpoints)
-        hdist = scipy.spatial.distance.cdist(hullpoints, hullpoints, metric='euclidean')
+        #qhull will fail on colinear points, so use different method if this is the case
+        try:
+            hull = scipy.spatial.ConvexHull(points)
+            hullpoints = points[hull.vertices,:]
+            #print(hullpoints)
+            hdist = scipy.spatial.distance.cdist(hullpoints, hullpoints, metric='euclidean')
+        except:
+            hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
         return np.max(hdist)
 
     
@@ -269,15 +282,21 @@ class raw_h5_file:
         for pad in running_averages:
             self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
 
-    def get_count_array(self, veto_threshold=0):
+    def get_count_array(self, threshold=0, veto_threshold=0, range_bounds=None):
         '''
         Returns an array containing the total number of counts in each event in which no
-        veto pad went above the given threshold.
+        veto pad went above the given veto threshold.
+
+        threshold is used for determining track length
 
         TODO: apply veto condition PRIOR to removing outliers
         '''
         to_return = []
         for i in range(*self.get_event_num_bounds()):
+            if range_bounds != None:
+                length = self.get_track_length(i, threshold)
+                if length < range_bounds[0] or length > range_bounds[1]:
+                    continue
             to_add = 0
             for pad, trace in zip(*self.get_pad_traces(i)):
                 if pad in VETO_PADS:
@@ -286,13 +305,34 @@ class raw_h5_file:
                 to_add += np.sum(trace)
             to_return.append(to_add)
         return to_return
+    
+    def get_length_array(self, threshold, veto_threshold=0, range_bounds=None):
+        to_return = []
+        for i in range(*self.get_event_num_bounds()):
+            for pad, trace in zip(*self.get_pad_traces(i)):
+                if pad in VETO_PADS:
+                    if np.any(trace>veto_threshold):
+                        continue
+            length = self.get_track_length(i, threshold)
+            if range_bounds == None or (length >= range_bounds[0] and length <= range_bounds[1]):
+                to_return.append(length)
+        return to_return
 
-    def show_counts_histogram(self, num_bins, veto_threshold=0, fig_name=None, block=True):
-        data = self.get_count_array(veto_threshold)
+    def show_counts_histogram(self, num_bins, threshold=-np.nan, veto_threshold=0, fig_name=None, block=True, range_bounds=None):
+        data = self.get_count_array(threshold=threshold, veto_threshold=veto_threshold, range_bounds=range_bounds)
         plt.figure(fig_name)
         plt.hist(data, bins=num_bins)
         plt.show(block=block)
 
+    def show_rve_histogram(self, num_e_bins, num_range_bins, threshold, veto_threshold=0, fig_name=None, block=True, range_bounds=None):
+        plt.figure(fig_name)
+        plt.hist2d(self.get_count_array(threshold, veto_threshold, range_bounds),
+                   self.get_length_array(threshold, veto_threshold, range_bounds), 
+                   bins=(num_e_bins, num_range_bins), norm=colors.LogNorm())
+        plt.xlabel('energy (counts)')
+        plt.ylabel('range (mm)')
+        plt.colorbar()
+        plt.show(block=block)
 
     def show_pad_backgrounds(self, fig_name=None, block=True):
         ave_image = np.zeros(np.shape(self.pad_plane))
@@ -347,17 +387,13 @@ class raw_h5_file:
         ax.set_ylim3d(-200, 200)
         ax.set_zlim3d(0, 400)
 
-        xs, ys, zs, es = self.get_xyze(event_num)
-        xs = xs[es>threshold]
-        ys = ys[es>threshold]
-        zs = zs[es>threshold]
-        es = es[es>threshold]
+        xs, ys, zs, es = self.get_xyze(event_num, threshold)
 
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
         #TODO
-        #plt.title('event %d, total counts=%d'%(event_num, get_counts_in_event(file, event_number)))
+        plt.title('event %d, total counts=%d, length=%f mm'%(event_num, self.get_counts_in_event(event_num), self.get_track_length(event_num, threshold)))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
