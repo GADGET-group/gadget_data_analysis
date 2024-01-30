@@ -70,10 +70,15 @@ class IndividualEventFrame(ttk.Frame):
         count_hist_frame.grid()
 
         settings_frame = ttk.LabelFrame(self, text='Processing Settings')
-        ttk.Label(settings_frame, text='# background time bins:').grid(row=0, column=0)
-        self.background_bins_entry = ttk.Entry(settings_frame)
-        self.background_bins_entry.grid(row=0, column=1)
-        self.background_bins_entry.bind('<FocusOut>', self.entry_changed)
+        ttk.Label(settings_frame, text='background time bins:').grid(row=0, column=0)
+        self.background_start_entry = ttk.Entry(settings_frame)
+        self.background_start_entry.grid(row=0, column=1)
+        self.background_start_entry.bind('<FocusOut>', self.entry_changed)
+        self.background_start_entry.insert(0, '0')
+        self.background_stop_entry = ttk.Entry(settings_frame)
+        self.background_stop_entry.grid(row=0, column=2)
+        self.background_stop_entry.bind('<FocusOut>', self.entry_changed)
+        self.background_stop_entry.insert(0, '25')
         get_backgrounds_button = ttk.Button(settings_frame, text='get pad backgrounds', command=self.get_backgrounds)
         get_backgrounds_button.grid(row = 1, column=0)
         show_backgrounds_button = ttk.Button(settings_frame, text='show pad backgrounds', command=self.show_backgrounds)
@@ -128,7 +133,7 @@ class IndividualEventFrame(ttk.Frame):
                                         range_bounds=(min_range, max_range),block=False)
 
     def get_backgrounds(self):
-        background_bins = int(self.background_bins_entry.get())
+        background_bins = int(self.background_start_entry.get())
         self.data.determine_pad_backgrounds(background_bins)
 
     def show_backgrounds(self):
@@ -155,7 +160,7 @@ class IndividualEventFrame(ttk.Frame):
 
     def entry_changed(self, event):
         self.data.zscale = float(self.zscale_entry.get())
-        self.data.num_background_bins = int(self.background_bins_entry.get())
+        self.data.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
 
 if __name__ == '__main__':
     root = tk.Tk()

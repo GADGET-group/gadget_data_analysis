@@ -86,7 +86,7 @@ class raw_h5_file:
         self.apply_background_subtraction = False
         self.background_subtract_mode = 'per event' #or 'entire run'
         self.remove_outliers = False
-        self.num_background_bins = 0 #number of time bins to use for per event background subtraction
+        self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
 
     def get_data(self, event_number):
         '''
@@ -97,6 +97,8 @@ class raw_h5_file:
         1. Populate a pad plane image with all zeros, except for pads which fired
         2. Use skimage.measure.label to determine to label pads based on connectivity
         3. Make a new datacube which just has the pads from the largest blob
+
+        Veto pads should NOT be removed during outlier removal.
         '''
         data = self.h5_file['get']['evt%d_data'%event_number]
         data = np.array(data, copy=True, dtype=np.float)
@@ -115,7 +117,8 @@ class raw_h5_file:
                 if self.apply_background_subtraction and self.background_subtract_mode == 'entire run':
                     line[FIRST_DATA_BIN:] -= self.pad_backgrounds[pad][0]
                 elif self.apply_background_subtraction and self.background_subtract_mode == 'per event':
-                    line[FIRST_DATA_BIN:] -= np.average(line[FIRST_DATA_BIN:FIRST_DATA_BIN + self.num_background_bins])
+                    line[FIRST_DATA_BIN:] -= np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:
+                                                             FIRST_DATA_BIN + self.num_background_bins[1]])
                 elif self.background_subtract_mode:
                     print('unkown background subtraction mode')
                     assert False
@@ -127,7 +130,7 @@ class raw_h5_file:
             labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
             bigest_label = labels[np.argmax(counts)]
             new_data = []
-            for line in data: #only copy over pads in the bigest blob
+            for line in data: #only copy over pads in the bigest blob and veto pads
                 chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
@@ -135,7 +138,7 @@ class raw_h5_file:
                     #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                     continue
                 x,y = self.pad_to_xy_index[pad]
-                if labeled_image[x,y] == bigest_label:
+                if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
                     new_data.append(line)
             data = np.array(new_data)
 
