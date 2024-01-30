@@ -25,7 +25,7 @@ class IndividualEventFrame(ttk.Frame):
 
         ttk.Label(individual_event_frame, text='threshold:').grid(row=1, column=0)
         self.threshold_entry = ttk.Entry(individual_event_frame)
-        self.threshold_entry.insert(0, 500)
+        self.threshold_entry.insert(0, 100)
         self.threshold_entry.grid(row=1, column=1)
 
         show_3d_button = ttk.Button(individual_event_frame, text='show', command = self.show_3d_cloud)
@@ -41,7 +41,7 @@ class IndividualEventFrame(ttk.Frame):
 
         ttk.Label(individual_event_frame, text='# pad threshold:').grid(row=4, column=0)
         self.num_pad_threshold_entry = ttk.Entry(individual_event_frame)
-        self.num_pad_threshold_entry.insert(0, 10)
+        self.num_pad_threshold_entry.insert(0, 1)
         self.num_pad_threshold_entry.grid(row=4, column=2)
 
         ttk.Button(individual_event_frame, text='show track info', command=self.show_track_info).grid()
@@ -63,7 +63,7 @@ class IndividualEventFrame(ttk.Frame):
         self.range_min_entry.grid(row=2, column=1)
         self.range_min_entry.insert(0, '0')
         self.range_max_entry.grid(row=2, column=2)
-        self.range_max_entry.insert(0, '1000')
+        self.range_max_entry.insert(0, '100')
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
         count_hist_button.grid(row=3, column=0)
         rve_hist_button = ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=3, column=1)
@@ -92,12 +92,14 @@ class IndividualEventFrame(ttk.Frame):
                                                          command=self.check_state_changed)
         ttk.Label(settings_frame, text='zscale (mm/time bin):').grid(row=3,column=0)
         self.zscale_entry = ttk.Entry(settings_frame)
-        self.zscale_entry.insert(0, '1')
+        self.zscale_entry.insert(0, '0.25')
         self.zscale_entry.grid(row=3,column=1)
         self.zscale_entry.bind('<FocusOut>', self.entry_changed)
 
         remove_outliers_check.grid(row=2, column=1)
         settings_frame.grid()
+
+        self.entry_changed(None) #sync setting with GUI
     
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
@@ -156,7 +158,7 @@ class IndividualEventFrame(ttk.Frame):
         min_range = float(self.range_min_entry.get())
         max_range = float(self.range_max_entry.get())
         self.data.show_rve_histogram(num_e_bins=bins, num_range_bins=bins, threshold=threshold, 
-                                     veto_threshold=threshold, block=False, range_bounds=(min_range, max_range))
+                                     veto_threshold=veto_threshold, block=False, range_bounds=(min_range, max_range))
 
     def entry_changed(self, event):
         self.data.zscale = float(self.zscale_entry.get())

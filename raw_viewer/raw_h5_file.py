@@ -189,9 +189,10 @@ class raw_h5_file:
         x,y,t,e = self.get_xyte(event_number, threshold)
         return x,y, t*self.zscale ,e
     
-    def get_counts_in_event(self, event_number):
+    def get_counts_in_event(self, event_number, threshold):
         event = self.get_data(event_number)
-        return np.sum(event[:,FIRST_DATA_BIN:])
+        all_traces = event[:,FIRST_DATA_BIN:]
+        return np.sum(all_traces[all_traces>threshold])
     
     def get_event_num_bounds(self):
         #returns first event number, last event number
@@ -293,53 +294,34 @@ class raw_h5_file:
         self.pad_backgrounds = {}
         for pad in running_averages:
             self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
-
-    def get_count_array(self, threshold=0, veto_threshold=0, range_bounds=None):
-        '''
-        Returns an array containing the total number of counts in each event in which no
-        veto pad went above the given veto threshold.
-
-        threshold is used for determining track length
-
-        TODO: apply veto condition PRIOR to removing outliers
-        '''
-        to_return = []
-        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
-            if range_bounds != None:
-                length = self.get_track_length(i, threshold)
-                if length < range_bounds[0] or length > range_bounds[1]:
-                    continue
-            to_add = 0
-            for pad, trace in zip(*self.get_pad_traces(i)):
-                if pad in VETO_PADS:
-                    if np.any(trace>veto_threshold):
-                        continue
-                to_add += np.sum(trace)
-            to_return.append(to_add)
-        return to_return
     
-    def get_length_array(self, threshold, veto_threshold=0, range_bounds=None):
-        to_return = []
+    def get_histogram_arrays(self, threshold, veto_threshold=0, range_bounds=None):
+        range_hist = []
+        counts_hist = []
         for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
+            counts = 0
             for pad, trace in zip(*self.get_pad_traces(i)):
                 if pad in VETO_PADS:
                     if np.any(trace>veto_threshold):
                         continue
+                counts += np.sum(trace[trace>threshold])
             length = self.get_track_length(i, threshold)
             if range_bounds == None or (length >= range_bounds[0] and length <= range_bounds[1]):
-                to_return.append(length)
-        return to_return
+                range_hist.append(length)
+                counts_hist.append(counts)
+
+        return range_hist, counts_hist
 
     def show_counts_histogram(self, num_bins, threshold=-np.nan, veto_threshold=0, fig_name=None, block=True, range_bounds=None):
-        data = self.get_count_array(threshold=threshold, veto_threshold=veto_threshold, range_bounds=range_bounds)
+        ranges, counts = self.get_histogram_arrays(threshold=threshold, veto_threshold=veto_threshold, range_bounds=range_bounds)
         plt.figure(fig_name)
-        plt.hist(data, bins=num_bins)
+        plt.hist(counts, bins=num_bins)
         plt.show(block=block)
 
     def show_rve_histogram(self, num_e_bins, num_range_bins, threshold, veto_threshold=0, fig_name=None, block=True, range_bounds=None):
+        ranges, counts = self.get_histogram_arrays(threshold=threshold, veto_threshold=veto_threshold, range_bounds=range_bounds)
         plt.figure(fig_name)
-        plt.hist2d(self.get_count_array(threshold, veto_threshold, range_bounds),
-                   self.get_length_array(threshold, veto_threshold, range_bounds), 
+        plt.hist2d(counts, ranges, 
                    bins=(num_e_bins, num_range_bins), norm=colors.LogNorm())
         plt.xlabel('energy (counts)')
         plt.ylabel('range (mm)')
@@ -405,7 +387,7 @@ class raw_h5_file:
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
         #TODO
-        plt.title('event %d, total counts=%d, length=%f mm'%(event_num, self.get_counts_in_event(event_num), self.get_track_length(event_num, threshold)))
+        plt.title('event %d, total counts=%d, length=%f mm'%(event_num, self.get_counts_in_event(event_num, threshold), self.get_track_length(event_num, threshold)))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
