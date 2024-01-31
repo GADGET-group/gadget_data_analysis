@@ -320,7 +320,8 @@ class raw_h5_file:
             if pad in VETO_PADS:
                 if np.any(trace>self.veto_threshold):
                     should_veto = True
-            counts += np.sum(trace[trace>self.ic_counts_threshold])
+            else: #don't inlcude veto pad energy
+                counts += np.sum(trace[trace>self.ic_counts_threshold])
         length = self.get_track_length(event_num)
         if self.range_bounds != None:
             if length > self.range_bounds[1] or length < self.range_bounds[0]:
@@ -338,10 +339,20 @@ class raw_h5_file:
 
     def show_rve_histogram(self, num_e_bins, num_range_bins, fig_name=None, block=True):
         ranges, counts = self.get_histogram_arrays()
+
+        #TODO: make generic, these are P10 values
+        calib_point_1 = (0.806, 156745)
+        calib_point_2 = (1.679, 320842)
+        energy_1, channel_1 = calib_point_1
+        energy_2, channel_2 = calib_point_2
+        energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
+        energy_offset = energy_1 - energy_scale_factor * channel_1
+        counts = energy_scale_factor*counts + energy_offset
+
         plt.figure(fig_name)
         plt.hist2d(counts, ranges, 
                    bins=(num_e_bins, num_range_bins), norm=colors.LogNorm())
-        plt.xlabel('energy (counts)')
+        plt.xlabel('energy (MeV)')
         plt.ylabel('range (mm)')
         plt.colorbar()
         plt.show(block=block)
