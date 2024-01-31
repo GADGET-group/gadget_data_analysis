@@ -107,7 +107,7 @@ class raw_h5_file:
         Does NOT apply thresholding. However, this is applied in get_xyte and and get_xyze.
         '''
         data = self.h5_file['get']['evt%d_data'%event_number]
-        data = np.array(data, copy=True, dtype=np.float)
+        data = np.array(data, copy=True, dtype=float)
         if self.remove_outliers:
             pad_image = np.zeros(np.shape(self.pad_plane))
         #Loop over each pad, performing background subtraction and marking the pad in the pad image
