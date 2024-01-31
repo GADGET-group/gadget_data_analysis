@@ -27,6 +27,7 @@ class IndividualEventFrame(ttk.Frame):
         self.threshold_entry = ttk.Entry(individual_event_frame)
         self.threshold_entry.insert(0, 100)
         self.threshold_entry.grid(row=1, column=1)
+        self.threshold_entry.bind('<FocusOut>', self.entry_changed)
 
         show_3d_button = ttk.Button(individual_event_frame, text='show', command = self.show_3d_cloud)
         show_3d_button.grid(row=2, column=0)
@@ -52,6 +53,7 @@ class IndividualEventFrame(ttk.Frame):
         self.veto_threshold_entry = ttk.Entry(count_hist_frame)
         self.veto_threshold_entry.insert(0,'100')
         self.veto_threshold_entry.grid(row=1, column=1)
+        self.veto_threshold_entry.bind('<FocusOut>', self.entry_changed)
         ttk.Label(count_hist_frame,text='range min/max (mm):').grid(row=2, column=0)
         self.range_min_entry, self.range_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
         self.range_min_entry.grid(row=2, column=1)
@@ -155,6 +157,8 @@ class IndividualEventFrame(ttk.Frame):
         self.data.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
         self.data.ic_bounds = (float(self.ic_min_entry.get()), float(self.ic_max_entry.get()))
         self.data.range_bounds = (float(self.range_min_entry.get()), float(self.range_max_entry.get()))
+        self.data.threshold = float(self.threshold_entry.get())
+        self.data.veto_threshold = float(self.veto_threshold_entry.get())
 
     def get_track_info(self):
         event_number = int(self.event_number_entry.get())

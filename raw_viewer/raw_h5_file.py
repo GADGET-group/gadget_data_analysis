@@ -298,9 +298,9 @@ class raw_h5_file:
         range_hist = []
         counts_hist = []
         for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
-            should_veto, range, energy = self.process_event(i)
+            should_veto, length, energy = self.process_event(i)
             if not should_veto:
-                range_hist.append(range)
+                range_hist.append(length)
                 counts_hist.append(energy)
 
         return np.array(range_hist), np.array(counts_hist)
@@ -399,7 +399,7 @@ class raw_h5_file:
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
-        should_veto, energy, length = self.process_event(event_num)
+        should_veto, length, energy = self.process_event(event_num)
         plt.title('event %d, total counts=%d, length=%f mm, veto=%d'%(event_num, energy, length, should_veto))
         plt.show(block=block)
     
