@@ -89,7 +89,8 @@ class raw_h5_file:
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
         self.range_bounds = (0, 100)
         self.ic_bounds = (0, 1e6)
-        self.threshold = 100 #only use voxels which exceed this value when calculating length and integrated charge
+        self.length_counts_threshold = 300 #threshold to use when calculating range
+        self.ic_counts_threshold = 100 #threshold to use when calculating energy
         self.veto_threshold = 100 #veto events for which any veto pad exceeds this value at some point
 
     def get_data(self, event_number):
@@ -103,6 +104,7 @@ class raw_h5_file:
         3. Make a new datacube which just has the pads from the largest blob
 
         Veto pads should NOT be removed during outlier removal.
+        Does NOT apply thresholding. However, this is applied in get_xyte and and get_xyze.
         '''
         data = self.h5_file['get']['evt%d_data'%event_number]
         data = np.array(data, copy=True, dtype=np.float)
@@ -149,7 +151,7 @@ class raw_h5_file:
         return data
 
 
-    def get_xyte(self, event_number):
+    def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''
         Returns: xs, ys, ts, es
                  Where each of these is an array s.t. each "pixel" in the in the raw TPC data is represented.
@@ -165,6 +167,10 @@ class raw_h5_file:
             if chnl_info not in self.chnls_to_xy_coord:
                 #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                 continue
+            if not include_veto_pads:
+                pad = self.chnls_to_pad[chnl_info]
+                if pad in VETO_PADS:
+                    continue
             x,y = self.chnls_to_xy_coord[chnl_info]
             xs.append(x)
             ys.append(y)
@@ -179,18 +185,18 @@ class raw_h5_file:
         ts = np.tile(np.arange(0, NUM_TIME_BINS), int(len(xs)/NUM_TIME_BINS))
 
         #apply thresholding
-        if self.threshold != -np.inf:
-            xs = xs[es>self.threshold]
-            ys = ys[es>self.threshold]
-            ts = ts[es>self.threshold]
-            es = es[es>self.threshold]
+        if threshold != -np.inf:
+            xs = xs[es>threshold]
+            ys = ys[es>threshold]
+            ts = ts[es>threshold]
+            es = es[es>threshold]
         return xs, ys, ts, es
     
-    def get_xyze(self, event_number):
+    def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
-        x,y,t,e = self.get_xyte(event_number)
+        x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
         return x,y, t*self.zscale ,e
     
     def get_event_num_bounds(self):
@@ -229,20 +235,19 @@ class raw_h5_file:
         Should replace this with something more robust in the future. This will NOT
         well work if outlier removal and background subtraction haven't been performed.
         '''
-        xs, ys, zs, es = self.get_xyze(event_number)
+        xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
         if len(xs) == 0:
             return 0
         points = np.vstack((xs, ys, zs)).T
         #print(points)
         #find max distance using this algorithm
         #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
-        #qhull will fail on colinear points, so use different method if this is the case
         try:
             hull = scipy.spatial.ConvexHull(points)
             hullpoints = points[hull.vertices,:]
             #print(hullpoints)
             hdist = scipy.spatial.distance.cdist(hullpoints, hullpoints, metric='euclidean')
-        except:
+        except: #qhull will fail on colinear points, so just brute force if that's the case
             hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
         return np.max(hdist)
 
@@ -315,7 +320,7 @@ class raw_h5_file:
             if pad in VETO_PADS:
                 if np.any(trace>self.veto_threshold):
                     should_veto = True
-            counts += np.sum(trace[trace>self.threshold])
+            counts += np.sum(trace[trace>self.ic_counts_threshold])
         length = self.get_track_length(event_num)
         if self.range_bounds != None:
             if length > self.range_bounds[1] or length < self.range_bounds[0]:
@@ -383,7 +388,7 @@ class raw_h5_file:
         plt.legend()
         plt.show(block=block)
 
-    def plot_3d_traces(self, event_num, block=True, fig_name=None):
+    def plot_3d_traces(self, event_num, threshold=-np.inf, block=True, fig_name=None):
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
         ax = plt.axes(projection='3d')
@@ -394,13 +399,21 @@ class raw_h5_file:
         ax.set_ylim3d(-200, 200)
         ax.set_zlim3d(0, 400)
 
-        xs, ys, zs, es = self.get_xyze(event_num)
+        xs, ys, zs, es = self.get_xyze(event_num, threshold=threshold)
+
+        #TODO: make generic, these are P10 values
+        calib_point_1 = (0.806, 156745)
+        calib_point_2 = (1.679, 320842)
+        energy_1, channel_1 = calib_point_1
+        energy_2, channel_2 = calib_point_2
+        energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
+        energy_offset = energy_1 - energy_scale_factor * channel_1
 
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
         should_veto, length, energy = self.process_event(event_num)
-        plt.title('event %d, total counts=%d, length=%f mm, veto=%d'%(event_num, energy, length, should_veto))
+        plt.title('event %d, total counts=%d / %f MeV, length=%f mm, veto=%d'%(event_num, energy, energy*energy_scale_factor + energy_offset, length, should_veto))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
@@ -420,12 +433,13 @@ class raw_h5_file:
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        plt.subplot(2,1,1)
-        plt.imshow(image)
-        plt.subplot(2,1,2)
-        plt.plot(trace)
         should_veto, energy, length = self.process_event(event_number)
         plt.title('event %d, total counts=%d, length=%f mm, veto=%d'%(event_number, energy, length, should_veto))
+        plt.subplot(2,1,1)
+        plt.imshow(image, norm=colors.LogNorm())
+        plt.colorbar()
+        plt.subplot(2,1,2)
+        plt.plot(trace)
         plt.show(block=block)
 
         

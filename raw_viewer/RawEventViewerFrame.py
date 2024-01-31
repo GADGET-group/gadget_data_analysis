@@ -23,11 +23,17 @@ class IndividualEventFrame(ttk.Frame):
         self.event_number_entry.insert(0, self.data.get_event_num_bounds()[0])
         self.event_number_entry.grid(row=0, column=1)
 
-        ttk.Label(individual_event_frame, text='threshold:').grid(row=1, column=0)
-        self.threshold_entry = ttk.Entry(individual_event_frame)
-        self.threshold_entry.insert(0, 100)
-        self.threshold_entry.grid(row=1, column=1)
-        self.threshold_entry.bind('<FocusOut>', self.entry_changed)
+        ttk.Label(individual_event_frame, text='length ic threshold:').grid(row=1, column=0)
+        self.length_threshold_entry = ttk.Entry(individual_event_frame)
+        self.length_threshold_entry.insert(0, 100)
+        self.length_threshold_entry.grid(row=1, column=1)
+        self.length_threshold_entry.bind('<FocusOut>', self.entry_changed)
+
+        ttk.Label(individual_event_frame, text='energy ic threshold:').grid(row=1, column=2)
+        self.energy_threshold_entry = ttk.Entry(individual_event_frame)
+        self.energy_threshold_entry.insert(0, 100)
+        self.energy_threshold_entry.grid(row=1, column=3)
+        self.energy_threshold_entry.bind('<FocusOut>', self.entry_changed)
 
         show_3d_button = ttk.Button(individual_event_frame, text='show', command = self.show_3d_cloud)
         show_3d_button.grid(row=2, column=0)
@@ -39,6 +45,11 @@ class IndividualEventFrame(ttk.Frame):
         show_2D_button.grid(row=3, column=0)
         show_traces_button = ttk.Button(individual_event_frame, text='pad traces', command=self.show_raw_traces)
         show_traces_button.grid(row=3, column=1)
+
+        ttk.Label(individual_event_frame, text='view threshold:').grid(row=4, column=0)
+        self.view_threshold_entry = ttk.Entry(individual_event_frame)
+        self.view_threshold_entry.insert(0, '100')
+        self.view_threshold_entry.grid(row=4, column=1)
         
         ttk.Button(individual_event_frame, text='show track info', command=self.show_track_info).grid()
         individual_event_frame.grid()
@@ -74,7 +85,7 @@ class IndividualEventFrame(ttk.Frame):
 
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
         count_hist_button.grid(row=4, column=0)
-        rve_hist_button = ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=4, column=1)
+        ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=4, column=1)
         count_hist_frame.grid()
 
         settings_frame = ttk.LabelFrame(self, text='Processing Settings')
@@ -111,7 +122,7 @@ class IndividualEventFrame(ttk.Frame):
     
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
-        self.data.plot_3d_traces(event_number, block=False)
+        self.data.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
     
     def next(self):
         plt.close()
@@ -157,7 +168,8 @@ class IndividualEventFrame(ttk.Frame):
         self.data.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
         self.data.ic_bounds = (float(self.ic_min_entry.get()), float(self.ic_max_entry.get()))
         self.data.range_bounds = (float(self.range_min_entry.get()), float(self.range_max_entry.get()))
-        self.data.threshold = float(self.threshold_entry.get())
+        self.data.length_counts_threshold = float(self.length_threshold_entry.get())
+        self.data.ic_counts_threshold = float(self.energy_threshold_entry.get())
         self.data.veto_threshold = float(self.veto_threshold_entry.get())
 
     def get_track_info(self):
