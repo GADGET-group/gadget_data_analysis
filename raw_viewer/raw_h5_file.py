@@ -252,7 +252,7 @@ class raw_h5_file:
         return np.max(hdist)
 
     
-    def determine_pad_backgrounds(self, num_background_bins=200):
+    def determine_pad_backgrounds(self, num_background_bins=200, mode='background'):
         '''
         Assume the first num_background_bins of each pad's data only include background.
         Determine average value of this pad and stddev across all events in which the pad fired.
@@ -260,13 +260,19 @@ class raw_h5_file:
 
         Pad background will be stored in self.pad_backgrounds, which is a dictionairy indexed by pad
         number which stores (background average, background standard deviation) pairs.
+        
+        Mode = background: determine average number of counts in background region
+        Mode = average: determine average number of counts above background (if background subtraction is turned on)
         '''
         first, last = self.get_event_num_bounds()
 
         #compute average
         running_averages = {}
         for event_num in range(first, last+1):
-            event_data = self.h5_file['get']['evt%d_data'%event_num]
+            if mode == 'background':
+                self.h5_file['get']['evt%d_data'%event_num]
+            elif mode == 'average':
+                event_data = self.get_data(event_num)#
             for line in event_data:
                 chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
@@ -276,7 +282,10 @@ class raw_h5_file:
                     continue
                 if pad not in running_averages:
                     running_averages[pad] = (0,0) #running everage, events processed
-                ave_this = np.average(line[FIRST_DATA_BIN:num_background_bins+FIRST_DATA_BIN])
+                if mode == 'background'
+                    ave_this = np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:self.num_background_bins[1]+FIRST_DATA_BIN])
+                elif mode == 'average':
+                    ave_this = np.average(line[FIRST_DATA_BIN:511+FIRST_DATA_BIN])
                 ave_last, n = running_averages[pad]
                 running_averages[pad] = ((n*ave_last + ave_this)/(n+1), n+1)
         #compute standard deviation
