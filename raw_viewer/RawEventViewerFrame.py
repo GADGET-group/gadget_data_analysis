@@ -83,9 +83,18 @@ class IndividualEventFrame(ttk.Frame):
         self.ic_max_entry.insert(0, '1e9')
         self.ic_max_entry.bind('<FocusOut>', self.entry_changed)
 
+        ttk.Label(count_hist_frame,text='angle min/max:').grid(row=4, column=0)
+        self.angle_min_entry, self.angle_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
+        self.angle_min_entry.grid(row=4, column=1)
+        self.angle_min_entry.insert(0, '0')
+        self.angle_min_entry.bind('<FocusOut>', self.entry_changed)
+        self.angle_max_entry.grid(row=4, column=2)
+        self.angle_max_entry.insert(0, '90')
+        self.angle_max_entry.bind('<FocusOut>', self.entry_changed)
+
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
-        count_hist_button.grid(row=4, column=0)
-        ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=4, column=1)
+        count_hist_button.grid(row=5, column=0)
+        ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=5, column=1)
         count_hist_frame.grid()
 
         settings_frame = ttk.LabelFrame(self, text='Processing Settings')
@@ -127,10 +136,10 @@ class IndividualEventFrame(ttk.Frame):
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
-        veto, length, energy = self.data.process_event(event_number)
+        veto, length, energy, angle = self.data.process_event(event_number)
         while veto:
             event_number += 1
-            veto, length, energy = self.data.process_event(event_number)
+            veto, length, energy, angle = self.data.process_event(event_number)
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
         self.show_3d_cloud()
@@ -168,6 +177,7 @@ class IndividualEventFrame(ttk.Frame):
         self.data.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
         self.data.ic_bounds = (float(self.ic_min_entry.get()), float(self.ic_max_entry.get()))
         self.data.range_bounds = (float(self.range_min_entry.get()), float(self.range_max_entry.get()))
+        self.data.angle_bounds = (np.radians(float(self.angle_min_entry.get())), np.radians(float(self.angle_max_entry.get())))
         self.data.length_counts_threshold = float(self.length_threshold_entry.get())
         self.data.ic_counts_threshold = float(self.energy_threshold_entry.get())
         self.data.veto_threshold = float(self.veto_threshold_entry.get())

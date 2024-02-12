@@ -89,6 +89,7 @@ class raw_h5_file:
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
         self.range_bounds = (0, 100)
         self.ic_bounds = (0, 1e6)
+        self.angle_bounds = None #min/max angles in radians to use when calculating veto conditions
         self.length_counts_threshold = 300 #threshold to use when calculating range
         self.ic_counts_threshold = 100 #threshold to use when calculating energy
         self.veto_threshold = 100 #veto events for which any veto pad exceeds this value at some point
@@ -228,28 +229,40 @@ class raw_h5_file:
         event = self.get_data(event_number)
         return len(event)
     
-    def get_track_length(self, event_number):
+    def get_track_length_angle(self, event_number):
         '''
         1. Remove all points which are less than threshold sigma above background
         2. Find max distance between any of the two remaining points.
         Should replace this with something more robust in the future. This will NOT
         well work if outlier removal and background subtraction haven't been performed.
+
+        Returns: length, angle from z-axis in radians
         '''
         xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
         if len(xs) == 0:
-            return 0
+            return 0, 0
         points = np.vstack((xs, ys, zs)).T
         #print(points)
         #find max distance using this algorithm
         #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
         try:
             hull = scipy.spatial.ConvexHull(points)
-            hullpoints = points[hull.vertices,:]
-            #print(hullpoints)
-            hdist = scipy.spatial.distance.cdist(hullpoints, hullpoints, metric='euclidean')
+            points = points[hull.vertices,:]
         except: #qhull will fail on colinear points, so just brute force if that's the case
-            hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
-        return np.max(hdist)
+            pass
+        #find the two most distant points
+        hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
+        indices = np.unravel_index(np.argmax(hdist, axis=None), hdist.shape)
+        p1 = points[indices[0]]
+        p2 = points[indices[1]]
+        #print(p1, p2)
+        dist = hdist[indices]
+        dr = p1-p2
+        if dr[2] != 0:
+            angle = np.abs(np.arctan(np.sqrt(dr[0]**2 + dr[1]**2)/dr[2]))
+        else:
+            angle = np.radians(90)
+        return dist, angle
 
     
     def determine_pad_backgrounds(self, num_background_bins=200, mode='background'):
@@ -282,7 +295,7 @@ class raw_h5_file:
                     continue
                 if pad not in running_averages:
                     running_averages[pad] = (0,0) #running everage, events processed
-                if mode == 'background'
+                if mode == 'background':
                     ave_this = np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:self.num_background_bins[1]+FIRST_DATA_BIN])
                 elif mode == 'average':
                     ave_this = np.average(line[FIRST_DATA_BIN:511+FIRST_DATA_BIN])
@@ -311,17 +324,19 @@ class raw_h5_file:
     def get_histogram_arrays(self):
         range_hist = []
         counts_hist = []
+        angle_hist = []
         for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
-            should_veto, length, energy = self.process_event(i)
+            should_veto, length, energy, angle = self.process_event(i)
             if not should_veto:
                 range_hist.append(length)
                 counts_hist.append(energy)
+                angle_hist.append(angle)
 
-        return np.array(range_hist), np.array(counts_hist)
+        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist)
     
     def process_event(self, event_num):
         '''
-        Returns: should veto, range, energy
+        Returns: should veto, range, energy, angle
         '''
         should_veto=False
         counts = 0
@@ -331,23 +346,26 @@ class raw_h5_file:
                     should_veto = True
             else: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
-        length = self.get_track_length(event_num)
+        length, angle = self.get_track_length_angle(event_num)
         if self.range_bounds != None:
             if length > self.range_bounds[1] or length < self.range_bounds[0]:
                 should_veto = True
         if self.ic_bounds != None:
             if counts < self.ic_bounds[0] or counts > self.ic_bounds[1]:
                 should_veto = True
-        return should_veto, length, counts
+        if self.angle_bounds != None:
+            if angle < self.angle_bounds[0] or angle > self.angle_bounds[1]:
+                should_veto = True
+        return should_veto, length, counts, angle
 
     def show_counts_histogram(self, num_bins, fig_name=None, block=True):
-        ranges, counts = self.get_histogram_arrays()
+        ranges, counts, angles = self.get_histogram_arrays()
         plt.figure(fig_name)
         plt.hist(counts, bins=num_bins)
         plt.show(block=block)
 
     def show_rve_histogram(self, num_e_bins, num_range_bins, fig_name=None, block=True):
-        ranges, counts = self.get_histogram_arrays()
+        ranges, counts, angles = self.get_histogram_arrays()
 
         #TODO: make generic, these are P10 values
         calib_point_1 = (0.806, 156745)
@@ -432,8 +450,10 @@ class raw_h5_file:
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
-        should_veto, length, energy = self.process_event(event_num)
-        plt.title('event %d, total counts=%d / %f MeV, length=%f mm, veto=%d'%(event_num, energy, energy*energy_scale_factor + energy_offset, length, should_veto))
+        should_veto, length, energy, angle = self.process_event(event_num)
+        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n veto=%d'%(event_num, energy, 
+                                                                                               energy*energy_scale_factor + energy_offset, length,
+                                                                                               np.degrees(angle), should_veto))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
@@ -453,8 +473,8 @@ class raw_h5_file:
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        should_veto, energy, length = self.process_event(event_number)
-        plt.title('event %d, total counts=%d, length=%f mm, veto=%d'%(event_number, energy, length, should_veto))
+        should_veto, energy, length, angle = self.process_event(event_number)
+        plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
         plt.subplot(2,1,1)
         plt.imshow(image, norm=colors.LogNorm())
         plt.colorbar()
