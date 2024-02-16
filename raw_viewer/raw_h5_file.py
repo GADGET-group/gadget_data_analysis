@@ -84,7 +84,6 @@ class raw_h5_file:
         self.cmap = LinearSegmentedColormap('test',cdict)
 
         self.apply_background_subtraction = False
-        self.background_subtract_mode = 'per event' #or 'entire run'
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
         self.range_bounds = (0, 100)
@@ -121,14 +120,9 @@ class raw_h5_file:
                 else:
                     #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                     continue
-                if self.apply_background_subtraction and self.background_subtract_mode == 'entire run':
-                    line[FIRST_DATA_BIN:] -= self.pad_backgrounds[pad][0]
-                elif self.apply_background_subtraction and self.background_subtract_mode == 'per event':
+                if self.apply_background_subtraction:
                     line[FIRST_DATA_BIN:] -= np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:
                                                              FIRST_DATA_BIN + self.num_background_bins[1]])
-                elif self.background_subtract_mode:
-                    print('unkown background subtraction mode')
-                    assert False
                 if self.remove_outliers:
                     x,y = self.pad_to_xy_index[pad]
                     pad_image[x,y]=1
@@ -333,7 +327,7 @@ class raw_h5_file:
                 angle_hist.append(angle)
 
         return np.array(range_hist), np.array(counts_hist), np.array(angle_hist)
-    
+
     def process_event(self, event_num):
         '''
         Returns: should veto, range, energy, angle
