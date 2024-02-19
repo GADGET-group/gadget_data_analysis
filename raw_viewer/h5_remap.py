@@ -21,12 +21,17 @@ def remap_pad_numbers(input_file, output_file, flatlookup_file):
         first_event_num, last_event_num = int(file['meta']['meta'][0]), int(file['meta']['meta'][2])
         for event_num in tqdm.tqdm(range(first_event_num, last_event_num+1)):
             data = file['get']['evt%d_data'%event_num]
-            for line in data:
-                chnl_info = tuple(line[0:4])
+            for line_num in range(len(data)):
+                chnl_info = tuple(data[line_num, 0:4])
                 if chnl_info in chnls_to_pad:
-                    data[4] = chnls_to_pad[chnl_info]
+                    data[line_num, 4] = chnls_to_pad[chnl_info]
+                else:
+                    print('Event #' + str(event_num) + ' channel information ' + str(chnl_info) + ' not in pad mapping!')
 
 if __name__ == '__main__':
     input_file = '/mnt/analysis/e21072/gastest_h5_files/run_0099.h5'
     output_file = '/mnt/analysis/e21072/h5test/gastest_run_0099_pads_remapped.h5'
+
+    #input_file = '/mnt/analysis/e21072/gastest_h5_files/run_0020.h5'
+    #output_file = '/mnt/analysis/e21072/gastest_h5_files/run_0020_remapped.h5'
     remap_pad_numbers(input_file, output_file, 'flatlookup2cobos.csv')

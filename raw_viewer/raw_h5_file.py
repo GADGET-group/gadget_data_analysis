@@ -319,7 +319,7 @@ class raw_h5_file:
         range_hist = []
         counts_hist = []
         angle_hist = []
-        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):
+        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):#TODO: is this missing the last event in the run?
             should_veto, length, energy, angle = self.process_event(i)
             if not should_veto:
                 range_hist.append(length)
