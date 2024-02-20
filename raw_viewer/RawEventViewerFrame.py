@@ -118,13 +118,16 @@ class IndividualEventFrame(ttk.Frame):
         self.remove_outlier_var = tk.IntVar()
         remove_outliers_check = ttk.Checkbutton(settings_frame, text='remove outlier pads', variable=self.remove_outlier_var, 
                                                          command=self.check_state_changed)
+        remove_outliers_check.grid(row=2, column=1)
         ttk.Label(settings_frame, text='zscale (mm/time bin):').grid(row=3,column=0)
         self.zscale_entry = ttk.Entry(settings_frame)
-        self.zscale_entry.insert(0, '0.25')
+        self.zscale_entry.insert(0, '1.45')
         self.zscale_entry.grid(row=3,column=1)
         self.zscale_entry.bind('<FocusOut>', self.entry_changed)
 
-        remove_outliers_check.grid(row=2, column=1)
+        self.mode_var = tk.StringVar()
+        self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only').grid(row=4, column=1)
         settings_frame.grid()
 
         self.entry_changed(None) #sync setting with GUI
@@ -181,6 +184,7 @@ class IndividualEventFrame(ttk.Frame):
         self.data.length_counts_threshold = float(self.length_threshold_entry.get())
         self.data.ic_counts_threshold = float(self.energy_threshold_entry.get())
         self.data.veto_threshold = float(self.veto_threshold_entry.get())
+        self.data.mode = self.mode_var.get()
 
     def get_track_info(self):
         event_number = int(self.event_number_entry.get())

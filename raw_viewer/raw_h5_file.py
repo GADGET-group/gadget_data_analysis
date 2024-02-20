@@ -92,6 +92,10 @@ class raw_h5_file:
         self.length_counts_threshold = 300 #threshold to use when calculating range
         self.ic_counts_threshold = 100 #threshold to use when calculating energy
         self.veto_threshold = 100 #veto events for which any veto pad exceeds this value at some point
+        #allowed modes = 'all data', or 'peak only'
+        #all data mode will make use of the entire trace from each pad
+        #'peak only' will make use of only the max value the trace reached on each pad
+        self.mode = 'all data' 
 
     def get_data(self, event_number):
         '''
@@ -110,6 +114,7 @@ class raw_h5_file:
         data = np.array(data, copy=True, dtype=float)
         if self.remove_outliers:
             pad_image = np.zeros(np.shape(self.pad_plane))
+
         #Loop over each pad, performing background subtraction and marking the pad in the pad image
         #which will be used for outlier removal.
         if self.apply_background_subtraction or self.remove_outliers:
@@ -142,7 +147,14 @@ class raw_h5_file:
                 if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
                     new_data.append(line)
             data = np.array(new_data)
-
+        
+        if self.mode == 'peak only':
+            for line in data:
+                max_index = np.argmax(line[FIRST_DATA_BIN:])
+                line[FIRST_DATA_BIN:max_index] = 0
+                if max_index < len(line[FIRST_DATA_BIN:]):
+                    line[max_index+1:] = 0
+        
         return data
 
 
