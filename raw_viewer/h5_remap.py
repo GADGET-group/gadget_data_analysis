@@ -29,8 +29,8 @@ def remap_pad_numbers(input_file, output_file, flatlookup_file):
                     print('Event #' + str(event_num) + ' channel information ' + str(chnl_info) + ' not in pad mapping!')
 
 if __name__ == '__main__':
-    input_file = '/mnt/analysis/e21072/gastest_h5_files/run_0099.h5'
-    output_file = '/mnt/analysis/e21072/h5test/gastest_run_0099_pads_remapped.h5'
+    input_file = '/mnt/analysis/e21072/gastest_h5_files/gastestrun_0120.h5'
+    output_file = '/mnt/analysis/e21072/h5test/run_9999.h5'
 
     #input_file = '/mnt/analysis/e21072/gastest_h5_files/run_0020.h5'
     #output_file = '/mnt/analysis/e21072/gastest_h5_files/run_0020_remapped.h5'

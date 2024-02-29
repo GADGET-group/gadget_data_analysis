@@ -127,7 +127,17 @@ class IndividualEventFrame(ttk.Frame):
 
         self.mode_var = tk.StringVar()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
-        ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only').grid(row=4, column=1)
+        ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only', 'near peak').grid(row=4, column=0)
+        ttk.Label(settings_frame, text='near peak window size:').grid(row=5, column=0)
+        self.near_peak_window_entry = ttk.Entry(settings_frame)
+        self.near_peak_window_entry.insert(0,'10')
+        self.near_peak_window_entry.grid(row=5, column=1)
+        ttk.Label(settings_frame, text='require peak between:').grid(row=6, column=0)
+        self.peak_first_allowed_bin_entry, self.peak_last_allowed_bin_entry = ttk.Entry(settings_frame),ttk.Entry(settings_frame)
+        self.peak_first_allowed_bin_entry.grid(row=6, column=1)
+        self.peak_last_allowed_bin_entry.grid(row=6, column=2)
+        self.peak_first_allowed_bin_entry.insert(0,'-inf')
+        self.peak_last_allowed_bin_entry.insert(0,'inf')
         settings_frame.grid()
 
         self.entry_changed(None) #sync setting with GUI
@@ -185,6 +195,9 @@ class IndividualEventFrame(ttk.Frame):
         self.data.ic_counts_threshold = float(self.energy_threshold_entry.get())
         self.data.veto_threshold = float(self.veto_threshold_entry.get())
         self.data.mode = self.mode_var.get()
+        self.data.near_peak_window_width = int(self.near_peak_window_entry.get())
+        self.data.require_peak_within=(float(self.peak_first_allowed_bin_entry.get()), float(self.peak_last_allowed_bin_entry.get()))
+
 
     def get_track_info(self):
         event_number = int(self.event_number_entry.get())

@@ -92,10 +92,13 @@ class raw_h5_file:
         self.length_counts_threshold = 300 #threshold to use when calculating range
         self.ic_counts_threshold = 100 #threshold to use when calculating energy
         self.veto_threshold = 100 #veto events for which any veto pad exceeds this value at some point
-        #allowed modes = 'all data', or 'peak only'
+        #allowed modes = 'all data', 'peak only', or 'near peak'
         #all data mode will make use of the entire trace from each pad
         #'peak only' will make use of only the max value the trace reached on each pad
+        #'near peak' will only use data within some window of the peak of each trace
         self.mode = 'all data' 
+        self.near_peak_window_width = 100 #+/- time bins to include
+        self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
 
     def get_data(self, event_number):
         '''
@@ -148,12 +151,22 @@ class raw_h5_file:
                     new_data.append(line)
             data = np.array(new_data)
         
-        if self.mode == 'peak only':
+        if self.mode == 'peak only': #zero everything but the peak bin
             for line in data:
-                max_index = np.argmax(line[FIRST_DATA_BIN:])
-                line[FIRST_DATA_BIN:max_index] = 0
-                if max_index < len(line[FIRST_DATA_BIN:]):
-                    line[max_index+1:] = 0
+                peak_index = np.argmax(line[FIRST_DATA_BIN:])
+                line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index] = 0
+                if peak_index < len(line[FIRST_DATA_BIN:]):
+                    line[FIRST_DATA_BIN+peak_index+1:] = 0
+        elif self.mode == 'near peak': #zero everything outside the window
+            for line in data:
+                peak_index = np.argmax(line[FIRST_DATA_BIN:])
+                if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
+                    line[FIRST_DATA_BIN:] = 0
+                else:
+                    if peak_index - self.near_peak_window_width > 0:
+                        line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
+                    if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
+                        line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
         
         return data
 
