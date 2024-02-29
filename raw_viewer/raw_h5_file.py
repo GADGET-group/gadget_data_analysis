@@ -435,9 +435,9 @@ class raw_h5_file:
         plt.clf()
         pads, pad_data = self.get_pad_traces(event_num)
         for pad, data in zip(pads, pad_data):
-            r = pad/1024
-            g = (pad%512)/512
-            b = (pad%256)/256
+            r = pad/1024*.8
+            g = (pad%512)/512*.8
+            b = (pad%256)/256*.8
             if pad in VETO_PADS:
                 plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
             else:
