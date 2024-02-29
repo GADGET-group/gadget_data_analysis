@@ -131,6 +131,7 @@ class IndividualEventFrame(ttk.Frame):
         ttk.Label(settings_frame, text='near peak window size:').grid(row=5, column=0)
         self.near_peak_window_entry = ttk.Entry(settings_frame)
         self.near_peak_window_entry.insert(0,'10')
+        self.near_peak_window_entry.bind('<FocusOut>', self.entry_changed)
         self.near_peak_window_entry.grid(row=5, column=1)
         ttk.Label(settings_frame, text='require peak between:').grid(row=6, column=0)
         self.peak_first_allowed_bin_entry, self.peak_last_allowed_bin_entry = ttk.Entry(settings_frame),ttk.Entry(settings_frame)
