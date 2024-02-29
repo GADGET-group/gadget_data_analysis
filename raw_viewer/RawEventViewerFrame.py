@@ -138,6 +138,8 @@ class IndividualEventFrame(ttk.Frame):
         self.peak_last_allowed_bin_entry.grid(row=6, column=2)
         self.peak_first_allowed_bin_entry.insert(0,'-inf')
         self.peak_last_allowed_bin_entry.insert(0,'inf')
+        self.peak_first_allowed_bin_entry.bind('<FocusOut>', self.entry_changed)
+        self.peak_last_allowed_bin_entry.bind('<FocusOut>', self.entry_changed)
         settings_frame.grid()
 
         self.entry_changed(None) #sync setting with GUI
