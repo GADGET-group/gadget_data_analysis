@@ -442,7 +442,7 @@ class raw_h5_file:
                 plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
             else:
                 plt.plot(data, color=(r,g,b), label='%d'%pad)
-        plt.legend()
+        plt.legend(loc='upper right')
         plt.show(block=block)
 
     def plot_3d_traces(self, event_num, threshold=-np.inf, block=True, fig_name=None):
@@ -492,7 +492,7 @@ class raw_h5_file:
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        should_veto, energy, length, angle = self.process_event(event_number)
+        should_veto, length, energy, angle = self.process_event(event_number)
         plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
         plt.subplot(2,1,1)
         plt.imshow(image, norm=colors.LogNorm())
