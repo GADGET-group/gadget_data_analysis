@@ -29,6 +29,8 @@ class raw_h5_file:
         
 
         if flat_lookup_csv == None: #figure out COBO configuration from meta data
+            #TODO: it seems that the merger is only writing meta data for the 2 COBO configuraiton
+            #so this doesn't work
             if  len(self.h5_file['meta']) == 9: #2 COBO configuration
                 self.flat_lookup = np.loadtxt('flatlookup2cobos.csv', delimiter=',', dtype=int)
             else:

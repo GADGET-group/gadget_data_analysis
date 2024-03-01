@@ -10,9 +10,11 @@ import raw_h5_file
 class IndividualEventFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
+        #get path to flat lookup file
+        flat_lookup_path = tk.filedialog.askopenfilename(initialdir='.', title='Select Channel Mapping FIle')
         #get file path and load file
-        file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select a Directory')
-        self.data = raw_h5_file.raw_h5_file(file_path, zscale=1.45)
+        file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File')
+        self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
         self.winfo_toplevel().title(file_path)
         
         #widget setup in individual_event_Frame
