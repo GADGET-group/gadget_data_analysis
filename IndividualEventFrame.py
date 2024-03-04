@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import ttk
 import matplotlib.pyplot as plt
 import numpy as np
-from raw_viewer import raw_trace_viewer
 import scipy.stats
 
 from sklearn.neighbors import NearestNeighbors
