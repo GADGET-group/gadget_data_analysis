@@ -101,6 +101,7 @@ class raw_h5_file:
         self.mode = 'all data' 
         self.near_peak_window_width = 100 #+/- time bins to include
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
+        self.include_counts_on_veto_pads = False
 
     def get_data(self, event_number):
         '''
@@ -365,7 +366,7 @@ class raw_h5_file:
             if pad in VETO_PADS:
                 if np.any(trace>self.veto_threshold):
                     should_veto = True
-            else: #don't inlcude veto pad energy
+            if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
         length, angle = self.get_track_length_angle(event_num)
         if self.range_bounds != None:
