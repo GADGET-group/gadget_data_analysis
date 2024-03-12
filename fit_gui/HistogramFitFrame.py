@@ -1,5 +1,6 @@
 import numpy as np
 import tkinter as tk
+import tkinter.filedialog
 from tkinter import ttk
 import matplotlib
 import matplotlib.pyplot as plt
@@ -141,11 +142,20 @@ class HistogramFitFrame(ttk.Frame):
 
 if __name__ == '__main__':
     import numpy.random as random
-    data = np.concatenate(\
+    '''data = np.concatenate(\
         [random.normal(-0.5, 0.3,1000),\
          np.random.normal(0.5,0.2, 300), \
          np.random.normal(3, 1, 3000),
-         np.random.uniform(-5,5,500)])#b=50, m=0
+         np.random.uniform(-5,5,500)])#b=50, m=0'''
+
+    file_path = tk.filedialog.askopenfilename()
+    data = np.load(file_path)
+    include_all_data = True
+    print('total events in file = %d'%len(data))
+    if not include_all_data:
+        min_val, max_val = 4e5, 6e5
+        data = data[np.logical_and(data>min_val, data<max_val)]
+        print('events after applying cut = %d'%len(data))
 
     root = tk.Tk()
     frame = HistogramFitFrame(root, data)
