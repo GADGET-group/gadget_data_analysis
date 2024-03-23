@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
+#ORIGINAL GADGET GUI WRITTEN BY TYLER WHEELER
 
 ############################################################### File Generator
 ###############################################################

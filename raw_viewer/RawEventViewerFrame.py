@@ -5,15 +5,19 @@ import tkinter.messagebox
 
 import matplotlib.pyplot as plt
 import numpy as np
-import raw_h5_file
 
-class IndividualEventFrame(ttk.Frame):
-    def __init__(self, parent):
+if __name__ == '__main__':
+    import raw_h5_file
+else:
+    from raw_viewer import raw_h5_file
+
+class RawEventViewerFrame(ttk.Frame):
+    def __init__(self, parent, file_path=None, flat_lookup_path=None):
         super().__init__(parent)
-        #get path to flat lookup file
-        flat_lookup_path = tk.filedialog.askopenfilename(initialdir='.', title='Select Channel Mapping FIle')
-        #get file path and load file
-        file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File')
+        if flat_lookup_path == None:
+            flat_lookup_path = tk.filedialog.askopenfilename(initialdir='.', title='Select Channel Mapping FIle')
+        if file_path == None:
+            file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File')
         self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
         self.winfo_toplevel().title(file_path)
         
@@ -216,5 +220,5 @@ class IndividualEventFrame(ttk.Frame):
 
 if __name__ == '__main__':
     root = tk.Tk()
-    IndividualEventFrame(root).grid()
+    RawEventViewerFrame(root).grid()
     root.mainloop()

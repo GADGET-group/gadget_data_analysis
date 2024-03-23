@@ -112,7 +112,7 @@ file.ic_counts_threshold = -1000000
 ranges, counts, angles = file.get_histogram_arrays()
 '''
 
-
+'''
 #file = raw_h5_file.raw_h5_file('E:/gastestsrun_0127.h5')
 file = raw_h5_file.raw_h5_file('C:/temp/gastestsrun_0127.h5')
 file.veto_threshold=np.inf
@@ -129,7 +129,81 @@ file.length_counts_threshold = 100
 file.ic_counts_threshold = 15
 file.include_counts_on_veto_pads = True
 ranges, counts, angles = file.get_histogram_arrays()
-plt.hist(counts[counts>1e4], 100)
+plt.hist(counts[counts>1e4], 100)'''
 '''
 file = raw_h5_file.raw_h5_file('E:/gastestsrun_0134.h5')
 '''
+'''
+for run in range(163, 173):
+    try:
+        ranges = np.load('D:/raw_viewer/%d_ranges.npy'%run)
+        counts = np.load('D:/raw_viewer/%d_counts.npy'%run)
+        angles = np.load('D:/raw_viewer/%d_angles.npy'%run)
+        
+        mask = counts>1e5#np.logical_and(counts>1e5, angles>np.radians(20))
+        plt.figure()
+        plt.hist2d(counts[mask], ranges[mask],100)
+        plt.colorbar()
+        plt.xlabel('adc counts')
+        plt.ylabel('range (mm)')
+        plt.title('run %d'%run)
+        plt.savefig('run_%d_RvE.png'%run)
+    except:
+        print('couldn\'t process run %d'%run)
+'''      
+
+'''
+for run in range(163, 173):
+    try:
+        ranges = np.load('D:/raw_viewer/%d_ranges.npy'%run)
+        counts = np.load('D:/raw_viewer/%d_counts.npy'%run)
+        angles = np.load('D:/raw_viewer/%d_angles.npy'%run)
+        
+        plt.figure()
+        plt.hist(counts,100)
+        plt.xlabel('adc counts')
+        plt.ylabel('# events')
+        plt.title('run %d'%run)
+        plt.savefig('run_%d_counts_hist.png'%run)
+    except:
+        print('couldn\'t process run %d'%run)
+'''
+'''
+for run in range(274, 275):
+    local=True
+    if local:
+        file=raw_h5_file.raw_h5_file('C:/temp/run_%04d.h5'%run, 
+                                   flat_lookup_csv='flatlookup4cobos.csv')
+    else:
+        file = raw_h5_file.raw_h5_file('/mnt/analysis/e21072/h5test/run_%04d.h5'%run, 
+                                   flat_lookup_csv='flatlookup4cobos.csv')
+    file.veto_threshold=1500
+    file.apply_background_subtraction=True
+    file.remove_outliers=True
+    file.mode = 'near peak'
+    file.require_peak_within = (20,180)
+    file.near_peak_window_width = 50
+    file.range_bounds=(0, np.inf)
+    file.ic_bounds=(-np.inf, np.inf)
+    file.num_background_bins=(200,400)
+    file.zscale=1.45
+    file.length_counts_threshold = 100
+    file.ic_counts_threshold = 75
+    file.include_counts_on_veto_pads = False
+    ranges, counts, angles = file.get_histogram_arrays()
+    np.save('e21072_run%04d_ranges_veto_1500'%run, ranges)
+    np.save('e21072_run%04d_counts_veto_1500'%run, counts)
+    np.save('e21072_run%04d_angles_veto_1500'%run, angles)
+'''
+ranges = np.load('I:/projects/e21072/OfflineAnalysis/analysis_scripts/alex/gadget_analysis/raw_viewer/e21072_run274_ranges_veto_1500.npy')
+counts = np.load('I:/projects/e21072/OfflineAnalysis/analysis_scripts/alex/gadget_analysis/raw_viewer/e21072_run274_counts_veto_1500.npy')
+angles = np.load('I:/projects/e21072/OfflineAnalysis/analysis_scripts/alex/gadget_analysis/raw_viewer/e21072_run274_angles_veto_1500.npy')
+
+plt.figure()
+plt.hist(counts,1000)
+plt.xlabel('adc counts')
+plt.ylabel('# events')
+plt.title('run %d'%274)
+
+events_in_peak=np.where(np.logical_and(counts>1.4e5,counts<1.5e5))
+pc_events=np.load('C:/temp/run_274_len90_ic600000_pads5_eps5_samps5_poly2/good_events.npy')

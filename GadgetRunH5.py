@@ -53,7 +53,7 @@ class GadgetRunH5:
         self.angle_list = np.load(os.path.join(folder_path, 'angle_list.npy'), allow_pickle=True)
 
         h5_dir = '/mnt/analysis/e21072/h5test/'
-        h5_file_path = h5_dir + 'run_' + ('%4d'%run_num).replace(' ', '0') + '.h5'
+        self.h5_file_path = h5_dir + 'run_' + ('%4d'%run_num).replace(' ', '0') + '.h5'
         #self.h5_file = raw_h5_file(h5_file_path, zscale=1.45) #TODO
 
 

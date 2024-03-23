@@ -25,7 +25,7 @@ NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
 class raw_h5_file:
     def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
         self.h5_file = h5py.File(file_path, 'r')
-        self.padxy = np.loadtxt('padxy.txt', delimiter=',')
+        self.padxy = np.loadtxt(os.path.join(os.path.dirname(__file__), 'padxy.txt'), delimiter=',')
         
 
         if flat_lookup_csv == None: #figure out COBO configuration from meta data
@@ -38,7 +38,7 @@ class raw_h5_file:
         else:
             self.flat_lookup = np.loadtxt(flat_lookup_csv, delimiter=',', dtype=int)
         
-        self.pad_plane = np.genfromtxt('PadPlane.csv',delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
+        self.pad_plane = np.genfromtxt(os.path.join(os.path.dirname(__file__),'PadPlane.csv'),delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
         self.pad_to_xy_index = {} #maps pad number to (x_index,y_index)
         for y in range(len(self.pad_plane)):
             for x in range(len(self.pad_plane[0])):

@@ -11,6 +11,8 @@ from fit_gui.FitFrame import FitFrame
 
 from skspatial.objects import Line
 
+from raw_viewer.RawEventViewerFrame import RawEventViewerFrame
+
 class IndividualEventFrame(ttk.Frame):
     def __init__(self, parent, run_data):
         super().__init__(parent)
@@ -47,27 +49,16 @@ class IndividualEventFrame(ttk.Frame):
                    command=self.project_trace).grid(row=1, columnspan=2)
         
         trace_frame = ttk.LabelFrame(self, text='Original Trace Data')
-        ttk.Label(trace_frame, text='threshold').grid(row=0, column=0)
-        self.threshold_entry = ttk.Entry(trace_frame)
-        self.threshold_entry.grid(row=0, column=1)
-        ttk.Button(trace_frame, text='show raw traces', 
-                   command=self.plot_traces).grid(row=1, column=0)
-        ttk.Button(trace_frame, text='3D trace plot', 
-                   command=self.plot_3d_traces).grid(row=1, column=1)
+        ttk.Button(trace_frame, text='Open Raw Data Viewer', 
+                   command=self.open_raw_viewer).grid(row=1, column=0)
         trace_frame.pack()
 
-    def plot_traces(self):
-        event_num = int(self.event_num_entry.get())
-        raw_trace_viewer.plot_traces(self.run_data.h5_file, event_num, False)
+    def open_raw_viewer(self):
+        new_window = tk.Toplevel(self)
+        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='raw_viewer/flatlookup4cobos.csv')
+        self.viewer_frame.pack()
 
-    def plot_3d_traces(self):
-        event_num = int(self.event_num_entry.get())
-        threshold = self.threshold_entry.get()
-        if len(threshold) == 0:
-            threshold = 0
-        else:
-            threshold = float(threshold)
-        raw_trace_viewer.plot_3d_traces(self.run_data.h5_file, event_num, threshold, False)
+    
 
     def project_trace(self):
         debug = True
