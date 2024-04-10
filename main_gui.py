@@ -8,6 +8,7 @@ from RunSelectFrame import RunSelectFrame
 from EnergySpectrumFrame import EnergySpectrumFrame
 from RvE_Frame import RvE_Frame
 from IndividualEventFrame import IndividualEventFrame
+from CNN_Frame import CNN_Frame
 
 import matplotlib.pyplot
 
@@ -41,7 +42,7 @@ class GadgetAnalysisGUI(tk.Tk):
         self.notebook.grid(row=2, column=0)
         
         self.run_select_frame = RunSelectFrame(self.notebook, self)
-        self.notebook.add(self.run_select_frame, text='run')
+        self.notebook.add(self.run_select_frame, text='Run')
 
         #list of tabs that should be updated each time a new run is loaded
         self.run_specific_tabs = []
@@ -64,6 +65,11 @@ class GadgetAnalysisGUI(tk.Tk):
         single_event_frame = IndividualEventFrame(self.notebook, self.run_select_frame.run_data)
         self.notebook.add(single_event_frame, text='Individual Events')
         self.run_specific_tabs.append(single_event_frame)
+
+        cnn_frame = CNN_Frame(self.notebook, self.run_select_frame.run_data)
+        self.run_specific_tabs.append(cnn_frame)
+        self.notebook.add(cnn_frame, text='CNN')
+
         self.title('GADGET II Analysis: Run '+str(self.run_select_frame.run_data.run_num))
 
 #function to close all matplot windows, if this is run as main program
