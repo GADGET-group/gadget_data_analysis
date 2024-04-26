@@ -106,7 +106,13 @@ class CNN_Frame(ttk.Frame):
         plt.show(block=False)
         
     def prev_cut(self):
-        PrevCutSelectWindow(self, self.run_data)
+        global glob_dir_select
+        window = PrevCutSelectWindow(self, self.run_data)
+        self.wait_window(window)  
+
+        if hasattr(window, 'image_path_list') and len(window.image_path_list) > window.current_image_index:
+            glob_dir_select = window.image_path_list[window.current_image_index][:-4]
+        
 
     def save_cut_files(self, points):
         '''
@@ -287,7 +293,9 @@ class CNN_Frame(ttk.Frame):
         # num_classes in your dataset
         num_classes = 3
 
-        predictions = predict_directory(dir_select, model_paths, num_classes)
+        predictions = predict_directory(glob_dir_select, model_paths, num_classes)
+
+        del glob_dir_select
 
         print(f"\nPredctions Complete for {model_paths}")
 
