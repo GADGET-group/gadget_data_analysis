@@ -56,10 +56,19 @@ class RawEventViewerFrame(ttk.Frame):
         self.view_threshold_entry = ttk.Entry(individual_event_frame)
         self.view_threshold_entry.insert(0, '100')
         self.view_threshold_entry.grid(row=4, column=1)
-        
-        ttk.Button(individual_event_frame, text='show track info', command=self.show_track_info).grid()
-        individual_event_frame.grid()
 
+        ttk.Label(individual_event_frame, text='use data from CoBos:').grid(row=5, column=0)
+        self.cobos_entry = ttk.Entry(individual_event_frame)
+        self.cobos_entry.insert(0, 'all')
+        self.cobos_entry.grid(row=5, column=1)
+        self.cobos_entry.bind('<FocusOut>', self.entry_changed)
+        ttk.Label(individual_event_frame, text='use data from ASADs:').grid(row=5, column=2)
+        self.asads_entry = ttk.Entry(individual_event_frame)
+        self.asads_entry.insert(0, 'all')
+        self.asads_entry.grid(row=5, column=3)
+        self.asads_entry.bind('<FocusOut>', self.entry_changed)
+
+        individual_event_frame.grid()
         
         count_hist_frame = ttk.LabelFrame(self, text='Counts Histogram')
         ttk.Label(count_hist_frame, text='# bins:').grid(row=0, column=0)
@@ -206,6 +215,16 @@ class RawEventViewerFrame(ttk.Frame):
         self.data.mode = self.mode_var.get()
         self.data.near_peak_window_width = int(self.near_peak_window_entry.get())
         self.data.require_peak_within=(float(self.peak_first_allowed_bin_entry.get()), float(self.peak_last_allowed_bin_entry.get()))
+        asads = self.asads_entry.get()
+        if asads.lower() == 'all':
+            self.data.asads = 'all'
+        else:
+            self.data.asads = np.fromstring(asads, sep=',')
+        cobos = self.cobos_entry.get()
+        if cobos.lower() == 'all':
+            self.data.cobos = 'all'
+        else:
+            self.data.cobos = np.fromstring(cobos, sep=',')
 
 
     def get_track_info(self):
