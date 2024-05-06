@@ -1,9 +1,8 @@
 import datetime
 import random
 import os
-import tkinter.filedialog
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patches as patches
@@ -13,292 +12,266 @@ import numpy as np
 from tqdm import tqdm
 import gadget_widgets
 from prev_cut_select_window import PrevCutSelectWindow
-from tkinter import filedialog
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, random_split, ConcatDataset, Subset
 from torchvision import transforms, models, datasets
-import torchvision
 import glob
-import math
-from matplotlib.ticker import MaxNLocator
-from sklearn.metrics import confusion_matrix
-import seaborn as sns
-import pandas as pd
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torchvision.transforms import InterpolationMode
-from collections import defaultdict, Counter
-from PIL import Image
-from torch.autograd import Variable
-from scipy import stats
+from collections import defaultdict
+from PIL import Image, ImageTk
+import numpy as np
+import os
+import glob
+import re
+import csv
+from sklearn.neighbors import NearestNeighbors
+import matplotlib.pyplot as plt
+import easyocr
 
 class CNN_Frame(ttk.Frame):
-    def __init__(self, parent, run_data:GadgetRunH5):
+    def __init__(self, parent, run_data: GadgetRunH5):
         super().__init__(parent)
         self.run_data = run_data
-        #show background image
         self.background_image = gadget_widgets.get_background_image()
         self.background = ttk.Label(self, image=self.background_image)
         self.background.place(relx=0.5, rely=0.5, anchor='center')
-
-        #plot settings
+        self.models = []
+        self.prediction_buttons = []
+        # UI setup
         self.cut_tools_frame = ttk.LabelFrame(self, text='Select Data')
         self.cut_tools_frame.grid(row=2)
-        #TODO: implement manual cut, and project to axis
         self.manual_cut_button = ttk.Button(self.cut_tools_frame, text='Manual Cut Selection')
         self.manual_cut_button.grid(row=0, column=0)
-        self.from_file_cut_button = ttk.Button(self.cut_tools_frame,
-                                               text='Polygon from File',
-                                               command=self.cut_from_file)
+        self.from_file_cut_button = ttk.Button(self.cut_tools_frame, text='Polygon from File', command=self.cut_from_file)
         self.from_file_cut_button.grid(row=0, column=1)
-        self.prev_cut_button = ttk.Button(self.cut_tools_frame, 
-                                          text='Previous Cuts',
-                                          command=self.prev_cut)
+        self.prev_cut_button = ttk.Button(self.cut_tools_frame, text='Previous Cuts', command=self.prev_cut)
         self.prev_cut_button.grid(row=1, column=0, columnspan=2)
 
         self.model_select_frame = ttk.LabelFrame(self, text='Select & Deploy')
         self.model_select_frame.grid(row=4)
-        self.model_select_button = ttk.Button(self.model_select_frame, 
-                                              text='Select Trained CNN Model(s)', 
-                                              command=self.select_model)
+        self.model_select_button = ttk.Button(self.model_select_frame, text='Select Trained CNN Model(s)', command=self.select_model)
         self.model_select_button.grid(row=1, column=0)
-
-        self.deploy_button = ttk.Button(self.model_select_frame, 
-                                              text='Deploy Model(s)', 
-                                              command=self.predict)
+        self.deploy_button = ttk.Button(self.model_select_frame, text='Deploy Model(s)', command=self.predict)
         self.deploy_button.grid(row=2, column=0)
 
+    def load_prediction_files(self):
+        prediction_dir = self.glob_dir_select  # Adjust as necessary
+        txt_files = glob.glob(os.path.join(prediction_dir, '*.txt'))
+        for idx, file_path in enumerate(txt_files):
+            self.create_prediction_button(file_path, idx)
 
-    def plot_spectrum(self, fig_name='RvE',clear=True, show=True):
-        num_range_bins = int(self.range_bins_entry.get())
-        num_energy_bins = int(self.energy_bins_entry.get())
-        
-        plt.figure(fig_name, clear=clear)
-        plt.xlabel('Energy (MeV)', fontdict={'fontsize': 20})
-        plt.ylabel('Range (mm)', fontdict={'fontsize': 20})
-        plt.title(f'Range vs Energy \n Energy Bins = {num_energy_bins} | Range Bins = {num_range_bins}', fontdict={'fontsize': 20})
-        tot_energy_temp = np.concatenate(([0], self.run_data.total_energy_MeV))
-        len_list_temp = np.concatenate(([0], self.run_data.len_list))
-        if self.log_scale_var.get():
-            norm = colors.LogNorm()
-        else:
-            norm = colors.Normalize()
-        plt.hist2d(tot_energy_temp, len_list_temp, (num_energy_bins, num_range_bins), 
-                   cmap=plt.cm.jet, norm=norm)
-        plt.colorbar()
-        plt.gca().set_facecolor('darkblue')
-        if show:
-            plt.show(block=False)
 
-    def show_event(self): #TODO: add "show annotation" checkbox
-        #only draw plot if it's not already open
-        if not plt.fignum_exists('RvE'):
-            self.plot_spectrum()
-        else:
-            plt.figure('RvE')  # switch focus back to RvE plot
-        event_num = int(self.event_num_entry.get())
-        event_index = self.run_data.get_index(event_num)
-        plt.plot(self.run_data.total_energy_MeV[event_index], self.run_data.len_list[event_index], 'ro', picker=5) 
-        plt.annotate(f"Evt#: {event_num}", (self.run_data.total_energy_MeV[event_index], 
-                    self.run_data.len_list[event_index]), textcoords="offset points", xytext=(-15,7),
-                    ha='center', fontsize=10, color='black',
-                    bbox=dict(boxstyle="round,pad=0.5", facecolor="yellow", edgecolor="black"))
-        plt.show(block=False)
-        
-    def prev_cut(self):
-        global glob_dir_select
-        window = PrevCutSelectWindow(self, self.run_data)
-        self.wait_window(window)  
-
-        if hasattr(window, 'image_path_list') and len(window.image_path_list) > window.current_image_index:
-            glob_dir_select = window.image_path_list[window.current_image_index][:-4]
-        
-
-    def save_cut_files(self, points):
-        '''
-        points: verticies specifying the cut region
-        '''
-        now = datetime.datetime.now()
-        rand_num = str(random.randrange(0,1000000,1))
-        cut_name = rand_num+now.strftime("CUT_Date_%m_%d_%Y")
-        event_images_path = os.path.join(self.run_data.folder_path, cut_name)
-
-        #save an image for future cut selection
-        self.plot_spectrum(fig_name=cut_name)
-        ax = plt.gca()
-        #add once point and use this to close the path
-        #actual value of final vertex is ignored for CLOSEPOLY code
-        points_list = list(points)
-        points_list.append([0,0])
-        codes = [Path.LINETO]*len(points_list)
-        codes[0] = Path.MOVETO
-        codes[-1] = Path.CLOSEPOLY
-        path = Path(points_list, codes)
-        
-        to_draw = patches.PathPatch(path, fill=False, color='red')
-        ax.add_patch(to_draw)
-        plt.savefig(os.path.join(self.run_data.folder_path, cut_name+'.jpg'))
-        plt.close()
-
-        #save images of the selected events
-        os.makedirs(event_images_path)
-        selected_indices = self.run_data.get_RvE_cut_indexes(points)
-        for index in tqdm(selected_indices):
-            image_name = f"run{self.run_data.run_num}_image_{index}.jpg"
-            image_path = os.path.join(event_images_path, image_name)
-            self.run_data.save_image(index, save_path=image_path)
-        #save the cut parameters used
-        np.savetxt(os.path.join(event_images_path, 'cut_used.txt'), points)
-
+    def create_prediction_button(self, file_path, idx):
+        file_name = os.path.basename(file_path)
+        event_type = file_name.replace('.txt', '').replace('_', ' ').capitalize()
+        btn = ttk.Button(self, text=f"View {event_type}", command=lambda f=file_path: self.CNN_select_cut(f))
+        btn.grid(row=idx+5, column=0, sticky='ew')  # Use grid with dynamic row assignment
+        self.prediction_buttons.append(btn)
 
     def cut_from_file(self):
-        '''
-        Input files should have an energy (MeV) followed by range (mm) on each line,
-        with the values seperated by a space. 
-        '''
-        fname = tkinter.filedialog.askopenfile(initialdir=os.getcwd())
-        points = np.loadtxt(fname)
-        self.save_cut_files(points)
+        fname = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select file")
+        if fname:  # Check if a file was actually selected
+            points = np.loadtxt(fname)
+            self.save_cut_files(points)
+
+    def save_cut_files(self, points):
+        now = datetime.datetime.now()
+        rand_num = str(random.randrange(0, 1000000))
+        cut_name = f"{rand_num}_CUT_Date_{now.strftime('%m_%d_%Y')}"
+        event_images_path = os.path.join(self.run_data.folder_path, cut_name)
+        os.makedirs(event_images_path, exist_ok=True)  # Ensure directory exists without raising an error if it already exists
+
+        self.plot_spectrum(fig_name=cut_name)  # Assuming you have already defined plot_spectrum elsewhere in your class
+        ax = plt.gca()
+        
+        points_list = list(points) + [[points[0][0], points[0][1]]]  # Close the polygon by adding the first point at the end
+        codes = [Path.MOVETO] + [Path.LINETO] * (len(points_list) - 1) + [Path.CLOSEPOLY]
+        path = Path(points_list, codes)
+        patch = patches.PathPatch(path, fill=False, color='red', lw=2)
+        ax.add_patch(patch)
+        plt.savefig(os.path.join(event_images_path, f'{cut_name}.jpg'))
+        plt.close()
+
+        # Saving the selected indices and images for each event
+        selected_indices = self.run_data.get_RvE_cut_indexes(points)
+        for index in tqdm(selected_indices, desc="Saving selected images"):
+            image_name = f"run{self.run_data.run_num}_image_{index}.jpg"
+            image_path = os.path.join(event_images_path, image_name)
+            self.run_data.save_image(index, save_path=image_path)  # Assuming you have a method save_image in GadgetRunH5
+
+        # Save the cut parameters used
+        np.savetxt(os.path.join(event_images_path, 'cut_used.txt'), points, fmt='%f')
+
+
 
     def select_model(self):
-        '''
-        Selct model(s)
-        All models are trained
-        Hold Ctrl to select multiple models and they will be deployed as an ensemble 
-        '''
-        mypath = f"/mnt/analysis/e21072/models"
-        self.models = list(filedialog.askopenfilenames(initialdir=mypath, title="Select a Model"))
+        mypath = "/mnt/analysis/e21072/models"
+        selected_files = filedialog.askopenfilenames(initialdir=mypath, title="Select Model(s)")
+        self.models.extend(selected_files)
 
-    def predict(model_paths): 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Simple Identity class that let's input pass without changes
-        class Identity(nn.Module):
-            def __init__(self):
-                super(Identity, self).__init__()
-
-            def forward(self, x):
-                return x
-        
-        class ImageFolderWithPaths(datasets.ImageFolder):
-            def __getitem__(self, index):
-                original_tuple = super(ImageFolderWithPaths, self).__getitem__(index)
-                path = self.imgs[index][0]
-                tuple_with_path = (original_tuple + (path,))
-                return tuple_with_path
-
-        class CropImage(object):
-            def __init__(self, top, bottom, left, right):
-                self.top = top
-                self.bottom = bottom
-                self.left = left
-                self.right = right
-
-            def __call__(self, img):
-                return img.crop((self.left, self.top, img.width - self.right, img.height - self.bottom))
-
-
-        # Define transformation
-        transform = transforms.Compose([ 
-            transforms.ToTensor()
-        ])
-
-        def load_model(model_path, device, num_classes):    
-            model = models.vgg16(pretrained=True)
-            for param in model.parameters():
-                param.requires_grad = False
-            model.avgpool = nn.Identity()
-            model.classifier = nn.Sequential(
-                nn.Linear(25088, 4096, bias=True), 
-                nn.ReLU(inplace=True), 
-                nn.Linear(4096, 4096, bias=True),
-                nn.ReLU(inplace=True),
-                nn.Linear(4096, num_classes, bias=True)
-                )
-            model.load_state_dict(torch.load(model_path, map_location=device))
-            model = model.to(device)
-            model.eval()
-            return model
-
-        def load_model(model_path, device, num_classes):    
-            if not os.path.isfile(model_path):
-                print(f"The path {model_path} does not point to a valid file. Skipping this model...")
-                return None
-
-            model = models.vgg16(pretrained=True)
-            for param in model.parameters():
-                param.requires_grad = False
-            model.avgpool = nn.Identity()
-            model.classifier = nn.Sequential(
-                nn.Linear(25088, 4096, bias=True), 
-                nn.ReLU(inplace=True), 
-                nn.Linear(4096, 4096, bias=True),
-                nn.ReLU(inplace=True),
-                nn.Linear(4096, num_classes, bias=True)
-            )
-
-            try:
-                model.load_state_dict(torch.load(model_path, map_location=device))
-            except Exception as e:
-                print(f"Error loading model from {model_path}: {e}")
-                return None
-
-            model = model.to(device)
-            model.eval()
-            return model
-
-        def predict_image_class(image_path, models, device):
-            image = Image.open(image_path).convert('RGB')
-            image = transform(image).unsqueeze(0).to(device)
-            outputs = [model(image) for model in models]
-            avg_output = torch.stack(outputs).mean(0)
-            _, predicted_class = torch.max(avg_output, 1)
-            return predicted_class.item()
-
-        def predict_directory(directory_path, model_paths, num_classes):
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            models = [load_model(model_path, device, num_classes) for model_path in model_paths]
-            models = [model for model in models if model is not None]  # Remove any None values
-
-            if not models:
-                print("No valid models could be loaded.")
-                return {}
-
-            image_paths = glob.glob(os.path.join(directory_path, '*.png'))  # Get all files in the directory
-            class_images = defaultdict(list)  # Dictionary where the keys are class indices and the values are lists of image paths
-            for image_path in tqdm(image_paths):
-                predicted_class = predict_image_class(image_path, models, device)
-                class_images[predicted_class].append(image_path)  # Add the image path to the correct class
-
-            # Save the image paths for each class in separate files
-            for class_index, image_paths in class_images.items():
-                file_path = os.path.join(directory_path, f'class_{class_index}_images.txt')
-                if os.path.exists(file_path):
-                    print(f"The file {file_path} already exists.")
-                    response = input("Do you want to continue and overwrite it? (yes/no): ")
-                    if response.lower() != 'yes':
-                        print("Skipping this file.")
-                        continue
-                with open(file_path, 'w') as f:
-                    for path in image_paths:
-                        f.write(path + '\n')
-
-            return class_images
-
-
-        
-        # paths to your trained models
-        # model_paths = [f'./Models/Model_ReduceClasses_Ensemble{i}.pth' for i in [11]]
-
-        # num_classes in your dataset
+    def predict(self):
+        if not self.models:
+            print("No models selected.")
+            return
         num_classes = 3
+        predictions = self.predict_directory(self.glob_dir_select, self.models, num_classes)
+        print(f"\nPredictions Complete for {self.models}")
 
-        predictions = predict_directory(glob_dir_select, model_paths, num_classes)
+    def predict_directory(self, directory_path, model_paths, num_classes):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        models = [self.load_model(path, device, num_classes) for path in model_paths]
+        models = [model for model in models if model is not None]  # Remove any None values
 
-        del glob_dir_select
+        if not models:
+            print("No valid models could be loaded.")
+            return {}
 
-        print(f"\nPredctions Complete for {model_paths}")
+        image_paths = glob.glob(os.path.join(directory_path, '*.png'))  # Get all files in the directory
+        class_images = defaultdict(list)  # Dictionary where the keys are class indices and the values are lists of image paths
+        for image_path in tqdm(image_paths):
+            predicted_class = self.predict_image_class(image_path, models, device)
+            class_images[predicted_class].append(image_path)  # Add the image path to the correct class
 
-        # You can now print or otherwise use the predictions...
-        #for image_path, predicted_class in predictions.items():
-        #	print(f"Image: {image_path}, Predicted class: {predicted_class}")
+        # Save the image paths for each class in separate files
+        for class_index, image_paths in class_images.items():
+            file_path = os.path.join(directory_path, f'class_{class_index}_images.txt')
+            if os.path.exists(file_path):
+                print(f"The file {file_path} already exists.")
+                response = input("Do you want to continue and overwrite it? (yes/no): ")
+                if response.lower() != 'yes':
+                    print("Skipping this file.")
+                    continue
+            with open(file_path, 'w') as f:
+                for path in image_paths:
+                    f.write(path + '\n')
+
+        return class_images
+
+
+    def load_model(self, model_path, device, num_classes):
+        try:
+            model = models.vgg16(pretrained=True)
+            model.avgpool = nn.Identity()
+            model.classifier = nn.Sequential(
+                nn.Linear(25088, 4096), nn.ReLU(inplace=True),
+                nn.Linear(4096, 4096), nn.ReLU(inplace=True),
+                nn.Linear(4096, num_classes)
+            )
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            model.to(device)
+            model.eval()
+            return model
+        except Exception as e:
+            print(f"Error loading model from {model_path}: {e}")
+            return None
+
+    def predict_image_class(self, image_path, models, device):
+        transform = transforms.Compose([transforms.ToTensor()])
+        image = Image.open(image_path).convert('RGB')
+        image = transform(image).unsqueeze(0).to(device)
+        outputs = [model(image) for model in models]
+        avg_output = torch.stack(outputs).mean(0)
+        _, predicted_class = torch.max(avg_output, 1)
+        return predicted_class.item()
+
+    def prev_cut(self):
+        window = PrevCutSelectWindow(self, self.run_data)
+        self.wait_window(window)  # This will block until the window is closed
+
+        if hasattr(window, 'image_path_list') and len(window.image_path_list) > window.current_image_index:
+            self.glob_dir_select = window.image_path_list[window.current_image_index][:-4]
+        
+        self.load_prediction_files()
+       
+    def CNN_select_cut(self, pred_text):
+        print(f'\nLoading predictions from {pred_text}')
+        dir_select = os.path.dirname(pred_text)  # Get the directory of the file
+        self.current_image_index = 0
+
+        with open(pred_text, 'r') as f:
+            class_image_paths = [line.strip() for line in f.readlines()]
+
+        self.image_list = []
+        for image_path in class_image_paths:
+            image = Image.open(image_path)
+            photo_image = ImageTk.PhotoImage(image)
+            self.image_list.append((photo_image, image_path))
+
+        self.create_image_viewer()
+
+    def create_image_viewer(self):
+        self.newWindow = tk.Toplevel(self)
+        self.newWindow.title('Image Viewer')
+        self.newWindow.geometry("900x680")
+
+        self.my_label = tk.Label(self.newWindow, image=None)
+        self.my_label.grid(row=0, column=0, padx=10, pady=10)
+
+        self.filename_label = tk.Label(self.newWindow, text="", font=('Helvetica', 14))
+        self.filename_label.grid(row=1, column=0)
+
+        self.button_back = tk.Button(self.newWindow, text="<<", command=lambda: self.navigate_images(-1))
+        self.button_forward = tk.Button(self.newWindow, text=">>", command=lambda: self.navigate_images(1))
+
+        self.button_back.grid(row=2, column=0, sticky=tk.W, padx=10)
+        self.button_forward.grid(row=2, column=2, sticky=tk.E, padx=10)
+
+        # Entry and Go-To Button for specific image navigation
+        self.go_to_entry = tk.Entry(self.newWindow)
+        self.go_to_entry.grid(row=2, column=1)
+        self.go_to_button = tk.Button(self.newWindow, text="Go to Image", command=self.go_to_image)
+        self.go_to_button.grid(row=3, column=1, pady=10)
+
+        self.image_list = self.load_images(self.glob_dir_select)  # Adjust path accordingly
+        self.current_image_index = 0
+        self.update_image_display(self.current_image_index)
+
+    def load_images(self, directory):
+        image_files = glob.glob(os.path.join(directory, "*.png"))
+        return image_files
+
+    def navigate_images(self, direction):
+        new_index = max(0, min(self.current_image_index + direction, len(self.image_list) - 1))
+        self.update_image_display(new_index)
+
+    def go_to_image(self):
+        
+        try:
+            # Get the user input from the entry box
+            image_number = int(self.go_to_entry.get())
+            # Construct a pattern to match filenames. Adjust the pattern based on your file naming conventions.
+            pattern = rf"image_{image_number}\.png$"
+
+            # Search through the image list to find a matching file
+            for index, path in enumerate(self.image_list):
+                if re.search(pattern, os.path.basename(path)):
+                    self.update_image_display(index)
+                    return
+
+            # If no match is found, display a warning message
+            tk.messagebox.showwarning('Image Not Found', f'No image found for number: {image_number}')
+        except ValueError:
+            # Handle cases where the user input is not an integer
+            tk.messagebox.showerror('Invalid Input', 'Please enter a valid image number.')
+
+
+    def update_image_display(self, index):
+        self.current_image_index = index
+        image_path = self.image_list[index]
+        image = Image.open(image_path)
+
+        # Resize image maintaining aspect ratio
+        single_image_size = (840, 680)
+        aspect_ratio = min(single_image_size[0] / image.width, single_image_size[1] / image.height)
+        new_size = (int(image.width * aspect_ratio), int(image.height * aspect_ratio))
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+
+        photo_image = ImageTk.PhotoImage(image)
+        self.my_label.config(image=photo_image)
+        self.my_label.image = photo_image  # keep a reference!
+        
+        # Update filename label
+        self.filename_label.config(text=f"Image: {os.path.basename(image_path)}")
+
+        # Update button states based on the current index
+        self.button_back['state'] = 'normal' if index > 0 else 'disabled'
+        self.button_forward['state'] = 'normal' if index < len(self.image_list) - 1 else 'disabled'
