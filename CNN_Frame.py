@@ -190,11 +190,11 @@ class CNN_Frame(ttk.Frame):
         with open(pred_text, 'r') as f:
             class_image_paths = [line.strip() for line in f.readlines()]
 
-        self.image_list = []
-        for image_path in class_image_paths:
-            image = Image.open(image_path)
-            photo_image = ImageTk.PhotoImage(image)
-            self.image_list.append((photo_image, image_path))
+        self.image_list = class_image_paths
+        # for image_path in class_image_paths:
+        #     image = Image.open(image_path)
+        #     photo_image = ImageTk.PhotoImage(image)
+        #     self.image_list.append((photo_image, image_path))
 
         self.create_image_viewer()
 
@@ -220,14 +220,8 @@ class CNN_Frame(ttk.Frame):
         self.go_to_entry.grid(row=2, column=1)
         self.go_to_button = tk.Button(self.newWindow, text="Go to Image", command=self.go_to_image)
         self.go_to_button.grid(row=3, column=1, pady=10)
-
-        self.image_list = self.load_images(self.glob_dir_select)  # Adjust path accordingly
         self.current_image_index = 0
         self.update_image_display(self.current_image_index)
-
-    def load_images(self, directory):
-        image_files = glob.glob(os.path.join(directory, "*.png"))
-        return image_files
 
     def navigate_images(self, direction):
         new_index = max(0, min(self.current_image_index + direction, len(self.image_list) - 1))
