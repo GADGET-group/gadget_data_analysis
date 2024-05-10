@@ -103,6 +103,10 @@ class raw_h5_file:
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False
 
+        #cobo and asad selction. Can be "all" or a list of ints
+        self.asads='all'
+        self.cobos='all'
+
     def get_data(self, event_number):
         '''
         Get data for event, with background subtraction and pad outlier removal applied as specified
@@ -117,9 +121,23 @@ class raw_h5_file:
         Does NOT apply thresholding. However, this is applied in get_xyte and and get_xyze.
         '''
         data = self.h5_file['get']['evt%d_data'%event_number]
-        data = np.array(data, copy=True, dtype=float)
+
+        
+        if self.asads != 'all' or self.cobos != 'all':
+            to_copy = []
+            for i, line in enumerate(data):
+                cobo, asad, channel, *rest = tuple(line[0:4])
+                if (self.cobos == 'all' or cobo in self.cobos) and \
+                    (self.asads == 'all' or asad in self.asads):
+                    to_copy.append(i)
+            data = np.array(data[to_copy], dtype=float)
+
+        else:
+            data = np.array(data, copy=True, dtype=float)
+
         if self.remove_outliers:
             pad_image = np.zeros(np.shape(self.pad_plane))
+
 
         #Loop over each pad, performing background subtraction and marking the pad in the pad image
         #which will be used for outlier removal.
