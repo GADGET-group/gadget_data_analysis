@@ -106,6 +106,7 @@ class raw_h5_file:
         #cobo and asad selction. Can be "all" or a list of ints
         self.asads='all'
         self.cobos='all'
+        self.pads='all'
 
     def get_data(self, event_number):
         '''
@@ -123,12 +124,15 @@ class raw_h5_file:
         data = self.h5_file['get']['evt%d_data'%event_number]
 
         
-        if self.asads != 'all' or self.cobos != 'all':
+        if self.asads != 'all' or self.cobos != 'all' or self.pads != 'all':
             to_copy = []
             for i, line in enumerate(data):
-                cobo, asad, channel, *rest = tuple(line[0:4])
+                chnl_info =  tuple(line[0:4])
+                cobo, asad, channel, *rest = chnl_info
+                pad = self.chnls_to_pad[chnl_info]
                 if (self.cobos == 'all' or cobo in self.cobos) and \
-                    (self.asads == 'all' or asad in self.asads):
+                        (self.asads == 'all' or asad in self.asads) and \
+                        (self.pads == 'all' or pad in self.pads):
                     to_copy.append(i)
             data = np.array(data[to_copy], dtype=float)
 

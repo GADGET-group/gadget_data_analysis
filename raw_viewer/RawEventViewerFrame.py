@@ -67,6 +67,11 @@ class RawEventViewerFrame(ttk.Frame):
         self.asads_entry.insert(0, 'all')
         self.asads_entry.grid(row=5, column=3)
         self.asads_entry.bind('<FocusOut>', self.entry_changed)
+        ttk.Label(individual_event_frame, text='use data from pads:').grid(row=6, column=0)
+        self.pads_entry = ttk.Entry(individual_event_frame)
+        self.pads_entry.insert(0, 'all')
+        self.pads_entry.grid(row=6, column=1)
+        self.pads_entry.bind('<FocusOut>', self.entry_changed)
 
         individual_event_frame.grid()
         
@@ -225,6 +230,11 @@ class RawEventViewerFrame(ttk.Frame):
             self.data.cobos = 'all'
         else:
             self.data.cobos = np.fromstring(cobos, sep=',')
+        pads = self.pads_entry.get()
+        if pads.lower() == 'all':
+            self.data.pads = 'all'
+        else:
+            self.data.pads = np.fromstring(pads, sep=',')
 
 
     def get_track_info(self):
