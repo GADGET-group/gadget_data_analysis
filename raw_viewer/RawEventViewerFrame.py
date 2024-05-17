@@ -218,7 +218,24 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_file_entry.insert(0, file_path)
 
     def load_settings_file(self):
-        pass
+        config = configparser.ConfigParser()
+        file_path = self.settings_file_entry.get()
+        config.read(file_path)
+
+        for entry_name in config['ttk.Entry']:
+            entry = self.settings_entry_map[entry_name]
+            entry.delete(0, tk.END)
+            entry.insert(0, config['ttk.Entry'][entry_name])
+
+        for menu_name in config['ttk.OptionMenu']:
+            var_to_update = self.settings_optionmenu_map[menu_name]
+            var_to_update.set(config['ttk.OptionMenu'][menu_name])
+
+        
+        for checkbox_name in config['ttk.CheckButton']:
+            var_to_update = self.settings_checkbutton_map[checkbox_name]
+            var_to_update.set(config['ttk.CheckButton'][checkbox_name])
+
         #apply settings to raw data object
         self.entry_changed(None)
         self.check_state_changed()
