@@ -17,9 +17,9 @@ class RawEventViewerFrame(ttk.Frame):
     def __init__(self, parent, file_path=None, flat_lookup_path=None):
         super().__init__(parent)
         if flat_lookup_path == None:
-            flat_lookup_path = tk.filedialog.askopenfilename(initialdir='.', title='Select Channel Mapping FIle')
+            flat_lookup_path = tk.filedialog.askopenfilename(initialdir='.', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
         if file_path == None:
-            file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File')
+            file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
         self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
         self.winfo_toplevel().title(file_path)
         
@@ -34,11 +34,11 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_file_entry.grid(row=0, column=1)
         ttk.Button(settings_frame, text='Browse', command=self.browse_for_settings_file).grid(row=0, column=2)
         ttk.Button(settings_frame, text='Load', command=self.load_settings_file).grid(row=0, column=3)
-        ttk.Button(settings_frame, text='Save', command=self.save_settings_file).grid(row=0, column=4)
+        ttk.Button(settings_frame, text='Save', command=self.save_settings_file).grid(row=1, column=0, columnspan=3)
 
-        ttk.Label(settings_frame, text='settings file status:').grid(row=1, column=0)
+        ttk.Label(settings_frame, text='settings file status:').grid(row=2, column=0)
         self.settings_status_label = ttk.Label(settings_frame,text='no settings file loaded')
-        self.settings_status_label.grid(row=1, column = 1)
+        self.settings_status_label.grid(row=2, column = 1, columnspan=2)
         settings_frame.grid()
 
         #widget setup in individual_event_Frame
@@ -213,7 +213,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.check_state_changed()
     
     def browse_for_settings_file(self):
-        file_path = tk.filedialog.askopenfilename(initialdir='.', title='select GUI settings file')
+        file_path = tk.filedialog.askopenfilename(initialdir='.', title='select GUI settings file', filetypes=([("gui config", ".gui_ini")]))
         self.settings_file_entry.delete(0, tk.END)
         self.settings_file_entry.insert(0, file_path)
 
