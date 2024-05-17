@@ -1,3 +1,5 @@
+import configparser
+
 import tkinter as tk
 from tkinter import ttk
 import tkinter.filedialog
@@ -21,6 +23,24 @@ class RawEventViewerFrame(ttk.Frame):
         self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
         self.winfo_toplevel().title(file_path)
         
+        #objects whose values should be saved in settings file, indexed by settings file variable
+        self.settings_entry_map={}
+        self.settings_checkbutton_map={}
+        self.settings_optionmenu_map={}
+
+        settings_frame = ttk.LabelFrame(self, text='settings files and data export')
+        ttk.Label(settings_frame, text='settings file:').grid(row=0, column=0)
+        self.settings_file_entry = ttk.Entry(settings_frame)
+        self.settings_file_entry.grid(row=0, column=1)
+        ttk.Button(settings_frame, text='Browse', command=self.browse_for_settings_file).grid(row=0, column=2)
+        ttk.Button(settings_frame, text='Load', command=self.load_settings_file).grid(row=0, column=3)
+        ttk.Button(settings_frame, text='Save', command=self.save_settings_file).grid(row=0, column=4)
+
+        ttk.Label(settings_frame, text='settings file status:').grid(row=1, column=0)
+        self.settings_status_label = ttk.Label(settings_frame,text='no settings file loaded')
+        self.settings_status_label.grid(row=1, column = 1)
+        settings_frame.grid()
+
         #widget setup in individual_event_Frame
         individual_event_frame = ttk.LabelFrame(self, text='Individual Events')
 
@@ -34,12 +54,14 @@ class RawEventViewerFrame(ttk.Frame):
         self.length_threshold_entry.insert(0, 100)
         self.length_threshold_entry.grid(row=1, column=1)
         self.length_threshold_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['length_ic_threshold']=self.length_threshold_entry
 
         ttk.Label(individual_event_frame, text='energy ic threshold:').grid(row=1, column=2)
         self.energy_threshold_entry = ttk.Entry(individual_event_frame)
         self.energy_threshold_entry.insert(0, 100)
         self.energy_threshold_entry.grid(row=1, column=3)
         self.energy_threshold_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['energy_ic_threshold']=self.energy_threshold_entry
 
         show_3d_button = ttk.Button(individual_event_frame, text='show', command = self.show_3d_cloud)
         show_3d_button.grid(row=2, column=0)
@@ -56,22 +78,26 @@ class RawEventViewerFrame(ttk.Frame):
         self.view_threshold_entry = ttk.Entry(individual_event_frame)
         self.view_threshold_entry.insert(0, '100')
         self.view_threshold_entry.grid(row=4, column=1)
+        self.settings_entry_map['view_threshold']=self.view_threshold_entry
 
         ttk.Label(individual_event_frame, text='use data from CoBos:').grid(row=5, column=0)
         self.cobos_entry = ttk.Entry(individual_event_frame)
         self.cobos_entry.insert(0, 'all')
         self.cobos_entry.grid(row=5, column=1)
         self.cobos_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['include_cobos']=self.cobos_entry
         ttk.Label(individual_event_frame, text='use data from ASADs:').grid(row=5, column=2)
         self.asads_entry = ttk.Entry(individual_event_frame)
         self.asads_entry.insert(0, 'all')
         self.asads_entry.grid(row=5, column=3)
         self.asads_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['include_asads']=self.asads_entry
         ttk.Label(individual_event_frame, text='use data from pads:').grid(row=6, column=0)
         self.pads_entry = ttk.Entry(individual_event_frame)
         self.pads_entry.insert(0, 'all')
         self.pads_entry.grid(row=6, column=1)
         self.pads_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['include_pads']=self.pads_entry
 
         individual_event_frame.grid()
         
@@ -85,14 +111,17 @@ class RawEventViewerFrame(ttk.Frame):
         self.veto_threshold_entry.insert(0,'100')
         self.veto_threshold_entry.grid(row=1, column=1)
         self.veto_threshold_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['veto_threshold']=self.veto_threshold_entry
         ttk.Label(count_hist_frame,text='range min/max (mm):').grid(row=2, column=0)
         self.range_min_entry, self.range_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
         self.range_min_entry.grid(row=2, column=1)
         self.range_min_entry.insert(0, '0')
         self.range_min_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['range_min']=self.range_min_entry
         self.range_max_entry.grid(row=2, column=2)
         self.range_max_entry.insert(0, '100')
         self.range_max_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['range_max']=self.range_max_entry
         
         ttk.Label(count_hist_frame,text='ic min/max:').grid(row=3, column=0)
         self.ic_min_entry, self.ic_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
@@ -102,6 +131,8 @@ class RawEventViewerFrame(ttk.Frame):
         self.ic_max_entry.grid(row=3, column=2)
         self.ic_max_entry.insert(0, '1e9')
         self.ic_max_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['min_ic']=self.ic_min_entry
+        self.settings_entry_map['max_ic']=self.ic_max_entry
 
         ttk.Label(count_hist_frame,text='angle min/max:').grid(row=4, column=0)
         self.angle_min_entry, self.angle_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
@@ -111,6 +142,8 @@ class RawEventViewerFrame(ttk.Frame):
         self.angle_max_entry.grid(row=4, column=2)
         self.angle_max_entry.insert(0, '90')
         self.angle_max_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['angle_min']=self.angle_min_entry
+        self.settings_entry_map['angle_max']=self.angle_max_entry
 
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
         count_hist_button.grid(row=5, column=0)
@@ -127,6 +160,9 @@ class RawEventViewerFrame(ttk.Frame):
         self.background_stop_entry.grid(row=0, column=2)
         self.background_stop_entry.bind('<FocusOut>', self.entry_changed)
         self.background_stop_entry.insert(0, '200')
+        self.settings_entry_map['background_bin_start']=self.background_start_entry
+        self.settings_entry_map['background_bin_stop']=self.background_stop_entry
+
         get_backgrounds_button = ttk.Button(settings_frame, text='get pad backgrounds', command=self.get_backgrounds)
         get_backgrounds_button.grid(row = 1, column=0)
         show_backgrounds_button = ttk.Button(settings_frame, text='show pad backgrounds', command=self.show_backgrounds)
@@ -134,25 +170,31 @@ class RawEventViewerFrame(ttk.Frame):
         self.background_subtract_enable_var = tk.IntVar()
         background_subtract_check = ttk.Checkbutton(settings_frame, text='background subtraction', variable=self.background_subtract_enable_var, 
                                                          command=self.check_state_changed)
+        self.settings_checkbutton_map['background_subtraction']=self.background_subtract_enable_var
         background_subtract_check.grid(row=2, column=0)
+        
         self.remove_outlier_var = tk.IntVar()
         remove_outliers_check = ttk.Checkbutton(settings_frame, text='remove outlier pads', variable=self.remove_outlier_var, 
                                                          command=self.check_state_changed)
+        self.settings_checkbutton_map['remove_outliers']=self.remove_outlier_var
         remove_outliers_check.grid(row=2, column=1)
+
         ttk.Label(settings_frame, text='zscale (mm/time bin):').grid(row=3,column=0)
         self.zscale_entry = ttk.Entry(settings_frame)
         self.zscale_entry.insert(0, '1.45')
         self.zscale_entry.grid(row=3,column=1)
         self.zscale_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['zscale']=self.zscale_entry
 
-        self.mode_var = tk.StringVar()
-        self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        self.mode_var = tk.StringVar() #traced added later, after all entries are created
         ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only', 'near peak').grid(row=4, column=0)
+        self.settings_optionmenu_map['peak_mode']=self.mode_var
         ttk.Label(settings_frame, text='near peak window size:').grid(row=5, column=0)
         self.near_peak_window_entry = ttk.Entry(settings_frame)
         self.near_peak_window_entry.insert(0,'10')
         self.near_peak_window_entry.bind('<FocusOut>', self.entry_changed)
         self.near_peak_window_entry.grid(row=5, column=1)
+        self.settings_entry_map['near_peak_window_width']=self.near_peak_window_entry
         ttk.Label(settings_frame, text='require peak between:').grid(row=6, column=0)
         self.peak_first_allowed_bin_entry, self.peak_last_allowed_bin_entry = ttk.Entry(settings_frame),ttk.Entry(settings_frame)
         self.peak_first_allowed_bin_entry.grid(row=6, column=1)
@@ -161,10 +203,50 @@ class RawEventViewerFrame(ttk.Frame):
         self.peak_last_allowed_bin_entry.insert(0,'inf')
         self.peak_first_allowed_bin_entry.bind('<FocusOut>', self.entry_changed)
         self.peak_last_allowed_bin_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['peak_first_allowed_bin']=self.peak_first_allowed_bin_entry
+        self.settings_entry_map['peak_last_allowed_bin']=self.peak_last_allowed_bin_entry
         settings_frame.grid()
+        self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
-        self.entry_changed(None) #sync setting with GUI
+        #sync setting with GUI
+        self.entry_changed(None) 
+        self.check_state_changed()
     
+    def browse_for_settings_file(self):
+        file_path = tk.filedialog.askopenfilename(initialdir='.', title='select GUI settings file')
+        self.settings_file_entry.delete(0, tk.END)
+        self.settings_file_entry.insert(0, file_path)
+
+    def load_settings_file(self):
+        pass
+        #apply settings to raw data object
+        self.entry_changed(None)
+        self.check_state_changed()
+
+    def save_settings_file(self,file_path=None):
+        if file_path == None:
+            file_path = tk.filedialog.asksaveasfilename(initialdir='.', title='GUI settings file save path', filetypes=([("gui config", ".gui_ini")]), defaultextension='.gui_ini')
+        config = configparser.ConfigParser()
+        
+        entries_to_save = {}
+        for entry_name in self.settings_entry_map:
+            entries_to_save[entry_name] = self.settings_entry_map[entry_name].get()
+        config['ttk.Entry']=entries_to_save
+
+        option_menus_to_save = {}
+        for menu_name in self.settings_optionmenu_map:
+            option_menus_to_save[menu_name] = self.settings_optionmenu_map[menu_name].get()
+        config['ttk.OptionMenu']=option_menus_to_save
+
+        check_buttons_to_save = {}
+        for check_name in self.settings_checkbutton_map:
+            check_buttons_to_save[check_name] = self.settings_checkbutton_map[check_name].get()
+        config['ttk.CheckButton']=check_buttons_to_save
+
+        with open(file_path, 'w') as configfile:
+            config.write(configfile)
+
+
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
         self.data.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
