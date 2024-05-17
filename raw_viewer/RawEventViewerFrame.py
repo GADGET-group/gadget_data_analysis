@@ -1,3 +1,4 @@
+import os
 import configparser
 
 import tkinter as tk
@@ -34,12 +35,15 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_file_entry.grid(row=0, column=1)
         ttk.Button(settings_frame, text='Browse', command=self.browse_for_settings_file).grid(row=0, column=2)
         ttk.Button(settings_frame, text='Load', command=self.load_settings_file).grid(row=0, column=3)
-        ttk.Button(settings_frame, text='Save', command=self.save_settings_file).grid(row=1, column=0, columnspan=3)
+        ttk.Button(settings_frame, text='Save Config File', command=self.save_settings_file).grid(row=1, column=0, columnspan=3)
 
         ttk.Label(settings_frame, text='settings file status:').grid(row=2, column=0)
         self.settings_status_label = ttk.Label(settings_frame,text='no settings file loaded')
         self.settings_status_label.grid(row=2, column = 1, columnspan=2)
         settings_frame.grid()
+
+        ttk.Button(settings_frame, text='process run', command=self.process_run).grid(row=3, column=0, columnspan=3)
+
 
         #widget setup in individual_event_Frame
         individual_event_frame = ttk.LabelFrame(self, text='Individual Events')
@@ -262,6 +266,21 @@ class RawEventViewerFrame(ttk.Frame):
 
         with open(file_path, 'w') as configfile:
             config.write(configfile)
+
+    def process_run(self):
+        directory_path, h5_fname = os.path.split(self.data.file_path)
+        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0])
+        assert not os.path.isdir(directory_path) #TODO: make this run # + config file name, or pop up for non-up to date config
+        os.mkdir(directory_path)
+
+        self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
+
+        ranges, counts, angles = self.data.get_histogram_arrays()
+        np.save(os.path.join(directory_path, 'counts.npy'), counts)
+        np.save(os.path.join(directory_path, 'ranges.npy'), ranges)
+        np.save(os.path.join(directory_path, 'angles.npy'), angles)
+
+        #TODO: save git hash and if up to date
 
 
     def show_3d_cloud(self):
