@@ -395,7 +395,6 @@ class raw_h5_file:
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
             if np.max(trace) >= 4095:
-                print(pad)
                 pads_railed.append(pad)
         length, angle = self.get_track_length_angle(event_num)
         if self.range_bounds != None:
