@@ -370,27 +370,33 @@ class raw_h5_file:
         range_hist = []
         counts_hist = []
         angle_hist = []
+        pads_railed_list = []
         for i in tqdm.tqdm(range(*self.get_event_num_bounds())):#TODO: is this missing the last event in the run?
-            should_veto, length, energy, angle = self.process_event(i)
+            should_veto, length, energy, angle, pads_railed = self.process_event(i)
             if not should_veto:
                 range_hist.append(length)
                 counts_hist.append(energy)
                 angle_hist.append(angle)
+                pads_railed_list.append(pads_railed)
 
-        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist)
+        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist), pads_railed_list
 
     def process_event(self, event_num):
         '''
-        Returns: should veto, range, energy, angle
+        Returns: should veto, range, energy, angle, pads_railed
         '''
         should_veto=False
         counts = 0
+        pads_railed = []
         for pad, trace in zip(*self.get_pad_traces(event_num)):
             if pad in VETO_PADS:
                 if np.any(trace>self.veto_threshold):
                     should_veto = True
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
+            if np.max(trace) >= 4095:
+                print(pad)
+                pads_railed.append(pad)
         length, angle = self.get_track_length_angle(event_num)
         if self.range_bounds != None:
             if length > self.range_bounds[1] or length < self.range_bounds[0]:
@@ -401,16 +407,16 @@ class raw_h5_file:
         if self.angle_bounds != None:
             if angle < self.angle_bounds[0] or angle > self.angle_bounds[1]:
                 should_veto = True
-        return should_veto, length, counts, angle
+        return should_veto, length, counts, angle, pads_railed
 
     def show_counts_histogram(self, num_bins, fig_name=None, block=True):
-        ranges, counts, angles = self.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list = self.get_histogram_arrays()
         plt.figure(fig_name)
         plt.hist(counts, bins=num_bins)
         plt.show(block=block)
 
     def show_rve_histogram(self, num_e_bins, num_range_bins, fig_name=None, block=True):
-        ranges, counts, angles = self.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list = self.get_histogram_arrays()
 
         #TODO: make generic, these are P10 values
         calib_point_1 = (0.806, 156745)
@@ -495,10 +501,10 @@ class raw_h5_file:
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
-        should_veto, length, energy, angle = self.process_event(event_num)
-        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n veto=%d'%(event_num, energy, 
+        should_veto, length, energy, angle, pads_railed = self.process_event(event_num)
+        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n veto=%d\n # pads railed=%d'%(event_num, energy, 
                                                                                                energy*energy_scale_factor + energy_offset, length,
-                                                                                               np.degrees(angle), should_veto))
+                                                                                               np.degrees(angle), should_veto, len(pads_railed)))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
@@ -518,7 +524,7 @@ class raw_h5_file:
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        should_veto, length, energy, angle = self.process_event(event_number)
+        should_veto, length, energy, angle, pads_railed_list = self.process_event(event_number)
         plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
         plt.subplot(2,1,1)
         plt.imshow(image, norm=colors.LogNorm())

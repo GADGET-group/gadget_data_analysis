@@ -1,5 +1,6 @@
 import os
 import configparser
+import csv
 
 import tkinter as tk
 from tkinter import ttk
@@ -269,16 +270,19 @@ class RawEventViewerFrame(ttk.Frame):
 
     def process_run(self):
         directory_path, h5_fname = os.path.split(self.data.file_path)
-        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0])
+        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0]+'_raw_data_export')
         assert not os.path.isdir(directory_path) #TODO: make this run # + config file name, or pop up for non-up to date config
         os.mkdir(directory_path)
 
         self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
 
-        ranges, counts, angles = self.data.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list = self.data.get_histogram_arrays()
         np.save(os.path.join(directory_path, 'counts.npy'), counts)
         np.save(os.path.join(directory_path, 'ranges.npy'), ranges)
         np.save(os.path.join(directory_path, 'angles.npy'), angles)
+        with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(pads_railed_list)
 
         #TODO: save git hash and if up to date
 
@@ -290,10 +294,10 @@ class RawEventViewerFrame(ttk.Frame):
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
-        veto, length, energy, angle = self.data.process_event(event_number)
+        veto, length, energy, angle, pads_vetoed = self.data.process_event(event_number)
         while veto:
             event_number += 1
-            veto, length, energy, angle = self.data.process_event(event_number)
+            veto, length, energy, angle, pads_vetoed = self.data.process_event(event_number)
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
         self.show_3d_cloud()
