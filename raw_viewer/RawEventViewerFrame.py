@@ -294,10 +294,10 @@ class RawEventViewerFrame(ttk.Frame):
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
-        veto, length, energy, angle, pads_vetoed = self.data.process_event(event_number)
+        veto, length, energy, angle, pads_railed = self.data.process_event(event_number)
         while veto:
             event_number += 1
-            veto, length, energy, angle, pads_vetoed = self.data.process_event(event_number)
+            veto, length, energy, angle, pads_railed = self.data.process_event(event_number)
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
         self.show_3d_cloud()
