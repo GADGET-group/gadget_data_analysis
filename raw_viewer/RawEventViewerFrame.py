@@ -9,11 +9,10 @@ import tkinter.messagebox
 
 import matplotlib.pyplot as plt
 import numpy as np
+from skspatial.objects import Line, Point
 
-if __name__ == '__main__':
-    import raw_h5_file
-else:
-    from raw_viewer import raw_h5_file
+from fit_gui.HistogramFitFrame import HistogramFitFrame
+from raw_viewer import raw_h5_file
 
 class RawEventViewerFrame(ttk.Frame):
     def __init__(self, parent, file_path=None, flat_lookup_path=None):
@@ -78,6 +77,9 @@ class RawEventViewerFrame(ttk.Frame):
         show_2D_button.grid(row=3, column=0)
         show_traces_button = ttk.Button(individual_event_frame, text='pad traces', command=self.show_raw_traces)
         show_traces_button.grid(row=3, column=1)
+
+        ttk.Button(individual_event_frame, text='1D proj on trac axis', command = self.project_to_principle_axis).grid(row=3, column=2)
+        
 
         ttk.Label(individual_event_frame, text='view threshold:').grid(row=4, column=0)
         self.view_threshold_entry = ttk.Entry(individual_event_frame)
@@ -359,6 +361,39 @@ class RawEventViewerFrame(ttk.Frame):
             self.data.pads = np.fromstring(pads, sep=',')
 
 
+    def project_to_principle_axis(self):
+        '''
+        Do the following for the current event:
+            Get all data above length thresholdand find best fit line for all points above length threshold
+            Get all data above ic threshold and project these points to the line found in previous step
+            Generate histogram and export to histogram fit frame
+        '''
+        event_number = int(self.event_number_entry.get())
+        length_threshold = float(self.length_threshold_entry.get())
+        ic_threshold = float(self.energy_threshold_entry.get())
+        #get fit line for all data above the length threshold
+        xs, ys, zs, es = self.data.get_xyze(event_number, include_veto_pads=False)
+        if length_threshold != -np.inf:
+            xs = xs[es>length_threshold]
+            ys = ys[es>length_threshold]
+            zs = zs[es>length_threshold]
+            es = es[es>length_threshold]
+            points = np.vstack((xs, ys, zs)).transpose()
+        line = Line.best_fit(points)
+        
+        #calculate distance along projected axis for each point
+        pstart, direction_vect = line.point, line.vector
+        direction_vect = direction_vect.unit()
+        dist = []
+        for x,y,z in zip(xs, ys, zs):
+            point = Point([x,y,z])
+            dist.append(np.dot(point - pstart, direction_vect))
+        #dist = np.sqrt((xProj - pstart[0])**2 + (yProj - pstart[1])**2 + (zProj - pstart[2])**2)
+        #export to histogram fit frame
+        new_window = tk.Toplevel()
+        HistogramFitFrame(new_window, data=dist, weights=es).pack()
+
+
     def get_track_info(self):
         event_number = int(self.event_number_entry.get())
         return self.data.process_event(event_num=event_number)
@@ -369,7 +404,3 @@ class RawEventViewerFrame(ttk.Frame):
 
 
 
-if __name__ == '__main__':
-    root = tk.Tk()
-    RawEventViewerFrame(root).grid()
-    root.mainloop()

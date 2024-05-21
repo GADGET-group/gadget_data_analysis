@@ -16,12 +16,14 @@ else:
 #TODO: ability to only fix some region of the histogram
 #TODO: use root for fitting
 class HistogramFitFrame(ttk.Frame):
-    def __init__(self, parent, data):
+    def __init__(self, parent, data, weights=None):
         '''
         data: array of floats to make histogram of
+        weights: weights to pass to np.hist
         '''
         super().__init__(parent)
         self.data = data
+        self.weights=weights
 
         matplotlib.use('TkAgg')
 
@@ -59,7 +61,7 @@ class HistogramFitFrame(ttk.Frame):
 
     def rebin(self):
         self.num_bins = int(self.bins_entry.get())
-        self.hist, self.bins = np.histogram(self.data, self.num_bins)
+        self.hist, self.bins = np.histogram(self.data, self.num_bins, weights=self.weights)
         self.bin_centers = (self.bins[1:] + self.bins[:-1])/2
         self.update_hist()
 
