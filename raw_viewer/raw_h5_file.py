@@ -9,6 +9,7 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
+from numba import njit
 import skimage.measure
 
 '''
@@ -169,9 +170,18 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
+        elif self.mode == 'fft':
+            # baseline_window_scale = 20.0 is the default value given in the config.py file for Spyral
+            data = preprocess_traces(data,20.0)
+            print(data.shape)
         
         return data
 
+    def get_timestamp(self, event_number):
+        time = self.h5_file['get']['evt%d_header'%event_number][1]
+        time = np.array(time, copy=True, dtype=float)
+        
+        return time
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''
@@ -355,6 +365,17 @@ class raw_h5_file:
 
         return np.array(range_hist), np.array(counts_hist), np.array(angle_hist)
 
+    def get_timestamp_array(self):
+        timestamps = []
+        print('Getting timestamps:')
+        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):#TODO: is this missing the last event in the run?
+            should_veto, length, energy, angle = self.process_event(i)
+            time = self.get_timestamp(i)
+            if not should_veto:
+                timestamps.append(time)
+
+        return np.array(timestamps)
+
     def process_event(self, event_num):
         '''
         Returns: should veto, range, energy, angle
@@ -402,6 +423,27 @@ class raw_h5_file:
                    bins=(num_e_bins, num_range_bins), norm=colors.LogNorm())
         plt.xlabel('energy (MeV)')
         plt.ylabel('range (mm)')
+        plt.colorbar()
+        plt.show(block=block)
+
+    def show_tve_histogram(self, num_e_bins, num_time_bins, fig_name=None, block=True):
+        ranges, counts, angles = self.get_histogram_arrays()
+        timestamps = self.get_timestamp_array()
+
+        #TODO: make generic, these are P10 values
+        calib_point_1 = (0.806, 156745)
+        calib_point_2 = (1.679, 320842)
+        energy_1, channel_1 = calib_point_1
+        energy_2, channel_2 = calib_point_2
+        energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
+        energy_offset = energy_1 - energy_scale_factor * channel_1
+        counts = energy_scale_factor*counts + energy_offset
+
+        plt.figure(fig_name)
+        plt.hist2d(counts, timestamps, 
+                   bins=(num_e_bins, num_time_bins), norm=colors.LogNorm())
+        plt.xlabel('energy (MeV)')
+        plt.ylabel('time (ns)')
         plt.colorbar()
         plt.show(block=block)
 
@@ -504,7 +546,52 @@ class raw_h5_file:
         plt.show(block=block)
 
         
+# @njit
+def preprocess_traces(traces_with_pad: np.ndarray, baseline_window_scale: float) -> np.ndarray:
+    '''JIT-ed Method for pre-cleaning the trace data in bulk before doing trace analysis
 
+    These methods are more suited to operating on the entire dataset rather than on a trace by trace basis
+    It includes
+
+    - Removal of edge effects in traces (first and last time buckets can be noisy)
+    - Baseline removal via fourier transform method (see J. Bradt thesis, pytpc library)
+
+    Parameters
+    ----------
+    traces: ndarray
+        A (n, 512) matrix where n is the number of traces and each row corresponds to a trace. This should be a copied
+        array, not a reference to an array in an hdf file
+    baseline_window_scale: float
+        The scale of the baseline filter used to perform a moving average over the baseline
+
+    Returns
+    -------
+    ndarray
+        A new (n, 512) matrix which contains the traces with their baselines removed and edges smoothed
+    '''
+    # Smooth out the edges of the traces, and remove pad information
+    traces = traces_with_pad[:, 5:]
+    traces[:, 0] = traces[:, 1]
+    traces[:, -1] = traces[:, -2]
+    # Remove peaks from baselines and replace with average
+    bases: np.ndarray = traces.copy()
+    for row in bases:
+        mean = np.mean(row)
+        sigma = np.std(row)
+        mask = row - mean > sigma * 1.5
+        row[mask] = np.mean(row[~mask])
+
+    # Create the filter
+    window = np.arange(-256.0, 256.0, 1.0)
+    fil = np.fft.ifftshift(np.sinc(window / baseline_window_scale))
+    transformed = np.fft.fft2(bases, axes=(1,))
+    result = np.real(
+        np.fft.ifft2(transformed * fil, axes=(1,))
+    )  # Apply the filter -> multiply in Fourier = convolve in normal
+    
+    traces_with_pad[:, 5:] = traces - result
+
+    return traces_with_pad
 
 '''
 import h5py

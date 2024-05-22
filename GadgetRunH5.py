@@ -2,7 +2,7 @@
 This file contains the following
 -- Class which handles accessing information from a single run
 -- A function for generating files subject to veto conditions from h5 files.
--- Functions for getting the defulat directory from run id
+-- Functions for getting the default directory from run id
 '''
 import os
 import numpy as np
