@@ -71,7 +71,7 @@ class IndividualEventFrame(ttk.Frame):
         zHit = self.run_data.zHit_list[index]
         eHit = self.run_data.eHit_list[index]
 
-        extend_bins = 10 #TODO: this should probably be relaed to the bandwidth
+        extend_bins = 10 #TODO: this should probably be related to the bandwidth
         if debug:
             self.show_plot(xHit, yHit, zHit, eHit)
         

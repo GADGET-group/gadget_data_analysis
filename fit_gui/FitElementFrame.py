@@ -255,3 +255,62 @@ class ProtonAlpha(BraggWDiffusion):
         c1 = dEdx_guess*(beta0**2)/(np.log(c2*beta0**2) - beta0**2)
         self.update_guess(2, 2*c1)#factor of 2 is empirical
         self.hist_fit_frame.update_hist()
+
+
+def LoadSrimTable(fileName: str, gas: str): # gas type is either 'P10' or 'ArCO2'. Units are in 'MeV' and 'mm'
+    f = open("../SRIM/%s/%s"% (gas, fileName),'r')
+    lines = f.readlines()
+    atConversion = False
+    energy = []
+    dEdX = []
+
+    # Print warning if your SRIM file was not calculated with a gas target 
+    if lines[10] != ' Target is a GAS \n':
+        print('SRIM file indicates that stopping power is calculated with solid target (%s).'%lines[10])
+        print('Please re-run the calculation with the \'gas target\' option checked and appropriate gas density entered.')
+
+    for line in lines:
+        tokens = line.split()
+        # Make sure you are using the correct pressure (P10 at 800 torr has density of 0.00164263 g/cm3 AND ArCO2 80/20% at 2 bar has density of 0.003396 g/cm3)
+        try:
+            if tokens[0] == 'Target' and tokens[1] == 'Density':
+                print('Gas Density = %s'% tokens[3])
+        except:
+            pass
+
+        # Check if we've reached the conversion part of the SRIM table
+        try:
+            atConversion |= (tokens[0] == 'Multiply')
+        except:
+            pass
+
+        try:
+            if atConversion and tokens[1] == 'MeV' and tokens[3] == 'mm':
+                conversion = float(tokens[0])
+                break
+        
+            en = float(tokens[0]) * float(get_unit_conversion(tokens[1]))
+            stoppingpower = float(tokens[2]) + float(tokens[3])
+
+            energy.append(float(en))
+            dEdX.append(float(stoppingpower))
+        except:
+            pass
+
+    dEdX = [conversion*x for x in dEdX]
+    table = np.column_stack((energy,dEdX))
+    return table
+
+
+def get_unit_conversion(unit: str):
+    if unit == 'eV':
+        return 1e-6
+    if unit == 'keV':
+        return 1e-3
+    if unit == 'MeV':
+        return 1e-0
+    if unit == 'GeV':
+        return 1e3
+    return -1
+    
+

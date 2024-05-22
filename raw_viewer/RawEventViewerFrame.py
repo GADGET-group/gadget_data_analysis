@@ -115,6 +115,7 @@ class RawEventViewerFrame(ttk.Frame):
         count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
         count_hist_button.grid(row=5, column=0)
         ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=5, column=1)
+        ttk.Button(count_hist_frame, text='TvE Histogram', command=self.show_tve_plot).grid(row=5, column=2)
         count_hist_frame.grid()
 
         settings_frame = ttk.LabelFrame(self, text='Processing Settings')
@@ -147,7 +148,7 @@ class RawEventViewerFrame(ttk.Frame):
 
         self.mode_var = tk.StringVar()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
-        ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only', 'near peak').grid(row=4, column=0)
+        ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only', 'near peak', 'fft').grid(row=4, column=0)
         ttk.Label(settings_frame, text='near peak window size:').grid(row=5, column=0)
         self.near_peak_window_entry = ttk.Entry(settings_frame)
         self.near_peak_window_entry.insert(0,'10')
@@ -207,6 +208,10 @@ class RawEventViewerFrame(ttk.Frame):
     def show_rve_plot(self):
         bins = int(self.bins_entry.get())
         self.data.show_rve_histogram(num_e_bins=bins, num_range_bins=bins, block=False)
+
+    def show_tve_plot(self):
+        bins = int(self.bins_entry.get())
+        self.data.show_tve_histogram(num_e_bins=bins, num_time_bins=bins, block=False)
 
     def entry_changed(self, event):
         self.data.zscale = float(self.zscale_entry.get())
