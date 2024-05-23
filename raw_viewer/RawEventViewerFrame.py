@@ -18,7 +18,7 @@ class RawEventViewerFrame(ttk.Frame):
     def __init__(self, parent, file_path=None, flat_lookup_path=None):
         super().__init__(parent)
         if flat_lookup_path == None:
-            flat_lookup_path = tk.filedialog.askopenfilename(initialdir='.', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
+            flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
         if file_path == None:
             file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
         self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
@@ -220,7 +220,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.check_state_changed()
     
     def browse_for_settings_file(self):
-        file_path = tk.filedialog.askopenfilename(initialdir='.', title='select GUI settings file', filetypes=([("gui config", ".gui_ini")]))
+        file_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/gui_configs', title='select GUI settings file', filetypes=([("gui config", ".gui_ini")]))
         self.settings_file_entry.delete(0, tk.END)
         self.settings_file_entry.insert(0, file_path)
 
@@ -380,6 +380,14 @@ class RawEventViewerFrame(ttk.Frame):
             es = es[es>length_threshold]
             points = np.vstack((xs, ys, zs)).transpose()
         line = Line.best_fit(points)
+        #project all points above ic threshold to the line
+        xs, ys, zs, es = self.data.get_xyze(event_number, include_veto_pads=False)
+        if ic_threshold != -np.inf:
+            xs = xs[es>ic_threshold]
+            ys = ys[es>ic_threshold]
+            zs = zs[es>ic_threshold]
+            es = es[es>ic_threshold]
+            points = np.vstack((xs, ys, zs)).transpose()
         
         #calculate distance along projected axis for each point
         pstart, direction_vect = line.point, line.vector
