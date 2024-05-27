@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from skspatial.objects import Line, Point
 
+from tqdm import tqdm
+
 from fit_gui.HistogramFitFrame import HistogramFitFrame
 from raw_viewer import raw_h5_file
 
@@ -380,14 +382,28 @@ class RawEventViewerFrame(ttk.Frame):
             es = es[es>length_threshold]
             points = np.vstack((xs, ys, zs)).transpose()
         line = Line.best_fit(points)
-        #project all points above ic threshold to the line
-        xs, ys, zs, es = self.data.get_xyze(event_number, include_veto_pads=False)
-        if ic_threshold != -np.inf:
-            xs = xs[es>ic_threshold]
-            ys = ys[es>ic_threshold]
-            zs = zs[es>ic_threshold]
-            es = es[es>ic_threshold]
-            points = np.vstack((xs, ys, zs)).transpose()
+        #bin the charge, assume charge is uniformly distributed in each voxel.
+        #approximate this by breaking each point into N^3 points, each with 1/N^3
+        #the charge of the original point
+        N = 10
+        xs, ys, zs, es= [],[],[],[]
+        dxys = np.arange(0, 2.2, 2.2/N)
+        dzs = np.arange(0,self.data.zscale, self.data.zscale/N)
+        x_old, y_old, z_old, e_old = self.data.get_xyze(event_number, include_veto_pads=False)
+        x_old = x_old[e_old>ic_threshold]
+        y_old = y_old[e_old>ic_threshold]
+        z_old = z_old[e_old>ic_threshold]
+        e_old = e_old[e_old>ic_threshold]
+        for x,y,z,e in tqdm(zip(x_old, y_old, z_old, e_old)):
+            for dx in dxys:
+                for dy in dxys:
+                    for dz in dzs:
+                        xs.append(x+dx)
+                        ys.append(y+dy)
+                        zs.append(z+dz)
+                        es.append(e/N**3)
+        xs, ys, zs, es = np.array(xs), np.array(ys), np.array(zs), np.array(es)
+        points = np.vstack((xs, ys, zs)).transpose()
         
         #calculate distance along projected axis for each point
         pstart, direction_vect = line.point, line.vector
