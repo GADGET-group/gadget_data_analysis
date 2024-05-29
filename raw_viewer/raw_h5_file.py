@@ -19,7 +19,7 @@ Notes for tomorrow:
 '''
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
-FIRST_DATA_BIN = 6
+FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
 
 class raw_h5_file:

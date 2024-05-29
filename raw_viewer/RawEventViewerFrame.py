@@ -15,15 +15,21 @@ from tqdm import tqdm
 
 from fit_gui.HistogramFitFrame import HistogramFitFrame
 from raw_viewer import raw_h5_file
+from raw_viewer import heritage_h5_file
 
 class RawEventViewerFrame(ttk.Frame):
-    def __init__(self, parent, file_path=None, flat_lookup_path=None):
+    def __init__(self, parent, file_path=None, flat_lookup_path=None, heritage_file=False):
         super().__init__(parent)
-        if flat_lookup_path == None:
-            flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
-        if file_path == None:
-            file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
-        self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
+        if not heritage_file:
+            if file_path == None:
+                file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
+            if flat_lookup_path == None:
+                flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
+            self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
+        else:
+            if file_path == None:
+                file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e17023/', title='Select H5 File', filetypes=[('H5', ".h5")])
+            self.data = heritage_h5_file.heritage_h5_file(file_path)
         self.winfo_toplevel().title(file_path)
         
         #objects whose values should be saved in settings file, indexed by settings file variable
