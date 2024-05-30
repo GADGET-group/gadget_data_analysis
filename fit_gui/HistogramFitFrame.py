@@ -151,17 +151,25 @@ if __name__ == '__main__':
          np.random.uniform(-5,5,500)])#b=50, m=0'''
     root = tk.Tk()
     
-    file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/')
+    #file_path = tk.filedialog.askopenfilename()#initialdir='/mnt/analysis/e21072/')
+    event = 11
+    file_path = './track_projections/run365_event%dproj_dist.npy'%event
     data = np.load(file_path)
-    include_all_data = False
+    file_path = './track_projections/run365_event%dproj_e.npy'%event
+    #file_path = tk.filedialog.askopenfilename()
+    weights = np.load(file_path)
+
+    include_all_data = True
     print('total events in file = %d'%len(data))
     if not include_all_data:
-        min_val, max_val = 2e5,5e5
-        data = data[np.logical_and(data>min_val, data<max_val)]
+        min_val, max_val = -30,30
+        mask = np.logical_and(data>min_val, data<max_val)
+        data = data[mask]
+        weights = weights[mask]
         print('events after applying cut = %d'%len(data))
 
     
     root.title(file_path)
-    frame = HistogramFitFrame(root, data)
+    frame = HistogramFitFrame(root, data, weights)
     frame.grid()
     root.mainloop()

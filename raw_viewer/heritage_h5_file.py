@@ -12,7 +12,8 @@ class heritage_h5_file(raw_h5_file.raw_h5_file):
         raw_h5_file.raw_h5_file.__init__(self,file_path, flat_lookup_csv=flat_lookup_path)
         self.xy_to_pad = {tuple(self.padxy[pad]):pad for pad in range(len(self.padxy))}
         self.xy_to_chnls = {tuple(self.chnls_to_xy_coord[chnls]):chnls 
-                            for chnls in self.chnls_to_xy_coord}  
+                            for chnls in self.chnls_to_xy_coord}
+        
     
     def get_data(self, event_number):
         event_str = 'Event_[%d]'%event_number

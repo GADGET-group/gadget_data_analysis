@@ -20,6 +20,7 @@ from raw_viewer import heritage_h5_file
 class RawEventViewerFrame(ttk.Frame):
     def __init__(self, parent, file_path=None, flat_lookup_path=None, heritage_file=False):
         super().__init__(parent)
+        self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
                 file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
@@ -388,6 +389,19 @@ class RawEventViewerFrame(ttk.Frame):
             es = es[es>length_threshold]
             points = np.vstack((xs, ys, zs)).transpose()
         line = Line.best_fit(points)
+        DEBUG=False
+        if DEBUG:
+            fig = plt.figure(figsize=(6,6))
+            plt.clf()
+            ax = plt.axes(projection='3d')
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+            ax.set_zlabel("z")
+            ax.set_xlim3d(-200, 200)
+            ax.set_ylim3d(-200, 200)
+            ax.set_zlim3d(0, 400)
+            xs, ys, zs, es = self.data.get_xyze(event_number, threshold=length_threshold)
+            ax.scatter(xs, ys, zs, c=es)
         #bin the charge, assume charge is uniformly distributed in each voxel.
         #approximate this by breaking each point into N^3 points, each with 1/N^3
         #the charge of the original point
@@ -395,6 +409,10 @@ class RawEventViewerFrame(ttk.Frame):
         xs, ys, zs, es= [],[],[],[]
         dxys = np.arange(0, 2.2, 2.2/N)
         dzs = np.arange(0,self.data.zscale, self.data.zscale/N)
+        if self.heritage_file: 
+            #smear z even more because of timing jitter
+            #TODO: be rigorous about this
+            dzs *= 10
         x_old, y_old, z_old, e_old = self.data.get_xyze(event_number, include_veto_pads=False)
         x_old = x_old[e_old>ic_threshold]
         y_old = y_old[e_old>ic_threshold]
@@ -409,17 +427,27 @@ class RawEventViewerFrame(ttk.Frame):
                         zs.append(z+dz)
                         es.append(e/N**3)
         xs, ys, zs, es = np.array(xs), np.array(ys), np.array(zs), np.array(es)
-        points = np.vstack((xs, ys, zs)).transpose()
+
         
         #calculate distance along projected axis for each point
         pstart, direction_vect = line.point, line.vector
         direction_vect = direction_vect.unit()
         dist = []
-        for x,y,z in zip(xs, ys, zs):
+        xproj, yproj, zproj = [],[],[]
+        for x,y,z in tqdm(zip(xs, ys, zs)):
             point = Point([x,y,z])
+            #point = line.project_point(point)
             dist.append(np.dot(point - pstart, direction_vect))
+
+        if DEBUG:
+            ax.scatter(xproj[::30], yproj[::30], zproj[::30], c=es[::30])
+            plt.show(block=False)
+
         #dist = np.sqrt((xProj - pstart[0])**2 + (yProj - pstart[1])**2 + (zProj - pstart[2])**2)
         #export to histogram fit frame
+        np.save('dist', dist)
+        np.save('e', es)
+        print('opening histogram fit frame)')
         new_window = tk.Toplevel()
         HistogramFitFrame(new_window, data=dist, weights=es).pack()
 
