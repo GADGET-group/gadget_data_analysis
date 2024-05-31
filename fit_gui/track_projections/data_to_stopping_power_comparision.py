@@ -18,7 +18,7 @@ show_error_bars = True
 #typical track is 55 mm (25 pads) long and 6 pads wide, but ~90% energy deposition is contained in 
 #a track just 3 pads wide. Let's assume the typical track is at ~45 degrees. Then ~50 pads contribute meaningfully to the energy resolution. 
 #Moshe's paper says "2.8% FWHM resolution at 6.288 MeV" for 220Rn, while Ruchi's says 5.4%.
-#So we have: 5.4% = sqrt(2.7%^2 + 50(x/75)^2) where x is the unknown uncertainties due to not gain matching.
+#So we have: 5.4% = sqrt(2.7%^2 + 50(x/50)^2) where x is the unknown uncertainties due to not gain matching.
 #x^2=(5.4^2 - 2.7^2)*50=>33% per pad
 gain_match_uncertainty = 0.33
 #make histogram from projected track
