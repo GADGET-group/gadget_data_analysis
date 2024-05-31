@@ -152,23 +152,23 @@ class Bragg(FitElementFrame):
     beta^2 = c3 * E
     '''
     def __init__(self, master, hist_fit_frame):
-        super().__init__(master, hist_fit_frame, ['x0','E0'], [0,0])
+        super().__init__(master, hist_fit_frame, ['x0','E0', 'counts/MeV'], [0,0, 1])
         ttk.Label(self, text='direction').grid(row=self.next_row, column=0)
         self.direction_combobox = ttk.Combobox(self, values=['left', 'right'])
         self.direction_combobox.set('right')
         self.direction_combobox.grid(row=self.next_row, column=1)
         self.direction_combobox.bind("<<ComboboxSelected>>", lambda e: self.hist_fit_frame.update_hist())
         self.next_row += 1
-        ttk.Label(self, text='counts/MeV').grid(row=self.next_row, column=0)
-        self.energy_cal_entry = ttk.Entry(self)
-        self.energy_cal_entry.insert(0,'1e5')
-        self.energy_cal_entry.bind("<FocusOut>", lambda e: self.hist_fit_frame.update_hist())
-        self.energy_cal_entry.grid(row=self.next_row, column=1)
-        self.next_row += 1
-        self.dEdx_table = np.load('p10_alpha_850torr.npy')
+        # ttk.Label(self, text='counts/MeV').grid(row=self.next_row, column=0)
+        # self.energy_cal_entry = ttk.Entry(self)
+        # self.energy_cal_entry.insert(0,'1e5')
+        # self.energy_cal_entry.bind("<FocusOut>", lambda e: self.hist_fit_frame.update_hist())
+        # self.energy_cal_entry.grid(row=self.next_row, column=1)
+        # self.next_row += 1
+        self.dEdx_table = np.load('p10_alpha_850torr.npy')*800/850#scale to 800 torr
 
     def evaluate(self, xs: np.array, params):
-        x0, E0 = params
+        x0, E0, energy_cal = params
         direction = self.direction_combobox.get()
         if direction == 'right':
             xs_for_int = np.concatenate([[x0], xs[xs>=x0]])
@@ -193,7 +193,8 @@ class Bragg(FitElementFrame):
             to_return[xs<=x0] = dEdx(Es[1:])
         
 
-        to_return *= float(self.energy_cal_entry.get())
+        #to_return *= float(self.energy_cal_entry.get())
+        to_return *=energy_cal
         return to_return
         
 class BraggWDiffusion(Bragg):
@@ -202,7 +203,7 @@ class BraggWDiffusion(Bragg):
         self.add_param_entry('sigma', 1)
     
     def evaluate(self, xs, params):
-        x0, E0, sigma = params
+        x0, E0,  energy_cal, sigma= params
         #should consider oversampling if needed
         no_diff = super().evaluate(xs, params[0:-1])
         dx = xs[1] - xs[0]

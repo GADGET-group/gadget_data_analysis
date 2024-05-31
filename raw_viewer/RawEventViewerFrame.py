@@ -29,7 +29,7 @@ class RawEventViewerFrame(ttk.Frame):
             self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
         else:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e17023/', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir='.', title='Select H5 File', filetypes=[('H5', ".h5")])
             self.data = heritage_h5_file.heritage_h5_file(file_path)
         self.winfo_toplevel().title(file_path)
         

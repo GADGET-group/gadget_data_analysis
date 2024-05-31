@@ -152,10 +152,12 @@ if __name__ == '__main__':
     root = tk.Tk()
     
     #file_path = tk.filedialog.askopenfilename()#initialdir='/mnt/analysis/e21072/')
-    event = 11
-    file_path = './track_projections/run365_event%dproj_dist.npy'%event
+    event = 107
+    #file_path = './track_projections/run365_event%dproj_dist.npy'%event
+    file_path = './track_projections/ruchi_event_%d_dist.npy'%event
     data = np.load(file_path)
-    file_path = './track_projections/run365_event%dproj_e.npy'%event
+    file_path = './track_projections/ruchi_event_%d_e.npy'%event
+    #file_path = './track_projections/run365_event%dproj_e.npy'%event
     #file_path = tk.filedialog.askopenfilename()
     weights = np.load(file_path)
 
