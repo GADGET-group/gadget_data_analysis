@@ -13,6 +13,8 @@ pads = np.load(input_base_path%'pads')
 bins = 30
 counts_per_MeV = 18600
 
+show_error_bars = True
+
 #typical track is 55 mm (25 pads) long and 6 pads wide, but ~90% energy deposition is contained in 
 #a track just 3 pads wide. Let's assume the typical track is at ~45 degrees. Then ~50 pads contribute meaningfully to the energy resolution. 
 #Moshe's paper says "2.8% FWHM resolution at 6.288 MeV" for 220Rn, while Ruchi's says 5.4%.
@@ -50,14 +52,20 @@ def build_histogram(dist, es, pads, num_bins):
 
 
 fig, axs = plt.subplots(2,1)
-#hist, bin_edges=np.histogram(dists, bins=bins, weights=es)
-hist, bin_edges, sigmas = build_histogram(dists, es, pads, bins)
+if show_error_bars:
+    hist, bin_edges, sigmas = build_histogram(dists, es, pads, bins)
+else:
+    hist, bin_edges=np.histogram(dists, bins=bins, weights=es)
+
 bin_width = bin_edges[1] - bin_edges[0]
 hist /=(counts_per_MeV*bin_width)
-sigmas /=(counts_per_MeV*bin_width)
+if show_error_bars:
+    sigmas /=(counts_per_MeV*bin_width)
 bin_centers = (bin_edges[1:] + bin_edges[:-1])/2
-axs[0].bar(bin_centers, hist, width=bin_width, yerr=sigmas)
-#hist, bin_edges, patches = axs[0].hist(dists, bins=bins, weights=es/counts_per_MeV/bin_width)
+if show_error_bars:
+    axs[0].bar(bin_centers, hist, width=bin_width, yerr=sigmas)
+else:
+    hist, bin_edges, patches = axs[0].hist(dists, bins=bins, weights=es/counts_per_MeV/bin_width)
 axs[0].set_xlabel('position along track (mm)')
 axs[0].set_ylabel('energy deposition (MeV/mm)')
 
@@ -101,8 +109,12 @@ def bragg_w_diffusion(xs, x0, E0, sigma, direction, pressure):
 
 #fit bragg curve to get x0, sigma, and then plot it
 to_fit = lambda xs, x0, sigma: bragg_w_diffusion(xs, x0=x0, E0=6.404, sigma=sigma, direction='right', pressure=800)
+if show_error_bars:
+    popt, pcov = scipy.optimize.curve_fit(to_fit, bin_centers, hist, (-29.7, 3.4), sigma=sigmas)
+else:
+    popt, pcov = scipy.optimize.curve_fit(to_fit, bin_centers, hist, (-29.7, 3.4))
 #theoretical = bragg_w_diffusion(bin_centers, x0=-29.7, E0=6.404, sigma=3.4, direction='right', pressure=800)
-popt, pcov = scipy.optimize.curve_fit(to_fit, bin_centers, hist, (-29.7, 3.4), sigma=sigmas)
+
 x0, sigma = popt
 theoretical = to_fit(bin_centers, x0, sigma)
 print(x0, sigma)
