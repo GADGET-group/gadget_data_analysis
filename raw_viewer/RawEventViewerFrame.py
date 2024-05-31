@@ -406,7 +406,7 @@ class RawEventViewerFrame(ttk.Frame):
         #approximate this by breaking each point into N^3 points, each with 1/N^3
         #the charge of the original point
         N = 10
-        xs, ys, zs, es= [],[],[],[]
+        xs, ys, zs, es,pads= [],[],[],[], []
         dxys = np.arange(0, 2.2, 2.2/N)
         dzs = np.arange(0,self.data.zscale, self.data.zscale/N)
         if self.heritage_file: 
@@ -419,6 +419,7 @@ class RawEventViewerFrame(ttk.Frame):
         z_old = z_old[e_old>ic_threshold]
         e_old = e_old[e_old>ic_threshold]
         for x,y,z,e in tqdm(zip(x_old, y_old, z_old, e_old)):
+            pad = self.data.get_pad_from_xy((x,y))
             for dx in dxys:
                 for dy in dxys:
                     for dz in dzs:
@@ -426,7 +427,8 @@ class RawEventViewerFrame(ttk.Frame):
                         ys.append(y+dy)
                         zs.append(z+dz)
                         es.append(e/N**3)
-        xs, ys, zs, es = np.array(xs), np.array(ys), np.array(zs), np.array(es)
+                        pads.append(pad)
+        xs, ys, zs, es, pads = np.array(xs), np.array(ys), np.array(zs), np.array(es), np.array(pads)
 
         
         #calculate distance along projected axis for each point
@@ -447,6 +449,7 @@ class RawEventViewerFrame(ttk.Frame):
         #export to histogram fit frame
         np.save('dist', dist)
         np.save('e', es)
+        np.save('pads', pads)
         print('opening histogram fit frame)')
         new_window = tk.Toplevel()
         HistogramFitFrame(new_window, data=dist, weights=es).pack()

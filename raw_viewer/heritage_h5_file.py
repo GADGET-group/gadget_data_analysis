@@ -11,9 +11,6 @@ class heritage_h5_file(raw_h5_file.raw_h5_file):
     def __init__(self, file_path):
         flat_lookup_path = os.path.join(os.path.dirname(__file__), 'channel_mappings/flatlookup2cobos.csv')
         raw_h5_file.raw_h5_file.__init__(self,file_path, flat_lookup_csv=flat_lookup_path)
-        self.xy_to_pad = {tuple(self.padxy[pad]):pad for pad in range(len(self.padxy))}
-        self.xy_to_chnls = {tuple(self.chnls_to_xy_coord[chnls]):chnls 
-                            for chnls in self.chnls_to_xy_coord}
         
         
     
@@ -23,24 +20,37 @@ class heritage_h5_file(raw_h5_file.raw_h5_file):
         data = np.zeros((len(event['x']),517))
         for i,x,y,t,A in zip(range(len(event['x'])),event['x'], event['y'], event['t'], event['A']):
             xy=(x,y)
-            if xy not in self.xy_to_chnls:
+                
+            data[i][0:4] = self.get_chnl_from_xy(xy)
+            data[i][4] = self.get_pad_from_xy(xy)
+            data[i][t] = A
+
+        return np.array(data)
+
+    def get_nearest_xy(self, xy):
+        xy = tuple(np.round(xy, 1))
+        if xy not in self.xy_to_chnls:
                 #find nearest pad
                 best_xy = (np.inf, np.inf)
                 best_dist = np.inf
-                for xy in self.xy_to_pad:
+                for x,y in self.xy_to_pad:
                     dist = np.array(xy) - np.array([x,y])
                     dist = np.dot(dist, dist)
                     if dist < best_dist:
                         best_dist = dist
-                        best_xy = xy
+                        best_xy = (x,y)
                 self.xy_to_chnls[xy] = self.xy_to_chnls[best_xy]
                 self.xy_to_pad[xy] = self.xy_to_pad[best_xy]
-                
-            data[i][0:4] = self.xy_to_chnls[xy]
-            data[i][4] = self.xy_to_pad[xy]
-            data[i][t] = A
-
-        return np.array(data)
+                print('(%f,%f) remmapped to (%f,%f)'%(*xy, *best_xy))
+        return xy
+    
+    def get_pad_from_xy(self, xy):
+        xy = self.get_nearest_xy(xy)
+        return self.xy_to_pad[xy]
+    
+    def get_chnl_from_xy(self, xy):
+        xy = self.get_nearest_xy(xy)
+        return self.xy_to_chnls[xy]
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''

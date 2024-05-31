@@ -56,6 +56,10 @@ class raw_h5_file:
             self.chnls_to_pad[chnls] = pad
             self.chnls_to_xy_coord[chnls] = self.padxy[pad]
             self.chnls_to_xy_index[chnls] = self.pad_to_xy_index[pad]
+        #round xy to nearest 10nths place to avoid issues with different floating point formats
+        self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
+        self.xy_to_chnls = {tuple(np.round(self.chnls_to_xy_coord[chnls], 1)):chnls 
+                            for chnls in self.chnls_to_xy_coord}
         
         self.zscale = zscale #conversion factor from time bin to mm
 
@@ -108,6 +112,20 @@ class raw_h5_file:
         self.asads='all'
         self.cobos='all'
         self.pads='all'
+
+    def get_pad_from_xy(self, xy):
+        '''
+        xy: tuple of (x,y) to lookup pad number for
+        '''
+        xy = tuple(np.round(xy, 1))
+        return self.xy_to_pad[xy]
+    
+    def get_chnl_from_xy(self, xy):
+        '''
+        xy: tuple of (x,y) to lookup pad number for
+        '''
+        xy = tuple(np.round(xy, 1))
+        return self.xy_to_chnls[xy]
 
     def get_data(self, event_number):
         '''

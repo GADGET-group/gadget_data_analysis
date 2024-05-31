@@ -21,6 +21,7 @@ axs[0].set_ylabel('energy deposition (MeV/mm)')
 fig.tight_layout()
 #make bragg curve
 dEdx_table = np.load('../p10_alpha_850torr.npy')
+#dEdx_table =  np.genfromtxt("../P10_760torr_srim.csv", delimiter=",")
 
 def bragg_w_diffusion(xs, x0, E0, sigma, direction, pressure):
     '''
@@ -70,3 +71,9 @@ axs[0].plot(bin_centers, theoretical)
 #make residuals plot
 axs[1].bar(bin_centers, hist - theoretical, width=bin_width)
 plt.show()
+
+#typical track is 55 mm (25 pads) long and 6 pads wide, but ~90% energy deposition is contained in 
+#a track just 3 pads wide. Let's assume the typical track is at ~45 degrees. Then ~50 pads contribute meaningfully to the energy resolution. 
+#Moshe's paper says "2.8% FWHM resolution at 6.288 MeV" for 220Rn, while Ruchi's says 5.4%.
+#So we have: 5.4% = sqrt(2.7%^2 + 50(x/75)^2) where x is the unknown uncertainties due to not gain matching.
+#x^2=(5.4^2 - 2.7^2)*50=>4.67% from not gain matching and 33% per pad
