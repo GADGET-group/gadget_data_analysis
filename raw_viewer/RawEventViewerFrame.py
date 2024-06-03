@@ -287,10 +287,11 @@ class RawEventViewerFrame(ttk.Frame):
 
         self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
 
-        ranges, counts, angles, pads_railed_list = self.data.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list,accepted_events = self.data.get_histogram_arrays()
         np.save(os.path.join(directory_path, 'counts.npy'), counts)
         np.save(os.path.join(directory_path, 'ranges.npy'), ranges)
         np.save(os.path.join(directory_path, 'angles.npy'), angles)
+        np.save(os.path.join(directory_path, 'event_numbers.npy'), accepted_events)
         with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerows(pads_railed_list)

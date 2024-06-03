@@ -389,6 +389,7 @@ class raw_h5_file:
         counts_hist = []
         angle_hist = []
         pads_railed_list = []
+        accepted_events = []
         for i in tqdm.tqdm(range(*self.get_event_num_bounds())):#TODO: is this missing the last event in the run?
             should_veto, length, energy, angle, pads_railed = self.process_event(i)
             if not should_veto:
@@ -396,8 +397,9 @@ class raw_h5_file:
                 counts_hist.append(energy)
                 angle_hist.append(angle)
                 pads_railed_list.append(pads_railed)
+                accepted_events.append(i)
 
-        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist), pads_railed_list
+        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist), pads_railed_list, accepted_events
 
     def process_event(self, event_num):
         '''
@@ -427,13 +429,13 @@ class raw_h5_file:
         return should_veto, length, counts, angle, pads_railed
 
     def show_counts_histogram(self, num_bins, fig_name=None, block=True):
-        ranges, counts, angles, pads_railed_list = self.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list, accepted_events_list = self.get_histogram_arrays()
         plt.figure(fig_name)
         plt.hist(counts, bins=num_bins)
         plt.show(block=block)
 
     def show_rve_histogram(self, num_e_bins, num_range_bins, fig_name=None, block=True):
-        ranges, counts, angles, pads_railed_list = self.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list,accepted_events_list = self.get_histogram_arrays()
 
         #TODO: make generic, these are P10 values
         calib_point_1 = (0.806, 156745)

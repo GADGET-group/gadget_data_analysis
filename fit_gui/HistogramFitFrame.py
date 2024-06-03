@@ -151,27 +151,27 @@ if __name__ == '__main__':
          np.random.uniform(-5,5,500)])#b=50, m=0'''
     root = tk.Tk()
     
-    #file_path = tk.filedialog.askopenfilename()#initialdir='/mnt/analysis/e21072/')
+    file_path = tk.filedialog.askopenfilename()#initialdir='/mnt/analysis/e21072/')
     event = 107
     #file_path = './track_projections/run365_event%dproj_dist.npy'%event
-    file_path = './track_projections/ruchi_event_%d_dist.npy'%event
+    #file_path = './track_projections/ruchi_event_%d_dist.npy'%event
     data = np.load(file_path)
-    file_path = './track_projections/ruchi_event_%d_e.npy'%event
+    #file_path = './track_projections/ruchi_event_%d_e.npy'%event
     #file_path = './track_projections/run365_event%dproj_e.npy'%event
     #file_path = tk.filedialog.askopenfilename()
-    weights = np.load(file_path)
+    #weights = np.load(file_path)
 
-    include_all_data = True
+    include_all_data = False
     print('total events in file = %d'%len(data))
     if not include_all_data:
-        min_val, max_val = -30,30
+        min_val, max_val = 115e3,150e3
         mask = np.logical_and(data>min_val, data<max_val)
         data = data[mask]
-        weights = weights[mask]
+        #weights = weights[mask]
         print('events after applying cut = %d'%len(data))
 
     
     root.title(file_path)
-    frame = HistogramFitFrame(root, data, weights)
+    frame = HistogramFitFrame(root, data)#, weights)
     frame.grid()
     root.mainloop()
