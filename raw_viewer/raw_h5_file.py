@@ -20,24 +20,17 @@ Notes for tomorrow:
 '''
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
-FIRST_DATA_BIN = 6
+FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
 
 class raw_h5_file:
     def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
+        self.file_path = file_path
         self.h5_file = h5py.File(file_path, 'r')
         self.padxy = np.loadtxt(os.path.join(os.path.dirname(__file__), 'padxy.txt'), delimiter=',')
         
-
-        if flat_lookup_csv == None: #figure out COBO configuration from meta data
-            #TODO: it seems that the merger is only writing meta data for the 2 COBO configuraiton
-            #so this doesn't work
-            if  len(self.h5_file['meta']) == 9: #2 COBO configuration
-                self.flat_lookup = np.loadtxt('flatlookup2cobos.csv', delimiter=',', dtype=int)
-            else:
-                self.flat_lookup = np.loadtxt('flatlookup4cobos.csv', delimiter=',', dtype=int)
-        else:
-            self.flat_lookup = np.loadtxt(flat_lookup_csv, delimiter=',', dtype=int)
+        self.flat_lookup_file_path = flat_lookup_csv        
+        self.flat_lookup = np.loadtxt(self.flat_lookup_file_path, delimiter=',', dtype=int)
         
         self.pad_plane = np.genfromtxt(os.path.join(os.path.dirname(__file__),'PadPlane.csv'),delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
         self.pad_to_xy_index = {} #maps pad number to (x_index,y_index)
@@ -56,6 +49,10 @@ class raw_h5_file:
             self.chnls_to_pad[chnls] = pad
             self.chnls_to_xy_coord[chnls] = self.padxy[pad]
             self.chnls_to_xy_index[chnls] = self.pad_to_xy_index[pad]
+        #round xy to nearest 10nths place to avoid issues with different floating point formats
+        self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
+        self.xy_to_chnls = {tuple(np.round(self.chnls_to_xy_coord[chnls], 1)):chnls 
+                            for chnls in self.chnls_to_xy_coord}
         
         self.zscale = zscale #conversion factor from time bin to mm
 
@@ -86,7 +83,8 @@ class raw_h5_file:
         #                 (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
-        self.apply_background_subtraction = False
+        self.background_subtract_mode = 'none' #none, fixed window, or convolution
+        self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
         self.range_bounds = (0, 100)
@@ -108,6 +106,20 @@ class raw_h5_file:
         self.asads='all'
         self.cobos='all'
         self.pads='all'
+
+    def get_pad_from_xy(self, xy):
+        '''
+        xy: tuple of (x,y) to lookup pad number for
+        '''
+        xy = tuple(np.round(xy, 1))
+        return self.xy_to_pad[xy]
+    
+    def get_chnl_from_xy(self, xy):
+        '''
+        xy: tuple of (x,y) to lookup pad number for
+        '''
+        xy = tuple(np.round(xy, 1))
+        return self.xy_to_chnls[xy]
 
     def get_data(self, event_number):
         '''
@@ -146,7 +158,7 @@ class raw_h5_file:
 
         #Loop over each pad, performing background subtraction and marking the pad in the pad image
         #which will be used for outlier removal.
-        if self.apply_background_subtraction or self.remove_outliers:
+        if self.background_subtract_mode!='none' or self.remove_outliers:
             for line in data:
                 chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
@@ -154,9 +166,8 @@ class raw_h5_file:
                 else:
                     #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                     continue
-                if self.apply_background_subtraction:
-                    line[FIRST_DATA_BIN:] -= np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:
-                                                             FIRST_DATA_BIN + self.num_background_bins[1]])
+                if self.background_subtract_mode!='none':
+                    line[FIRST_DATA_BIN:] -= self.calculate_background(line[FIRST_DATA_BIN:])
                 if self.remove_outliers:
                     x,y = self.pad_to_xy_index[pad]
                     pad_image[x,y]=1
@@ -200,11 +211,30 @@ class raw_h5_file:
         
         return data
 
+<<<<<<< HEAD
     def get_timestamp(self, event_number):
         time = self.h5_file['get']['evt%d_header'%event_number][1]
         time = np.array(time, copy=True, dtype=float)
         
         return time
+=======
+    def calculate_background(self, trace):
+        '''
+        Return calculated background for each timebin.
+
+        Trace should only contain data bins
+        '''
+        #apply consnant offset of average value of a pad within a time window
+        if self.background_subtract_mode == 'fixed window':
+            return np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
+        #rolling average to each side of a pad
+        elif self.background_subtract_mode == 'convolution':
+            return np.convolve(trace, self.background_convolution_kernel, mode='same')
+        #in the case of none, just return an array of 0s
+        elif self.background_subtract_mode == 'none':
+            return np.zeros(len(trace))
+        assert False #invalid mode
+>>>>>>> 2d02e1c3ce333af551babb4d4dbe5ff8e12dcbe9
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''
@@ -379,14 +409,18 @@ class raw_h5_file:
         range_hist = []
         counts_hist = []
         angle_hist = []
+        pads_railed_list = []
+        accepted_events = []
         for i in tqdm.tqdm(range(*self.get_event_num_bounds())):#TODO: is this missing the last event in the run?
-            should_veto, length, energy, angle = self.process_event(i)
+            should_veto, length, energy, angle, pads_railed = self.process_event(i)
             if not should_veto:
                 range_hist.append(length)
                 counts_hist.append(energy)
                 angle_hist.append(angle)
+                pads_railed_list.append(pads_railed)
+                accepted_events.append(i)
 
-        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist)
+        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist), pads_railed_list, accepted_events
 
     def get_timestamp_array(self):
         timestamps = []
@@ -401,16 +435,19 @@ class raw_h5_file:
 
     def process_event(self, event_num):
         '''
-        Returns: should veto, range, energy, angle
+        Returns: should veto, range, energy, angle, pads_railed
         '''
         should_veto=False
         counts = 0
+        pads_railed = []
         for pad, trace in zip(*self.get_pad_traces(event_num)):
             if pad in VETO_PADS:
                 if np.any(trace>self.veto_threshold):
                     should_veto = True
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
+            if np.max(trace) >= 4095:
+                pads_railed.append(pad)
         length, angle = self.get_track_length_angle(event_num)
         if self.range_bounds != None:
             if length > self.range_bounds[1] or length < self.range_bounds[0]:
@@ -421,16 +458,16 @@ class raw_h5_file:
         if self.angle_bounds != None:
             if angle < self.angle_bounds[0] or angle > self.angle_bounds[1]:
                 should_veto = True
-        return should_veto, length, counts, angle
+        return should_veto, length, counts, angle, pads_railed
 
     def show_counts_histogram(self, num_bins, fig_name=None, block=True):
-        ranges, counts, angles = self.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list, accepted_events_list = self.get_histogram_arrays()
         plt.figure(fig_name)
         plt.hist(counts, bins=num_bins)
         plt.show(block=block)
 
     def show_rve_histogram(self, num_e_bins, num_range_bins, fig_name=None, block=True):
-        ranges, counts, angles = self.get_histogram_arrays()
+        ranges, counts, angles, pads_railed_list,accepted_events_list = self.get_histogram_arrays()
 
         #TODO: make generic, these are P10 values
         calib_point_1 = (0.806, 156745)
@@ -536,10 +573,10 @@ class raw_h5_file:
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
-        should_veto, length, energy, angle = self.process_event(event_num)
-        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n veto=%d'%(event_num, energy, 
+        should_veto, length, energy, angle, pads_railed = self.process_event(event_num)
+        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n veto=%d\n # pads railed=%d'%(event_num, energy, 
                                                                                                energy*energy_scale_factor + energy_offset, length,
-                                                                                               np.degrees(angle), should_veto))
+                                                                                               np.degrees(angle), should_veto, len(pads_railed)))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
@@ -559,7 +596,7 @@ class raw_h5_file:
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        should_veto, length, energy, angle = self.process_event(event_number)
+        should_veto, length, energy, angle, pads_railed_list = self.process_event(event_number)
         plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
         plt.subplot(2,1,1)
         plt.imshow(image, norm=colors.LogNorm())

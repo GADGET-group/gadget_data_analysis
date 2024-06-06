@@ -16,12 +16,14 @@ else:
 #TODO: ability to only fix some region of the histogram
 #TODO: use root for fitting
 class HistogramFitFrame(ttk.Frame):
-    def __init__(self, parent, data):
+    def __init__(self, parent, data, weights=None):
         '''
         data: array of floats to make histogram of
+        weights: weights to pass to np.hist
         '''
         super().__init__(parent)
         self.data = data
+        self.weights=weights
 
         matplotlib.use('TkAgg')
 
@@ -59,7 +61,7 @@ class HistogramFitFrame(ttk.Frame):
 
     def rebin(self):
         self.num_bins = int(self.bins_entry.get())
-        self.hist, self.bins = np.histogram(self.data, self.num_bins)
+        self.hist, self.bins = np.histogram(self.data, self.num_bins, weights=self.weights)
         self.bin_centers = (self.bins[1:] + self.bins[:-1])/2
         self.update_hist()
 
@@ -150,16 +152,26 @@ if __name__ == '__main__':
     root = tk.Tk()
     
     file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/')
+    event = 107
+    #file_path = './track_projections/run365_event%dproj_dist.npy'%event
+    #file_path = './track_projections/ruchi_event_%d_dist.npy'%event
     data = np.load(file_path)
-    include_all_data = False
+    #file_path = './track_projections/ruchi_event_%d_e.npy'%event
+    #file_path = './track_projections/run365_event%dproj_e.npy'%event
+    #file_path = tk.filedialog.askopenfilename()
+    #weights = np.load(file_path)
+
+    include_all_data = True
     print('total events in file = %d'%len(data))
     if not include_all_data:
-        min_val, max_val = 2e5,5e5
-        data = data[np.logical_and(data>min_val, data<max_val)]
+        min_val, max_val = 115e3,150e3
+        mask = np.logical_and(data>min_val, data<max_val)
+        data = data[mask]
+        #weights = weights[mask]
         print('events after applying cut = %d'%len(data))
 
     
     root.title(file_path)
-    frame = HistogramFitFrame(root, data)
+    frame = HistogramFitFrame(root, data)#, weights)
     frame.grid()
     root.mainloop()

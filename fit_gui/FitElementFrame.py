@@ -152,27 +152,37 @@ class Bragg(FitElementFrame):
     beta^2 = c3 * E
     '''
     def __init__(self, master, hist_fit_frame):
-        super().__init__(master, hist_fit_frame, ['x0','E0','c1', 'c2', 'c3'], [0,0.001,1,50000,.0001])
+        super().__init__(master, hist_fit_frame, ['x0','E0', 'counts/MeV'], [0,0, 1])
         ttk.Label(self, text='direction').grid(row=self.next_row, column=0)
         self.direction_combobox = ttk.Combobox(self, values=['left', 'right'])
         self.direction_combobox.set('right')
         self.direction_combobox.grid(row=self.next_row, column=1)
         self.direction_combobox.bind("<<ComboboxSelected>>", lambda e: self.hist_fit_frame.update_hist())
         self.next_row += 1
+        # ttk.Label(self, text='counts/MeV').grid(row=self.next_row, column=0)
+        # self.energy_cal_entry = ttk.Entry(self)
+        # self.energy_cal_entry.insert(0,'1e5')
+        # self.energy_cal_entry.bind("<FocusOut>", lambda e: self.hist_fit_frame.update_hist())
+        # self.energy_cal_entry.grid(row=self.next_row, column=1)
+        # self.next_row += 1
+        self.dEdx_table = np.load('p10_alpha_850torr.npy')*800/850#scale to 800 torr
 
     def evaluate(self, xs: np.array, params):
-        x0, E0, c1, c2, c3 = params
+        x0, E0, energy_cal = params
         direction = self.direction_combobox.get()
         if direction == 'right':
             xs_for_int = np.concatenate([[x0], xs[xs>=x0]])
         else:
             xs_for_int = np.flip(np.concatenate([xs[xs<=x0], [x0]]))
-            c1=-c1
+        def dEdx(E):
+            to_return = np.interp(E, self.dEdx_table[:,0], self.dEdx_table[:,1], left=0)
+            if direction == 'right':
+                to_return *= -1
+            return to_return
 
         if len(xs_for_int) == 1:
             return np.zeros(len(xs))
-
-        dEdx = lambda E: -c1*(np.log(c2*c3*E/(1-c3*E))/c3/E - 1)
+    
         Es = np.squeeze(integrate.odeint(lambda E, x: dEdx(E), E0, xs_for_int))
 
         to_return = np.zeros(len(xs))
@@ -181,6 +191,10 @@ class Bragg(FitElementFrame):
         else:
             Es = np.flip(Es)
             to_return[xs<=x0] = dEdx(Es[1:])
+        
+
+        #to_return *= float(self.energy_cal_entry.get())
+        to_return *=energy_cal
         return to_return
         
 class BraggWDiffusion(Bragg):
@@ -189,12 +203,12 @@ class BraggWDiffusion(Bragg):
         self.add_param_entry('sigma', 1)
     
     def evaluate(self, xs, params):
-        x0, E0, c1, c2, c3, sigma = params
+        x0, E0,  energy_cal, sigma= params
         #should consider oversampling if needed
         no_diff = super().evaluate(xs, params[0:-1])
         dx = xs[1] - xs[0]
         sigma_in_bins = sigma / dx
-        return scipy.ndimage.gaussian_filter1d(no_diff, sigma_in_bins, mode='nearest')
+        return scipy.ndimage.gaussian_filter1d(no_diff, sigma_in_bins, mode='constant', cval=0)
 
 class ProtonAlpha(BraggWDiffusion):
     '''
