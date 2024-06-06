@@ -28,16 +28,8 @@ class raw_h5_file:
         self.h5_file = h5py.File(file_path, 'r')
         self.padxy = np.loadtxt(os.path.join(os.path.dirname(__file__), 'padxy.txt'), delimiter=',')
         
-
-        if flat_lookup_csv == None: #figure out COBO configuration from meta data
-            #TODO: it seems that the merger is only writing meta data for the 2 COBO configuraiton
-            #so this doesn't work
-            if  len(self.h5_file['meta']) == 9: #2 COBO configuration
-                self.flat_lookup = np.loadtxt('flatlookup2cobos.csv', delimiter=',', dtype=int)
-            else:
-                self.flat_lookup = np.loadtxt('flatlookup4cobos.csv', delimiter=',', dtype=int)
-        else:
-            self.flat_lookup = np.loadtxt(flat_lookup_csv, delimiter=',', dtype=int)
+        self.flat_lookup_file_path = flat_lookup_csv        
+        self.flat_lookup = np.loadtxt(self.flat_lookup_file_path, delimiter=',', dtype=int)
         
         self.pad_plane = np.genfromtxt(os.path.join(os.path.dirname(__file__),'PadPlane.csv'),delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
         self.pad_to_xy_index = {} #maps pad number to (x_index,y_index)
@@ -90,7 +82,8 @@ class raw_h5_file:
         #                 (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
-        self.apply_background_subtraction = False
+        self.background_subtract_mode = 'none' #none, fixed window, or convolution
+        self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
         self.range_bounds = (0, 100)
@@ -164,7 +157,7 @@ class raw_h5_file:
 
         #Loop over each pad, performing background subtraction and marking the pad in the pad image
         #which will be used for outlier removal.
-        if self.apply_background_subtraction or self.remove_outliers:
+        if self.background_subtract_mode!='none' or self.remove_outliers:
             for line in data:
                 chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
@@ -172,9 +165,8 @@ class raw_h5_file:
                 else:
                     #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                     continue
-                if self.apply_background_subtraction:
-                    line[FIRST_DATA_BIN:] -= np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:
-                                                             FIRST_DATA_BIN + self.num_background_bins[1]])
+                if self.background_subtract_mode!='none':
+                    line[FIRST_DATA_BIN:] -= self.calculate_background(line[FIRST_DATA_BIN:])
                 if self.remove_outliers:
                     x,y = self.pad_to_xy_index[pad]
                     pad_image[x,y]=1
@@ -214,6 +206,22 @@ class raw_h5_file:
         
         return data
 
+    def calculate_background(self, trace):
+        '''
+        Return calculated background for each timebin.
+
+        Trace should only contain data bins
+        '''
+        #apply consnant offset of average value of a pad within a time window
+        if self.background_subtract_mode == 'fixed window':
+            return np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
+        #rolling average to each side of a pad
+        elif self.background_subtract_mode == 'convolution':
+            return np.convolve(trace, self.background_convolution_kernel, mode='same')
+        #in the case of none, just return an array of 0s
+        elif self.background_subtract_mode == 'none':
+            return np.zeros(len(trace))
+        assert False #invalid mode
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''

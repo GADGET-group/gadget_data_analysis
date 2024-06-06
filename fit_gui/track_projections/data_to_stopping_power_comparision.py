@@ -13,7 +13,7 @@ pads = np.load(input_base_path%'pads')
 bins = 30
 counts_per_MeV = 18600
 
-show_error_bars = True
+show_error_bars = False
 
 #typical track is 55 mm (25 pads) long and 6 pads wide, but ~90% energy deposition is contained in 
 #a track just 3 pads wide. Let's assume the typical track is at ~45 degrees. Then ~50 pads contribute meaningfully to the energy resolution. 

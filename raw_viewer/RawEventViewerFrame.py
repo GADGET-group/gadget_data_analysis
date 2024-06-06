@@ -1,6 +1,8 @@
 import os
+import subprocess
 import configparser
 import csv
+import shutil
 
 import tkinter as tk
 from tkinter import ttk
@@ -179,22 +181,27 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_entry_map['background_bin_start']=self.background_start_entry
         self.settings_entry_map['background_bin_stop']=self.background_stop_entry
 
-        get_backgrounds_button = ttk.Button(settings_frame, text='get pad backgrounds', command=self.get_backgrounds)
-        get_backgrounds_button.grid(row = 1, column=0)
-        show_backgrounds_button = ttk.Button(settings_frame, text='show pad backgrounds', command=self.show_backgrounds)
-        show_backgrounds_button.grid(row=1, column=1)
-        self.background_subtract_enable_var = tk.IntVar()
-        background_subtract_check = ttk.Checkbutton(settings_frame, text='background subtraction', variable=self.background_subtract_enable_var, 
-                                                         command=self.check_state_changed)
-        self.settings_checkbutton_map['background_subtraction']=self.background_subtract_enable_var
-        background_subtract_check.grid(row=2, column=0)
-        
+        ttk.Label(settings_frame, text='moving average window radius (exclude, include):').grid(row=1, column=0)
+        self.exclude_width_entry, self.include_width_entry = ttk.Entry(settings_frame), ttk.Entry(settings_frame)
+        self.exclude_width_entry.grid(row=1, column=1)
+        self.include_width_entry.grid(row=1, column=2)
+        self.include_width_entry.insert(0, '40')
+        self.exclude_width_entry.insert(0, '20')
+        self.exclude_width_entry.bind('<FocusOut>', self.entry_changed)
+        self.include_width_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['moving_average_include_width']=self.include_width_entry
+        self.settings_entry_map['moving_average_exclude_width']=self.exclude_width_entry
+
+        self.background_mode_var = tk.StringVar() #traced added later, after all entries are created
+        ttk.OptionMenu(settings_frame, self.background_mode_var, 'none', 'none', 'fixed window', 'convolution').grid(row=2, column=0)
+        self.settings_optionmenu_map['background_mode']=self.background_mode_var
         self.remove_outlier_var = tk.IntVar()
         remove_outliers_check = ttk.Checkbutton(settings_frame, text='remove outlier pads', variable=self.remove_outlier_var, 
                                                          command=self.check_state_changed)
         self.settings_checkbutton_map['remove_outliers']=self.remove_outlier_var
         remove_outliers_check.grid(row=2, column=1)
-
+        self.background_mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        
         ttk.Label(settings_frame, text='zscale (mm/time bin):').grid(row=3,column=0)
         self.zscale_entry = ttk.Entry(settings_frame)
         self.zscale_entry.insert(0, '1.45')
@@ -258,7 +265,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def save_settings_file(self,file_path=None):
         if file_path == None:
-            file_path = tk.filedialog.asksaveasfilename(initialdir='.', title='GUI settings file save path', filetypes=([("gui config", ".gui_ini")]), defaultextension='.gui_ini')
+            file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/gui_configs', title='GUI settings file save path', filetypes=([("gui config", ".gui_ini")]), defaultextension='.gui_ini')
         config = configparser.ConfigParser()
         
         entries_to_save = {}
@@ -281,11 +288,13 @@ class RawEventViewerFrame(ttk.Frame):
 
     def process_run(self):
         directory_path, h5_fname = os.path.split(self.data.file_path)
-        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0]+'_raw_data_export')
+        settings_name = os.path.split(self.settings_file_entry.get())[1]
+        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0]+settings_name)
         assert not os.path.isdir(directory_path) #TODO: make this run # + config file name, or pop up for non-up to date config
         os.mkdir(directory_path)
 
         self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
+        #TODO: save git hash and if up to date
 
         ranges, counts, angles, pads_railed_list,accepted_events = self.data.get_histogram_arrays()
         np.save(os.path.join(directory_path, 'counts.npy'), counts)
@@ -293,10 +302,15 @@ class RawEventViewerFrame(ttk.Frame):
         np.save(os.path.join(directory_path, 'angles.npy'), angles)
         np.save(os.path.join(directory_path, 'event_numbers.npy'), accepted_events)
         with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
+            #TODO: fix this feature so it works with background subtraction turned on
             writer = csv.writer(f)
             writer.writerows(pads_railed_list)
-
-        #TODO: save git hash and if up to date
+        #save git version info and modified files
+        with open(os.path.join(directory_path, 'git_info.txt'), 'w') as f:
+            subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, stdout=f)
+            subprocess.run(['git', 'status'], capture_output=True, stdout=f)
+        #copy channel mapping files
+        shutil.copyfile(self.data.flat_lookup_file_path, directory_path)
 
 
     def show_3d_cloud(self):
@@ -326,16 +340,7 @@ class RawEventViewerFrame(ttk.Frame):
         bins = int(self.bins_entry.get())
         self.data.show_counts_histogram(num_bins=bins, block=False)
 
-    def get_backgrounds(self):
-        #TODO: update to use range
-        background_bins = int(self.background_start_entry.get())
-        self.data.determine_pad_backgrounds(background_bins)
-
-    def show_backgrounds(self):
-        self.data.show_pad_backgrounds()
-
     def check_state_changed(self):
-        self.data.apply_background_subtraction = (self.background_subtract_enable_var.get() == 1)
         self.data.remove_outliers = (self.remove_outlier_var.get() == 1)
 
     def show_rve_plot(self):
@@ -369,6 +374,12 @@ class RawEventViewerFrame(ttk.Frame):
             self.data.pads = 'all'
         else:
             self.data.pads = np.fromstring(pads, sep=',')
+        self.data.background_subtract_mode=self.background_mode_var.get()
+        r_include = int(self.include_width_entry.get())
+        r_exclude = int(self.exclude_width_entry.get())
+        self.data.background_convolution_kernel = np.ones(r_include*2+1)
+        self.data.background_convolution_kernel[r_include-r_exclude:r_include+r_exclude+1] = 0
+        self.data.background_convolution_kernel /= np.sum(self.data.background_convolution_kernel)
 
 
     def project_to_principle_axis(self):

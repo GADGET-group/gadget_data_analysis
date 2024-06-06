@@ -20,7 +20,7 @@ class processed_h5_file(raw_h5_file.raw_h5_file):
                   self.angle_bounds[0], self.angle_bounds[1], 
                     self.ic_bounds[0], self.ic_bounds[1],
                     self.range_bounds[0], self.range_bounds[1],
-                    self.apply_background_subtraction, self.remove_outliers,
+                    self.background_subtract_mode, self.remove_outliers,
                     self.length_counts_threshold, self.ic_counts_threshold,
                     self.veto_threshold
                 )
