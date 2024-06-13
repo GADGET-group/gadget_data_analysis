@@ -12,6 +12,7 @@ from fit_gui.FitFrame import FitFrame
 from skspatial.objects import Line
 
 from raw_viewer.RawEventViewerFrame import RawEventViewerFrame
+from track_fitting.TraceFit3D import TraceFit3D
 
 class IndividualEventFrame(ttk.Frame):
     def __init__(self, parent, run_data):
@@ -53,12 +54,21 @@ class IndividualEventFrame(ttk.Frame):
                    command=self.open_raw_viewer).grid(row=1, column=0)
         trace_frame.pack()
 
+        fit_frame = ttk.LabelFrame(self, text='3D Trace Fit')
+        ttk.Button(fit_frame, text='Open 3D Trace Fit', 
+                   command=self.open_trace_fit).grid(row=1, column=0)
+        fit_frame.pack()
+
     def open_raw_viewer(self):
         new_window = tk.Toplevel(self)
         self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='raw_viewer/flatlookup4cobos.csv')
         self.viewer_frame.pack()
 
-    
+    def open_trace_fit(self):
+        new_window = tk.Toplevel(self)
+        self.fit_frame = TraceFit3D(new_window, data_path = 'track_fitting/H_in_P10.txt')
+        self.fit_frame.pack()
+
 
     def project_trace(self):
         debug = True
@@ -140,7 +150,6 @@ class IndividualEventFrame(ttk.Frame):
 
         event_num = int(self.event_num_entry.get())
         xHit, yHit, zHit, eHit = self.run_data.get_hit_lists(event_num)
-        
         nbrs = NearestNeighbors(radius=radius).fit(np.vstack((xHit, yHit, zHit)).T)
 
         # Find the points within the specified radius

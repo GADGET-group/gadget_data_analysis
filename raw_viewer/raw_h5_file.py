@@ -192,7 +192,9 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        
+        # To save with a delimiter (e.g., comma)
+        np.savetxt('data_comma.txt', data, delimiter=',')
+
         return data
 
 
@@ -237,7 +239,7 @@ class raw_h5_file:
             es = es[es>threshold]
         return xs, ys, ts, es
     
-    def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=True):
+    def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
