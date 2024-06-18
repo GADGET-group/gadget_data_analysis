@@ -1,0 +1,28 @@
+[ttk.Entry]
+length_ic_threshold = 100
+energy_ic_threshold = 100
+view_threshold = 100
+include_cobos = all
+include_asads = all
+include_pads = all
+veto_threshold = 100
+range_min = 0
+range_max = 100
+min_ic = 0
+max_ic = 1e9
+angle_min = 0
+angle_max = 90
+background_bin_start = 0
+background_bin_stop = 200
+zscale = 1.45
+near_peak_window_width = 10
+peak_first_allowed_bin = -inf
+peak_last_allowed_bin = inf
+
+[ttk.OptionMenu]
+peak_mode = all data
+
+[ttk.CheckButton]
+background_subtraction = 0
+remove_outliers = 0
+
