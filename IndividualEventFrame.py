@@ -55,7 +55,7 @@ class IndividualEventFrame(ttk.Frame):
 
     def open_raw_viewer(self):
         new_window = tk.Toplevel(self)
-        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='raw_viewer/flatlookup4cobos.csv')
+        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         self.viewer_frame.pack()
 
     
