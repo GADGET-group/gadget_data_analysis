@@ -8,6 +8,7 @@ from RunSelectFrame import RunSelectFrame
 from EnergySpectrumFrame import EnergySpectrumFrame
 from RvE_Frame import RvE_Frame
 from IndividualEventFrame import IndividualEventFrame
+from Simulations.SimFrame import SimFrame
 
 import matplotlib.pyplot
 
@@ -42,6 +43,9 @@ class GadgetAnalysisGUI(tk.Tk):
         
         self.run_select_frame = RunSelectFrame(self.notebook, self)
         self.notebook.add(self.run_select_frame, text='run')
+        
+        self.sim_frame = SimFrame(self.notebook, self)
+        self.notebook.add(self.sim_frame, text='sim')
 
         #list of tabs that should be updated each time a new run is loaded
         self.run_specific_tabs = []

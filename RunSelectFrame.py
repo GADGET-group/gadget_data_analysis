@@ -90,7 +90,9 @@ class RunSelectFrame(ttk.Frame):
         self.run_data = None
 
     def load_button_clicked(self):
-        self.run_number = int(self.load_run_number_entry.get())
+        self.run_number = self.load_run_number_entry.get()
+        if 's' not in self.run_number:
+            self.run_number = int(self.run_number)
         default_path = GadgetRunH5.get_default_path(self.run_number)
         selected_path = tk.filedialog.askdirectory(initialdir=default_path, title='Select a Directory')
         if selected_path:
@@ -106,6 +108,8 @@ class RunSelectFrame(ttk.Frame):
         eps = int(self.eps_entry.get())
         samps = int(self.min_samples_entry.get())
         poly = int(self.poly_entry.get())
-        run_num = int(self.create_run_number_entry.get())
-
+        run_num = (self.create_run_number_entry.get())
+        if 's' not in run_num:
+            run_num = int(run_num)
+            
         GadgetRunH5.generate_files(run_num, length, ic, points, eps, samps, poly)

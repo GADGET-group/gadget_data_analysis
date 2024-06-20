@@ -323,7 +323,7 @@ class raw_h5_file:
         running_averages = {}
         for event_num in range(first, last+1):
             if mode == 'background':
-                self.h5_file['get']['evt%d_data'%event_num]
+                event_data = self.h5_file['get']['evt%d_data'%event_num]
             elif mode == 'average':
                 event_data = self.get_data(event_num)#
             for line in event_data:

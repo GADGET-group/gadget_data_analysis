@@ -75,8 +75,11 @@ class PrevCutSelectWindow(tk.Toplevel):
 
         with open(cut_indicies_path, "rb") as file:
                 cut_indices_H5list = pickle.load(file)
-
-        str_file = f"/mnt/analysis/e21072/h5test/run_{self.run_data.run_num}.h5"
+        
+        if 's' in self.run_data.run_num:
+            str_file = f"/mnt/analysis/e17023/Adam/simulations/run_{self.run_data.run_num}.h5"
+        else:
+            str_file = f"/mnt/analysis/e21072/h5test/run_{self.run_data.run_num}.h5"
 
         # Open the original h5 file
         with h5py.File(str_file, 'r') as original:

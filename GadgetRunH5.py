@@ -25,12 +25,21 @@ from skspatial.objects import Line
 from raw_viewer.raw_h5_file import raw_h5_file
 
 def run_num_to_str(run_num):
-    run_num = int(run_num)
-    return  ('%4d'%run_num).replace(' ', '0')
+    run_num = str(run_num)
+    if 's' in run_num: # simulation
+        run_num = run_num.replace('s', '')
+        run_num = int(run_num)
+        return  's'+('%4d'%run_num).replace(' ', '0')
+    else:
+        run_num = int(run_num)
+        return  ('%4d'%run_num).replace(' ', '0')
 
 def get_default_path(run_id):    
     run_str = run_num_to_str(run_id)
-    return f"/mnt/analysis/e21072/h5test/run_{run_str}"
+    if 's' in run_str: # simulation
+        return f"/mnt/analysis/e17023/Adam/simulations/run_{run_str}"
+    else:
+        return f"/mnt/analysis/e21072/h5test/run_{run_str}"
 
 class GadgetRunH5:
     def __init__(self, run_num, folder_path):
@@ -51,9 +60,15 @@ class GadgetRunH5:
         self.trace_list = np.load(os.path.join(folder_path, 'trace_list.npy'), allow_pickle=True)
         #
         self.angle_list = np.load(os.path.join(folder_path, 'angle_list.npy'), allow_pickle=True)
-
-        h5_dir = '/mnt/analysis/e21072/h5test/'
-        self.h5_file_path = h5_dir + 'run_' + ('%4d'%run_num).replace(' ', '0') + '.h5'
+        
+        run_num = run_num_to_str(run_num)
+        if 's' in run_num: # simulation
+            h5_dir = '/mnt/analysis/e17023/Adam/simulations/'
+        else:
+            h5_dir = '/mnt/analysis/e21072/h5test/'
+        
+        self.h5_file_path = f"{h5_dir}run_{run_num}.h5"
+        
         #self.h5_file = raw_h5_file(h5_file_path, zscale=1.45) #TODO
 
 
@@ -812,47 +827,33 @@ def generate_files(run_num, length, ic, pads, eps, samps, poly):
 
         return (tot_energy, skipped_events, veto_events, good_events, len_list, trace_list, xHit_list, yHit_list, zHit_list, eHit_list, angle_list)
 
-    
 
     #str_file = f"/mnt/rawdata/e21072/h5/run_{run_num}.h5"
-    str_file = f"/mnt/analysis/e21072/h5test/run_{run_num}.h5"
+    if 's' in run_num:
+        str_file = f"/mnt/analysis/e17023/Adam/simulations/run_{run_num}.h5"
+    else:
+        str_file = f"/mnt/analysis/e21072/h5test/run_{run_num}.h5"
     f = h5py.File(str_file, 'r')
     (tot_energy, skipped_events, veto_events, good_events, len_list, trace_list, xHit_list, yHit_list, zHit_list, eHit_list, angle_list) = main(h5file=f, pads=pads, ic=ic)
 
     # Save Arrays
-    print(f"DIRECTORY: /mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}")
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/tot_energy"
-    np.save(sub_path, tot_energy, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/skipped_events"
-    np.save(sub_path, skipped_events, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/veto_events"
-    np.save(sub_path, veto_events, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/good_events"
-    np.save(sub_path, good_events, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/len_list"
-    np.save(sub_path, len_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/trace_list"
-    np.save(sub_path, trace_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/xHit_list"
-    np.save(sub_path, xHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/yHit_list"
-    np.save(sub_path, yHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/zHit_list"
-    np.save(sub_path, zHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/eHit_list"
-    np.save(sub_path, eHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/angle_list"
-    np.save(sub_path, angle_list, allow_pickle=True)
+    if 's' in run_num:
+        directory_path = f"/mnt/analysis/e17023/Adam/simulations/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}"
+    else:
+        directory_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}"
+    
+    print(f"DIRECTORY: {directory_path}")
+    np.save(f"{directory_path}/tot_energy", tot_energy, allow_pickle=True)
+    np.save(f"{directory_path}/skipped_events", skipped_events, allow_pickle=True)
+    np.save(f"{directory_path}/veto_events", veto_events, allow_pickle=True)
+    np.save(f"{directory_path}/good_events", good_events, allow_pickle=True)
+    np.save(f"{directory_path}/len_list", len_list, allow_pickle=True)
+    np.save(f"{directory_path}/trace_list", trace_list, allow_pickle=True)
+    np.save(f"{directory_path}/xHit_list", xHit_list, allow_pickle=True)
+    np.save(f"{directory_path}/yHit_list", yHit_list, allow_pickle=True)
+    np.save(f"{directory_path}/zHit_list", zHit_list, allow_pickle=True)
+    np.save(f"{directory_path}/eHit_list", eHit_list, allow_pickle=True)
+    np.save(f"{directory_path}/angle_list", angle_list, allow_pickle=True)
 
     #Delete arrays
     del tot_energy
