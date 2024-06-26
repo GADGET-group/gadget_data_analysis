@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import integrate
 from scipy.ndimage import convolve
+import time 
 
 class TraceFit3D(ttk.Frame):
     def __init__(self, parent, data_path):
@@ -64,7 +65,7 @@ class TraceFit3D(ttk.Frame):
 
         # Make distances where stopping_power is to be calculated
         distances = np.linspace(0,100,500)
-
+        times1 = time.time()
         def dEdx(E):
             """
             Differential function to calculate stopping power based on energy.
@@ -78,11 +79,24 @@ class TraceFit3D(ttk.Frame):
         
         # Calculate stopping powers
         calculated_stopping_powers = -dEdx(Es)*100/500
-
+        timef1 = time.time()
+        print("Time for Integrating: ",timef1-times1)
         # Find Points where energy is evaluated
+        times2 = time.time()
         points = self.compute_points(distances)
+        timef2 = time.time()
+        print("Time for Finding Points: ",timef2-times2)
+        times3 = time.time()
+        # energy_map, self.x, self.y, self.z = create_grid(points, calculated_stopping_powers)
         energy_map = self.create_grid(points, calculated_stopping_powers)
+        timef3 = time.time()
+        print("Time for Creating Grid: ",timef3-times3)
+        times4 = time.time()
+        print("energy: ", np.sum(energy_map))
         convolved_energies = self.convolve_with_gaussian(energy_map)
+        print("energy 2: ", np.sum(convolved_energies))
+        timef4 = time.time()
+        print("Time for Convulation: ",timef4-times4)
         self.display_image(convolved_energies)
 
     def compute_points(self, distances):
@@ -92,43 +106,86 @@ class TraceFit3D(ttk.Frame):
         direction_vector = np.round(np.array((np.sin(self.theta) * np.cos(self.phi), np.sin(self.theta) * np.sin(self.phi), np.cos(self.theta))), 6)
         points = np.array([np.array(self.initial_point) + distance * direction_vector for distance in distances])
         return points
-    
+
     def create_grid(self, coords, stopping_powers, grid_resolution=0.5):
         """
         Create a fine grid for the given coordinate range and resolution.
-        grid_resolution (fin mm): Resolution of the grid.
+        grid_resolution (in mm): Resolution of the grid.
         """
         min_coord = np.min(coords)
         max_coord = np.max(coords)
-        self.x = np.arange(min_coord - 10, max_coord + grid_resolution + 10, grid_resolution)
-        self.y = np.arange(min_coord - 10, max_coord + grid_resolution + 10, grid_resolution)
-        self.z = np.arange(min_coord - 10, max_coord + grid_resolution + 10, grid_resolution)
+        padding = 10
+        self.x = np.arange(min_coord - padding, max_coord + grid_resolution + padding, grid_resolution)
+        self.y = np.arange(min_coord - padding, max_coord + grid_resolution + padding, grid_resolution)
+        self.z = np.arange(min_coord - padding, max_coord + grid_resolution + padding, grid_resolution)
         X, Y, Z = np.meshgrid(self.x, self.y, self.z, indexing='ij')
         grid_shape = X.shape
+
+        # Calculate indices
+        indices = ((coords - (min_coord - padding)) / grid_resolution).round().astype(int)
+        
+        # Initialize energy grid
         energy_grid = np.zeros(grid_shape)
-        for point, energy in zip(coords, stopping_powers):
-            # Find the nearest grid coordinates
-            x_idx = int(np.round((point[0] - min_coord + 10) / grid_resolution))
-            y_idx = int(np.round((point[1] - min_coord + 10) / grid_resolution))
-            z_idx = int(np.round((point[2] - min_coord + 10) / grid_resolution))
-            energy_grid[x_idx, y_idx, z_idx] += energy
+        
+        # Accumulate energy values using advanced indexing
+        np.add.at(energy_grid, (indices[:, 0], indices[:, 1], indices[:, 2]), stopping_powers)
 
         return energy_grid
     
     def convolve_with_gaussian(self, energy_grid):
         """
-        Convolve the energy grid with a 3D Gaussian kernel.
+        Convolve the energy grid with a 3D Gaussian kernel with varying sigma based on z position.
         """
-
-        def gaussian_kernel_3d(kernel_size, sigma, sigma_z):
+        def gaussian_kernel_2d(kernel_size, sigma_xy):
+            """Create a 2D Gaussian kernel."""
+            ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
+            xx, yy = np.meshgrid(ax, ax)
+            kernel = np.exp(-(xx**2 + yy**2) / (2 * sigma_xy**2))
+            return kernel / np.sum(kernel)
+        
+        def gaussian_kernel_1d(kernel_size, sigma_z):
+            """Create a 1D Gaussian kernel."""
+            ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
+            kernel = np.exp(-ax**2 / (2 * sigma_z**2))
+            return kernel / np.sum(kernel)
+        
+        def gaussian_kernel_3d(kernel_size, sigma_xy, sigma_z):
             """Create a 3D Gaussian kernel."""
             ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
             xx, yy, zz = np.meshgrid(ax, ax, ax)
-            kernel = np.exp(-((xx**2 + yy**2) / (2 * sigma**2) + zz**2 / (2 * sigma_z**2)))
+            kernel = np.exp(-((xx**2 + yy**2) / (2 * sigma_xy**2) + zz**2 / (2 * sigma_z**2)))
             return kernel / np.sum(kernel)
         
-        kernel = gaussian_kernel_3d(self.kernel_size, self.sigma_xy, self.sigma_z)
-        convolved_grid = convolve(energy_grid, kernel, mode='constant', cval=0)
+        # Determine the sigma values based on z position
+        k_xy = 0.0554 
+        k_z = 0.338
+        z_positions = np.arange(energy_grid.shape[2])
+        sigma_xy_array = np.sqrt(10) * k_xy * np.sqrt(z_positions)
+        sigma_z_array = np.sqrt(10) * k_z * np.sqrt(z_positions)
+        
+        # Ensure sigma values are positive
+        sigma_xy_array = np.clip(sigma_xy_array, 1e-5, None)
+        sigma_z_array = np.clip(sigma_z_array, 1e-5, None)
+
+        # Create an empty array for the convolved grid
+        convolved_grid = np.zeros_like(energy_grid)
+        
+        # Apply the convolution for each z slice
+        kernel_size = self.kernel_size
+        for z in range(energy_grid.shape[2]):
+            sigma_xy = sigma_xy_array[z]
+            sigma_z = sigma_z_array[z]
+            
+            # Create 2D and 1D Gaussian kernels
+            kernel_2d = gaussian_kernel_2d(kernel_size, sigma_xy)
+            kernel_1d = gaussian_kernel_1d(kernel_size, sigma_z)
+            
+            # Convolve in the xy plane
+            convolved_xy = convolve(energy_grid[:, :, z], kernel_2d, mode='constant', cval=0)
+            
+            # Convolve in the z direction
+            convolved_grid[:, :, z] = convolve(convolved_xy, kernel_1d[:, np.newaxis], mode='constant', cval=0)
+
         return convolved_grid
     
     def display_image(self, energy_grid):
@@ -140,7 +197,7 @@ class TraceFit3D(ttk.Frame):
         pad_x = np.arange(-38.5,38.5+2.2,2.2)
         pad_y = np.arange(-38.5,38.5+2.2,2.2)
         pad_z = np.arange(0,512*self.z_scale,self.z_scale)
-
+        times5 = time.time()
         # Get the indices where energy is not zero for more efficient plotting
         non_zero_indices = np.nonzero(energy_grid)
         x_non_zero = self.x[non_zero_indices[0]]
@@ -166,6 +223,9 @@ class TraceFit3D(ttk.Frame):
         pad_y_coords = pad_coords[:, 1]
         pad_z_coords = pad_coords[:, 2]
 
+        timef5 = time.time()
+        print("Time for Final Arrays: ",timef5-times5)
+        times6 = time.time()
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
 
@@ -182,10 +242,13 @@ class TraceFit3D(ttk.Frame):
 
         ax.axes.set_xlim3d(left=-40, right=40) 
         ax.axes.set_ylim3d(bottom=-40, top=40) 
-        ax.axes.set_zlim3d(bottom=0, top=100)
+        ax.axes.set_zlim3d(bottom=0, top=500)
         
         plt.title(f'3D Energy Distribution of {self.initial_energy} MeV proton, θ = {self.theta} rad, φ = {self.phi} rad')
+        timef6 = time.time()
+        print("Time for 3d Plot: ",timef6-times6)
         plt.show()
+        
 
     def load_energies(self, data_path):
         # Initialize lists to store the data
@@ -237,3 +300,23 @@ class TraceFit3D(ttk.Frame):
         path_length_mm = np.array(path_length_mm)
         stopping_power_converted = self.gas_density * (electronic_stopping_MeV_um + nuclear_stopping_MeV_um)/10
         return energy_MeV, stopping_power_converted
+    
+
+
+# def convolve_with_gaussian(self, energy_grid):
+    #     """
+    #     Convolve the energy grid with a 3D Gaussian kernel.
+    #     """
+
+    #     def gaussian_kernel_3d(kernel_size, sigma, sigma_z):
+    #         """Create a 3D Gaussian kernel."""
+    #         ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
+    #         xx, yy, zz = np.meshgrid(ax, ax, ax)
+    #         kernel = np.exp(-((xx**2 + yy**2) / (2 * sigma**2) + zz**2 / (2 * sigma_z**2)))
+    #         return kernel / np.sum(kernel)
+        
+    #     kernel = gaussian_kernel_3d(self.kernel_size, self.sigma_xy, self.sigma_z)
+    #     convolved_grid = convolve(energy_grid, kernel, mode='constant', cval=0)
+    #     return convolved_grid
+
+    
