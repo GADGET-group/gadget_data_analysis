@@ -10,6 +10,8 @@ import tkinter.filedialog
 import tkinter.messagebox
 
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+
 import numpy as np
 from skspatial.objects import Line, Point
 
@@ -34,6 +36,10 @@ class RawEventViewerFrame(ttk.Frame):
                 file_path = tk.filedialog.askopenfilename(initialdir='.', title='Select H5 File', filetypes=[('H5', ".h5")])
             self.data = heritage_h5_file.heritage_h5_file(file_path)
         self.winfo_toplevel().title(file_path)
+
+        #initialize member variables used after a run is procesed
+        self.dzs, self.ranges, self.angles = None, None, None
+        self.max_veto_counts, self.dxys, self.dts, self.counts = None, None, None, None
         
         #objects whose values should be saved in settings file, indexed by settings file variable
         self.settings_entry_map={}
@@ -47,13 +53,10 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Button(settings_frame, text='Browse', command=self.browse_for_settings_file).grid(row=0, column=2)
         ttk.Button(settings_frame, text='Load', command=self.load_settings_file).grid(row=0, column=3)
         ttk.Button(settings_frame, text='Save Config File', command=self.save_settings_file).grid(row=1, column=0, columnspan=3)
-
-        ttk.Label(settings_frame, text='settings file status:').grid(row=2, column=0)
-        self.settings_status_label = ttk.Label(settings_frame,text='no settings file loaded')
-        self.settings_status_label.grid(row=2, column = 1, columnspan=2)
         settings_frame.grid()
 
-        ttk.Button(settings_frame, text='process run', command=self.process_run).grid(row=3, column=0, columnspan=3)
+        ttk.Button(settings_frame, text='process run', command=self.process_run).grid(row=3, column=0)
+        ttk.Button(settings_frame, text='load processed run', command=self.load_processed_run).grid(row=3, column=1)
 
 
         #widget setup in individual_event_Frame
@@ -89,7 +92,8 @@ class RawEventViewerFrame(ttk.Frame):
         show_traces_button = ttk.Button(individual_event_frame, text='pad traces', command=self.show_raw_traces)
         show_traces_button.grid(row=3, column=1)
 
-        ttk.Button(individual_event_frame, text='1D proj on trac axis', command = self.project_to_principle_axis).grid(row=3, column=2)
+        ttk.Button(individual_event_frame, text='trace w baseline', command=self.trace_w_baseline).grid(row=3, column=2)
+        ttk.Button(individual_event_frame, text='1D proj on trac axis', command=self.project_to_principle_axis).grid(row=3, column=3)
         
 
         ttk.Label(individual_event_frame, text='view threshold:').grid(row=4, column=0)
@@ -119,19 +123,19 @@ class RawEventViewerFrame(ttk.Frame):
 
         individual_event_frame.grid()
         
-        count_hist_frame = ttk.LabelFrame(self, text='Counts Histogram')
-        ttk.Label(count_hist_frame, text='# bins:').grid(row=0, column=0)
-        self.bins_entry = ttk.Entry(count_hist_frame)
+        hist_frame = ttk.LabelFrame(self, text='Histograms')
+        ttk.Label(hist_frame, text='# bins:').grid(row=0, column=0)
+        self.bins_entry = ttk.Entry(hist_frame)
         self.bins_entry.insert(0, '100')
         self.bins_entry.grid(row=0, column=1)
-        ttk.Label(count_hist_frame, text='veto pad threshold').grid(row=1, column=0)
-        self.veto_threshold_entry = ttk.Entry(count_hist_frame)
+        ttk.Label(hist_frame, text='veto pad threshold').grid(row=1, column=0)
+        self.veto_threshold_entry = ttk.Entry(hist_frame)
         self.veto_threshold_entry.insert(0,'100')
         self.veto_threshold_entry.grid(row=1, column=1)
         self.veto_threshold_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['veto_threshold']=self.veto_threshold_entry
-        ttk.Label(count_hist_frame,text='range min/max (mm):').grid(row=2, column=0)
-        self.range_min_entry, self.range_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
+        ttk.Label(hist_frame,text='range min/max (mm):').grid(row=2, column=0)
+        self.range_min_entry, self.range_max_entry = ttk.Entry(hist_frame), ttk.Entry(hist_frame)
         self.range_min_entry.grid(row=2, column=1)
         self.range_min_entry.insert(0, '0')
         self.range_min_entry.bind('<FocusOut>', self.entry_changed)
@@ -141,8 +145,8 @@ class RawEventViewerFrame(ttk.Frame):
         self.range_max_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['range_max']=self.range_max_entry
         
-        ttk.Label(count_hist_frame,text='ic min/max:').grid(row=3, column=0)
-        self.ic_min_entry, self.ic_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
+        ttk.Label(hist_frame,text='ic min/max:').grid(row=3, column=0)
+        self.ic_min_entry, self.ic_max_entry = ttk.Entry(hist_frame), ttk.Entry(hist_frame)
         self.ic_min_entry.grid(row=3, column=1)
         self.ic_min_entry.insert(0, '0')
         self.ic_min_entry.bind('<FocusOut>', self.entry_changed)
@@ -152,8 +156,8 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_entry_map['min_ic']=self.ic_min_entry
         self.settings_entry_map['max_ic']=self.ic_max_entry
 
-        ttk.Label(count_hist_frame,text='angle min/max:').grid(row=4, column=0)
-        self.angle_min_entry, self.angle_max_entry = ttk.Entry(count_hist_frame), ttk.Entry(count_hist_frame)
+        ttk.Label(hist_frame,text='angle min/max:').grid(row=4, column=0)
+        self.angle_min_entry, self.angle_max_entry = ttk.Entry(hist_frame), ttk.Entry(hist_frame)
         self.angle_min_entry.grid(row=4, column=1)
         self.angle_min_entry.insert(0, '0')
         self.angle_min_entry.bind('<FocusOut>', self.entry_changed)
@@ -163,11 +167,16 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_entry_map['angle_min']=self.angle_min_entry
         self.settings_entry_map['angle_max']=self.angle_max_entry
 
-        count_hist_button = ttk.Button(count_hist_frame, text='count histogram', command=self.show_count_hist)
-        count_hist_button.grid(row=5, column=0)
-        ttk.Button(count_hist_frame, text='RvE Histogram', command=self.show_rve_plot).grid(row=5, column=1)
-        ttk.Button(count_hist_frame, text='TvE Histogram', command=self.show_tve_plot).grid(row=5, column=2)
-        count_hist_frame.grid()
+
+        ttk.Button(hist_frame, text='find next event', command=self.find_next_processed_event).grid(row=5, column=0)
+        self.axis1_var = tk.StringVar()
+        self.axis2_var = tk.StringVar()
+        ttk.OptionMenu(hist_frame, self.axis1_var, 'adc counts', 'adc counts', 'ranges (mm)', 'timestamps (s)', 'angles (deg)').grid(row=5, column=1)
+        ttk.OptionMenu(hist_frame, self.axis2_var, 'ranges (mm)', 'adc counts', 'ranges (mm)', 'timestamps (s)', 'angles (deg)').grid(row=5, column=2)
+        ttk.Button(hist_frame, text='1D Histogram', command=self.show_1d_hist).grid(row=6, column=0)
+        ttk.Button(hist_frame, text='Fit 1D Histogram', command=self.show_hist_fit_gui).grid(row=6, column=1)
+        ttk.Button(hist_frame, text='2D Histogram', command=self.show_2d_hist).grid(row=6, column=3)
+        hist_frame.grid()
 
         settings_frame = ttk.LabelFrame(self, text='Processing Settings')
         ttk.Label(settings_frame, text='background time bins:').grid(row=0, column=0)
@@ -210,15 +219,9 @@ class RawEventViewerFrame(ttk.Frame):
         self.zscale_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['zscale']=self.zscale_entry
 
-<<<<<<< HEAD
-        self.mode_var = tk.StringVar()
-        self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
-        ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only', 'near peak', 'fft').grid(row=4, column=0)
-=======
         self.mode_var = tk.StringVar() #traced added later, after all entries are created
         ttk.OptionMenu(settings_frame, self.mode_var, 'all data', 'all data', 'peak only', 'near peak').grid(row=4, column=0)
         self.settings_optionmenu_map['peak_mode']=self.mode_var
->>>>>>> 2d02e1c3ce333af551babb4d4dbe5ff8e12dcbe9
         ttk.Label(settings_frame, text='near peak window size:').grid(row=5, column=0)
         self.near_peak_window_entry = ttk.Entry(settings_frame)
         self.near_peak_window_entry.insert(0,'10')
@@ -295,30 +298,65 @@ class RawEventViewerFrame(ttk.Frame):
 
     def process_run(self):
         directory_path, h5_fname = os.path.split(self.data.file_path)
-        settings_name = os.path.split(self.settings_file_entry.get())[1]
+        #make directory for processed data from this run, if it doesn't already exist
+        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0])
+        if not os.path.isdir(directory_path):
+            os.mkdir(directory_path)
+        #make directory for this export
+        settings_name = os.path.splitext(os.path.basename(self.settings_file_entry.get()))[0]
         directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0]+settings_name)
-        assert not os.path.isdir(directory_path) #TODO: make this run # + config file name, or pop up for non-up to date config
-        os.mkdir(directory_path)
+        if  os.path.isdir(directory_path):
+            if not tkinter.messagebox.askyesno(title='overwrite files?', message='Export already exists, overwrite files?'):
+                return
+        else:
+            os.mkdir(directory_path)
 
         self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
-        #TODO: save git hash and if up to date
-
-        ranges, counts, angles, pads_railed_list,accepted_events = self.data.get_histogram_arrays()
-        np.save(os.path.join(directory_path, 'counts.npy'), counts)
-        np.save(os.path.join(directory_path, 'ranges.npy'), ranges)
-        np.save(os.path.join(directory_path, 'angles.npy'), angles)
-        np.save(os.path.join(directory_path, 'event_numbers.npy'), accepted_events)
-        with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
-            #TODO: fix this feature so it works with background subtraction turned on
-            writer = csv.writer(f)
-            writer.writerows(pads_railed_list)
         #save git version info and modified files
         with open(os.path.join(directory_path, 'git_info.txt'), 'w') as f:
-            subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, stdout=f)
-            subprocess.run(['git', 'status'], capture_output=True, stdout=f)
+            subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], stdout=f)
+            subprocess.run(['git', 'status'], stdout=f)
+            subprocess.run(['git', 'diff'], stdout=f)
         #copy channel mapping files
-        shutil.copyfile(self.data.flat_lookup_file_path, directory_path)
-
+        shutil.copy(self.data.flat_lookup_file_path, directory_path)
+        #save event timestamps array
+        self.timestamps = self.data.get_timestamps_array()
+        np.save(os.path.join(directory_path, 'timestamps.npy'), self.timestamps)
+        #save all the other properties
+        max_veto_counts, dxy, dz, counts, angles, pads_railed_list = self.data.get_histogram_arrays()
+        np.save(os.path.join(directory_path, 'counts.npy'), counts)
+        np.save(os.path.join(directory_path, 'dxy.npy'), dxy)
+        np.save(os.path.join(directory_path, 'dt.npy'), dz/self.data.zscale)
+        np.save(os.path.join(directory_path, 'angles.npy'), angles)
+        np.save(os.path.join(directory_path, 'veto.npy'), max_veto_counts)
+        with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
+            #TODO: fix railed pads feature so it works with background subtraction turned on
+            writer = csv.writer(f)
+            writer.writerows(pads_railed_list)
+        self.max_veto_counts, self.dxys, self.dts, self.counts = max_veto_counts, dxy, dz/self.data.zscale, counts
+        #do zscale dependent calcuations of range and angle
+        self.entry_changed(None)
+        
+    def load_processed_run(self):
+        '''
+        Load exported data, and update GUI to match the settings used to export the given file.
+        '''
+        #open file dialog in export for this run, and find which export should be opened
+        directory_path = os.path.splitext(self.data.file_path)[0]
+        directory_path = tk.filedialog.askdirectory (initialdir=directory_path, title='Select processed run to open')
+        #load GUI settings to from export
+        self.settings_file_entry.delete(0, tk.END)
+        settings_dir = os.path.join(directory_path, 'config.gui_ini')
+        self.settings_file_entry.insert(0, settings_dir)
+        self.load_settings_file()
+        #load histogram arrays
+        self.counts = np.load(os.path.join(directory_path, 'counts.npy'))
+        self.dxys = np.load(os.path.join(directory_path, 'dxy.npy'))
+        self.dts = np.load(os.path.join(directory_path, 'dt.npy'))
+        self.max_veto_counts = np.load(os.path.join(directory_path, 'veto.npy'))
+        self.timestamps = np.load(os.path.join(directory_path, 'timestamps.npy'))
+        #do zscale dependent calcuations of range and angle
+        self.entry_changed(None)
 
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
@@ -327,13 +365,25 @@ class RawEventViewerFrame(ttk.Frame):
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
-        veto, length, energy, angle, pads_railed = self.data.process_event(event_number)
-        while veto:
+        while self.should_veto(event_number):
             event_number += 1
-            veto, length, energy, angle, pads_railed = self.data.process_event(event_number)
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
         self.show_3d_cloud()
+
+    def should_veto(self, event_num):
+        max_veto_counts, dxy, dz, energy, angle, pads_railed = self.data.process_event(event_num)
+        length = np.sqrt(dxy**2 + dz**2)
+        if np.degrees(angle) > float(self.angle_max_entry.get()) or np.degrees(angle) < float(self.angle_min_entry.get()):
+            return True
+        if length < float(self.range_min_entry.get()) or length > float(self.range_max_entry.get()):
+            return True
+        if energy < float(self.ic_min_entry.get()) or energy > float(self.ic_max_entry.get()):
+            return True
+        if max_veto_counts >= float(self.veto_threshold_entry.get()):
+            return True
+        return False
+
 
     def show_raw_traces(self):
         event_number = int(self.event_number_entry.get())
@@ -343,31 +393,80 @@ class RawEventViewerFrame(ttk.Frame):
         event_number = int(self.event_number_entry.get())
         self.data.show_2d_projection(event_number, False)
     
-    def show_count_hist(self):
-        bins = int(self.bins_entry.get())
-        self.data.show_counts_histogram(num_bins=bins, block=False)
+    def get_processed_event_mask(self):
+        '''
+        Returns a mask that can be used to select events in the processed data set
+        '''
+        veto_maxs = self.max_veto_counts
+
+        #return veto_maxs < float(self.veto_threshold_entry.get())
+        return np.logical_and.reduce((veto_maxs < float(self.veto_threshold_entry.get()),
+                                      self.angles < float(self.angle_max_entry.get()),
+                                      self.angles > float(self.angle_min_entry.get()),
+                                      self.ranges > float(self.range_min_entry.get()),
+                                      self.ranges < float(self.range_max_entry.get()),
+                                      self.counts < float(self.ic_max_entry.get()),
+                                      self.counts > float(self.ic_min_entry.get())
+                                    ))
 
     def check_state_changed(self):
         self.data.remove_outliers = (self.remove_outlier_var.get() == 1)
 
-    def show_rve_plot(self):
-        bins = int(self.bins_entry.get())
-        self.data.show_rve_histogram(num_e_bins=bins, num_range_bins=bins, block=False)
+    def get_hist_data_from_name(self, name):
+        if name == 'adc counts':
+            return self.counts
+        if name == 'ranges (mm)':
+            return self.ranges
+        if name == 'timestamps (s)':
+            return self.timestamps
+        if name == 'angles (deg)':
+            return self.angles
+    
+    def find_next_processed_event(self):
+        plt.close()
+        event_number = int(self.event_number_entry.get())
+        events_to_find = self.get_processed_event_mask()
+        event_number += np.where(events_to_find[event_number+1:])[0][0]+1
+        self.event_number_entry.delete(0, tk.END)
+        self.event_number_entry.insert(0, event_number)
+        self.show_3d_cloud()
 
-    def show_tve_plot(self):
+    def show_1d_hist(self):
+        xlabel = self.axis1_var.get()
+        mask = self.get_processed_event_mask()
+        xdata = self.get_hist_data_from_name(xlabel)[mask]
+        num_bins = int(self.bins_entry.get())
+        plt.figure()
+        plt.hist(xdata, bins=num_bins)
+        plt.xlabel(xlabel)
+        plt.show(block=False)
+
+    def show_2d_hist(self):
         bins = int(self.bins_entry.get())
-        self.data.show_tve_histogram(num_e_bins=bins, num_time_bins=bins, block=False)
+        xlabel = self.axis1_var.get()
+        ylabel = self.axis2_var.get()
+        plt.figure()
+        mask = self.get_processed_event_mask()
+        xdata = self.get_hist_data_from_name(xlabel)[mask]
+        ydata = self.get_hist_data_from_name(ylabel)[mask]
+        plt.hist2d(xdata, ydata, bins=(bins, bins), norm=colors.LogNorm())
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.colorbar()
+        plt.show(block=False)
+
+    def show_hist_fit_gui(self):
+        xlabel = self.axis1_var.get()
+        mask = self.get_processed_event_mask()
+        xdata = self.get_hist_data_from_name(xlabel)[mask]
+        new_window = tk.Toplevel()
+        HistogramFitFrame(new_window, data=xdata).pack()
 
     def entry_changed(self, event):
-        self.data.zscale = float(self.zscale_entry.get())
         self.data.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
-        self.data.ic_bounds = (float(self.ic_min_entry.get()), float(self.ic_max_entry.get()))
-        self.data.range_bounds = (float(self.range_min_entry.get()), float(self.range_max_entry.get()))
-        self.data.angle_bounds = (np.radians(float(self.angle_min_entry.get())), np.radians(float(self.angle_max_entry.get())))
         self.data.length_counts_threshold = float(self.length_threshold_entry.get())
         self.data.ic_counts_threshold = float(self.energy_threshold_entry.get())
-        self.data.veto_threshold = float(self.veto_threshold_entry.get())
-        self.data.mode = self.mode_var.get()
+        self.data.data_select_mode = self.mode_var.get()
         self.data.near_peak_window_width = int(self.near_peak_window_entry.get())
         self.data.require_peak_within=(float(self.peak_first_allowed_bin_entry.get()), float(self.peak_last_allowed_bin_entry.get()))
         asads = self.asads_entry.get()
@@ -391,6 +490,16 @@ class RawEventViewerFrame(ttk.Frame):
         self.data.background_convolution_kernel = np.ones(r_include*2+1)
         self.data.background_convolution_kernel[r_include-r_exclude:r_include+r_exclude+1] = 0
         self.data.background_convolution_kernel /= np.sum(self.data.background_convolution_kernel)
+
+        #update zscale, and recalculate range and angles with new z_scale, if it is different than before
+        zscale_old = self.data.zscale
+        self.data.zscale = float(self.zscale_entry.get())
+        if type(self.dts) != type(None):
+            if  zscale_old != self.data.zscale or type(self.dzs) == type(None):
+                self.dzs = self.dts*self.data.zscale
+                self.ranges = np.sqrt(self.dzs*self.dzs + self.dxys*self.dxys)
+                with np.errstate(divide='ignore',invalid='ignore'):#we expect some divide by zeros here
+                    self.angles =  np.degrees(np.arctan(self.dxys/self.dzs))
 
 
     def project_to_principle_axis(self):
@@ -477,14 +586,7 @@ class RawEventViewerFrame(ttk.Frame):
         new_window = tk.Toplevel()
         HistogramFitFrame(new_window, data=dist, weights=es).pack()
 
-
-    def get_track_info(self):
-        event_number = int(self.event_number_entry.get())
-        return self.data.process_event(event_num=event_number)
-        
-    def show_track_info(self):
-        veto, length, energy = self.get_track_info()
-        tk.messagebox.showinfo(message='length = %f mm, energy=%E, veto=%d'%(length, energy, veto))
-
-
+    def trace_w_baseline(self):
+        event_num = int(self.event_number_entry.get())
+        self.data.show_traces_w_baseline_estimate(event_num, block=False)
 

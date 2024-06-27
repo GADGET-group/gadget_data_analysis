@@ -50,7 +50,7 @@ class HistogramFitFrame(ttk.Frame):
 
         top_frame = ttk.Frame(self)
         top_frame.grid(row=0, column=3)
-        values=['Gaussian', 'Linear', 'Bragg', 'Bragg w/ Diffusion']
+        values=['Gaussian', 'Linear', 'Bragg', 'Bragg w/ Diffusion', 'Exponential']
         self.add_element_combo = ttk.Combobox(top_frame, 
                                               values=values)
         self.add_element_combo.current(0)
@@ -99,6 +99,9 @@ class HistogramFitFrame(ttk.Frame):
             to_add = FitElementFrame.Bragg(self.elements_frame, self)
         elif self.add_element_combo.get() == 'Bragg w/ Diffusion':
             to_add = FitElementFrame.BraggWDiffusion(self.elements_frame, self)
+        elif self.add_element_combo.get() == 'Exponential':
+            to_add = FitElementFrame.Exponential(self.elements_frame, self)
+        
         self.elements.append(to_add)
         to_add.pack(side=tk.TOP)
         self.update_hist()
@@ -161,10 +164,10 @@ if __name__ == '__main__':
     #file_path = tk.filedialog.askopenfilename()
     #weights = np.load(file_path)
 
-    include_all_data = True
+    include_all_data = False
     print('total events in file = %d'%len(data))
     if not include_all_data:
-        min_val, max_val = 115e3,150e3
+        min_val, max_val = 6.5e5,9.5e5
         mask = np.logical_and(data>min_val, data<max_val)
         data = data[mask]
         #weights = weights[mask]

@@ -142,6 +142,18 @@ class Linear(FitElementFrame):
     def evaluate(self, xs, params):
         m, b = params
         return m*xs + b
+    
+class Exponential(FitElementFrame):
+    '''
+    A*exp((x-x0)/tau)
+    '''
+    def __init__(self, master, hist_fit_frame):
+        super().__init__(master, hist_fit_frame, ['A', 'x_0', 'tau'], [0,0, 1])
+    
+    def evaluate(self, xs, params):
+        A, x0, tau = params
+        return A*np.exp((xs-x0)/tau)
+
 
 class Bragg(FitElementFrame):
     '''

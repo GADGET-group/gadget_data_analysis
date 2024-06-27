@@ -87,20 +87,16 @@ class raw_h5_file:
         self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
-        self.range_bounds = (0, 100)
-        self.ic_bounds = (0, 1e6)
-        self.angle_bounds = None #min/max angles in radians to use when calculating veto conditions
         self.length_counts_threshold = 300 #threshold to use when calculating range
         self.ic_counts_threshold = 100 #threshold to use when calculating energy
-        self.veto_threshold = 100 #veto events for which any veto pad exceeds this value at some point
         #allowed modes = 'all data', 'peak only', or 'near peak'
         #all data mode will make use of the entire trace from each pad
         #'peak only' will make use of only the max value the trace reached on each pad
         #'near peak' will only use data within some window of the peak of each trace
-        self.mode = 'all data' 
+        self.data_select_mode = 'all data' 
         self.near_peak_window_width = 100 #+/- time bins to include
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
-        self.include_counts_on_veto_pads = False
+        self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
         #cobo and asad selction. Can be "all" or a list of ints
         self.asads='all'
@@ -120,6 +116,24 @@ class raw_h5_file:
         '''
         xy = tuple(np.round(xy, 1))
         return self.xy_to_chnls[xy]
+
+    def get_timestamp(self, event_number):
+        '''
+        Returns timestamp in seconds.
+        '''
+        #timestamps are stored in units of 10ns
+        return self.h5_file['get']['evt%d_header'%event_number][1]/1e8 
+
+    def get_timestamps_array(self):
+        '''
+        Returns an array with the timestamps of each event, in seconds
+        '''
+        first, last = self.get_event_num_bounds()
+        num_events = last - first + 1
+        to_return = np.zeros(num_events)
+        for i, evt in tqdm.tqdm(enumerate(range(first, last+1))):
+            to_return[i] = self.get_timestamp(evt)
+        return to_return
 
     def get_data(self, event_number):
         '''
@@ -188,13 +202,13 @@ class raw_h5_file:
                     new_data.append(line)
             data = np.array(new_data)
         
-        if self.mode == 'peak only': #zero everything but the peak bin
+        if self.data_select_mode == 'peak only': #zero everything but the peak bin
             for line in data:
                 peak_index = np.argmax(line[FIRST_DATA_BIN:])
                 line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index] = 0
                 if peak_index < len(line[FIRST_DATA_BIN:]):
                     line[FIRST_DATA_BIN+peak_index+1:] = 0
-        elif self.mode == 'near peak': #zero everything outside the window
+        elif self.data_select_mode == 'near peak': #zero everything outside the window
             for line in data:
                 peak_index = np.argmax(line[FIRST_DATA_BIN:])
                 if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
@@ -211,13 +225,6 @@ class raw_h5_file:
         
         return data
 
-<<<<<<< HEAD
-    def get_timestamp(self, event_number):
-        time = self.h5_file['get']['evt%d_header'%event_number][1]
-        time = np.array(time, copy=True, dtype=float)
-        
-        return time
-=======
     def calculate_background(self, trace):
         '''
         Return calculated background for each timebin.
@@ -234,7 +241,6 @@ class raw_h5_file:
         elif self.background_subtract_mode == 'none':
             return np.zeros(len(trace))
         assert False #invalid mode
->>>>>>> 2d02e1c3ce333af551babb4d4dbe5ff8e12dcbe9
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''
@@ -324,7 +330,7 @@ class raw_h5_file:
         '''
         xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
         if len(xs) == 0:
-            return 0, 0
+            return 0, 0, 0
         points = np.vstack((xs, ys, zs)).T
         #print(points)
         #find max distance using this algorithm
@@ -346,7 +352,7 @@ class raw_h5_file:
             angle = np.abs(np.arctan(np.sqrt(dr[0]**2 + dr[1]**2)/dr[2]))
         else:
             angle = np.radians(90)
-        return dist, angle
+        return np.sqrt(dr[0]**2 + dr[1]**2), dr[2], angle
 
     
     def determine_pad_backgrounds(self, num_background_bins=200, mode='background'):
@@ -406,85 +412,40 @@ class raw_h5_file:
             self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
     
     def get_histogram_arrays(self):
-        range_hist = []
-        counts_hist = []
-        angle_hist = []
-        pads_railed_list = []
-        accepted_events = []
-        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):#TODO: is this missing the last event in the run?
-            should_veto, length, energy, angle, pads_railed = self.process_event(i)
-            if not should_veto:
-                range_hist.append(length)
-                counts_hist.append(energy)
-                angle_hist.append(angle)
-                pads_railed_list.append(pads_railed)
-                accepted_events.append(i)
+        max_veto_counts_list, pads_railed_list, angle_hist, counts_hist, dxy_hist, dz_hist = [], [], [], [], [], []
+        first, last = self.get_event_num_bounds()
+        for i in tqdm.tqdm(range(first, last+1)):
+            max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(i)
+            dxy_hist.append(dxy)
+            dz_hist.append(dz)
+            counts_hist.append(energy)
+            angle_hist.append(angle)
+            pads_railed_list.append(pads_railed)
+            max_veto_counts_list.append(max_veto_counts)
 
-        return np.array(range_hist), np.array(counts_hist), np.array(angle_hist), pads_railed_list, accepted_events
-
-    def get_timestamp_array(self):
-        timestamps = []
-        print('Getting timestamps:')
-        for i in tqdm.tqdm(range(*self.get_event_num_bounds())):#TODO: is this missing the last event in the run?
-            should_veto, length, energy, angle = self.process_event(i)
-            time = self.get_timestamp(i)
-            if not should_veto:
-                timestamps.append(time)
-
-        return np.array(timestamps)
+        return np.array(max_veto_counts_list), np.array(dxy_hist), np.array(dz_hist), np.array(counts_hist), np.array(angle_hist), pads_railed_list
 
     def process_event(self, event_num):
         '''
-        Returns: should veto, range, energy, angle, pads_railed
+        Returns: max veto counts, dxy, dz, energy, angle, pads_railed
+        max veto counts is max counts in any single time bin on a single veto pad
+        dxy is the track length in the pad plane, dz is the other component of track length
         '''
         should_veto=False
         counts = 0
         pads_railed = []
+        max_veto_pad_counts = -np.inf
         for pad, trace in zip(*self.get_pad_traces(event_num)):
+            trace_max = np.max(trace)
             if pad in VETO_PADS:
-                if np.any(trace>self.veto_threshold):
-                    should_veto = True
+                if  trace_max > max_veto_pad_counts:
+                    max_veto_pad_counts = trace_max
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
-            if np.max(trace) >= 4095:
+            if trace_max >= 4095:
                 pads_railed.append(pad)
-        length, angle = self.get_track_length_angle(event_num)
-        if self.range_bounds != None:
-            if length > self.range_bounds[1] or length < self.range_bounds[0]:
-                should_veto = True
-        if self.ic_bounds != None:
-            if counts < self.ic_bounds[0] or counts > self.ic_bounds[1]:
-                should_veto = True
-        if self.angle_bounds != None:
-            if angle < self.angle_bounds[0] or angle > self.angle_bounds[1]:
-                should_veto = True
-        return should_veto, length, counts, angle, pads_railed
-
-    def show_counts_histogram(self, num_bins, fig_name=None, block=True):
-        ranges, counts, angles, pads_railed_list, accepted_events_list = self.get_histogram_arrays()
-        plt.figure(fig_name)
-        plt.hist(counts, bins=num_bins)
-        plt.show(block=block)
-
-    def show_rve_histogram(self, num_e_bins, num_range_bins, fig_name=None, block=True):
-        ranges, counts, angles, pads_railed_list,accepted_events_list = self.get_histogram_arrays()
-
-        #TODO: make generic, these are P10 values
-        calib_point_1 = (0.806, 156745)
-        calib_point_2 = (1.679, 320842)
-        energy_1, channel_1 = calib_point_1
-        energy_2, channel_2 = calib_point_2
-        energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
-        energy_offset = energy_1 - energy_scale_factor * channel_1
-        counts = energy_scale_factor*counts + energy_offset
-
-        plt.figure(fig_name)
-        plt.hist2d(counts, ranges, 
-                   bins=(num_e_bins, num_range_bins), norm=colors.LogNorm())
-        plt.xlabel('energy (MeV)')
-        plt.ylabel('range (mm)')
-        plt.colorbar()
-        plt.show(block=block)
+        dxy, dz, angle = self.get_track_length_angle(event_num)
+        return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
 
     def show_tve_histogram(self, num_e_bins, num_time_bins, fig_name=None, block=True):
         ranges, counts, angles = self.get_histogram_arrays()
@@ -573,10 +534,11 @@ class raw_h5_file:
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
-        should_veto, length, energy, angle, pads_railed = self.process_event(event_num)
-        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n veto=%d\n # pads railed=%d'%(event_num, energy, 
+        max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(event_num)
+        length = np.sqrt(dxy**2 + dz**2)
+        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
                                                                                                energy*energy_scale_factor + energy_offset, length,
-                                                                                               np.degrees(angle), should_veto, len(pads_railed)))
+                                                                                               np.degrees(angle), len(pads_railed)))
         plt.show(block=block)
     
     def show_2d_projection(self, event_number, block=True, fig_name=None):
@@ -596,7 +558,8 @@ class raw_h5_file:
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        should_veto, length, energy, angle, pads_railed_list = self.process_event(event_number)
+        should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
+        length = np.sqrt(dxy**2 + dz**2)
         plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
         plt.subplot(2,1,1)
         plt.imshow(image, norm=colors.LogNorm())
@@ -605,65 +568,31 @@ class raw_h5_file:
         plt.plot(trace)
         plt.show(block=block)
 
-        
-# @njit
-def preprocess_traces(traces_with_pad: np.ndarray, baseline_window_scale: float) -> np.ndarray:
-    '''JIT-ed Method for pre-cleaning the trace data in bulk before doing trace analysis
-
-    These methods are more suited to operating on the entire dataset rather than on a trace by trace basis
-    It includes
-
-    - Removal of edge effects in traces (first and last time buckets can be noisy)
-    - Baseline removal via fourier transform method (see J. Bradt thesis, pytpc library)
-
-    Parameters
-    ----------
-    traces: ndarray
-        A (n, 512) matrix where n is the number of traces and each row corresponds to a trace. This should be a copied
-        array, not a reference to an array in an hdf file
-    baseline_window_scale: float
-        The scale of the baseline filter used to perform a moving average over the baseline
-
-    Returns
-    -------
-    ndarray
-        A new (n, 512) matrix which contains the traces with their baselines removed and edges smoothed
-    '''
-    # Smooth out the edges of the traces, and remove pad information
-    traces = traces_with_pad[:, 5:]
-    traces[:, 0] = traces[:, 1]
-    traces[:, -1] = traces[:, -2]
-    # Remove peaks from baselines and replace with average
-    bases: np.ndarray = traces.copy()
-    for row in bases:
-        mean = np.mean(row)
-        sigma = np.std(row)
-        mask = row - mean > sigma * 1.5
-        row[mask] = np.mean(row[~mask])
-
-    # Create the filter
-    window = np.arange(-256.0, 256.0, 1.0)
-    fil = np.fft.ifftshift(np.sinc(window / baseline_window_scale))
-    transformed = np.fft.fft2(bases, axes=(1,))
-    result = np.real(
-        np.fft.ifft2(transformed * fil, axes=(1,))
-    )  # Apply the filter -> multiply in Fourier = convolve in normal
-    
-    traces_with_pad[:, 5:] = traces - result
-
-    return traces_with_pad
-
-'''
-import h5py
-file = h5py.File('/mnt/analysis/e21072/gastest_h5_files/run_0032.h5', 'r')
-a=file['get']['evt3057_data']
-
-import raw_h5_file
-from importlib import reload
-reload(raw_h5_file)
-file = raw_h5_file.raw_h5_file('/mnt/analysis/e21072/gastest_h5_files/run_0037.h5')
-file.remove_outliers=True
-file.get_data(553)
-'''
-
-
+    def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
+        '''
+        plots traces without background subtraction, with backgrounds shown as ... lines
+        '''
+        plt.figure(fig_name)
+        plt.clf()
+        old_background_mode = self.background_subtract_mode
+        self.background_subtract_mode = 'none' #will set back after drawing traces
+        old_mode = self.data_select_mode
+        self.data_select_mode = 'all data'
+        pads, pad_data = self.get_pad_traces(event_num)
+        for pad, data in zip(pads, pad_data):
+            r = pad/1024*.8
+            g = (pad%512)/512*.8
+            b = (pad%256)/256*.8
+            if pad in VETO_PADS:
+                plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
+            else:
+                plt.plot(data, color=(r,g,b), label='%d'%pad)
+        self.background_subtract_mode = old_background_mode
+        for pad, data in zip(pads, pad_data):
+            r = pad/1024*.8
+            g = (pad%512)/512*.8
+            b = (pad%256)/256*.8
+            plt.plot(self.calculate_background(data), '.', color=(r,g,b), label='%d baseline'%pad)
+        self.data_select_mode = old_mode
+        plt.legend(loc='upper right')
+        plt.show(block=block)
