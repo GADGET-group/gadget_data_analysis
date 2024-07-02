@@ -3,14 +3,13 @@ from tkinter import ttk
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import integrate
-from scipy.ndimage import convolve
+from scipy.signal import convolve
 import time 
 
 class TraceFit3D(ttk.Frame):
-    def __init__(self, parent, data_path):
+    def __init__(self, parent):
         super().__init__(parent)
         self.gas_density = 1.56 #mg/cm^3
-        self.energies, self.stopping_powers = self.load_energies(data_path) #MeV, MeV/mm
         self.z_scale = 1.74
         self.create_widgets()
 
@@ -36,9 +35,19 @@ class TraceFit3D(ttk.Frame):
             
             self.entries[var_name] = entry
         
+        # Add a combobox for selecting particle type
+        particle_label = ttk.Label(self, text="Particle Type")
+        particle_label.grid(row=len(parameters), column=0, padx=10, pady=5, sticky=tk.W)
+        
+        self.particle_type = tk.StringVar()
+        self.particle_combobox = ttk.Combobox(self, textvariable=self.particle_type, values=["Proton", "Alpha"])
+        self.particle_combobox.grid(row=len(parameters), column=1, padx=10, pady=5, sticky=tk.W)
+        self.particle_combobox.current(0)  # Set default to "Proton"
+        print(self.particle_type)
+        
         # Create a button to plot the data
         self.plot_button = ttk.Button(self, text="Plot", command=self.plot_data)
-        self.plot_button.grid(row=len(parameters), columnspan=2, pady=10)
+        self.plot_button.grid(row=len(parameters) + 1, columnspan=2, pady=10)
 
     def load_parameters(self):
         try:
@@ -56,12 +65,17 @@ class TraceFit3D(ttk.Frame):
             print("Please enter valid numbers for all parameters.")
 
     def plot_data(self):
-
+        self.particle = self.particle_type.get()
         # Load Prameters for the Plot
+        if self.particle == "Proton":  
+            self.data_path = 'track_fitting/H_in_P10.txt'
+        elif self.particle == "Alpha":
+            self.data_path = 'track_fitting/He_in_P10.txt'
+        self.energies, self.stopping_powers = self.load_energies() #MeV, MeV/mm
         self.load_parameters()
         self.sigma_xy = 2
         self.sigma_z = 2
-        self.kernel_size = 6
+        self.kernel_size = 31
 
         # Make distances where stopping_power is to be calculated
         distances = np.linspace(0,100,500)
@@ -94,7 +108,7 @@ class TraceFit3D(ttk.Frame):
         times4 = time.time()
         print("energy: ", np.sum(energy_map))
         convolved_energies = self.convolve_with_gaussian(energy_map)
-        print("energy 2: ", np.sum(convolved_energies))
+        print("energy 2: ", np.nansum(convolved_energies))
         timef4 = time.time()
         print("Time for Convulation: ",timef4-times4)
         self.display_image(convolved_energies)
@@ -106,27 +120,32 @@ class TraceFit3D(ttk.Frame):
         direction_vector = np.round(np.array((np.sin(self.theta) * np.cos(self.phi), np.sin(self.theta) * np.sin(self.phi), np.cos(self.theta))), 6)
         points = np.array([np.array(self.initial_point) + distance * direction_vector for distance in distances])
         return points
-
+    
     def create_grid(self, coords, stopping_powers, grid_resolution=0.5):
         """
         Create a fine grid for the given coordinate range and resolution.
         grid_resolution (in mm): Resolution of the grid.
         """
-        min_coord = np.min(coords)
-        max_coord = np.max(coords)
-        padding = 10
-        self.x = np.arange(min_coord - padding, max_coord + grid_resolution + padding, grid_resolution)
-        self.y = np.arange(min_coord - padding, max_coord + grid_resolution + padding, grid_resolution)
-        self.z = np.arange(min_coord - padding, max_coord + grid_resolution + padding, grid_resolution)
+        padding = 15
+
+        # Find min and max for each dimension
+        min_x, min_y, min_z = np.min(coords, axis=0) - padding
+        max_x, max_y, max_z = np.max(coords, axis=0) + padding
+
+        # Create ranges for each dimension with padding
+        self.x = np.arange(min_x, max_x + grid_resolution, grid_resolution)
+        self.y = np.arange(min_y, max_y + grid_resolution, grid_resolution)
+        self.z = np.arange(min_z, max_z + grid_resolution, grid_resolution)
+        print(self.x.shape, self.y.shape, self.z.shape)
+        # Create meshgrid
         X, Y, Z = np.meshgrid(self.x, self.y, self.z, indexing='ij')
         grid_shape = X.shape
-
         # Calculate indices
-        indices = ((coords - (min_coord - padding)) / grid_resolution).round().astype(int)
-        
+        indices = ((coords - [min_x, min_y, min_z]) / grid_resolution).round().astype(int)
+
         # Initialize energy grid
         energy_grid = np.zeros(grid_shape)
-        
+
         # Accumulate energy values using advanced indexing
         np.add.at(energy_grid, (indices[:, 0], indices[:, 1], indices[:, 2]), stopping_powers)
 
@@ -158,7 +177,7 @@ class TraceFit3D(ttk.Frame):
         
         # Determine the sigma values based on z position
         k_xy = 0.0554 
-        k_z = 0.338
+        k_z = 0.0338
         z_positions = np.arange(energy_grid.shape[2])
         sigma_xy_array = np.sqrt(10) * k_xy * np.sqrt(z_positions)
         sigma_z_array = np.sqrt(10) * k_z * np.sqrt(z_positions)
@@ -167,26 +186,39 @@ class TraceFit3D(ttk.Frame):
         sigma_xy_array = np.clip(sigma_xy_array, 1e-5, None)
         sigma_z_array = np.clip(sigma_z_array, 1e-5, None)
 
-        # Create an empty array for the convolved grid
+        # Initialize the convolved grid
         convolved_grid = np.zeros_like(energy_grid)
-        
-        # Apply the convolution for each z slice
-        kernel_size = self.kernel_size
-        for z in range(energy_grid.shape[2]):
-            sigma_xy = sigma_xy_array[z]
-            sigma_z = sigma_z_array[z]
-            
-            # Create 2D and 1D Gaussian kernels
-            kernel_2d = gaussian_kernel_2d(kernel_size, sigma_xy)
-            kernel_1d = gaussian_kernel_1d(kernel_size, sigma_z)
-            
-            # Convolve in the xy plane
-            convolved_xy = convolve(energy_grid[:, :, z], kernel_2d, mode='constant', cval=0)
-            
-            # Convolve in the z direction
-            convolved_grid[:, :, z] = convolve(convolved_xy, kernel_1d[:, np.newaxis], mode='constant', cval=0)
 
-        return convolved_grid
+        # Apply the convolution for each z slice
+        half_kernel_size = self.kernel_size // 2
+
+        # Convolve along the XY plane for each Z slice
+        for z in range(energy_grid.shape[2]):
+            # Create 2D Gaussian kernel for xy-plane
+            kernel_2d_xy = gaussian_kernel_2d(self.kernel_size, sigma_xy_array[z])
+            
+            # Convolve each slice along the x and y axes
+            convolved_grid[:, :, z] = convolve(energy_grid[:, :, z], kernel_2d_xy, mode='same')
+
+        # for z in range(energy_grid.shape[2]):
+        #     kernel_1d_z = gaussian_kernel_1d(self.kernel_size, sigma_z_array[z])
+        #     for i in np.arange(energy_grid.shape[0]):
+        #         for j in np.arange(energy_grid.shape[1]):
+        #             onepoint = energy_grid[i,j,z]
+        #             if (z-half_kernel_size >= 0) and (z+half_kernel_size < energy_grid.shape[2]):
+        #                 convolved_grid [i,j,z-half_kernel_size:z+half_kernel_size] = np.convolve(onepoint, kernel_1d_z, mode='same')
+
+        # Convolve along the z-axis
+        temp_grid = np.zeros_like(convolved_grid)
+        for z in range(energy_grid.shape[2]):
+            kernel_1d_z = gaussian_kernel_1d(self.kernel_size, sigma_z_array[z])
+            for dz in range(-half_kernel_size, half_kernel_size + 1):
+                kernel_index = dz + half_kernel_size
+                
+                if 0 <= z + dz < energy_grid.shape[2]:
+                    temp_grid[:, :, z] += convolved_grid[:, :, z + dz] * kernel_1d_z[kernel_index]
+
+        return temp_grid
     
     def display_image(self, energy_grid):
         """
@@ -199,7 +231,10 @@ class TraceFit3D(ttk.Frame):
         pad_z = np.arange(0,512*self.z_scale,self.z_scale)
         times5 = time.time()
         # Get the indices where energy is not zero for more efficient plotting
-        non_zero_indices = np.nonzero(energy_grid)
+        # non_zero_indices = np.nonzero(energy_grid)
+        max_value = np.max(energy_grid)
+        significant_mask = energy_grid > (0.001 * max_value)
+        non_zero_indices = np.nonzero(significant_mask)
         x_non_zero = self.x[non_zero_indices[0]]
         y_non_zero = self.y[non_zero_indices[1]]
         z_non_zero = self.z[non_zero_indices[2]]
@@ -230,7 +265,7 @@ class TraceFit3D(ttk.Frame):
         ax = fig.add_subplot(111, projection='3d')
 
         # Plot the 3D scatter plot with energy values as color
-        sc = ax.scatter(pad_x_coords, pad_y_coords, pad_z_coords, c=pad_energies, cmap='viridis', marker='o', alpha=0.5)
+        sc = ax.scatter(pad_x_coords, pad_y_coords, pad_z_coords, c=pad_energies, cmap='inferno', marker='o', alpha=0.5)
         
         # Add colorbar
         cbar = plt.colorbar(sc, ax=ax)
@@ -242,7 +277,7 @@ class TraceFit3D(ttk.Frame):
 
         ax.axes.set_xlim3d(left=-40, right=40) 
         ax.axes.set_ylim3d(bottom=-40, top=40) 
-        ax.axes.set_zlim3d(bottom=0, top=500)
+        ax.axes.set_zlim3d(bottom=0, top=200)
         
         plt.title(f'3D Energy Distribution of {self.initial_energy} MeV proton, θ = {self.theta} rad, φ = {self.phi} rad')
         timef6 = time.time()
@@ -250,7 +285,7 @@ class TraceFit3D(ttk.Frame):
         plt.show()
         
 
-    def load_energies(self, data_path):
+    def load_energies(self):
         # Initialize lists to store the data
         energy_MeV = []
         electronic_stopping_MeV_um = []  # Stopping power in MeV/(mg/cm^2)
@@ -258,7 +293,7 @@ class TraceFit3D(ttk.Frame):
         path_length_mm = []
 
         # Read the file
-        with open(data_path, 'r') as file:
+        with open(self.data_path, 'r') as file:
             for i, line in enumerate(file):
                 # Start reading from the 26th line and stop after the 105th line
                 if 26 <= i <= 104:

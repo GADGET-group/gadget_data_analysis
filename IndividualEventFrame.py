@@ -66,7 +66,7 @@ class IndividualEventFrame(ttk.Frame):
 
     def open_trace_fit(self):
         new_window = tk.Toplevel(self)
-        self.fit_frame = TraceFit3D(new_window, data_path = 'track_fitting/H_in_P10.txt')
+        self.fit_frame = TraceFit3D(new_window)
         self.fit_frame.pack()
 
 
