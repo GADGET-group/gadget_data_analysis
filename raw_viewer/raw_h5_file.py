@@ -517,7 +517,7 @@ class raw_h5_file:
                                                                                                np.degrees(angle), len(pads_railed)))
         plt.show(block=block)
     
-    def show_2d_projection(self, event_number, block=True, fig_name=None):
+    def get_2d_image(self, event_number):
         data = self.get_data(event_number)
         image = np.zeros(np.shape(self.pad_plane))
         for line in data:
@@ -529,6 +529,11 @@ class raw_h5_file:
             x,y = self.pad_to_xy_index[pad]
             image[x,y] = np.sum(line[FIRST_DATA_BIN:])
         image[image<0]=0
+        return image
+
+    def show_2d_projection(self, event_number, block=True, fig_name=None):
+        data = self.get_data(event_number)
+        image = self.get_2d_image(event_number)
         trace = np.sum(data[:,FIRST_DATA_BIN:],0)
         
 
