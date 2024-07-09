@@ -14,6 +14,8 @@ class TraceFunction:
         self.grid_resolution = 0.5  # mm
         self.k_xy = 0.0554 
         self.k_z = 0.0338
+        self.charge_spreading = 0
+        self.shaping_time = 2.5 * self.z_scale
         self.p_energies, self.p_stopping_powers, self.p_path_length = self.load_energies('Proton')
         self.a_energies, self.a_stopping_powers, self.a_path_length = self.load_energies('Alpha')
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
@@ -122,8 +124,8 @@ class TraceFunction:
         # Determine the sigma values based on z position
         z_positions = self.z
         z_positions[z_positions < 0] = 0
-        sigma_xy_array = 1 / self.grid_resolution * np.sqrt(10) * self.k_xy * np.sqrt(z_positions)
-        sigma_z_array = 1 / self.grid_resolution * np.sqrt(10) * self.k_z * np.sqrt(z_positions)
+        sigma_xy_array = 1 / self.grid_resolution * np.sqrt(10) * self.k_xy * np.sqrt(z_positions) + self.charge_spreading
+        sigma_z_array = 1 / self.grid_resolution * np.sqrt(10) * self.k_z * np.sqrt(z_positions) + self.shaping_time
         
         # Ensure sigma values are positive
         sigma_xy_array = np.clip(sigma_xy_array, 1e-5, None)
