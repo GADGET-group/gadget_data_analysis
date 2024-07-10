@@ -22,6 +22,8 @@ class TraceFunction:
     '''
 
     def __init__(self, gas_density, particle):
+        self.particle = particle #this variable should only be changed using the load_srim_table function
+    
         self.enable_print_statements = True
 
         #physical constants relating to the detector
@@ -72,7 +74,7 @@ class TraceFunction:
         elif particle.lower() == 'alpha':
             self.srim_table = srim_interface.SRIM_Table('track_fitting/He_in_P10.txt', gas_density)
 
-    def simulate_event(self):
+    def simulate_event(self, map_to_pads=True):
         '''
         
         '''
@@ -122,10 +124,10 @@ class TraceFunction:
         kernel_axis = np.linspace(-kernel_end, kernel_end, self.kernel_size)
         kernel_xx, kernel_yy = np.meshgrid(kernel_axis, kernel_axis)
         kernel_r2 = kernel_xx**2 + kernel_yy**2
-        for z_index in range(len(self.grid_zs)):
+        for z_index in range(len(self.grid_zs)): #todo: consider breaking this apart into an x convolution and y direction convolution
             kernel = np.exp(-kernel_r2/2/sigma_xy_array[z_index]**2)
             kernel /= np.sum(kernel)
-            energy_grid[:,:,z_index] = scipy.signal.convolve2d(energy_grid[:,:,z_index], kernel, mode='same')
+            energy_grid[:,:,z_index] = scipy.signal.convolve(energy_grid[:,:,z_index], kernel, mode='same')
         time4 = time.time()
         #spread charge in z-direction
         charge_distribution = np.zeros_like(energy_grid)
@@ -151,12 +153,16 @@ class TraceFunction:
         # Map to pads and return the results
         self.observed_charge_distribution = charge_distribution
         #return self.map_to_pads_extended(convolved_energies)
+        if map_to_pads:
+            self.map_to_pads()
     
  
     def map_to_pads(self):
         """
         Map the energy grid to the pad plane
         """
+        #TODO: this function is very inefficient, change to doing mapping on a per-column basis
+        start_time = time.time()
         # Creating PadPlane positions
         pad_x = np.arange(-38.5, 38.5 + 2.2, 2.2)
         pad_y = np.arange(-38.5, 38.5 + 2.2, 2.2)
@@ -180,17 +186,19 @@ class TraceFunction:
                 pad_energy_dict[(pad_x_nearest, pad_y_nearest, z)] = e
             else:
                 pad_energy_dict[(pad_x_nearest, pad_y_nearest, z)] += e
-        if self.enable_print_statements:
-            print('Pad energy dict length: ', len(pad_energy_dict.keys()))
         
         # Extract coordinates and energies from the dictionary
         pad_coords = np.array(list(pad_energy_dict.keys()))
-        pad_energies = np.array(list(pad_energy_dict.values()))
-        pad_x_coords = pad_coords[:, 0]
-        pad_y_coords = pad_coords[:, 1]
-        pad_z_coords = pad_coords[:, 2]
+        self.es = np.array(list(pad_energy_dict.values()))
+        self.xs = pad_coords[:, 0]
+        self.ys = pad_coords[:, 1]
+        self.zs = pad_coords[:, 2]
 
-        return pad_x_coords, pad_y_coords, pad_z_coords, pad_energies
+        end_time = time.time()
+        if self.enable_print_statements:
+            print('Pad energy dict length: ', len(pad_energy_dict.keys()))
+            print('pad map time: ', end_time - start_time)
+
     
     def map_to_pads_extended(self, energy_grid):
         '''

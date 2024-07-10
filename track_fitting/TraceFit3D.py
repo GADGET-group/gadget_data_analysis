@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 import matplotlib.pyplot as plt
 import matplotlib.colors
+import numpy as np
+
 from track_fitting import TraceFunction
 
 class TraceFit3D(ttk.Frame):
@@ -60,7 +62,7 @@ class TraceFit3D(ttk.Frame):
     def plot_data(self):
         self.load_parameters()
         self.trace_function.simulate_event()
-        x, y, z, e = self.trace_function.get_xyze(e_dict, zs)
+        x, y, z, e = self.trace_function.xs, self.trace_function.ys, self.trace_function.zs, self.trace_function.es
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
 
@@ -79,7 +81,7 @@ class TraceFit3D(ttk.Frame):
         ax.axes.set_ylim3d(bottom=-40, top=40) 
         ax.axes.set_zlim3d(bottom=0, top=200)
         
-        plt.title(f'3D Energy Distribution of {self.initial_energy} MeV {self.particle}, θ = {self.theta} rad, φ = {self.phi} rad')
+        plt.title(f'3D Energy Distribution of {self.trace_function.initial_energy} MeV {self.trace_function.particle}, θ = {self.trace_function.theta} rad, φ = {self.trace_function.phi} rad')
         plt.show()
 
     
