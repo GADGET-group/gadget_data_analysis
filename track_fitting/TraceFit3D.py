@@ -8,7 +8,7 @@ class TraceFit3D(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         pressure = 800
-        self.trace_parameters = TraceFunction.TraceFunction(pressure)
+        self.trace_function = TraceFunction.TraceFunction(pressure, 'proton')
         self.create_widgets()
 
     def create_widgets(self):
@@ -49,24 +49,18 @@ class TraceFit3D(ttk.Frame):
     def load_parameters(self):
         try:
             # Get the values from the entry fields and store them as instance variables
-            self.initial_energy = float(self.entries["initial_energy"].get())
-            self.initial_point = (float(self.entries["initial_x"].get()), float(self.entries["initial_y"].get()), float(self.entries["initial_z"].get()))
-            self.theta = float(self.entries["theta"].get())
-            self.phi = float(self.entries["phi"].get())
-            self.particle = self.particle_type.get()
-
-            print(f"Initial Energy: {self.initial_energy}")
-            print(f"Theta: {self.theta}")
-            print(f"Phi: {self.phi}")
-            print(f"Particle Type: {self.particle}")
-
+            self.trace_function.initial_energy = float(self.entries["initial_energy"].get())
+            self.trace_function.initial_point = (float(self.entries["initial_x"].get()), float(self.entries["initial_y"].get()), float(self.entries["initial_z"].get()))
+            self.trace_function.theta = float(self.entries["theta"].get())
+            self.trace_function.phi = float(self.entries["phi"].get())
+            self.trace_function.load_srim_table(self.particle_type.get(), 1.57)
         except ValueError:
             print("Please enter valid numbers for all parameters.")
 
     def plot_data(self):
         self.load_parameters()
-        e_dict, zs = self.trace_parameters.calculate_xyze(self.initial_energy, self.initial_point, self.theta, self.phi, self.particle)
-        x, y, z, e = self.trace_parameters.convert_pad_to_coords(e_dict, zs)
+        self.trace_function.simulate_event()
+        x, y, z, e = self.trace_function.get_xyze(e_dict, zs)
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
 
