@@ -32,7 +32,6 @@ class TraceFunction:
         self.k_z = 0.0338 #longitudinal diffusion
         self.charge_spreading_sigma = 0 #additional width from charge spreading in mm, sigma=charge_spreading + k_xy*sqrt(z)
         self.shaping_time_sigma = 0 #stddev of gaussian induced by amplifier shaping time, in mm, not time bins
-        self.threshold = 0.001 #bins with less than this fraction of max bin value will not be mapped to pad plane
 
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
         self.load_srim_table(particle, gas_density)
@@ -58,10 +57,8 @@ class TraceFunction:
         self.initial_charge_distribution = np.zeros((0,0,0))
         self.observed_charge_distribution = np.zeros((0,0,0))
         self.grid_xs, self.grid_ys, self.grid_zs = np.zeros(0), np.zeros(0), np.zeros(0)
-        #variables which are equivalent to the get_xyze retrun value of the raw_h5_file class
-        #x & y will be mapped to the nearest pad, but z will have the same spacing as the grid used for computation
-        #populated by map_to_pads
-        self.xs, self.ys, self.zs, self.es = np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0)
+        #dictionary containing energy deposition on each pad as a function of z coordinate
+        self.pad_traces = {}
 
     def load_srim_table(self, particle:str, gas_density:float):
         '''
@@ -73,6 +70,16 @@ class TraceFunction:
             self.srim_table = srim_interface.SRIM_Table('track_fitting/H_in_P10.txt', gas_density)
         elif particle.lower() == 'alpha':
             self.srim_table = srim_interface.SRIM_Table('track_fitting/He_in_P10.txt', gas_density)
+
+    def get_pad_from_xy(self, xy):
+            '''
+            xy: tuple of (x,y) to lookup pad number for
+            '''
+            xy = tuple(np.round(xy, 1))
+            if xy in self.xy_to_pad:
+                return self.xy_to_pad[xy]
+            else:
+                return None
 
     def simulate_event(self, map_to_pads=True):
         '''
@@ -164,112 +171,61 @@ class TraceFunction:
         #TODO: this function is very inefficient, change to doing mapping on a per-column basis
         start_time = time.time()
         # Creating PadPlane positions
-        pad_x = np.arange(-38.5, 38.5 + 2.2, 2.2)
-        pad_y = np.arange(-38.5, 38.5 + 2.2, 2.2)
+        pad_coords = np.arange(-38.5, 38.5 + 2.2, 2.2)
+        pad_boundaries = pad_coords + 1.1 #right/top boundary of pad
 
-        #get indices above threshold
-        max_value = np.max(self.observed_charge_distribution)
-        above_threshold_mask = self.observed_charge_distribution > (self.threshold * max_value)
-        above_theshold_indices = np.nonzero(above_threshold_mask)
-        x_above_theshold = self.grid_xs[above_theshold_indices[0]]
-        y_above_theshold = self.grid_ys[above_theshold_indices[1]]
-        z_above_theshold = self.grid_zs[above_theshold_indices[2]]
-        energy_above_theshold = self.observed_charge_distribution[above_theshold_indices]
-        
-        # Map energies to the nearest padplane positions
-        pad_energy_dict = {}
-        for x, y, z, e in zip(x_above_theshold, y_above_theshold, z_above_theshold, energy_above_theshold):
-            # Find nearest padplane positions
-            pad_x_nearest = pad_x[np.abs(pad_x - x).argmin()]
-            pad_y_nearest = pad_y[np.abs(pad_y - y).argmin()]
-            if (pad_x_nearest, pad_y_nearest, z) not in pad_energy_dict:
-                pad_energy_dict[(pad_x_nearest, pad_y_nearest, z)] = e
-            else:
-                pad_energy_dict[(pad_x_nearest, pad_y_nearest, z)] += e
-        
-        # Extract coordinates and energies from the dictionary
-        pad_coords = np.array(list(pad_energy_dict.keys()))
-        self.es = np.array(list(pad_energy_dict.values()))
-        self.xs = pad_coords[:, 0]
-        self.ys = pad_coords[:, 1]
-        self.zs = pad_coords[:, 2]
+        #remap each grid x,y to nearest pad x,y
+        grid_xs = self.grid_xs[(self.grid_xs > -38.5-1.1) & (self.grid_xs < 38.5+1.1)]
+        pad_xs_indices = np.searchsorted(pad_boundaries, grid_xs)
+        pad_xs = pad_coords[pad_xs_indices]
 
-        end_time = time.time()
+        grid_ys = self.grid_ys[(self.grid_ys > -38.5-1.1) & (self.grid_ys < 38.5+1.1)]
+        pad_ys_indices = np.searchsorted(pad_boundaries, grid_ys)
+        pad_ys_indices = pad_ys_indices[pad_ys_indices < len(self.grid_ys)]
+        pad_ys = pad_coords[pad_ys_indices]
+
+        self.pad_traces = {}
+
+        for padx, grid_sliced_by_x in zip(pad_xs, self.observed_charge_distribution):
+            for pady, trace in zip(pad_ys, grid_sliced_by_x):
+                pad_num = self.get_pad_from_xy((padx, pady))
+                if pad_num == None: #coordinate not in pad map
+                    continue
+                if pad_num not in self.pad_traces:
+                    self.pad_traces[pad_num] = np.zeros(len(self.grid_zs))
+                self.pad_traces[pad_num] += trace
+
         if self.enable_print_statements:
-            print('Pad energy dict length: ', len(pad_energy_dict.keys()))
-            print('pad map time: ', end_time - start_time)
+            print('time for pad map:', time.time() - start_time)
 
-    
-    def map_to_pads_extended(self, energy_grid):
+    def get_xyze(self, use_pad_map = True, threshold=-np.inf):
         '''
+        returns x,y,z,e arrays, similar to the same method in raw_h5_file
         
+        use_pad_map: If true, returns charge over each pad, if false, returns the entire numerical grid
+        threshold: only bins with more than this much energy deposition (in MeV) will be returned
         '''
-        time1 = time.time()
-        pad_plane_positions = np.array(list(self.xy_to_pad.keys()))
-
-        # Get the indices where energy is significant (greater than 0.1% of max value)
-        max_value = np.max(energy_grid)
-        significant_mask = energy_grid > (0.001 * max_value)
-        non_zero_indices = np.nonzero(significant_mask)
-        x_non_zero = self.grid_xs[non_zero_indices[0]]
-        y_non_zero = self.grid_ys[non_zero_indices[1]]
-        z_non_zero = self.grid_zs[non_zero_indices[2]]
-        energy_non_zero = energy_grid[non_zero_indices]
-
-        def find_nearest_pad_positions(points, pad_plane_positions):
-            tree = KDTree(pad_plane_positions)
-            distances, indices = tree.query(points)
-            nearest_pad_positions = pad_plane_positions[indices]
-            return nearest_pad_positions
-        
-        def get_pad_from_xy(xy):
-            '''
-            xy: tuple of (x,y) to lookup pad number for
-            '''
-            xy = tuple(np.round(xy, 1))
-            return self.xy_to_pad[xy]
-
-        pad_to_energies = {value: np.zeros_like(self.grid_zs) for value in self.xy_to_pad.values()}
-
-        # Map energies to the nearest padplane positions
-        # Points (i, j)
-        points = np.column_stack((x_non_zero, y_non_zero))
-
-        # Find nearest pad positions for all points
-        nearest_pad_positions = find_nearest_pad_positions(points, pad_plane_positions)
-
-        for (i, j, k, e), (pad_x_nearest, pad_y_nearest) in zip(zip(x_non_zero, y_non_zero, z_non_zero, energy_non_zero), nearest_pad_positions):
-            pad_no = get_pad_from_xy((pad_x_nearest, pad_y_nearest))
-            pad_to_energies[pad_no][np.where(self.grid_zs == k)[0]] += e
-        time2 = time.time()
-        print("Time for mapping and data foermatting: ", time2 - time1)
-        print(self.grid_zs.shape, len(pad_to_energies.values()))
-        return pad_to_energies, self.grid_zs
-    
-    def get_xyze_before_pad_map(self):
-        
-        # Initialize the dictionary for the pad coordinates and energies
-        pad_energy_dict = {}
-
-        for pad_no, energies in pad_to_energies.items():
-            pad_x, pad_y = self.pad_to_xy[pad_no] 
-            for z_index, energy in enumerate(energies):
-                if energy > 0:  # Only consider significant energies
-                    pad_z = z_values[z_index]
-                    if (pad_x, pad_y, pad_z) not in pad_energy_dict:
-                        pad_energy_dict[(pad_x, pad_y, pad_z)] = energy
-                    else:
-                        pad_energy_dict[(pad_x, pad_y, pad_z)] += energy
-
-        print('Pad energy dict length: ', len(pad_energy_dict.keys()))
-
-        # Extract coordinates and energies from the dictionary
-        pad_coords = np.array(list(pad_energy_dict.keys()))
-        pad_energies = np.array(list(pad_energy_dict.values()))
-        pad_x_coords = pad_coords[:, 0]
-        pad_y_coords = pad_coords[:, 1]
-        pad_z_coords = pad_coords[:, 2]
-
-        return pad_x_coords, pad_y_coords, pad_z_coords, pad_energies
-
-    
+        xs, ys, es = [],[],[]
+        if use_pad_map:
+            for pad in self.pad_traces:
+                x,y = self.pad_to_xy[pad]
+                xs.append(x)
+                ys.append(y)
+                es.append(self.pad_traces[pad])
+        else:
+            for x in self.grid_xs:
+                for y in self.grid_ys:
+                    xs.append(x)
+                    ys.append(y)
+                    es.append(self.observed_charge_distribution[x,y,:])
+        num_z_bins = len(self.grid_zs)
+        xs = np.repeat(xs, num_z_bins)
+        ys = np.repeat(ys, num_z_bins)
+        es = np.array(es).flatten()
+        zs = np.tile(self.grid_zs, int(len(xs)/len(self.grid_zs)))
+        if threshold != -np.inf:
+            xs = xs[es>threshold]
+            ys = ys[es>threshold]
+            zs = zs[es>threshold]
+            es = es[es>threshold]
+        return xs, ys, zs, es
