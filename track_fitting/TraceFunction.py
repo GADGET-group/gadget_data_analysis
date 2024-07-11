@@ -28,10 +28,11 @@ class TraceFunction:
 
         #physical constants relating to the detector
         self.grid_padding = 15  #mm; grid created will extend this far beyond particle track w/o diffusion
-        self.k_xy = 0.0554 #transverse diffusion, sqrt cm?
-        self.k_z = 0.0338 #longitudinal diffusion
+        self.k_xy = 0.0554 #transverse diffusion, in sqrt cm
+        self.k_z = 0.0338 #longitudinal diffusion, in sqrt cm
         self.charge_spreading_sigma = 0 #additional width from charge spreading in mm, sigma=charge_spreading + k_xy*sqrt(z)
-        self.shaping_time_sigma = 0 #stddev of gaussian induced by amplifier shaping time, in mm, not time bins
+        self.shaping_width = 7 #FWHM of the shaping amplifier in time bins
+        self.zscale = 1.45 #mm/time bin
 
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
         self.load_srim_table(particle, gas_density)
@@ -40,6 +41,7 @@ class TraceFunction:
         self.num_stopping_power_points = 500 #number of points at which to compute 1D energy deposition
         self.kernel_size = 31 #size of gaussian kernels. MUST BE ODD!
         self.grid_resolution = 0.5  #spacing between grid lines mm
+        self.shaping_kernel_size = 31 #must be odd
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
@@ -58,7 +60,15 @@ class TraceFunction:
         self.observed_charge_distribution = np.zeros((0,0,0))
         self.grid_xs, self.grid_ys, self.grid_zs = np.zeros(0), np.zeros(0), np.zeros(0)
         #dictionary containing energy deposition on each pad as a function of z coordinate
-        self.pad_traces = {}
+        self.sim_pad_traces = {} #charge distribution over pads, binned per self.grid_zs
+        self.traces_to_fit = {} #trace data to try to fit. Populated by calling self.set_real_data
+        self.aligned_sim_traces = {} #simulated data prepared for comparison with traces_to_fit by calling align_pad_traces
+        
+        self.peak_bins = {} #dictionairy of peak bin indices, indexed by pad number
+        self.peak_vals = {} #dictionary holding the max value of each trace to be fit
+        
+
+
 
     def load_srim_table(self, particle:str, gas_density:float):
         '''
@@ -124,8 +134,8 @@ class TraceFunction:
         # Convolution
         #calculate sigma for gaussian kernels at each z-slice of the grid
         #the sqrt(10) is to convert a diffusion coeficient with units of sqrt(cm) to mm
-        sigma_xy_array = 1 / self.grid_resolution * np.sqrt(10) * self.k_xy * np.sqrt(self.grid_zs) + self.charge_spreading_sigma
-        sigma_z_array = 1 / self.grid_resolution * np.sqrt(10) * self.k_z * np.sqrt(self.grid_zs) + self.shaping_time_sigma
+        sigma_xy_array = np.sqrt(10) * self.k_xy * np.sqrt(self.grid_zs) + self.charge_spreading_sigma
+        sigma_z_array = np.sqrt(10) * self.k_z * np.sqrt(self.grid_zs)
         #do xy convolution
         kernel_end = (self.kernel_size-1)/2*self.grid_resolution
         kernel_axis = np.linspace(-kernel_end, kernel_end, self.kernel_size)
@@ -184,16 +194,16 @@ class TraceFunction:
         pad_ys_indices = pad_ys_indices[pad_ys_indices < len(self.grid_ys)]
         pad_ys = pad_coords[pad_ys_indices]
 
-        self.pad_traces = {}
+        self.sim_pad_traces = {}
 
         for padx, grid_sliced_by_x in zip(pad_xs, self.observed_charge_distribution):
             for pady, trace in zip(pad_ys, grid_sliced_by_x):
                 pad_num = self.get_pad_from_xy((padx, pady))
                 if pad_num == None: #coordinate not in pad map
                     continue
-                if pad_num not in self.pad_traces:
-                    self.pad_traces[pad_num] = np.zeros(len(self.grid_zs))
-                self.pad_traces[pad_num] += trace
+                if pad_num not in self.sim_pad_traces:
+                    self.sim_pad_traces[pad_num] = np.zeros(len(self.grid_zs))
+                self.sim_pad_traces[pad_num] += trace
 
         if self.enable_print_statements:
             print('time for pad map:', time.time() - start_time)
@@ -207,11 +217,11 @@ class TraceFunction:
         '''
         xs, ys, es = [],[],[]
         if use_pad_map:
-            for pad in self.pad_traces:
+            for pad in self.sim_pad_traces:
                 x,y = self.pad_to_xy[pad]
                 xs.append(x)
                 ys.append(y)
-                es.append(self.pad_traces[pad])
+                es.append(self.sim_pad_traces[pad])
         else:
             for x in self.grid_xs:
                 for y in self.grid_ys:
@@ -229,3 +239,98 @@ class TraceFunction:
             zs = zs[es>threshold]
             es = es[es>threshold]
         return xs, ys, zs, es
+    
+    def set_real_data(self, traces_to_fit, fit_threshold, trim_pad = 5):
+        '''
+        Prepares real pad traces for coomparison to simulated data.
+        This function does the following:
+        1. Stores traces to member variables, setting all portions of the trace less than 'fit_threshold' to zero
+        2. Trim traces if possible, keeping the length of all traces the same but removing as many zeros as possible
+        3. Find time bin in each trace with peak value, or average of time bins with peak values if there are more than one. 
+
+        traces_to_fit: dictionary of traces, as returned by raw_h5_file.get_pad_traces
+        fit_threshold: only portions of the traces above this threshold will be used when fitting
+        trim_pad: number of zero elements to keep in traces
+        '''
+        #steps 1 & 2
+        self.traces_to_fit = traces_to_fit
+        trim_before = 512 #will be set to the first non-zero time bin in any trace
+        trim_after = -1
+        #perform thresholding and find indecies for trimming
+        for pad in self.traces_to_fit:
+            trace = self.traces_to_fit[pad]
+            trace[trace < fit_threshold] = 0
+            nonzero = np.nonzero(trace)
+            first, last = np.min(nonzero), np.max(nonzero)
+            if first < trim_before:
+                trim_before = first
+            if last > trim_after:
+                trim_after = last
+        #trim traces
+        trim_start = max(first - trim_pad, 0)
+        trim_end = min(last + trim_pad, len(trace))
+        for pad in self.traces_to_fit:
+            self.traces_to_fit[pad] = self.traces_to_fit[pad][trim_start:trim_end]
+        #find peaks
+        self.peak_bins = {}
+        self.peak_vals = {}
+        for pad in self.traces_to_fit:
+            trace = self.traces_to_fit[pad]
+            max_val = np.max(trace)
+            self.peak_bins[pad] = np.average(np.where(trace == max_val))
+            self.peak_vals[pad] = max_val
+
+
+    def align_pad_traces(self):
+        '''
+        First, find "t_offset" such that time bins can be computed using t = z/zscale + t_offset
+        This is done such that the difference in peak positions is minimized, weighted by peak height
+          in the real data by minimizing: sum over pads peak_value*(t_actual peak - t_simulated_peak)^2
+          The sum is over all pads that are in both the simulated and real dataset. peak_value is taken from
+          the target/real trace.
+        
+        Then distribute simulated charge into a histogram with the same binning as the real data, distributing charge
+        between bins based on the specified shaping time.
+        '''
+        #determin offset to apply to simulated trace in time bin units
+        sum_pdeltax = 0
+        sum_p = 0
+        for pad in self.traces_to_fit:
+            if pad in self.sim_pad_traces:
+                p = self.peak_vals[pad]
+                sum_p += p
+
+                simulated_peak_val = np.max(self.sim_pad_traces[pad])
+                simulated_peak_bin = np.average(self.grid_zs[np.where(self.sim_pad_traces[pad] == simulated_peak_val)])/self.zscale
+                deltax = self.peak_bins[pad] - simulated_peak_bin
+                sum_pdeltax += p*deltax
+        if sum_p == 0: #no pads in common, rebin without alignment
+            t_offset = 0
+        else:
+            t_offset = sum_pdeltax/sum_p
+        #shift charge distribution and put charge in nearest bins
+        time_axis = self.grid_zs/self.zscale + t_offset #new charge locations in time bin units
+        time_bin_map = np.round(time_axis) #where each charge should go
+        #don't map bins that would be out of range
+        time_bin_map = time_bin_map[(time_bin_map>0) & (time_bin_map < len(self.traces_to_fit.values()[0]))]
+        self.align_pad_traces = {}
+        shaping_kernel = np.exp()
+        for pad in self.sim_pad_traces:
+            aligned_trace = np.zeros(len(self.traces_to_fit[pad]))
+            np.add.at(aligned_trace, time_bin_map, self.sim_pad_traces[pad])
+            self.align_pad_traces[pad] = aligned_trace
+
+    def log_likelihood(self):
+        to_return = 0
+        all_pads = np.union1d(self.aligned_sim_traces.keys(), self.traces_to_fit.keys())
+        for pad in all_pads:
+            if pad in self.aligned_sim_traces and pad in self.traces_to_fit:
+                residuals = self.aligned_sim_traces[pad] - self.traces_to_fit[pad]
+            elif pad in self.aligned_sim_traces:
+                residuals = self.aligned_sim_traces[pad]
+            else:
+                residuals = self.traces_to_fit[pad]
+            to_return += np.sum(residuals * residuals)
+        return to_return
+            
+
