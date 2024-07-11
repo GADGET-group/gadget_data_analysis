@@ -345,7 +345,7 @@ class TraceFunction:
                 residuals = self.aligned_sim_traces[pad]
             else:
                 residuals = self.traces_to_fit[pad]
-            to_return += np.sum(residuals * residuals)
+            to_return += -np.sum(residuals * residuals)
         return to_return
             
 
