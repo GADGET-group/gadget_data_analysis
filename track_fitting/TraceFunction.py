@@ -209,31 +209,41 @@ class TraceFunction:
         if self.enable_print_statements:
             print('time for pad map:', time.time() - start_time)
 
-    def get_xyze(self, use_pad_map = True, threshold=-np.inf):
+    def get_xyze(self, source='pad map', threshold=-np.inf):
         '''
         returns x,y,z,e arrays, similar to the same method in raw_h5_file
         
-        use_pad_map: If true, returns charge over each pad, if false, returns the entire numerical grid
+        source: can be 'energy grid', 'pad map', or 'aligned'
         threshold: only bins with more than this much energy deposition (in MeV) will be returned
         '''
         xs, ys, es = [],[],[]
-        if use_pad_map:
+        if source == 'pad map':
             for pad in self.sim_pad_traces:
                 x,y = self.pad_to_xy[pad]
                 xs.append(x)
                 ys.append(y)
                 es.append(self.sim_pad_traces[pad])
-        else:
+        elif source == 'energy grid':
             for x in self.grid_xs:
                 for y in self.grid_ys:
                     xs.append(x)
                     ys.append(y)
                     es.append(self.observed_charge_distribution[x,y,:])
+        elif source == 'aligned':
+            for pad in self.aligned_sim_traces:
+                x,y = self.pad_to_xy[pad]
+                xs.append(x)
+                ys.append(y)
+                es.append(self.aligned_sim_traces[pad])
         num_z_bins = len(self.grid_zs)
         xs = np.repeat(xs, num_z_bins)
         ys = np.repeat(ys, num_z_bins)
         es = np.array(es).flatten()
-        zs = np.tile(self.grid_zs, int(len(xs)/len(self.grid_zs)))
+        if source == 'energy grid' or source == 'pad map':
+            z_axis = self.grid_zs
+        elif source == 'aligned':
+            z_axis = np.arange(len(self.aligned_sim_traces[pad]))*self.zscale
+        zs = np.tile(z_axis, int(len(xs)/len(z_axis)))
         if threshold != -np.inf:
             xs = xs[es>threshold]
             ys = ys[es>threshold]
