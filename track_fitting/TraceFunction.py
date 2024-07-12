@@ -223,26 +223,28 @@ class TraceFunction:
                 xs.append(x)
                 ys.append(y)
                 es.append(self.sim_pad_traces[pad])
+            num_z_bins = len(self.grid_zs)
         elif source == 'energy grid':
             for x in self.grid_xs:
                 for y in self.grid_ys:
                     xs.append(x)
                     ys.append(y)
                     es.append(self.observed_charge_distribution[x,y,:])
+                num_z_bins = len(self.grid_zs)
         elif source == 'aligned':
             for pad in self.aligned_sim_traces:
                 x,y = self.pad_to_xy[pad]
                 xs.append(x)
                 ys.append(y)
                 es.append(self.aligned_sim_traces[pad])
-        num_z_bins = len(self.grid_zs)
+            num_z_bins = self.num_trimmed_trace_bins
         xs = np.repeat(xs, num_z_bins)
         ys = np.repeat(ys, num_z_bins)
         es = np.array(es).flatten()
         if source == 'energy grid' or source == 'pad map':
             z_axis = self.grid_zs
         elif source == 'aligned':
-            z_axis = np.arange(len(self.aligned_sim_traces[pad]))*self.zscale
+            z_axis = np.arange(self.num_trimmed_trace_bins)*self.zscale
         zs = np.tile(z_axis, int(len(xs)/len(z_axis)))
         if threshold != -np.inf:
             xs = xs[es>threshold]
@@ -312,6 +314,7 @@ class TraceFunction:
         between bins based on the specified shaping time.
         '''
         #determin offset to apply to simulated trace in time bin units
+        start_time = time.time()
         sum_pdeltax = 0
         sum_p = 0
         for pad in self.traces_to_fit:
@@ -338,14 +341,19 @@ class TraceFunction:
         kernel_size = self.shaping_kernel_size
         kernel_ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
         sigma = self.shaping_width/2.3548
+        print(kernel_ax)
         shaping_kernel = np.exp(-kernel_ax**2 / (2 * sigma**2))
+        print(sigma)
         shaping_kernel *= self.counts_per_MeV/np.sum(shaping_kernel) #norm of the kernel will be conversion to counts from MeV
+        print('shaping kernel:', shaping_kernel)
         
-        self.align_pad_traces = {}
+        self.aligned_sim_traces = {}
         for pad in self.sim_pad_traces:
             aligned_trace = np.zeros(self.num_trimmed_trace_bins)
             np.add.at(aligned_trace, time_bin_map[valid_bins_mask], self.sim_pad_traces[pad][valid_bins_mask])
-            self.align_pad_traces[pad] = scipy.signal.convolve(aligned_trace, shaping_kernel, 'same')
+            self.aligned_sim_traces[pad] = scipy.signal.convolve(aligned_trace, shaping_kernel, 'same')
+        if self.enable_print_statements:
+            print('trace alignment took %E s'%(time.time() - start_time))
 
     def log_likelihood(self):
         to_return = 0

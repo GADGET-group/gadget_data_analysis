@@ -35,7 +35,7 @@ h5file.num_background_bins=(400,500)
 
 gas_density = 1.56
 trace_sim = TraceFunction.TraceFunction(1.56, 'alpha')
-trace_sim.shaping_width = shaping_time
+trace_sim.shaping_width = shaping_width
 trace_sim.zscale = zscale
 trace_sim.counts_per_MeV = adc_scale
 
@@ -48,23 +48,35 @@ trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
 trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold)
 trace_sim.align_pad_traces()
-x_sim, y_sim, z_sim, e_sim = trace_sim.get_xyze('aligned', threshold = 25)
+x_sim, y_sim, z_sim, e_sim = trace_sim.get_xyze('aligned', threshold = 100)
+print(len(x_sim))
 
 
 fig = plt.figure()
+plt.title('simulated data')
 ax = fig.add_subplot(111, projection='3d')
-
 # Plot the 3D scatter plot with energy values as color
 sc = ax.scatter(x_sim, y_sim, z_sim, c=e_sim,  alpha=0.5)#, cmap='inferno', marker='o',)# norm=matplotlib.colors.LogNorm())
-
 # Add colorbar
 cbar = plt.colorbar(sc, ax=ax)
-cbar.set_label('Energy (a.u.)')
-
+cbar.set_label('Energy (adc units)')
 ax.set_xlabel('X')
 ax.set_ylabel('Y')
 ax.set_zlabel('Z')
-
 ax.axes.set_xlim3d(left=-100, right=100) 
 ax.axes.set_ylim3d(bottom=-100, top=100) 
 ax.axes.set_zlim3d(bottom=0, top=200)
+
+def plot_traces(trace_dict, title=''):
+    plt.figure()
+    for pad in trace_dict:
+        plt.plot(trace_dict[pad], label=str(pad))
+    plt.legend()
+    plt.title(title)
+
+plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
+plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
+
+plt.show()
+
+trace_sim.log_likelihood()
