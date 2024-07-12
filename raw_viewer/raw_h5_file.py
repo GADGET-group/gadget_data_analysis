@@ -293,7 +293,7 @@ class raw_h5_file:
         #return int(self.h5_file['meta']['meta'][0]), np.min((int(self.h5_file['meta']['meta'][2]), int(self.h5_file['meta']['meta'][0])+10000))#TODO
 
 
-    def get_pad_traces(self, event_number):
+    def get_pad_traces(self, event_number, include_veto_pads=True):
         '''
         returns [pads which fired], [[time series data for first pad], [time series data for 2nd pad], ...]
         Pad numbers are determined from AGET, COBO, and channel number, rather than the pad number written during
@@ -308,8 +308,9 @@ class raw_h5_file:
             else:
                 #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                 continue
-            pads.append(pad)
-            pad_datas.append(line[FIRST_DATA_BIN:])
+            if include_veto_pads or pad not in VETO_PADS:
+                pads.append(pad)
+                pad_datas.append(line[FIRST_DATA_BIN:])
         return pads, pad_datas
     
     def get_num_pads_fired(self, event_number):

@@ -251,7 +251,7 @@ class TraceFunction:
             es = es[es>threshold]
         return xs, ys, zs, es
     
-    def set_real_data(self, traces_to_fit, fit_threshold, trim_pad = 5):
+    def set_real_data(self, pads, traces, fit_threshold, trim_pad = 5):
         '''
         Prepares real pad traces for coomparison to simulated data.
         This function does the following:
@@ -259,24 +259,31 @@ class TraceFunction:
         2. Trim traces if possible, keeping the length of all traces the same but removing as many zeros as possible
         3. Find time bin in each trace with peak value, or average of time bins with peak values if there are more than one. 
 
-        traces_to_fit: dictionary of traces, as returned by raw_h5_file.get_pad_traces
+        pads: list of pads
+        traces: list of traces, one for each pad
         fit_threshold: only portions of the traces above this threshold will be used when fitting
         trim_pad: number of zero elements to keep in traces
         '''
         #steps 1 & 2
-        self.traces_to_fit = traces_to_fit
+        self.traces_to_fit = {pad: trace for pad, trace in zip(pads, traces)}
         trim_before = 512 #will be set to the first non-zero time bin in any trace
         trim_after = -1
         #perform thresholding and find indecies for trimming
+        pads_to_remove = [] #remove pads which have no non-zero elements
         for pad in self.traces_to_fit:
             trace = self.traces_to_fit[pad]
             trace[trace < fit_threshold] = 0
-            nonzero = np.nonzero(trace)
-            first, last = np.min(nonzero), np.max(nonzero)
-            if first < trim_before:
-                trim_before = first
-            if last > trim_after:
-                trim_after = last
+            nonzero = np.nonzero(trace)[0]
+            if len(nonzero) == 0:
+                pads_to_remove.append(pad)
+            else:
+                first, last = np.min(nonzero), np.max(nonzero)
+                if first < trim_before:
+                    trim_before = first
+                if last > trim_after:
+                    trim_after = last
+        for pad in pads_to_remove:
+            self.traces_to_fit.pop(pad)
         #trim traces
         trim_start = max(first - trim_pad, 0)
         trim_end = min(last + trim_pad, len(trace))
@@ -290,6 +297,7 @@ class TraceFunction:
             max_val = np.max(trace)
             self.peak_bins[pad] = np.average(np.where(trace == max_val))
             self.peak_vals[pad] = max_val
+        self.num_trimmed_trace_bins = len(trace)
 
 
     def align_pad_traces(self):
@@ -319,20 +327,24 @@ class TraceFunction:
             t_offset = 0
         else:
             t_offset = sum_pdeltax/sum_p
+        print(sum_p, sum_pdeltax)
+        print(t_offset)
         #shift charge distribution and put charge in nearest bins
         time_axis = self.grid_zs/self.zscale + t_offset #new charge locations in time bin units
-        time_bin_map = np.round(time_axis) #where each charge should go
+        time_bin_map = np.round(time_axis).astype(int) #where each charge should go
         #don't map bins that would be out of range
-        time_bin_map = time_bin_map[(time_bin_map>0) & (time_bin_map < len(self.traces_to_fit.values()[0]))]
-        self.align_pad_traces = {}
+        valid_bins_mask = (time_bin_map>0) & (time_bin_map < self.num_trimmed_trace_bins)
+
         kernel_size = self.shaping_kernel_size
         kernel_ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
         sigma = self.shaping_width/2.3548
         shaping_kernel = np.exp(-kernel_ax**2 / (2 * sigma**2))
         shaping_kernel *= self.counts_per_MeV/np.sum(shaping_kernel) #norm of the kernel will be conversion to counts from MeV
+        
+        self.align_pad_traces = {}
         for pad in self.sim_pad_traces:
-            aligned_trace = np.zeros(len(self.traces_to_fit[pad]))
-            np.add.at(aligned_trace, time_bin_map, self.sim_pad_traces[pad])
+            aligned_trace = np.zeros(self.num_trimmed_trace_bins)
+            np.add.at(aligned_trace, time_bin_map[valid_bins_mask], self.sim_pad_traces[pad][valid_bins_mask])
             self.align_pad_traces[pad] = scipy.signal.convolve(aligned_trace, shaping_kernel, 'same')
 
     def log_likelihood(self):
