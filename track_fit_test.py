@@ -9,10 +9,10 @@ from raw_viewer import raw_h5_file
 run_h5_path = '/mnt/analysis/e21072/gastest_h5_files/run_0368.h5'
 event_num = 5
 
-init_position_guess = (-7, 10, 400)
+init_position_guess = (-20, 12, 200)
 E_guess = 6.2 #correct answer is 6.288
 theta_guess = np.radians(80)
-phi_guess = np.radians(120)
+phi_guess = np.radians(-30)
 
 adc_scale = 376646/6.288 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 
@@ -31,6 +31,7 @@ h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                   zscale=zscale,
                                   flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
 h5file.background_subtract_mode='fixed window'
+h5file.remove_outliers=True
 h5file.near_peak_window_width = 50
 h5file.require_peak_within= (-np.inf, np.inf)
 h5file.num_background_bins=(400,500)
@@ -48,12 +49,18 @@ trace_sim.initial_point = init_position_guess
 
 trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold)
+trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 20)
 trace_sim.align_pad_traces()
-x_sim, y_sim, z_sim, e_sim = trace_sim.get_xyze('aligned', threshold = 100)
-print(len(x_sim))
 
-if False: #show plots of initial guess
+def plot_traces(trace_dict, title=''):
+        plt.figure()
+        for pad in trace_dict:
+            plt.plot(trace_dict[pad], label=str(pad))
+        plt.legend()
+        plt.title(title)
+
+def show_simulated_3d_data(mode,  threshold = 0.0001): #show plots of initial guess
+    x_sim, y_sim, z_sim, e_sim = trace_sim.get_xyze(mode,threshold)
     fig = plt.figure()
     plt.title('simulated data')
     ax = fig.add_subplot(111, projection='3d')
@@ -69,31 +76,39 @@ if False: #show plots of initial guess
     ax.axes.set_ylim3d(bottom=-100, top=100) 
     ax.axes.set_zlim3d(bottom=0, top=200)
 
-    def plot_traces(trace_dict, title=''):
-        plt.figure()
-        for pad in trace_dict:
-            plt.plot(trace_dict[pad], label=str(pad))
-        plt.legend()
-        plt.title(title)
-
-    plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
-    plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
-
-    plt.show()
 
 def neg_log_likelihood(params):
-    E, x, y, z, theta, phi = params
+    E, x, y, z, theta, phi, charge_spread = params
     trace_sim.initial_energy = E
     trace_sim.initial_point = (x,y,z)
     trace_sim.theta = theta
     trace_sim.phi = phi
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
+    trace_sim.charge_spreading_sigma = charge_spread
     to_return = -trace_sim.log_likelihood()
-    print(params, to_return)
+    print(params, '%e'%to_return)
     return to_return
 
 fit_start_time = time.time()
-xopt = opt.fmin(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess))
-print(xopt)
+
+Ebounds = (5,9)
+x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
+x_bounds = (np.min(x_real), np.max(x_real))
+y_bounds = (np.min(y_real), np.max(y_real))
+z_bounds = (0,400)
+theta_bounds = (0, np.pi)
+phi_bounds = (0, 2*np.pi)
+cs_bounds = (0,6)#mm
+#opt_results = opt.shgo(func=neg_log_likelihood, bounds=[Ebounds, x_bounds, y_bounds, z_bounds, theta_bounds, phi_bounds, cs_bounds])
+xopt = opt.fmin(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 0))
+#print(xopt)
 print('total fit time: %f s'%(time.time() - fit_start_time))
+
+#plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
+#plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
+
+trace_sim.simulate_event()
+trace_sim.align_pad_traces()
+show_simulated_3d_data(mode='aligned', threshold=100)
+h5file.plot_3d_traces(event_num, threshold=100)

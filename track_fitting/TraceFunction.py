@@ -138,7 +138,7 @@ class TraceFunction:
         sigma_xy_array = np.sqrt(10) * self.k_xy * np.sqrt(self.grid_zs) + self.charge_spreading_sigma
         sigma_z_array = np.sqrt(10) * self.k_z * np.sqrt(self.grid_zs)
         #do xy convolution
-        kernel_end = (self.kernel_size-1)/2*self.grid_resolution
+        kernel_end = (self.kernel_size-1)/2
         kernel_axis = np.linspace(-kernel_end, kernel_end, self.kernel_size)
         kernel_xx, kernel_yy = np.meshgrid(kernel_axis, kernel_axis)
         kernel_r2 = kernel_xx**2 + kernel_yy**2
@@ -225,11 +225,11 @@ class TraceFunction:
                 es.append(self.sim_pad_traces[pad])
             num_z_bins = len(self.grid_zs)
         elif source == 'energy grid':
-            for x in self.grid_xs:
-                for y in self.grid_ys:
+            for i,x in enumerate(self.grid_xs):
+                for j,y in enumerate(self.grid_ys):
                     xs.append(x)
                     ys.append(y)
-                    es.append(self.observed_charge_distribution[x,y,:])
+                    es.append(self.observed_charge_distribution[i,j,:])
                 num_z_bins = len(self.grid_zs)
         elif source == 'aligned':
             for pad in self.aligned_sim_traces:
@@ -351,6 +351,7 @@ class TraceFunction:
             print('trace alignment took %E s'%(time.time() - start_time))
 
     def log_likelihood(self):
+        start_time = time.time()
         to_return = 0
         all_pads = list(np.union1d(self.aligned_sim_traces.keys(), self.traces_to_fit.keys())[0])
         for pad in all_pads:
@@ -361,6 +362,8 @@ class TraceFunction:
             else:
                 residuals = self.traces_to_fit[pad]
             to_return += -np.sum(residuals * residuals)
+        if self.enable_print_statements:
+            print('likelihood time: %f s'%(time.time() - start_time))
         return to_return
             
 
