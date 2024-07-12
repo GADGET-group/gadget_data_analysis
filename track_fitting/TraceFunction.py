@@ -24,7 +24,7 @@ class TraceFunction:
     def __init__(self, gas_density, particle):
         self.particle = particle #this variable should only be changed using the load_srim_table function
     
-        self.enable_print_statements = True
+        self.enable_print_statements = False
 
         #physical constants relating to the detector
         self.grid_padding = 15  #mm; grid created will extend this far beyond particle track w/o diffusion
@@ -330,8 +330,6 @@ class TraceFunction:
             t_offset = 0
         else:
             t_offset = sum_pdeltax/sum_p
-        print(sum_p, sum_pdeltax)
-        print(t_offset)
         #shift charge distribution and put charge in nearest bins
         time_axis = self.grid_zs/self.zscale + t_offset #new charge locations in time bin units
         time_bin_map = np.round(time_axis).astype(int) #where each charge should go
@@ -341,11 +339,8 @@ class TraceFunction:
         kernel_size = self.shaping_kernel_size
         kernel_ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
         sigma = self.shaping_width/2.3548
-        print(kernel_ax)
         shaping_kernel = np.exp(-kernel_ax**2 / (2 * sigma**2))
-        print(sigma)
         shaping_kernel *= self.counts_per_MeV/np.sum(shaping_kernel) #norm of the kernel will be conversion to counts from MeV
-        print('shaping kernel:', shaping_kernel)
         
         self.aligned_sim_traces = {}
         for pad in self.sim_pad_traces:
@@ -357,7 +352,7 @@ class TraceFunction:
 
     def log_likelihood(self):
         to_return = 0
-        all_pads = np.union1d(self.aligned_sim_traces.keys(), self.traces_to_fit.keys())
+        all_pads = list(np.union1d(self.aligned_sim_traces.keys(), self.traces_to_fit.keys())[0])
         for pad in all_pads:
             if pad in self.aligned_sim_traces and pad in self.traces_to_fit:
                 residuals = self.aligned_sim_traces[pad] - self.traces_to_fit[pad]
