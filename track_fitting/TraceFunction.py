@@ -113,7 +113,7 @@ class TraceFunction:
             points[:,i] = self.initial_point[i] + direction_vector[i]*self.distances
         #points = np.array([np.array(self.initial_point) + distance * direction_vector for distance in self.distances])
         #remove any point with negative z (eg on wrong side of micro-megas)
-        points = points[points[:,2]>0]
+        #points = points[points[:,2]>0]
         timef2 = time.time()
 
         # create a 3d grid, surounding the event, on which all future operations will be performed

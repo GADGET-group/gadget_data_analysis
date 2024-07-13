@@ -1,5 +1,9 @@
 import time
+
+import os
+os.environ['OPENBLAS_NUM_THREADS'] = '3'
 import numpy as np
+
 import matplotlib.pylab as plt
 import scipy.optimize as opt
 
@@ -9,10 +13,15 @@ from raw_viewer import raw_h5_file
 run_h5_path = '/mnt/analysis/e21072/gastest_h5_files/run_0368.h5'
 event_num = 5
 
-init_position_guess = (-20, 12, 200)
-E_guess = 6.2 #correct answer is 6.288
-theta_guess = np.radians(80)
-phi_guess = np.radians(-30)
+E_guess = 6.2 
+if event_num == 5:
+    init_position_guess = (-20, 12, 200)
+    theta_guess = np.radians(80)
+    phi_guess = np.radians(-30)
+if event_num == 58:
+    init_position_guess = (29, 1, 200)
+    theta_guess = np.radians(60)
+    phi_guess = np.radians(-120)
 
 adc_scale = 376646/6.288 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 
@@ -31,6 +40,7 @@ h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                   zscale=zscale,
                                   flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
 h5file.background_subtract_mode='fixed window'
+h5file.data_select_mode='near peak'
 h5file.remove_outliers=True
 h5file.near_peak_window_width = 50
 h5file.require_peak_within= (-np.inf, np.inf)
@@ -55,7 +65,10 @@ trace_sim.align_pad_traces()
 def plot_traces(trace_dict, title=''):
         plt.figure()
         for pad in trace_dict:
-            plt.plot(trace_dict[pad], label=str(pad))
+            r = pad/1024*.8
+            g = (pad%512)/512*.8
+            b = (pad%256)/256*.8
+            plt.plot(trace_dict[pad], label=str(pad), color=(r,g,b))
         plt.legend()
         plt.title(title)
 
@@ -78,16 +91,18 @@ def show_simulated_3d_data(mode,  threshold = 0.0001): #show plots of initial gu
 
 
 def neg_log_likelihood(params):
-    E, x, y, z, theta, phi, charge_spread = params
+    E, x, y, z, theta, phi, charge_spread, counts_per_MeV = params
+    counts_per_MeV *= 1e4
     trace_sim.initial_energy = E
     trace_sim.initial_point = (x,y,z)
     trace_sim.theta = theta
     trace_sim.phi = phi
+    trace_sim.charge_spreading_sigma = charge_spread
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
-    trace_sim.charge_spreading_sigma = charge_spread
+    trace_sim.counts_per_MeV = counts_per_MeV
     to_return = -trace_sim.log_likelihood()
-    print(params, '%e'%to_return)
+    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, cpe=%e LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, counts_per_MeV, to_return))
     return to_return
 
 fit_start_time = time.time()
@@ -96,17 +111,25 @@ Ebounds = (5,9)
 x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
 x_bounds = (np.min(x_real), np.max(x_real))
 y_bounds = (np.min(y_real), np.max(y_real))
-z_bounds = (0,400)
-theta_bounds = (0, np.pi)
-phi_bounds = (0, 2*np.pi)
-cs_bounds = (0,6)#mm
+z_bounds = (10,400)
+theta_bounds = (0, np.radians(180))
+phi_bounds = (0., 2*np.pi)
+cs_bounds = (0,10)#mm
 #opt_results = opt.shgo(func=neg_log_likelihood, bounds=[Ebounds, x_bounds, y_bounds, z_bounds, theta_bounds, phi_bounds, cs_bounds])
-xopt = opt.fmin(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 0))
+xopt = opt.fmin(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 5, trace_sim.counts_per_MeV/1e4), ftol=1000)
+#res = opt.basinhopping(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 0))
+#res = opt.minimize(fun=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 0), method = 'Nelder-Mead', options={'adaptive':True})
+#res = opt.differential_evolution(func=neg_log_likelihood, bounds=[Ebounds, x_bounds, y_bounds, z_bounds, theta_bounds, phi_bounds, cs_bounds], workers=1)
 #print(xopt)
 print('total fit time: %f s'%(time.time() - fit_start_time))
 
-#plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
-#plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
+plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
+plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
+
+#best fit from differential evolution: E=6.034191 MeV, (x,y,z)=(26.532488, 16.171300, 39.979532) mm, theta = 149.786768deg, phi=79.963981 deg, cs=5.403833 mm, LL=6.807297e+06
+#fmin w/ charge per MeV free:
+#event 5: 
+#event 7
 
 trace_sim.simulate_event()
 trace_sim.align_pad_traces()
