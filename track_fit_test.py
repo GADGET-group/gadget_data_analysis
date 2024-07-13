@@ -15,13 +15,10 @@ event_num = 5
 
 E_guess = 6.2 
 if event_num == 5:
-    init_position_guess = (-20, 12, 200)
+    init_position_guess = (-20, 12, 100)
+    charge_spreading = 6
     theta_guess = np.radians(80)
     phi_guess = np.radians(-30)
-if event_num == 58:
-    init_position_guess = (29, 1, 200)
-    theta_guess = np.radians(60)
-    phi_guess = np.radians(-120)
 
 adc_scale = 376646/6.288 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 
@@ -116,7 +113,7 @@ theta_bounds = (0, np.radians(180))
 phi_bounds = (0., 2*np.pi)
 cs_bounds = (0,10)#mm
 #opt_results = opt.shgo(func=neg_log_likelihood, bounds=[Ebounds, x_bounds, y_bounds, z_bounds, theta_bounds, phi_bounds, cs_bounds])
-xopt = opt.fmin(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 5, trace_sim.counts_per_MeV/1e4), ftol=1000)
+xopt = opt.fmin(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, charge_spreading, trace_sim.counts_per_MeV/1e4), ftol=1000)
 #res = opt.basinhopping(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 0))
 #res = opt.minimize(fun=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 0), method = 'Nelder-Mead', options={'adaptive':True})
 #res = opt.differential_evolution(func=neg_log_likelihood, bounds=[Ebounds, x_bounds, y_bounds, z_bounds, theta_bounds, phi_bounds, cs_bounds], workers=1)
