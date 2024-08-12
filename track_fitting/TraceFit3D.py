@@ -4,13 +4,13 @@ import matplotlib.pyplot as plt
 import matplotlib.colors
 import numpy as np
 
-from track_fitting import TraceFunction
+from track_fitting import SingleParticleEvent
 
 class TraceFit3D(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         pressure = 800
-        self.trace_function = TraceFunction.TraceFunction(pressure, 'proton')
+        self.trace_function = SingleParticleEvent.SingleParticleEvent(pressure, 'proton')
         self.create_widgets()
 
     def create_widgets(self):

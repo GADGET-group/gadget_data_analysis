@@ -9,7 +9,7 @@ from scipy.spatial import KDTree
 from track_fitting import srim_interface
 
 
-class TraceFunction:
+class SingleParticleEvent:
     '''
     Class for simulating detector response to a single charged particle.
     Usage:
@@ -22,6 +22,9 @@ class TraceFunction:
     '''
 
     def __init__(self, gas_density, particle):
+        '''
+        gas_density: density in mg/cm^3
+        '''
         self.particle = particle #this variable should only be changed using the load_srim_table function
     
         self.enable_print_statements = False
@@ -92,16 +95,23 @@ class TraceFunction:
             else:
                 return None
 
+    def get_energy_deposition(self):
+        '''
+        Return energy deposition vs distance.
+        returns distances, energy deposition
+        '''
+        # Integrate stopping powers
+        stopping_distance = self.srim_table.get_stopping_distance(self.initial_energy)
+        distances = np.linspace(0, stopping_distance, self.num_stopping_power_points)
+        dx = distances[1] - distances[0]
+        energy_deposition = self.srim_table.get_stopping_power_after_distances(self.initial_energy, distances)*dx
+        return distances, energy_deposition
+
     def simulate_event(self, map_to_pads=True):
         '''
         
         '''
-        # Integrate stopping powers
-        stopping_distance = self.srim_table.get_stopping_distance(self.initial_energy)
-        self.distances = np.linspace(0, stopping_distance, self.num_stopping_power_points)
-        dx = self.distances[1] - self.distances[0]
-        stopping_powers = self.srim_table.get_stopping_power_after_distances(self.initial_energy, self.distances)*dx
-
+        self.distances, energy_deposition = self.get_energy_deposition()
         # Compute the points where energy is evaluated
         time2 = time.time()
         direction_vector = np.array((np.sin(self.theta) * np.cos(self.phi), 
@@ -127,7 +137,7 @@ class TraceFunction:
         energy_grid = np.zeros(grid_shape)
         #map stopping power points in 3-space to the nearest grid points
         indices = ((points - [min_x, min_y, min_z]) / self.grid_resolution).round().astype(int)
-        np.add.at(energy_grid, (indices[:, 0], indices[:, 1], indices[:, 2]), stopping_powers)
+        np.add.at(energy_grid, (indices[:, 0], indices[:, 1], indices[:, 2]), energy_deposition)
         self.initial_charge_distribution = np.copy(energy_grid)
         #np.add.at(energy_grid, np.transpose(indices), stopping_powers)
         timef3 = time.time()

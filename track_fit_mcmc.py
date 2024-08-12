@@ -1,11 +1,11 @@
 import time
 
-import os
-os.environ['OPENBLAS_NUM_THREADS'] = '3'
-import numpy as np
+#import os
+#os.environ['OPENBLAS_NUM_THREADS'] = '3'
 
+import numpy as np
 import matplotlib.pylab as plt
-import scipy.optimize as opt
+import emcee
 
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
@@ -16,11 +16,11 @@ event_num = 5
 if event_num == 5:
     E_guess = 6.212
     init_position_guess = (-8.5, 11, 200)
-    charge_spreading = 3
+    charge_spreading_guess = 3
     theta_guess = np.radians(80)
     phi_guess = np.radians(-30)
 
-adc_scale = 376646/6.288 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
+adc_scale = 369654/6.288 #counts/MeV, from fitting events with range 42-46 in run 0368 with p10_default, using the zscale above to determine range
 
 #use theoretical zscale
 clock_freq = 50e6 #Hz
@@ -32,7 +32,12 @@ shaping_width  = shaping_time*clock_freq#*2.355
 
 ic_threshold = 25
 
+rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
+P = 860 #torr
+T = 20+273.15 #K
+gas_density = rho0*(P/760)*(300./T)
 
+#configure h5 file interface to match P10_default
 h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                   zscale=zscale,
                                   flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
@@ -42,11 +47,10 @@ h5file.remove_outliers=True
 h5file.near_peak_window_width = 50
 h5file.require_peak_within= (-np.inf, np.inf)
 h5file.num_background_bins=(400,500)
+h5file.ic_counts_threshold = ic_threshold
+h5file.zscale = zscale
 
-rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-P = 860 #torr
-T = 20+273.15 #K
-gas_density = rho0*(P/760)*(300./T)
+
 trace_sim = SingleParticleEvent.SingleParticleEvent(gas_density, 'alpha')
 trace_sim.shaping_width = shaping_width
 trace_sim.zscale = zscale
@@ -104,9 +108,8 @@ def show_simulated_3d_data(mode,  threshold = 0.0001): #show plots of initial gu
     ax.axes.set_ylim3d(bottom=-100, top=100) 
     ax.axes.set_zlim3d(bottom=0, top=200)
 
-def neg_log_likelihood(params):
-    E, x, y, z, theta, phi, charge_spread, counts_per_MeV = params
-    counts_per_MeV *= 1e4
+def log_likelihood(params):
+    E, x, y, z, theta, phi, charge_spread = params
     trace_sim.initial_energy = E
     trace_sim.initial_point = (x,y,z)
     trace_sim.theta = theta
@@ -114,33 +117,42 @@ def neg_log_likelihood(params):
     trace_sim.charge_spreading_sigma = charge_spread
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
-    trace_sim.counts_per_MeV = counts_per_MeV
-    to_return = -trace_sim.log_likelihood()
-    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, cpe=%e LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, counts_per_MeV, to_return))
+    to_return = trace_sim.log_likelihood()
+    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, to_return))
     return to_return
 
-
 fit_start_time = time.time()
-
-Ebounds = (5,7)
+#set up priors
+max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
 x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
-x_bounds = (np.min(x_real), np.max(x_real))
-y_bounds = (np.min(y_real), np.max(y_real))
-z_bounds = (10,400)
-theta_bounds = (0, np.radians(180))
-phi_bounds = (0., 2*np.pi)
-cs_bounds = (0,10)#mm
-cpe_bounds = (0.8*adc_scale, 1.2*adc_scale)
-#opt_results = opt.shgo(func=neg_log_likelihood, bounds=[Ebounds, x_bounds, y_bounds, z_bounds, theta_bounds, phi_bounds, cs_bounds, cpe_bounds])
-#print(opt_results)
-xopt = opt.fmin_powell(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, charge_spreading, trace_sim.counts_per_MeV/1e4), ftol=1000)
-#xopt = opt.fmin(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, charge_spreading, trace_sim.counts_per_MeV/1e4), ftol=1000)
-#res = opt.basinhopping(func=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, 0))
-#res = opt.minimize(fun=neg_log_likelihood, x0=(E_guess, *init_position_guess, theta_guess, phi_guess, charge_spreading, trace_sim.counts_per_MeV/1e4), options={'adaptive':True})
-#res = opt.minimize(fun=neg_log_likelihood, method='BFGS', x0=(E_guess, *init_position_guess, theta_guess, phi_guess, charge_spreading, trace_sim.counts_per_MeV/1e4))
-#res = opt.differential_evolution(func=neg_log_likelihood, bounds=[Ebounds, x_bounds, y_bounds, z_bounds, theta_bounds, phi_bounds, cs_bounds, cpe_bounds], workers=1)
-#print(xopt)
-#neg_log_likelihood((6.212, -8.5,11,200,np.pi/2,np.arctan(-16/(8.5+17.7)), 0, adc_scale))
+E_from_ic = measured_counts/adc_scale
+detector_energy_resolution = 18828/369654*measured_counts/adc_scale
+def log_prior(Ealpha, x, y, z, theta, phi, charge_spread):
+    #apply uniform priors to x, y, and z
+    #TODO: make this uniform over the blob, rather than a cube
+    if x < np.min(x_real) or x > np.max(x_real) or y < np.min(y_real) or y > np.max(y_real) or z < 1 or z > 400:
+        return -np.inf
+    #uniform prior for theta and phi
+    #TODO: weight for equal solid angle?
+    if theta < 0 or theta >= np.pi or phi < 0 or phi >= 2*np.pi:
+        return -np.inf
+    if charge_spread <= 0 or charge_spread >= 10:
+        return -np.inf
+    #gaussian distribution of particle energies, based on known energy resolution of the detector
+    return -np.log(np.sqrt(2*np.pi*detector_energy_resolution**2)) - (E_from_ic - Ealpha)**2/2/detector_energy_resolution
+
+def log_posterior(params):
+    return log_prior(*params) + log_likelihood(params) #TODO: normalization for log_likelihood?
+
+#do MCMC sampling
+nwalkers = 50
+ndim = 7
+init_walker_pos =  [np.array([E_guess, *init_position_guess, theta_guess, phi_guess, charge_spreading_guess]) + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
+
+sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior)
+sampler.run_mcmc(init_walker_pos, 500, progress=True)
+
+
 print('total fit time: %f s'%(time.time() - fit_start_time))
 
 plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
