@@ -15,6 +15,8 @@ class SRIM_Table:
         # Read the file
         with open(data_path, 'r') as file:
             for i, line in enumerate(file):
+                if i == 9:#read in density at which calculation was done
+                    table_density = float(line.split()[3])*1e3#convert g/cm^3 to mg/cm^3
                 # Start reading from the 26th line and stop after the 105th line
                 if 26 <= i <= 104:
                     if line.strip():  # Ensure the line is not empty
@@ -52,7 +54,7 @@ class SRIM_Table:
         self.energy_MeV = np.array(energy_MeV)
         electronic_stopping_MeV_um = np.array(electronic_stopping_MeV_um)
         nuclear_stopping_MeV_um = np.array(nuclear_stopping_MeV_um)
-        self.stopping_distance_mm = np.array(path_length_mm)
+        self.stopping_distance_mm = np.array(path_length_mm)/material_density*table_density
         self.stopping_power_MeV_mm = material_density * (electronic_stopping_MeV_um + nuclear_stopping_MeV_um)/10
         
     def get_stopping_distance(self, E_MeV):
