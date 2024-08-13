@@ -256,7 +256,7 @@ backend_file = "run368_event%d_samples.h5"%(event_num)
 backend = emcee.backends.HDFBackend(backend_file)
 backend.reset(nwalkers, ndim)
 
-sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior)
+sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
 max_n = 100000
 # We'll track how the average autocorrelation time estimate changes
 index = 0

@@ -71,9 +71,6 @@ class SingleParticleEvent:
         self.peak_bins = {} #dictionairy of peak bin indices, indexed by pad number
         self.peak_vals = {} #dictionary holding the max value of each trace to be fit
         
-
-
-
     def load_srim_table(self, particle:str, gas_density:float):
         '''
         Reload SRIM table
@@ -375,5 +372,6 @@ class SingleParticleEvent:
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
         return to_return
-            
+        
+    
 
