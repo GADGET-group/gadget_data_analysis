@@ -178,7 +178,7 @@ def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
     if np.isnan(to_return):
         to_return = -np.inf
-    #print('log posterior: %e'%to_return)
+    print('log posterior: %e'%to_return)
     return to_return
     
 
