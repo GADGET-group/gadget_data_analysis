@@ -113,6 +113,9 @@ h5file.plot_3d_traces(event_num, threshold=100)
 #do MCMC
 import emcee
 
+shaping_best_fit = 10.126
+charge_spread_best_fit = 4.179261
+
 class GaussianVar:
     def __init__(self, mu, sigma):
         self.mu, self.sigma  = mu, sigma
@@ -120,8 +123,22 @@ class GaussianVar:
     def log_likelihood(self, val):
         return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma
 
+adc_scale_prior = GaussianVar(adc_scale_mu, adc_scale_sigma)
+max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
+E_from_ic = measured_counts/adc_scale_mu
+E_prior = GaussianVar(E_from_ic, detector_E_sigma)
+P_prior = GaussianVar(P_guess, P_guess*0.01)#assumes pressure transducer accuracy of 1%, should check what this really should be
+x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
+xmin, xmax = np.min(x_real), np.max(x_real)
+ymin, ymax = np.min(y_real), np.max(y_real)
+zmin, zmax = 5, 400
+
 def log_likelihood_mcmc(params):
-    E, x,y,z,theta, phi, charge_spread, shaping_width, P, adc_scale = params
+    E, x,y,theta, phi = params
+
+    z,P, adc_scale = 50., P_guess, adc_scale_mu
+    charge_spread, shaping_width = charge_spread_best_fit, shaping_best_fit
+
     trace_sim.load_srim_table('alpha', get_gas_density(P))
     trace_sim.initial_energy = E
     trace_sim.initial_point = (x,y,z)
@@ -136,32 +153,22 @@ def log_likelihood_mcmc(params):
     print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr, adc_scale=%f, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, adc_scale, to_return))
     return to_return
 
-adc_scale_prior = GaussianVar(adc_scale_mu, adc_scale_sigma)
-max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
-E_from_ic = measured_counts/adc_scale_mu
-E_prior = GaussianVar(E_from_ic, detector_E_sigma)
-P_prior = GaussianVar(P_guess, P_guess*0.01)#assumes pressure transducer accuracy of 1%, should check what this really should be
-x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
-xmin, xmax = np.min(x_real), np.max(x_real)
-ymin, ymax = np.min(y_real), np.max(y_real)
-zmin, zmax = 5, 400
+
 
 
 def log_priors(params):
-    E, x,y,z,theta, phi, charge_spread, shaping_width, P, adc_scale = params
+    E, x,y,theta, phi = params
     #uniform priors
-    if x < xmin or x > xmax or y < ymin or y > ymax or z < zmin or z>zmax:
+    if x < xmin or x > xmax or y < ymin or y > ymax:
         return -np.inf
     if theta < 0 or theta >= np.pi:
         return -np.inf
     if phi <= -np.pi or phi > np.pi:
         return -np.inf
-    if charge_spread <= 0 or charge_spread > 10:
-        return -np.inf
     if shaping_width <=0 or shaping_width > 20:
         return -np.inf
     #gaussian priors
-    return E_prior.log_likelihood(E) + P_prior.log_likelihood(P) + adc_scale_prior.log_likelihood(adc_scale)
+    return E_prior.log_likelihood(E) 
 
 def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
@@ -171,12 +178,13 @@ def log_posterior(params):
 
 #use previous optimization for start pos
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
-start_pos = [6.496048, -12.8865501,12.89937,50,np.radians(86.718415), np.radians(-29.475943), 4.179261,10.126,P_guess, adc_scale_mu]
-nwalkers = 50
-ndim = 10
+
+start_pos = [6.496048, -12.8865501,12.89937,np.radians(86.718415), np.radians(-29.475943)]
+nwalkers = 15
+ndim = 5
 init_walker_pos =  [np.array(start_pos) + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
 
-backend_file = "run368_event%d_samples.h5"%(event_num)
+backend_file = "run368_event%d_samples_E_x_y_theta_phi.h5"%(event_num)
 backend = emcee.backends.HDFBackend(backend_file)
 backend.reset(nwalkers, ndim)
 
