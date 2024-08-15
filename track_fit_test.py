@@ -150,7 +150,7 @@ def log_likelihood_mcmc(params):
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
     to_return = trace_sim.log_likelihood()
-    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr, adc_scale=%f, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, adc_scale, to_return))
+    #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr, adc_scale=%f, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, adc_scale, to_return))
     return to_return
 
 
@@ -172,7 +172,7 @@ def log_priors(params):
 
 def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
-    print('log posterior: %e'%to_return)
+    #print('log posterior: %e'%to_return)
     return to_return
     
 
@@ -180,9 +180,9 @@ def log_posterior(params):
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
 start_pos = [6.496048, -12.8865501,12.89937,np.radians(86.718415), np.radians(-29.475943)]
-nwalkers = 15
+nwalkers = 100
 ndim = 5
-init_walker_pos =  [np.array(start_pos) + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
+init_walker_pos =  [np.array(start_pos) + .1*np.random.randn(ndim) for i in range(nwalkers)]
 
 backend_file = "run368_event%d_samples_E_x_y_theta_phi.h5"%(event_num)
 backend = emcee.backends.HDFBackend(backend_file)
@@ -198,8 +198,8 @@ old_tau = np.inf
 # Now we'll sample for up to max_n steps
 for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
     # Only check convergence every 10 steps
-    if sampler.iteration % 100:
-        continue
+    #if sampler.iteration % 100:
+    #    continue
 
     # Compute the autocorrelation time so far
     # Using tol=0 means that we'll always get an estimate even
@@ -207,11 +207,11 @@ for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
     tau = sampler.get_autocorr_time(tol=0)
     autocorr[index] = np.mean(tau)
     index += 1
-    print('%f < tau < %f on iteration %d'%(np.min(tau), np.max(tau), sampler.iteration ))
+    print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', sampler.acceptance_fraction )
 
     # Check convergence
     converged = np.all(tau * 100 < sampler.iteration)
-    converged &= np.all(np.abs(old_tau - tau) / tau < 0.01)
+    #converged &= np.all(np.abs(old_tau - tau) / tau < 0.01)
     if converged:
         break
     old_tau = tau
