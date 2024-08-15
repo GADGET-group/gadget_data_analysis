@@ -45,7 +45,7 @@ class SingleParticleEvent:
         #parameters for grid size and other numerics
         self.num_stopping_power_points = 500 #number of points at which to compute 1D energy deposition
         self.kernel_size = 31 #size of gaussian kernels. MUST BE ODD!
-        self.grid_resolution = 1  #spacing between grid lines mm
+        self.grid_resolution = 1.3  #spacing between grid lines mm
         self.shaping_kernel_size = 31 #must be odd
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')

@@ -160,12 +160,16 @@ def log_priors(params):
     E, x,y,theta, phi = params
     #uniform priors
     if x < xmin or x > xmax or y < ymin or y > ymax:
+        print('fail1')
         return -np.inf
     if theta < 0 or theta >= np.pi:
-        return -np.inf
+        print('fail2')
+        return -np.inf 
     if phi <= -np.pi or phi > np.pi:
+        print('fail3')
         return -np.inf
     if shaping_width <=0 or shaping_width > 20:
+        print('fail4')
         return -np.inf
     #gaussian priors
     return E_prior.log_likelihood(E) 
@@ -180,9 +184,9 @@ def log_posterior(params):
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
 start_pos = [6.496048, -12.8865501,12.89937,np.radians(86.718415), np.radians(-29.475943)]
-nwalkers = 100
+nwalkers = 125
 ndim = 5
-init_walker_pos =  [np.array(start_pos) + .1*np.random.randn(ndim) for i in range(nwalkers)]
+init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
 
 backend_file = "run368_event%d_samples_E_x_y_theta_phi.h5"%(event_num)
 backend = emcee.backends.HDFBackend(backend_file)
@@ -207,7 +211,7 @@ for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
     tau = sampler.get_autocorr_time(tol=0)
     autocorr[index] = np.mean(tau)
     index += 1
-    print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', sampler.acceptance_fraction )
+    print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
     # Check convergence
     converged = np.all(tau * 100 < sampler.iteration)

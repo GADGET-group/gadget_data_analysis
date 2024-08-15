@@ -6,9 +6,11 @@ import numpy as np
 if True:
     filename = '../run368_event5_samples.h5'
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread', 'shaping_width', 'P', 'adc_scale']
+    tau = 700
 else:
     filename = '../run368_event5_samples_E_x_y_theta_phi.h5'
     labels = ['E', 'x','y','theta', 'phi']
+    tau = 10#reader.get_autocorr_time()
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
@@ -26,7 +28,7 @@ for i in range(len(labels)):
 axes[-1].set_xlabel("step number")
 
 
-tau = 150#reader.get_autocorr_time()
+
 burnin = int(2 * np.max(tau))
 thin = int(0.5 * np.min(tau))
 
