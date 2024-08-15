@@ -64,84 +64,8 @@ pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=
 trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 20)
 trace_sim.align_pad_traces()
 
-def plot_traces(trace_dict, title=''):
-        plt.figure()
-        for pad in trace_dict:
-            r = pad/1024*.8
-            g = (pad%512)/512*.8
-            b = (pad%256)/256*.8
-            plt.plot(trace_dict[pad], label=str(pad), color=(r,g,b))
-        plt.legend()
-        plt.title(title)
-
-def get_residuals():
-    sim_trace_dict = trace_sim.aligned_sim_traces
-    real_trace_dict = trace_sim.traces_to_fit
-    residuals_dict = {}
-    for pad in sim_trace_dict:
-        if pad not in real_trace_dict:
-            residuals_dict[pad] = sim_trace_dict[pad]
-        else:
-            residuals_dict[pad] = sim_trace_dict[pad] - real_trace_dict[pad]
-    for pad in real_trace_dict:
-        if pad not in sim_trace_dict:
-            residuals_dict[pad] = -real_trace_dict[pad]
-    return residuals_dict
-
-def plot_residuals():
-    plot_traces(get_residuals(), 'residuals')
-
-def plot_residuals_3d(threshold=1):
-    residuals_dict = get_residuals()
-    xs, ys, es = [],[],[]
-    for pad in residuals_dict:
-        es.append(residuals_dict[pad])
-        x,y = trace_sim.pad_to_xy[pad]
-        xs.append(x)
-        ys.append(y)
-    num_z_bins = len(es[0])
-    xs = np.repeat(xs, num_z_bins)
-    ys = np.repeat(ys, num_z_bins)
-    es = np.array(es).flatten()
-    z_axis = np.arange(num_z_bins)*trace_sim.zscale
-    zs = np.tile(z_axis, int(len(xs)/len(z_axis)))
-    fig = plt.figure()
-    plt.title('residuals')
-    ax = fig.add_subplot(111, projection='3d')
-    # Plot the 3D scatter plot with energy values as color
-    xs = xs[np.abs(es)>threshold]
-    ys = ys[np.abs(es)>threshold]
-    zs = zs[np.abs(es)>threshold]
-    es = es[np.abs(es)>threshold]
-    sc = ax.scatter(xs, ys,zs, c=es,  alpha=0.5)#, cmap='inferno', marker='o',)# norm=matplotlib.colors.LogNorm())
-    # Add colorbar
-    cbar = plt.colorbar(sc, ax=ax)
-    cbar.set_label('Energy (adc units)')
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.axes.set_xlim3d(left=-100, right=100) 
-    ax.axes.set_ylim3d(bottom=-100, top=100) 
-    ax.axes.set_zlim3d(bottom=0, top=200)
 
 
-
-def show_simulated_3d_data(mode,  threshold = 0.0001): #show plots of initial guess
-    x_sim, y_sim, z_sim, e_sim = trace_sim.get_xyze(mode,threshold)
-    fig = plt.figure()
-    plt.title('simulated data')
-    ax = fig.add_subplot(111, projection='3d')
-    # Plot the 3D scatter plot with energy values as color
-    sc = ax.scatter(x_sim, y_sim, z_sim, c=e_sim,  alpha=0.5)#, cmap='inferno', marker='o',)# norm=matplotlib.colors.LogNorm())
-    # Add colorbar
-    cbar = plt.colorbar(sc, ax=ax)
-    cbar.set_label('Energy (adc units)')
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.axes.set_xlim3d(left=-100, right=100) 
-    ax.axes.set_ylim3d(bottom=-100, top=100) 
-    ax.axes.set_zlim3d(bottom=0, top=200)
 
 #do initial minimization before starting MCMC
 def neg_log_likelihood_init_min(params):

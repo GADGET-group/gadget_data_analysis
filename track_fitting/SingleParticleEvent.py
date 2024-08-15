@@ -7,6 +7,7 @@ import scipy.signal
 import time
 from scipy.spatial import KDTree
 from track_fitting import srim_interface
+import matplotlib.pylab as plt
 
 
 class SingleParticleEvent:
@@ -357,21 +358,90 @@ class SingleParticleEvent:
         if self.enable_print_statements:
             print('trace alignment took %E s'%(time.time() - start_time))
 
+    def get_residuals(self):
+        sim_trace_dict = self.aligned_sim_traces
+        real_trace_dict = self.traces_to_fit
+        residuals_dict = {}
+        for pad in sim_trace_dict:
+            if pad not in real_trace_dict:
+                residuals_dict[pad] = sim_trace_dict[pad]
+            else:
+                residuals_dict[pad] = sim_trace_dict[pad] - real_trace_dict[pad]
+        for pad in real_trace_dict:
+            if pad not in sim_trace_dict:
+                residuals_dict[pad] = -real_trace_dict[pad]
+        return residuals_dict
+    
+    def get_residuals_xyze(self):
+        residuals_dict = self.get_residuals()
+        xs, ys, es = [],[],[]
+        for pad in residuals_dict:
+            es.append(residuals_dict[pad])
+            x,y = self.pad_to_xy[pad]
+            xs.append(x)
+            ys.append(y)
+        num_z_bins = len(es[0])
+        xs = np.repeat(xs, num_z_bins)
+        ys = np.repeat(ys, num_z_bins)
+        es = np.array(es).flatten()
+        z_axis = np.arange(num_z_bins)*self.zscale
+        zs = np.tile(z_axis, int(len(xs)/len(z_axis)))
+        return xs, ys, zs, es
+
     def log_likelihood(self):
         start_time = time.time()
         to_return = 0
-        all_pads = list(np.union1d(self.aligned_sim_traces.keys(), self.traces_to_fit.keys())[0])
-        for pad in all_pads:
-            if pad in self.aligned_sim_traces and pad in self.traces_to_fit:
-                residuals = self.aligned_sim_traces[pad] - self.traces_to_fit[pad]
-            elif pad in self.aligned_sim_traces:
-                residuals = self.aligned_sim_traces[pad]
-            else:
-                residuals = self.traces_to_fit[pad]
-            to_return += -np.sum(residuals * residuals)
+        residuals = self.get_residuals()
+        for pad in residuals:
+            to_return += -np.sum(residuals[pad] * residuals[pad])
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
         return to_return
-        
     
+    #######################
+    # Visualization Tools #
+    #######################
+    def plot_traces(self, trace_dict, title=''):
+        plt.figure()
+        for pad in trace_dict:
+            r = pad/1024*.8
+            g = (pad%512)/512*.8
+            b = (pad%256)/256*.8
+            plt.plot(trace_dict[pad], label=str(pad), color=(r,g,b))
+        plt.legend()
+        plt.title(title)
 
+    def plot_residuals(self):
+        self.plot_traces(self.get_residuals(), 'residuals')
+
+    def plot_xyze(self, xs, ys, zs, es, title='', energy_threshold=-np.inf):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        # Plot the 3D scatter plot with energy values as color
+        xs = xs[es>energy_threshold]
+        ys = ys[es>energy_threshold]
+        zs = zs[es>energy_threshold]
+        es = es[es>energy_threshold]
+        sc = ax.scatter(xs, ys,zs, c=es,  alpha=0.5)#, cmap='inferno', marker='o',)# norm=matplotlib.colors.LogNorm())
+        # Add colorbar
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label('Energy (adc units)')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.axes.set_xlim3d(left=-100, right=100) 
+        ax.axes.set_ylim3d(bottom=-100, top=100) 
+        ax.axes.set_zlim3d(bottom=0, top=200)
+        plt.title(title)
+
+    def plot_simulated_3d_data(self, mode='simulated traces',  title='simulated_data', threshold=-np.inf): #show plots of initial guess
+        self.plot_xyze(*self.get_xyze(mode, threshold), title, threshold)
+    
+    def plot_residuals_3d(self, title='residuals', energy_threshold=0):
+        #in this case treshold is applied to absolute value
+        xs, ys, zs, ys = self.get_residuals_xyze()
+        xs = xs[np.abs(es)>energy_threshold]
+        ys = ys[np.abs(es)>energy_threshold]
+        zs = zs[np.abs(es)>energy_threshold]
+        es = es[np.abs(es)>energy_threshold]
+        self.plot_xyze(xs, ys, zs, es, title)
