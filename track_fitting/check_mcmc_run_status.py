@@ -3,14 +3,19 @@ import matplotlib.pylab as plt
 import corner
 import numpy as np
 
-if True:
+if False:
     filename = '../run368_event5_samples.h5'
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread', 'shaping_width', 'P', 'adc_scale']
     tau = 700
-else:
+if True:
     filename = '../run368_event5_samples_E_x_y_theta_phi.h5'
     labels = ['E', 'x','y','theta', 'phi']
-    tau = 10#reader.get_autocorr_time()
+    tau = 2#reader.get_autocorr_time()
+
+if False:
+    filename = '../run368_event5_samples_E_x_y_theta_phi_15walker.h5'
+    labels = ['E', 'x','y','theta', 'phi']
+    tau = 200
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
@@ -27,7 +32,7 @@ for i in range(len(labels)):
 
 axes[-1].set_xlabel("step number")
 
-
+plt.show()
 
 burnin = int(2 * np.max(tau))
 thin = int(0.5 * np.min(tau))
