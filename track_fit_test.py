@@ -26,7 +26,7 @@ elif event_num == 331:
     phi_guess = np.radians(120)
     P_guess = 1157
 elif event_num == 12:
-    init_position_guess = (28, 20, 200)
+    init_position_guess = (28, 20, 100)
     charge_spreading_guess = 3
     theta_guess = np.radians(90+46)
     phi_guess = np.radians(160)
@@ -132,7 +132,7 @@ trace_sim.plot_residuals()
 trace_sim.plot_simulated_3d_data(mode='aligned', threshold=100)
 h5file.plot_3d_traces(event_num, threshold=100)
 trace_sim.plot_residuals_3d(energy_threshold=20)
-plt.show(block=False)
+plt.show()
 
 
 #do MCMC
@@ -165,7 +165,7 @@ def log_priors(params):
     E, x,y,theta, phi = params
     
     #uniform priors
-    if x < xmin or x > xmax or y < ymin or y > ymax:
+    if x**2 + y**2 > 40**2:
         print('fail1')
         return -np.inf
     if theta < 0 or theta >= np.pi:
