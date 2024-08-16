@@ -7,10 +7,14 @@ if False:
     filename = '../run368_event5_samples.h5'
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread', 'shaping_width', 'P', 'adc_scale']
     tau = [630, 1050]
-if True:
+if False:
     filename = '../run368_event5_samples_E_x_y_theta_phi.h5'
     labels = ['E', 'x','y','theta', 'phi']
     tau = [5,20]#reader.get_autocorr_time()
+if True:
+    filename = '../run368_event331_samples_E_x_y_theta_phi.h5'
+    labels = ['E', 'x','y','theta', 'phi']
+    tau = [2,2]#reader.get_autocorr_time()
 
 if False:
     filename = '../run368_event5_samples_E_x_y_theta_phi_15walker.h5'

@@ -296,8 +296,8 @@ class SingleParticleEvent:
         for pad in pads_to_remove:
             self.traces_to_fit.pop(pad)
         #trim traces
-        trim_start = max(first - trim_pad, 0)
-        trim_end = min(last + trim_pad, len(trace))
+        trim_start = max(trim_before - trim_pad, 0)
+        trim_end = min(trim_after + trim_pad, len(trace))
         for pad in self.traces_to_fit:
             self.traces_to_fit[pad] = self.traces_to_fit[pad][trim_start:trim_end]
         #find peaks

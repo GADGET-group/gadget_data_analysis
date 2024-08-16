@@ -11,7 +11,7 @@ from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
 
 run_h5_path = '/mnt/analysis/e21072/gastest_h5_files/run_0368.h5'
-event_num = 331
+event_num = 12
 
 if event_num == 5:
     init_position_guess = (-12, 13, 200)
@@ -24,6 +24,12 @@ elif event_num == 331:
     charge_spreading_guess = 3
     theta_guess = np.radians(50)
     phi_guess = np.radians(120)
+    P_guess = 1157
+elif event_num == 12:
+    init_position_guess = (28, 20, 200)
+    charge_spreading_guess = 3
+    theta_guess = np.radians(90+46)
+    phi_guess = np.radians(160)
     P_guess = 1157
 
 
@@ -62,7 +68,7 @@ trace_sim.counts_per_MeV = adc_scale_mu
 
 trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 20)
+trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 30)
 trace_sim.align_pad_traces()
 
 
