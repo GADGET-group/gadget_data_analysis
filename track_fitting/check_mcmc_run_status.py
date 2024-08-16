@@ -10,7 +10,7 @@ if False:
 if True:
     filename = '../run368_event5_samples_E_x_y_theta_phi.h5'
     labels = ['E', 'x','y','theta', 'phi']
-    tau = [5,5]#reader.get_autocorr_time()
+    tau = [5,20]#reader.get_autocorr_time()
 
 if False:
     filename = '../run368_event5_samples_E_x_y_theta_phi_15walker.h5'

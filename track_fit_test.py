@@ -11,7 +11,7 @@ from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
 
 run_h5_path = '/mnt/analysis/e21072/gastest_h5_files/run_0368.h5'
-event_num = 5
+event_num = 331
 
 if event_num == 5:
     init_position_guess = (-12, 13, 200)
@@ -19,6 +19,13 @@ if event_num == 5:
     theta_guess = np.radians(90)
     phi_guess = np.radians(-30)
     P_guess = 1157
+elif event_num == 331:
+    init_position_guess = (36, 1.5, 200)
+    charge_spreading_guess = 3
+    theta_guess = np.radians(50)
+    phi_guess = np.radians(120)
+    P_guess = 1157
+
 
 adc_scale_mu = 371902/6.288 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 adc_scale_sigma = 1401/6.288 #uncertainty in peak postiion from chi^2 fit
