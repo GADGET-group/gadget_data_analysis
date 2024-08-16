@@ -189,7 +189,7 @@ start_pos = [6.496048, -12.8865501,12.89937,np.radians(86.718415), np.radians(-2
 nwalkers = 125
 ndim = 5
 #init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
-init_walker_post = [(E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), np.random.uniform]
+#init_walker_post = [(E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), np.random.uniform]
 
 backend_file = "run368_event%d_samples_E_x_y_theta_phi.h5"%(event_num)
 backend = emcee.backends.HDFBackend(backend_file)

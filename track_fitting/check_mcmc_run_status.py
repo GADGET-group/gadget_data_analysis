@@ -8,7 +8,7 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread', 'shaping_width', 'P', 'adc_scale']
     tau = 700
 if True:
-    filename = '../run368_event5_samples_E_x_y_theta_phi.h5'
+    filename = '../run368_event5_samples_E_x_y_theta_phi_no_uniform.h5'#../run368_event5_samples_E_x_y_theta_phi.h5'
     labels = ['E', 'x','y','theta', 'phi']
     tau = 2#reader.get_autocorr_time()
 
@@ -34,6 +34,7 @@ axes[-1].set_xlabel("step number")
 
 plt.show()
 
+tau=reader.get_autocorr_time()
 burnin = int(2 * np.max(tau))
 thin = int(0.5 * np.min(tau))
 

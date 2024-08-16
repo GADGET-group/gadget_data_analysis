@@ -158,6 +158,7 @@ def log_likelihood_mcmc(params):
 
 def log_priors(params):
     E, x,y,theta, phi = params
+    
     #uniform priors
     if x < xmin or x > xmax or y < ymin or y > ymax:
         print('fail1')
@@ -171,6 +172,7 @@ def log_priors(params):
     if shaping_width <=0 or shaping_width > 20:
         print('fail4')
         return -np.inf
+    
     #gaussian priors
     return E_prior.log_likelihood(E) 
 
@@ -178,7 +180,7 @@ def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
     if np.isnan(to_return):
         to_return = -np.inf
-    #print('log posterior: %e'%to_return)
+    print('log posterior: %e'%to_return)
     return to_return
     
 
@@ -186,13 +188,13 @@ def log_posterior(params):
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
 start_pos = [6.496048, -12.8865501,12.89937,np.radians(86.718415), np.radians(-29.475943)]
-nwalkers = 100
+nwalkers = 1000
 ndim = 5
-#init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
-init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
+init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
+'''init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
                     np.random.uniform(ymin, ymax), np.random.uniform(0, np.pi), 
                     np.random.uniform(-np.pi, np.pi)] 
-                    for i in range(nwalkers)]
+                    for i in range(nwalkers)]'''
 
 backend_file = "run368_event%d_samples_E_x_y_theta_phi.h5"%(event_num)
 backend = emcee.backends.HDFBackend(backend_file)
