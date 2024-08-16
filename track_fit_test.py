@@ -14,8 +14,7 @@ run_h5_path = '/mnt/analysis/e21072/gastest_h5_files/run_0368.h5'
 event_num = 5
 
 if event_num == 5:
-    E_guess = 6.212
-    init_position_guess = (-12, 13, 50)
+    init_position_guess = (-12, 13, 200)
     charge_spreading_guess = 3
     theta_guess = np.radians(90)
     phi_guess = np.radians(-30)
@@ -53,11 +52,7 @@ trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(P_guess), 'a
 trace_sim.shaping_width = shaping_width
 trace_sim.zscale = zscale
 trace_sim.counts_per_MeV = adc_scale_mu
-
-trace_sim.initial_energy = E_guess
-trace_sim.phi = phi_guess
-trace_sim.theta = theta_guess
-trace_sim.initial_point = init_position_guess
+trace_sim.detector_resolution = detector_E_sigma
 
 trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
@@ -65,6 +60,23 @@ trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, 
 trace_sim.align_pad_traces()
 
 
+#MCMC priors
+class GaussianVar:
+    def __init__(self, mu, sigma):
+        self.mu, self.sigma  = mu, sigma
+
+    def log_likelihood(self, val):
+        return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
+
+adc_scale_prior = GaussianVar(adc_scale_mu, adc_scale_sigma)
+max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
+E_from_ic = measured_counts/adc_scale_mu
+E_prior = GaussianVar(E_from_ic, detector_E_sigma)
+P_prior = GaussianVar(P_guess, P_guess*0.01)#assumes pressure transducer accuracy of 1%, should check what this really should be
+x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
+xmin, xmax = np.min(x_real), np.max(x_real)
+ymin, ymax = np.min(y_real), np.max(y_real)
+zmin, zmax = 5, 400
 
 
 #do initial minimization before starting MCMC
@@ -88,50 +100,30 @@ def neg_log_likelihood_init_min(params):
 
 fit_start_time = time.time()
 
-initial_guess = (E_guess, *init_position_guess[0:2], theta_guess, phi_guess, charge_spreading_guess, shaping_width)
+initial_guess = (E_from_ic, *init_position_guess[0:2], theta_guess, phi_guess, charge_spreading_guess, shaping_width)
 
 #get log likilihood within 0.1%
-'''res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True, 'ftol':0.01, 'xtol':1})
+res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True, 'ftol':0.001, 'xtol':1})
 
 
 print(res)
-neg_log_likelihood_init_min(res.x)
+print('neg log likilihood: %e'%neg_log_likelihood_init_min(res.x))
 
 
 print('total fit time: %f s'%(time.time() - fit_start_time))
 
-plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
-plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
-plot_residuals()
-plot_residuals_3d()
+trace_sim.plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
+trace_sim.plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
+trace_sim.plot_residuals()
 
-show_simulated_3d_data(mode='aligned', threshold=100)
+trace_sim.plot_simulated_3d_data(mode='aligned', threshold=100)
 h5file.plot_3d_traces(event_num, threshold=100)
-'''
+trace_sim.plot_residuals_3d(energy_threshold=20)
+plt.show()
 
 
 #do MCMC
 import emcee
-
-shaping_best_fit = 10.126
-charge_spread_best_fit = 4.179261
-
-class GaussianVar:
-    def __init__(self, mu, sigma):
-        self.mu, self.sigma  = mu, sigma
-
-    def log_likelihood(self, val):
-        return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma
-
-adc_scale_prior = GaussianVar(adc_scale_mu, adc_scale_sigma)
-max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
-E_from_ic = measured_counts/adc_scale_mu
-E_prior = GaussianVar(E_from_ic, detector_E_sigma)
-P_prior = GaussianVar(P_guess, P_guess*0.01)#assumes pressure transducer accuracy of 1%, should check what this really should be
-x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
-xmin, xmax = np.min(x_real), np.max(x_real)
-ymin, ymax = np.min(y_real), np.max(y_real)
-zmin, zmax = 5, 400
 
 def log_likelihood_mcmc(params):
     E, x,y,theta, phi = params
@@ -187,7 +179,8 @@ def log_posterior(params):
 #use previous optimization for start pos
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
-start_pos = [6.496048, -12.8865501,12.89937,np.radians(86.718415), np.radians(-29.475943)]
+Efit, xfit, yfit, thetafit, phifit, charge_spread_best_fit, shaping_best_fit = res.x
+start_pos = [Efit, xfit,yfit,thetafit, phifit]
 nwalkers = 300
 ndim = 5
 init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]

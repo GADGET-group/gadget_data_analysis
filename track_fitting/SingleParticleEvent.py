@@ -38,6 +38,7 @@ class SingleParticleEvent:
         self.shaping_width = 7 #FWHM of the shaping amplifier in time bins
         self.zscale = 1.45 #mm/time bin
         self.counts_per_MeV = 1
+        self.detector_resolution = 1 #MeV, only used when calculating log likelihood
 
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
         self.load_srim_table(particle, gas_density)
@@ -397,7 +398,7 @@ class SingleParticleEvent:
             to_return += -np.sum(residuals[pad] * residuals[pad])
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
-        return to_return
+        return to_return/self.counts_per_MeV**2/self.detector_resolution**2/2
     
     #######################
     # Visualization Tools #
@@ -440,7 +441,7 @@ class SingleParticleEvent:
     
     def plot_residuals_3d(self, title='residuals', energy_threshold=0):
         #in this case treshold is applied to absolute value
-        xs, ys, zs, ys = self.get_residuals_xyze()
+        xs, ys, zs, es = self.get_residuals_xyze()
         xs = xs[np.abs(es)>energy_threshold]
         ys = ys[np.abs(es)>energy_threshold]
         zs = zs[np.abs(es)>energy_threshold]
