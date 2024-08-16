@@ -52,7 +52,6 @@ trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(P_guess), 'a
 trace_sim.shaping_width = shaping_width
 trace_sim.zscale = zscale
 trace_sim.counts_per_MeV = adc_scale_mu
-trace_sim.detector_resolution = detector_E_sigma
 
 trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
@@ -81,7 +80,7 @@ zmin, zmax = 5, 400
 
 #do initial minimization before starting MCMC
 def neg_log_likelihood_init_min(params):
-    E, x, y, theta, phi, charge_spread, shaping_width = params
+    E, x, y, theta, phi, charge_spread, shaping_width, likelihood_sigma = params
     P = P_guess
     z = init_position_guess[2]
     trace_sim.load_srim_table('alpha', get_gas_density(P))
@@ -91,16 +90,17 @@ def neg_log_likelihood_init_min(params):
     trace_sim.phi = phi
     trace_sim.charge_spreading_sigma = charge_spread
     trace_sim.shaping_width = shaping_width
+    trace_sim.sigma_for_likelihood = likelihood_sigma
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
     to_return = -trace_sim.log_likelihood()
-    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr,  LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, to_return))
+    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr, sigma=%f, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, likelihood_sigma, to_return))
     return to_return
 
 
 fit_start_time = time.time()
 
-initial_guess = (E_from_ic, *init_position_guess[0:2], theta_guess, phi_guess, charge_spreading_guess, shaping_width)
+initial_guess = (E_from_ic, *init_position_guess[0:2], theta_guess, phi_guess, charge_spreading_guess, shaping_width, 20)
 
 #get log likilihood within 0.1%
 res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True, 'ftol':0.001, 'xtol':1})
@@ -119,7 +119,7 @@ trace_sim.plot_residuals()
 trace_sim.plot_simulated_3d_data(mode='aligned', threshold=100)
 h5file.plot_3d_traces(event_num, threshold=100)
 trace_sim.plot_residuals_3d(energy_threshold=20)
-plt.show()
+plt.show(block=False)
 
 
 #do MCMC
@@ -165,8 +165,8 @@ def log_priors(params):
         print('fail4')
         return -np.inf
     
-    #gaussian priors
-    return E_prior.log_likelihood(E) 
+    #gaussian prior for energy, and assume uniform over solid angle
+    return E_prior.log_likelihood(E) + np.sin(theta)
 
 def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
@@ -179,7 +179,7 @@ def log_posterior(params):
 #use previous optimization for start pos
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
-Efit, xfit, yfit, thetafit, phifit, charge_spread_best_fit, shaping_best_fit = res.x
+Efit, xfit, yfit, thetafit, phifit, charge_spread_best_fit, shaping_best_fit, sigma_per_bin = res.x
 start_pos = [Efit, xfit,yfit,thetafit, phifit]
 nwalkers = 300
 ndim = 5

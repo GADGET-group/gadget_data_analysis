@@ -38,7 +38,7 @@ class SingleParticleEvent:
         self.shaping_width = 7 #FWHM of the shaping amplifier in time bins
         self.zscale = 1.45 #mm/time bin
         self.counts_per_MeV = 1
-        self.detector_resolution = 1 #MeV, only used when calculating log likelihood
+        self.sigma_for_likelihood = 1 #MeV, only used when calculating log likelihood. On a per bin basis.
 
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
         self.load_srim_table(particle, gas_density)
@@ -395,10 +395,11 @@ class SingleParticleEvent:
         to_return = 0
         residuals = self.get_residuals()
         for pad in residuals:
-            to_return += -np.sum(residuals[pad] * residuals[pad])
+            to_return += -np.sum(residuals[pad] * residuals[pad])/2/self.sigma_for_likelihood**2
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
-        return to_return/self.counts_per_MeV**2/self.detector_resolution**2/2
+        to_return += -np.log(np.sqrt(2*np.pi*self.sigma_for_likelihood**2))*self.num_trimmed_trace_bins*len(self.traces_to_fit.keys())
+        return to_return
     
     #######################
     # Visualization Tools #
