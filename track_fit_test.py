@@ -13,7 +13,7 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '/mnt/analysis/e21072/h5test/'
 run_number = 124
-event_num = 55
+event_num = 4
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 if folder == '/mnt/analysis/e21072/gastest_h5_files/':
@@ -111,6 +111,12 @@ elif folder == '/mnt/analysis/e21072/h5test/':
             charge_spreading_guess = 3
             theta_guess = np.radians(36)
             phi_guess = np.radians(-180)
+        if event_num == 108:
+            particle_type = 'proton'
+            init_position_guess = (0,0, 200)
+            charge_spreading_guess = 3
+            theta_guess = np.radians(82)
+            phi_guess = np.radians(-45)
 
         
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
@@ -169,7 +175,7 @@ fit_start_time = time.time()
 initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess, charge_spreading_guess, P_guess, 20)
 
 #get log likilihood within 0.1%
-res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True, 'ftol':0.001, 'xtol':1})
+res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True})#, 'ftol':0.001, 'xtol':1})
 
 
 print(res)
@@ -195,7 +201,7 @@ if False: #if true, terminate after initial fit
 import emcee
 
 def log_likelihood_mcmc(params):
-    E, x,y,theta, phi, charge_spread, likelihood_simga = params
+    E, x, y, z, theta, phi, charge_spread, P,  likelihood_sigma = params
 
     z,P, adc_scale = 50., P_guess, adc_scale_mu
     shaping_width = shaping_best_fit
@@ -208,7 +214,7 @@ def log_likelihood_mcmc(params):
     trace_sim.charge_spreading_sigma = charge_spread
     trace_sim.shaping_width = shaping_width
     trace_sim.counts_per_MeV = adc_scale
-    trace_sim.sigma_for_likelihood = likelihood_simga
+    trace_sim.sigma_for_likelihood = likelihood_sigma
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
     to_return = trace_sim.log_likelihood()
@@ -219,7 +225,7 @@ def log_likelihood_mcmc(params):
 
 
 def log_priors(params):
-    E, x,y,theta, phi, charge_spread, sigma_per_bin  = params
+    E, x, y, z, theta, phi, charge_spread, P,  likelihood_sigma = params
     
     #uniform priors
     if x**2 + y**2 > 40**2:
@@ -249,10 +255,10 @@ def log_posterior(params):
 #use previous optimization for start pos
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
-Efit, xfit, yfit, thetafit, phifit, charge_spread_best_fit, shaping_best_fit, sigma_per_bin_fit = res.x
-start_pos = [Efit, xfit,yfit,thetafit, phifit, charge_spread_best_fit, sigma_per_bin_fit]
+Efit, xfit, yfit, thetafit, phifit, charge_spread_best_fit, shaping_best_fit, Pfit, sigma_per_bin_fit = res.x
+start_pos = res.x#[Efit, xfit,yfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
 nwalkers = 300
-ndim = 5
+ndim = len(res.x)
 init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
 '''init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
                     np.random.uniform(ymin, ymax), np.random.uniform(0, np.pi), 

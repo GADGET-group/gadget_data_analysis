@@ -3,11 +3,14 @@ import matplotlib.pylab as plt
 import corner
 import numpy as np
 
+'''
+olds
+'''
 if False:
     filename = '../run368_event5_samples.h5'
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread', 'shaping_width', 'P', 'adc_scale']
     tau = [630, 1050]
-if True:
+if False:
     event=331
     filename = '../run368_event%d_samples_E_x_y_theta_phi.h5'%event
     labels = ['E', 'x','y','theta', 'phi']
@@ -17,6 +20,18 @@ if False:
     filename = '../run368_event5_samples_E_x_y_theta_phi_15walker.h5'
     labels = ['E', 'x','y','theta', 'phi']
     tau = 200
+
+if False:
+    filename = '../run368_event5_samples_E_x_y_theta_phi_15walker.h5'
+    labels = ['E', 'x','y','theta', 'phi']
+    tau = 200
+
+if True:
+    run_number, event_number = 124, 108
+    filename = '../run%d_event%d.h5'%(run_number, event_num)
+    labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread',  'P', 'sigma']
+    tau = [630, 1050]
+    
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
