@@ -27,8 +27,8 @@ if False:
     tau = 200
 
 if True:
-    run_number, event_number = 124, 108
-    filename = '../run%d_event%d.h5'%(run_number, event_num)
+    run_number, event_number = 124, 4 #108
+    filename = '../run%d_event%d.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread',  'P', 'sigma']
     tau = [2, 2]
     
@@ -48,7 +48,7 @@ for i in range(len(labels)):
 
 axes[-1].set_xlabel("step number")
 
-#plt.show()
+plt.show()
 
 #tau=reader.get_autocorr_time()
 

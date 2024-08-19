@@ -13,7 +13,7 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '/mnt/analysis/e21072/h5test/'
 run_number = 124
-event_num = 4
+event_num = 4 
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 if folder == '/mnt/analysis/e21072/gastest_h5_files/':
@@ -204,7 +204,6 @@ def log_likelihood_mcmc(params):
     E, x, y, z, theta, phi, charge_spread, P,  likelihood_sigma = params
 
     z,P, adc_scale = 50., P_guess, adc_scale_mu
-    shaping_width = shaping_best_fit
 
     trace_sim.load_srim_table(particle_type, get_gas_density(P))
     trace_sim.initial_energy = E
@@ -255,10 +254,12 @@ def log_posterior(params):
 #use previous optimization for start pos
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
-Efit, xfit, yfit, thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit = res.x
+Efit, xfit, yfit, zfit, thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit = res.x
 if thetafit < 0:
-    thetafit = thetafit
-start_pos = [Efit, xfit,yfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
+    thetafit = -thetafit
+if charge_spread_best_fit < 0:
+    charge_spread_best_fit = 0
+start_pos = [Efit, xfit,yfit,zfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
 nwalkers = 300
 ndim = len(res.x)
 init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
