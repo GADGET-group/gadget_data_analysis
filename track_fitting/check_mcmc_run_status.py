@@ -7,14 +7,11 @@ if False:
     filename = '../run368_event5_samples.h5'
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread', 'shaping_width', 'P', 'adc_scale']
     tau = [630, 1050]
-if False:
-    filename = '../run368_event5_samples_E_x_y_theta_phi.h5'
-    labels = ['E', 'x','y','theta', 'phi']
-    tau = [5,20]#reader.get_autocorr_time()
 if True:
-    filename = '../run368_event331_samples_E_x_y_theta_phi.h5'
+    event=331
+    filename = '../run368_event%d_samples_E_x_y_theta_phi.h5'%event
     labels = ['E', 'x','y','theta', 'phi']
-    tau = [2,2]#reader.get_autocorr_time()
+    tau = [20,6]#reader.get_autocorr_time(
 
 if False:
     filename = '../run368_event5_samples_E_x_y_theta_phi_15walker.h5'
@@ -43,7 +40,18 @@ axes[-1].set_xlabel("step number")
 burnin = int(2 * np.max(tau))
 thin = int(0.5 * np.min(tau))
 
+flat_samples = reader.get_chain(discard=0, thin=1, flat=True)
+corner.corner(flat_samples, labels=labels)
 flat_samples = reader.get_chain(discard=burnin, thin=thin, flat=True)
 corner.corner(flat_samples, labels=labels)
 
+ndim = len(labels)
+for i in range(ndim):
+    mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+    q = np.diff(mcmc)
+    txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
+    txt = txt.format(mcmc[1], q[0], q[1], labels[i])
+    print(txt)
+
 plt.show()
+

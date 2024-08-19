@@ -14,13 +14,13 @@ run_h5_path = '/mnt/analysis/e21072/gastest_h5_files/run_0368.h5'
 event_num = 12
 
 if event_num == 5:
-    init_position_guess = (-12, 13, 200)
+    init_position_guess = (-12, 13, 100)
     charge_spreading_guess = 3
     theta_guess = np.radians(90)
     phi_guess = np.radians(-30)
     P_guess = 1157
 elif event_num == 331:
-    init_position_guess = (36, 1.5, 200)
+    init_position_guess = (36, 1.5, 100)
     charge_spreading_guess = 3
     theta_guess = np.radians(50)
     phi_guess = np.radians(120)
@@ -68,9 +68,8 @@ trace_sim.counts_per_MeV = adc_scale_mu
 
 trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 30)
+trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 5)
 trace_sim.align_pad_traces()
-
 
 #MCMC priors
 class GaussianVar:
@@ -93,9 +92,9 @@ zmin, zmax = 5, 400
 
 #do initial minimization before starting MCMC
 def neg_log_likelihood_init_min(params):
-    E, x, y, theta, phi, charge_spread, shaping_width, likelihood_sigma = params
+    E, x, y, z, theta, phi, charge_spread, likelihood_sigma = params
     P = P_guess
-    z = init_position_guess[2]
+    #z = init_position_guess[2]
     trace_sim.load_srim_table('alpha', get_gas_density(P))
     trace_sim.initial_energy = E
     trace_sim.initial_point = (x,y,z)
@@ -113,7 +112,7 @@ def neg_log_likelihood_init_min(params):
 
 fit_start_time = time.time()
 
-initial_guess = (E_from_ic, *init_position_guess[0:2], theta_guess, phi_guess, charge_spreading_guess, shaping_width, 20)
+initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess, charge_spreading_guess, 20)
 
 #get log likilihood within 0.1%
 res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True, 'ftol':0.001, 'xtol':1})
@@ -130,10 +129,13 @@ trace_sim.plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
 trace_sim.plot_residuals()
 
 trace_sim.plot_simulated_3d_data(mode='aligned', threshold=100)
-h5file.plot_3d_traces(event_num, threshold=100)
+h5file.plot_3d_traces(event_num, threshold=100, block=False)
 trace_sim.plot_residuals_3d(energy_threshold=20)
 plt.show()
 
+
+import sys
+sys.exit(0)
 
 #do MCMC
 import emcee
@@ -179,7 +181,7 @@ def log_priors(params):
         return -np.inf
     
     #gaussian prior for energy, and assume uniform over solid angle
-    return E_prior.log_likelihood(E) + np.sin(theta)
+    return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
 def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
@@ -207,7 +209,7 @@ backend = emcee.backends.HDFBackend(backend_file)
 backend.reset(nwalkers, ndim)
 
 sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
-max_n = 100000
+max_n = 5000
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 autocorr = np.empty(max_n)
@@ -228,7 +230,7 @@ for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
     print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
     # Check convergence
-    converged = np.all(tau * 100 < sampler.iteration)
+    converged = np.all(tau * 50 < sampler.iteration)
     #converged &= np.all(np.abs(old_tau - tau) / tau < 0.01)
     if converged:
         break
