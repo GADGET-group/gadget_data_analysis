@@ -30,7 +30,7 @@ if True:
     run_number, event_number = 124, 108
     filename = '../run%d_event%d.h5'%(run_number, event_num)
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread',  'P', 'sigma']
-    tau = [630, 1050]
+    tau = [2, 2]
     
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
