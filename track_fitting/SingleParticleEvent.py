@@ -398,7 +398,7 @@ class SingleParticleEvent:
             to_return += -np.sum(residuals[pad] * residuals[pad])/2/self.sigma_for_likelihood**2
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
-        to_return += -np.log(np.sqrt(2*np.pi*self.sigma_for_likelihood**2))*self.num_trimmed_trace_bins*len(self.traces_to_fit.keys())
+        to_return += -np.log(np.sqrt(2*np.pi)*self.sigma_for_likelihood)*self.num_trimmed_trace_bins*len(self.traces_to_fit.keys())
         return to_return
     
     #######################

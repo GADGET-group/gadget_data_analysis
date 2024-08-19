@@ -10,16 +10,28 @@ import scipy.optimize as opt
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
 
-run_h5_path = '/mnt/analysis/e21072/gastest_h5_files/run_0368.h5'
-event_num = 5
+run_h5_path = '/mnt/analysis/e21072/h5test/run_0124.h5'
+event_num = 12
 
 if event_num == 5:
-    E_guess = 6.212
-    init_position_guess = (-12, 13, 50)
+    init_position_guess = (-12, 13, 100)
     charge_spreading_guess = 3
     theta_guess = np.radians(90)
     phi_guess = np.radians(-30)
     P_guess = 1157
+elif event_num == 331:
+    init_position_guess = (36, 1.5, 100)
+    charge_spreading_guess = 3
+    theta_guess = np.radians(50)
+    phi_guess = np.radians(120)
+    P_guess = 1157
+elif event_num == 12:
+    init_position_guess = (28, 20, 100)
+    charge_spreading_guess = 3
+    theta_guess = np.radians(90+46)
+    phi_guess = np.radians(160)
+    P_guess = 1157
+
 
 adc_scale_mu = 371902/6.288 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 adc_scale_sigma = 1401/6.288 #uncertainty in peak postiion from chi^2 fit
@@ -54,74 +66,18 @@ trace_sim.shaping_width = shaping_width
 trace_sim.zscale = zscale
 trace_sim.counts_per_MeV = adc_scale_mu
 
-trace_sim.initial_energy = E_guess
-trace_sim.phi = phi_guess
-trace_sim.theta = theta_guess
-trace_sim.initial_point = init_position_guess
-
 trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 20)
+trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 5)
 trace_sim.align_pad_traces()
 
-
-
-
-#do initial minimization before starting MCMC
-def neg_log_likelihood_init_min(params):
-    E, x, y, theta, phi, charge_spread, shaping_width = params
-    P = P_guess
-    z = init_position_guess[2]
-    trace_sim.load_srim_table('alpha', get_gas_density(P))
-    trace_sim.initial_energy = E
-    trace_sim.initial_point = (x,y,z)
-    trace_sim.theta = theta
-    trace_sim.phi = phi
-    trace_sim.charge_spreading_sigma = charge_spread
-    trace_sim.shaping_width = shaping_width
-    trace_sim.simulate_event()
-    trace_sim.align_pad_traces()
-    to_return = -trace_sim.log_likelihood()
-    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr,  LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, to_return))
-    return to_return
-
-
-fit_start_time = time.time()
-
-initial_guess = (E_guess, *init_position_guess[0:2], theta_guess, phi_guess, charge_spreading_guess, shaping_width)
-
-#get log likilihood within 0.1%
-'''res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True, 'ftol':0.01, 'xtol':1})
-
-
-print(res)
-neg_log_likelihood_init_min(res.x)
-
-
-print('total fit time: %f s'%(time.time() - fit_start_time))
-
-plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
-plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
-plot_residuals()
-plot_residuals_3d()
-
-show_simulated_3d_data(mode='aligned', threshold=100)
-h5file.plot_3d_traces(event_num, threshold=100)
-'''
-
-
-#do MCMC
-import emcee
-
-shaping_best_fit = 10.126
-charge_spread_best_fit = 4.179261
-
+#MCMC priors
 class GaussianVar:
     def __init__(self, mu, sigma):
         self.mu, self.sigma  = mu, sigma
 
     def log_likelihood(self, val):
-        return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma
+        return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
 
 adc_scale_prior = GaussianVar(adc_scale_mu, adc_scale_sigma)
 max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
@@ -132,6 +88,57 @@ x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
 xmin, xmax = np.min(x_real), np.max(x_real)
 ymin, ymax = np.min(y_real), np.max(y_real)
 zmin, zmax = 5, 400
+
+
+#do initial minimization before starting MCMC
+def neg_log_likelihood_init_min(params):
+    E, x, y, z, theta, phi, charge_spread, likelihood_sigma = params
+    P = P_guess
+    #z = init_position_guess[2]
+    trace_sim.load_srim_table('alpha', get_gas_density(P))
+    trace_sim.initial_energy = E
+    trace_sim.initial_point = (x,y,z)
+    trace_sim.theta = theta
+    trace_sim.phi = phi
+    trace_sim.charge_spreading_sigma = charge_spread
+    trace_sim.shaping_width = shaping_width
+    trace_sim.sigma_for_likelihood = likelihood_sigma
+    trace_sim.simulate_event()
+    trace_sim.align_pad_traces()
+    to_return = -trace_sim.log_likelihood()
+    print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr, sigma=%f, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, likelihood_sigma, to_return))
+    return to_return
+
+
+fit_start_time = time.time()
+
+initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess, charge_spreading_guess, 20)
+
+#get log likilihood within 0.1%
+res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True, 'ftol':0.001, 'xtol':1})
+
+
+print(res)
+print('neg log likilihood: %e'%neg_log_likelihood_init_min(res.x))
+
+
+print('total fit time: %f s'%(time.time() - fit_start_time))
+
+trace_sim.plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
+trace_sim.plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
+trace_sim.plot_residuals()
+
+trace_sim.plot_simulated_3d_data(mode='aligned', threshold=100)
+h5file.plot_3d_traces(event_num, threshold=100, block=False)
+trace_sim.plot_residuals_3d(energy_threshold=20)
+plt.show()
+
+
+import sys
+sys.exit(0)
+
+#do MCMC
+import emcee
 
 def log_likelihood_mcmc(params):
     E, x,y,theta, phi = params
@@ -158,8 +165,9 @@ def log_likelihood_mcmc(params):
 
 def log_priors(params):
     E, x,y,theta, phi = params
+    
     #uniform priors
-    if x < xmin or x > xmax or y < ymin or y > ymax:
+    if x**2 + y**2 > 40**2:
         print('fail1')
         return -np.inf
     if theta < 0 or theta >= np.pi:
@@ -171,8 +179,9 @@ def log_priors(params):
     if shaping_width <=0 or shaping_width > 20:
         print('fail4')
         return -np.inf
-    #gaussian priors
-    return E_prior.log_likelihood(E) 
+    
+    #gaussian prior for energy, and assume uniform over solid angle
+    return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
 def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
@@ -185,18 +194,22 @@ def log_posterior(params):
 #use previous optimization for start pos
 #E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
-start_pos = [6.496048, -12.8865501,12.89937,np.radians(86.718415), np.radians(-29.475943)]
-nwalkers = 125
+Efit, xfit, yfit, thetafit, phifit, charge_spread_best_fit, shaping_best_fit, sigma_per_bin = res.x
+start_pos = [Efit, xfit,yfit,thetafit, phifit]
+nwalkers = 300
 ndim = 5
-#init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
-#init_walker_post = [(E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), np.random.uniform]
+init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
+'''init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
+                    np.random.uniform(ymin, ymax), np.random.uniform(0, np.pi), 
+                    np.random.uniform(-np.pi, np.pi)] 
+                    for i in range(nwalkers)]'''
 
 backend_file = "run368_event%d_samples_E_x_y_theta_phi.h5"%(event_num)
 backend = emcee.backends.HDFBackend(backend_file)
 backend.reset(nwalkers, ndim)
 
 sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
-max_n = 100000
+max_n = 5000
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 autocorr = np.empty(max_n)
@@ -217,7 +230,7 @@ for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
     print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
     # Check convergence
-    converged = np.all(tau * 100 < sampler.iteration)
+    converged = np.all(tau * 50 < sampler.iteration)
     #converged &= np.all(np.abs(old_tau - tau) / tau < 0.01)
     if converged:
         break
