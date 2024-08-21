@@ -1,7 +1,7 @@
 import time
 
-#import os
-#os.environ['OPENBLAS_NUM_THREADS'] = '3'
+import os
+os.environ['OPENBLAS_NUM_THREADS'] = '5'
 import numpy as np
 
 import matplotlib.pylab as plt
@@ -15,6 +15,7 @@ folder = '/mnt/analysis/e21072/h5test/'
 run_number = 124
 event_num = 4 
 run_h5_path = folder +'run_%04d.h5'%run_number
+init_by_priors = True
 
 if folder == '/mnt/analysis/e21072/gastest_h5_files/':
     if run_number == 368:
@@ -83,6 +84,7 @@ elif folder == '/mnt/analysis/e21072/h5test/':
         shaping_width  = shaping_time*clock_freq*2.355
 
         P_guess = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
+        Pmin, Pmax = 700, 1000
 
         #757 keV proton events
         if event_num == 4:
@@ -174,28 +176,29 @@ fit_start_time = time.time()
 
 initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess, charge_spreading_guess, P_guess, 20)
 
-#get log likilihood within 0.1%
-res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True})#, 'ftol':0.001, 'xtol':1})
+if not init_by_priors:
+    #get log likilihood within 0.1%
+    res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True})#, 'ftol':0.001, 'xtol':1})
 
 
-print(res)
-print('neg log likilihood: %e'%neg_log_likelihood_init_min(res.x))
+    print(res)
+    print('neg log likilihood: %e'%neg_log_likelihood_init_min(res.x))
 
 
-print('total fit time: %f s'%(time.time() - fit_start_time))
+    print('total fit time: %f s'%(time.time() - fit_start_time))
 
-trace_sim.plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
-trace_sim.plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
-trace_sim.plot_residuals()
+    trace_sim.plot_traces(trace_sim.traces_to_fit, 'clipped real traces')
+    trace_sim.plot_traces(trace_sim.aligned_sim_traces, 'simulated traces')
+    trace_sim.plot_residuals()
 
-trace_sim.plot_simulated_3d_data(mode='aligned', threshold=100)
-h5file.plot_3d_traces(event_num, threshold=100, block=False)
-trace_sim.plot_residuals_3d(energy_threshold=20)
-plt.show()
-
-if False: #if true, terminate after initial fit
-    import sys
-    sys.exit(0)
+    trace_sim.plot_simulated_3d_data(mode='aligned', threshold=100)
+    h5file.plot_3d_traces(event_num, threshold=100, block=False)
+    trace_sim.plot_residuals_3d(energy_threshold=20)
+    plt.show()
+    
+    if False: #if true, terminate after initial fit
+        import sys
+        sys.exit(0)
 
 #do MCMC
 import emcee
@@ -239,7 +242,12 @@ def log_priors(params):
     if charge_spread < 0:
         print('fail5')
         return -np.inf
-    
+    if P < Pmin or P>Pmax:
+        print('fail6')
+        return -np.inf
+    if likelihood_sigma <= 1:
+        print('fail7')
+        return -np.inf
     #gaussian prior for energy, and assume uniform over solid angle
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
@@ -249,31 +257,39 @@ def log_posterior(params):
         to_return = -np.inf
     print('log posterior: %e'%to_return)
     return to_return
-    
 
-#use previous optimization for start pos
-#E=6.496048 MeV, (x,y,z)=(-12.865501, 12.899337, 50.000000) mm, theta = 86.718415 deg, phi=-29.475943 deg, cs=4.179261 mm, shaping=10.126000, P=1157.000000 torr,  LL=7.633177e+06
 
-Efit, xfit, yfit, zfit, thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit = res.x
-if thetafit < 0:
-    thetafit = -thetafit
-if charge_spread_best_fit < 0:
-    charge_spread_best_fit = 0
-start_pos = [Efit, xfit,yfit,zfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
 nwalkers = 300
-ndim = len(res.x)
-init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
-'''init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
-                    np.random.uniform(ymin, ymax), np.random.uniform(0, np.pi), 
-                    np.random.uniform(-np.pi, np.pi)] 
-                    for i in range(nwalkers)]'''
+max_n = 5000
 
-backend_file = 'run%d_event%d.h5'%(run_number, event_num) #TODO, correct path
+if not init_by_priors:
+    Efit, xfit, yfit, zfit, thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit = res.x
+    if thetafit < 0:
+        thetafit = -thetafit
+        phitfit = phifit + np.pi
+        if phifit > 2*np.pi:
+            phifit -= 2*np.pi
+    if charge_spread_best_fit < 0:
+        charge_spread_best_fit = 0
+    start_pos = [Efit, xfit,yfit,zfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
+    init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
+else:
+    init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
+                        np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
+                        np.random.uniform(-np.pi, np.pi), np.random.uniform(0,10), np.random.uniform(Pmin, Pmax),
+                        np.random.uniform(20, 300)] for i in range(nwalkers)]
+
+ndim = len(init_walker_pos[0])
+
+if init_by_priors:
+    backend_file = 'run%d_event%d_init_by_priors.h5'%(run_number, event_num) 
+else:
+    backend_file = 'run%d_event%d_init_by_best_fit.h5'%(run_number, event_num)
 backend = emcee.backends.HDFBackend(backend_file)
 backend.reset(nwalkers, ndim)
 
 sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
-max_n = 5000
+
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 autocorr = np.empty(max_n)

@@ -30,7 +30,7 @@ if True:
     run_number, event_number = 124, 4 #108
     filename = '../run%d_event%d.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread',  'P', 'sigma']
-    tau = [2, 2]
+    tau = [95,256]
     
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
@@ -55,8 +55,8 @@ plt.show()
 burnin = int(2 * np.max(tau))
 thin = int(0.5 * np.min(tau))
 
-flat_samples = reader.get_chain(discard=0, thin=1, flat=True)
-corner.corner(flat_samples, labels=labels)
+#flat_samples = reader.get_chain(discard=0, thin=1, flat=True)
+#corner.corner(flat_samples, labels=labels)
 flat_samples = reader.get_chain(discard=burnin, thin=thin, flat=True)
 corner.corner(flat_samples, labels=labels)
 
