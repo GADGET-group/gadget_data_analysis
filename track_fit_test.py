@@ -13,7 +13,7 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '/mnt/analysis/e21072/h5test/'
 run_number = 124
-event_num = 4 
+event_num = 132
 run_h5_path = folder +'run_%04d.h5'%run_number
 init_by_priors = True
 
@@ -72,7 +72,7 @@ elif folder == '/mnt/analysis/e21072/h5test/':
         ic_threshold = 25
         h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                         zscale=zscale,
-                                        flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
+                                        flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.background_subtract_mode='fixed window'
         h5file.data_select_mode='near peak'
         h5file.remove_outliers=True
@@ -108,6 +108,8 @@ elif folder == '/mnt/analysis/e21072/h5test/':
             phi_guess = np.radians(-45)
         #1587 keV or 1574 keV protons
         if event_num == 55:
+            #note: this one covers a pad which is missing pad mapping
+            #which currently prevents the sim from running
             particle_type = 'proton'
             init_position_guess = (11, 15, 200)
             charge_spreading_guess = 3
@@ -119,6 +121,12 @@ elif folder == '/mnt/analysis/e21072/h5test/':
             charge_spreading_guess = 3
             theta_guess = np.radians(82)
             phi_guess = np.radians(-45)
+        if event_num == 132:
+            particle_type = 'proton'
+            init_position_guess = (3,-24, 200)
+            charge_spreading_guess = 3
+            theta_guess = np.radians(40)
+            phi_guess = np.radians(200)
 
         
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
