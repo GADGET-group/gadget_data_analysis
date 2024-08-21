@@ -15,7 +15,9 @@ folder = '/mnt/analysis/e21072/h5test/'
 run_number = 124
 event_num = 4
 run_h5_path = folder +'run_%04d.h5'%run_number
+
 init_by_priors = True
+resume_previous_run = True
 
 if folder == '/mnt/analysis/e21072/gastest_h5_files/':
     if run_number == 368:
@@ -184,7 +186,7 @@ fit_start_time = time.time()
 
 initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess, charge_spreading_guess, P_guess, 20)
 
-if not init_by_priors:
+if not init_by_priors and not resume_previous_run:
     #get log likilihood within 0.1%
     res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True})#, 'ftol':0.001, 'xtol':1})
 
@@ -270,33 +272,40 @@ def log_posterior(params):
 nwalkers = 300
 max_n = 5000
 
-if not init_by_priors:
-    Efit, xfit, yfit, zfit, thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit = res.x
-    if thetafit < 0:
-        thetafit = -thetafit
-        phitfit = phifit + np.pi
-        if phifit > 2*np.pi:
-            phifit -= 2*np.pi
-    if charge_spread_best_fit < 0:
-        charge_spread_best_fit = 0
-    start_pos = [Efit, xfit,yfit,zfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
-    init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
-else:
-    init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
-                        np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
-                        np.random.uniform(-np.pi, np.pi), np.random.uniform(0,10), np.random.uniform(Pmin, Pmax),
-                        np.random.uniform(20, 300)] for i in range(nwalkers)]
+if not resume_previous_run:
+    if not init_by_priors:
+        Efit, xfit, yfit, zfit, thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit = res.x
+        if thetafit < 0:
+            thetafit = -thetafit
+            phitfit = phifit + np.pi
+            if phifit > 2*np.pi:
+                phifit -= 2*np.pi
+        if charge_spread_best_fit < 0:
+            charge_spread_best_fit = 0
+        start_pos = [Efit, xfit,yfit,zfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
+        init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
+    else:
+        init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
+                            np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
+                            np.random.uniform(-np.pi, np.pi), np.random.uniform(0,10), np.random.uniform(Pmin, Pmax),
+                            np.random.uniform(20, 300)] for i in range(nwalkers)]
 
-ndim = len(init_walker_pos[0])
+
+ndim = 9
 
 if init_by_priors:
     backend_file = 'run%d_event%d_init_by_priors.h5'%(run_number, event_num) 
 else:
     backend_file = 'run%d_event%d_init_by_best_fit.h5'%(run_number, event_num)
 backend = emcee.backends.HDFBackend(backend_file)
-backend.reset(nwalkers, ndim)
+
+if not resume_previous_run:
+    backend.reset(nwalkers, ndim)
 
 sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
+if resume_previous_run:
+    init_walker_pos = sampler.get_last_sample()
+
 
 # We'll track how the average autocorrelation time estimate changes
 index = 0
