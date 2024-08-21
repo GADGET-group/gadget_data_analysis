@@ -241,22 +241,18 @@ def log_priors(params):
     
     #uniform priors
     if x**2 + y**2 > 40**2:
-        print('fail1')
+        return -np.inf
+    if z < 0 or z >400:
         return -np.inf
     if theta < 0 or theta >= np.pi:
-        print('fail2')
         return -np.inf 
     if shaping_width <=0 or shaping_width > 20:
-        print('fail4')
         return -np.inf
     if charge_spread < 0:
-        print('fail5')
         return -np.inf
     if P < Pmin or P>Pmax:
-        print('fail6')
         return -np.inf
-    if likelihood_sigma <= 1:
-        print('fail7')
+    if likelihood_sigma <= 1 or likelihood_sigma > 1000:
         return -np.inf
     #gaussian prior for energy, and assume uniform over solid angle
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
