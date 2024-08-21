@@ -36,7 +36,7 @@ if False:
     tau = [95,256]
     
 if True:
-    run_number, event_number = 124, 132 #108
+    run_number, event_number = 124, 55 #108
     filename = '../run%d_event%d_init_by_priors.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread',  'P', 'sigma']
     tau = [2]

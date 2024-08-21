@@ -13,7 +13,7 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '/mnt/analysis/e21072/h5test/'
 run_number = 124
-event_num = 132
+event_num = 4
 run_h5_path = folder +'run_%04d.h5'%run_number
 init_by_priors = True
 
@@ -62,7 +62,7 @@ elif folder == '/mnt/analysis/e21072/h5test/':
     if run_number == 124:
         #TODO: make energy resolution energy dependent
         adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
-        detector_E_sigma = 5631./adc_scale_mu #sigma for above fit
+        detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
 
         #use theoretical zscale
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
@@ -152,7 +152,7 @@ class GaussianVar:
 
 max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
 E_from_ic = measured_counts/adc_scale_mu
-E_prior = GaussianVar(E_from_ic, detector_E_sigma)
+E_prior = GaussianVar(E_from_ic, detector_E_sigma(E_from_ic))
 P_prior = GaussianVar(P_guess, P_guess*0.01)#assumes pressure transducer accuracy of 1%, should check what this really should be
 x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
 xmin, xmax = np.min(x_real), np.max(x_real)
@@ -263,7 +263,7 @@ def log_posterior(params):
     to_return = log_priors(params) + log_likelihood_mcmc(params)
     if np.isnan(to_return):
         to_return = -np.inf
-    print('log posterior: %e'%to_return)
+    #print('log posterior: %e'%to_return)
     return to_return
 
 
