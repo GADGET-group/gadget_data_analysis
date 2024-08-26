@@ -1,7 +1,7 @@
 import time
 
-import os
-os.environ['OPENBLAS_NUM_THREADS'] = '5'
+#import os
+#os.environ['OPENBLAS_NUM_THREADS'] = '5'
 import numpy as np
 
 import matplotlib.pylab as plt
@@ -11,13 +11,13 @@ from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
 
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
-folder = '/mnt/analysis/e21072/h5test/'
+folder = '../../shared/Run_Data/'
 run_number = 124
 event_num = 4
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 init_by_priors = True
-resume_previous_run = True
+resume_previous_run = False
 
 if folder == '/mnt/analysis/e21072/gastest_h5_files/':
     if run_number == 368:
@@ -60,7 +60,7 @@ if folder == '/mnt/analysis/e21072/gastest_h5_files/':
             charge_spreading_guess = 3
             theta_guess = np.radians(90+46)
             phi_guess = np.radians(160)
-elif folder == '/mnt/analysis/e21072/h5test/':
+elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
     if run_number == 124:
         #TODO: make energy resolution energy dependent
         adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
