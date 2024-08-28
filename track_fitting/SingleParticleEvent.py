@@ -38,7 +38,9 @@ class SingleParticleEvent:
         self.shaping_width = 7 #FWHM of the shaping amplifier in time bins
         self.zscale = 1.45 #mm/time bin
         self.counts_per_MeV = 1
-        self.sigma_for_likelihood = 1 #MeV, only used when calculating log likelihood. On a per bin basis.
+        
+        self.pad_gain_match_uncertainty = 0 #unitless
+        self.other_systematics = 0 #adc counts
 
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
         self.load_srim_table(particle, gas_density)
@@ -393,9 +395,26 @@ class SingleParticleEvent:
     def log_likelihood(self):
         start_time = time.time()
         to_return = 0
-        residuals = self.get_residuals()
-        for pad in residuals:
-            to_return += -np.sum(residuals[pad] * residuals[pad])/2/self.sigma_for_likelihood**2
+        for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
+            if pad in self.sim_trace_dict: #if the pad trace was simulated
+                sigma = self.sim_trace_dict[pad]*self.pad_gain_match_uncertainty + self.other_systematics
+                to_return += np.sum(-np.log(np.sqrt(2*np.pi)*sigma))
+                if pad in self.traces_to_fit: #pad fired and was simulated
+                    residuals = self.sim_trace_dict[pad] - self.real_trace_dict[pad]
+                    to_return += np.sum(-residuals*residuals/(2*sigma**2))
+                else: #pad was simulated firing, but did not
+                    sigma = self.other_systematics
+                    to_return += -self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi)*sigma)
+                    to_return += -np.sum(self.sim_trace_dict[pad]*self.sim_trace_dict[pad])/2/sigma**2
+            else: #pad was not simulated
+                if pad in self.traces_to_fit: #pad fired, but was not simulated
+                    sigma = self.other_systematics
+                    to_return += -self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi)*sigma)
+                    to_return += -np.sum(self.traces_to_fit[pad]*self.traces_to_fit[pad])/2/sigma**2
+                else: #pad did not fire and was not simulated
+                    sigma = self.other_systematics
+                    to_return += -self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi)*sigma)
+
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
         to_return += -np.log(np.sqrt(2*np.pi)*self.sigma_for_likelihood)*self.num_trimmed_trace_bins*len(self.traces_to_fit.keys())
