@@ -264,39 +264,34 @@ class SingleParticleEvent:
             es = es[es>threshold]
         return xs, ys, zs, es
     
-    def set_real_data(self, pads, traces, fit_threshold, trim_pad = 5):
+    def set_real_data(self, pads, traces, trim_threshold, trim_pad = 5):
         '''
         Prepares real pad traces for coomparison to simulated data.
         This function does the following:
-        1. Stores traces to member variables, setting all portions of the trace less than 'fit_threshold' to zero
-        2. Trim traces if possible, keeping the length of all traces the same but removing as many zeros as possible
+        1. Stores traces to member variables
+        2. Trim traces if possible, keeping the length of all traces the same but the portion of regions where 
+           all traces are less than fit threshold.
         3. Find time bin in each trace with peak value, or average of time bins with peak values if there are more than one. 
 
         pads: list of pads
         traces: list of traces, one for each pad
-        fit_threshold: only portions of the traces above this threshold will be used when fitting
-        trim_pad: number of zero elements to keep in traces
+        trim_threshold: only portions of the traces above this threshold will be used when fitting
+        trim_pad: number of elements to leave on each side of the trimmed traces
         '''
         #steps 1 & 2
         self.traces_to_fit = {pad: trace for pad, trace in zip(pads, traces)}
         trim_before = 512 #will be set to the first non-zero time bin in any trace
         trim_after = -1
         #perform thresholding and find indecies for trimming
-        pads_to_remove = [] #remove pads which have no non-zero elements
         for pad in self.traces_to_fit:
             trace = self.traces_to_fit[pad]
-            trace[trace < fit_threshold] = 0
-            nonzero = np.nonzero(trace)[0]
-            if len(nonzero) == 0:
-                pads_to_remove.append(pad)
-            else:
-                first, last = np.min(nonzero), np.max(nonzero)
+            above_threshold_bins = np.nonzero(trace >= trim_threshold)
+            if len(above_threshold_bins)>=2:
+                first, last = np.min(above_threshold_bins), np.max(above_threshold_bins)
                 if first < trim_before:
                     trim_before = first
                 if last > trim_after:
                     trim_after = last
-        for pad in pads_to_remove:
-            self.traces_to_fit.pop(pad)
         #trim traces
         trim_start = max(trim_before - trim_pad, 0)
         trim_end = min(trim_after + trim_pad, len(trace))
