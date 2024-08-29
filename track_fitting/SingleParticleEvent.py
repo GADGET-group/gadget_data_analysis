@@ -286,12 +286,12 @@ class SingleParticleEvent:
         for pad in self.traces_to_fit:
             trace = self.traces_to_fit[pad]
             above_threshold_bins = np.nonzero(trace >= trim_threshold)
-            if len(above_threshold_bins)>=2:
-                first, last = np.min(above_threshold_bins), np.max(above_threshold_bins)
-                if first < trim_before:
-                    trim_before = first
-                if last > trim_after:
-                    trim_after = last
+            first, last = np.min(above_threshold_bins), np.max(above_threshold_bins)
+            if first < trim_before:
+                trim_before = first
+            if last > trim_after:
+                trim_after = last
+        print(trim_before, trim_after)
         #trim traces
         trim_start = max(trim_before - trim_pad, 0)
         trim_end = min(trim_after + trim_pad, len(trace))
@@ -391,16 +391,16 @@ class SingleParticleEvent:
         start_time = time.time()
         to_return = 0
         for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
-            if pad in self.sim_trace_dict: #if the pad trace was simulated
-                sigma = self.sim_trace_dict[pad]*self.pad_gain_match_uncertainty + self.other_systematics
+            if pad in self.aligned_sim_traces: #if the pad trace was simulated
+                sigma = self.aligned_sim_traces[pad]*self.pad_gain_match_uncertainty + self.other_systematics
                 to_return += np.sum(-np.log(np.sqrt(2*np.pi)*sigma))
                 if pad in self.traces_to_fit: #pad fired and was simulated
-                    residuals = self.sim_trace_dict[pad] - self.real_trace_dict[pad]
+                    residuals = self.aligned_sim_traces[pad] - self.traces_to_fit[pad]
                     to_return += np.sum(-residuals*residuals/(2*sigma**2))
                 else: #pad was simulated firing, but did not
                     sigma = self.other_systematics
                     to_return += -self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi)*sigma)
-                    to_return += -np.sum(self.sim_trace_dict[pad]*self.sim_trace_dict[pad])/2/sigma**2
+                    to_return += -np.sum(self.aligned_sim_traces[pad]*self.aligned_sim_traces[pad])/2/sigma**2
             else: #pad was not simulated
                 if pad in self.traces_to_fit: #pad fired, but was not simulated
                     sigma = self.other_systematics
@@ -412,7 +412,6 @@ class SingleParticleEvent:
 
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
-        to_return += -np.log(np.sqrt(2*np.pi)*self.sigma_for_likelihood)*self.num_trimmed_trace_bins*len(self.traces_to_fit.keys())
         return to_return
     
     #######################
