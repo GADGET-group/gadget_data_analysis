@@ -9,13 +9,15 @@
 '''
 
 import time
-import numpy as np
+import multiprocessing
 
+import numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
 
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
+
 
 folder = '../../shared/Run_Data/'
 run_number = 124
@@ -33,24 +35,25 @@ h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                 zscale=zscale,
                                 flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
 h5file.background_subtract_mode='fixed window'
-h5file.data_select_mode='all data'
+h5file.data_select_mode='near peak'
 h5file.remove_outliers=True
-#h5file.near_peak_window_width = 50
-#h5file.require_peak_within= (-np.inf, np.inf)
+h5file.near_peak_window_width = 50
+h5file.require_peak_within= (-np.inf, np.inf)
 h5file.num_background_bins=(160, 250)
 h5file.ic_counts_threshold = 25
 
 shaping_time = 70e-9 #s, from e21062 config file on mac minis
 shaping_width  = shaping_time*clock_freq*2.355
 
-pressure = 860.3 #torr, assuming current offset on MFC was present during experiment, and it was set to 800 torr
+#pressure = 860.3 #torr, assuming current offset on MFC was present during experiment, and it was set to 800 torr
+p_guess = 860
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
 
-def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50):
-    trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
+def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, return_dict=None):
+    trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(p_guess), particle_type)
     trace_sim.shaping_width = shaping_width
     trace_sim.zscale = zscale
     trace_sim.counts_per_MeV = adc_scale_mu
@@ -87,7 +90,8 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50):
     theta_guess = np.arctan2(dz, np.sqrt(furthest_dist_sqrd))
     phi_guess = np.arctan2(brag_y-y_guess, brag_x-x_guess)
     def neg_log_likelihood(params):
-        x,y,z,theta, phi, charge_spread = params
+        P, x,y,z,theta, phi, charge_spread = params
+        trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(P))
         trace_sim.theta, trace_sim.phi = theta, phi
         trace_sim.initial_point = (x,y,z)
         trace_sim.charge_spreading_sigma = charge_spread
@@ -95,10 +99,46 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50):
         trace_sim.align_pad_traces()
         return -trace_sim.log_likelihood()
     
-    init_guess = (x_guess, y_guess, 200, theta_guess, phi_guess, 1)
+    init_guess = (p_guess, x_guess, y_guess, 200, theta_guess, phi_guess, 1)
     res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")
-    return res.x
+    if return_dict != None:
+        return_dict[return_key] = res
+        print(return_key, res.x)
+    return res
 
-pads_to_fit, traces_to_fit = h5file.get_pad_traces(17, include_veto_pads=False)
-print(fit_event(pads_to_fit, traces_to_fit, 'proton', trim_threshold=50))
+events_in_catagory = [[],[],[],[]]
+events_per_catagory = 50
+processes = []
 
+def classify(range, counts):
+    if counts > 2e5 and counts < 4e5 and range < 25 and range > 15:
+        return 0 #low energy alpha
+    if counts > 4e5 and counts < 1e6 and range >20 and range < 100:
+        return 1 #high energy alpha
+    if counts > 7e4 and counts < 1e5 and range > 13 and range < 22:
+        return 2 #757 keV proton
+    if counts > 1.54e5 and counts < 2.1e5 and range > 34 and range < 55:
+        return 3 #higher energy proton
+    return -1
+
+veto_threshold = 300
+
+n = h5file.get_event_num_bounds()[0]
+manager = multiprocessing.Manager()
+
+fit_results_dict = manager.dict()
+while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
+    max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
+    l = np.sqrt(dxy**2 + dz**2)
+    event_catagory = classify(l, counts)
+    #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
+    if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
+        pads, traces  = h5file.get_pad_traces(n, include_veto_pads=False)
+        processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, 'alpha', 50, n, fit_results_dict)))
+        processes[-1].start()
+        events_in_catagory[event_catagory].append(n)
+        print([len(x) for x in events_in_catagory])
+    n += 1
+#wait for all processes to end
+for p in processes:
+    p.join()

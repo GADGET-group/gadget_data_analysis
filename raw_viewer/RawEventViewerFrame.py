@@ -342,7 +342,7 @@ class RawEventViewerFrame(ttk.Frame):
         Load exported data, and update GUI to match the settings used to export the given file.
         '''
         #open file dialog in export for this run, and find which export should be opened
-        directory_path = os.path.splitext(self.data.file_path)[0]+directory_path + '_raw_viewer'
+        directory_path = os.path.splitext(self.data.file_path)[0] + '_raw_viewer'
         directory_path = tk.filedialog.askdirectory (initialdir=directory_path, title='Select processed run to open')
         #load GUI settings to from export
         self.settings_file_entry.delete(0, tk.END)
