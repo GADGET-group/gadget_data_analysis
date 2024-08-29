@@ -291,7 +291,6 @@ class SingleParticleEvent:
                 trim_before = first
             if last > trim_after:
                 trim_after = last
-        print(trim_before, trim_after)
         #trim traces
         trim_start = max(trim_before - trim_pad, 0)
         trim_end = min(trim_after + trim_pad, len(trace))
