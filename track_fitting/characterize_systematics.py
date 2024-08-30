@@ -18,6 +18,7 @@ import scipy.optimize as opt
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
 
+start_time = time.time()
 
 folder = '../../shared/Run_Data/'
 run_number = 124
@@ -91,6 +92,14 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     phi_guess = np.arctan2(brag_y-y_guess, brag_x-x_guess)
     def neg_log_likelihood(params):
         P, x,y,z,theta, phi, charge_spread = params
+        if charge_spread < 0 or P < 760 or P>900:
+            return np.inf
+        if z > 400 or z<10:
+            return np.inf
+        if x**2 + y**2 > 40**2:
+            return np.inf
+        if charge_spread <0:
+            return np.inf
         trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(P))
         trace_sim.theta, trace_sim.phi = theta, phi
         trace_sim.initial_point = (x,y,z)
@@ -142,3 +151,26 @@ while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
 #wait for all processes to end
 for p in processes:
     p.join()
+
+print('fitting took %f s'%(time.time() - start_time))
+
+results_by_cat = {}
+for cat in range(len(events_in_catagory)):
+    results_by_cat[cat] = []
+    for evt in events_in_catagory[cat]:
+        if evt not in fit_results_dict:
+            print('evt %d (cat %d)not in results dict'%(evt, cat))
+            continue
+        res = fit_results_dict[evt]
+        if not res.success:
+            print('evt %d (cat %d)not succesfully fit'%(evt, cat))
+        results_by_cat[cat].append(res)
+
+
+Ps = np.array([fit_results_dict[k].x[0] for k in fit_results_dict])
+Pgood = Ps[(np.abs(Ps - np.mean(Ps)) < np.std(Ps))]
+Pbest = Pgood[(np.abs(Pgood - np.mean(Pgood)) < np.std(Pgood))]
+print(np.mean(Pbest), np.std(Pbest))
+plt.figure()
+plt.hist(Pbest, 20)
+plt.show()
