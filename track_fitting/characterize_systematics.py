@@ -46,15 +46,17 @@ h5file.ic_counts_threshold = 25
 shaping_time = 70e-9 #s, from e21062 config file on mac minis
 shaping_width  = shaping_time*clock_freq*2.355
 
-#pressure = 860.3 #torr, assuming current offset on MFC was present during experiment, and it was set to 800 torr
-p_guess = 860
+#assuming current offset on MFC was present during experiment, and it was set to 800 torr
+#which seems to be a good assumtion. See c48097904a89edc1131d7aa2d216ca6d045b5137
+pressure = 860.3 #torr
+
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, return_dict=None):
-    trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(p_guess), particle_type)
+    trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
     trace_sim.shaping_width = shaping_width
     trace_sim.zscale = zscale
     trace_sim.counts_per_MeV = adc_scale_mu
@@ -91,24 +93,25 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     theta_guess = np.arctan2(dz, np.sqrt(furthest_dist_sqrd))
     phi_guess = np.arctan2(brag_y-y_guess, brag_x-x_guess)
     def neg_log_likelihood(params):
-        P, x,y,z,theta, phi, charge_spread = params
-        if charge_spread < 0 or P < 760 or P>900:
-            return np.inf
+        x,y,z,theta, phi, E, charge_spread, P = params
         if z > 400 or z<10:
             return np.inf
         if x**2 + y**2 > 40**2:
             return np.inf
-        if charge_spread <0:
+        if charge_spread <0 or charge_spread>10:
             return np.inf
-        trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(P))
+        if P<760  or P>1000:
+            return np.inf
         trace_sim.theta, trace_sim.phi = theta, phi
         trace_sim.initial_point = (x,y,z)
         trace_sim.charge_spreading_sigma = charge_spread
+        trace_sim.initial_energy = E
+        trace_sim.load_srim_table(particle_type, get_gas_density(P))
         trace_sim.simulate_event()
         trace_sim.align_pad_traces()
         return -trace_sim.log_likelihood()
     
-    init_guess = (p_guess, x_guess, y_guess, 200, theta_guess, phi_guess, 1)
+    init_guess = (x_guess, y_guess, 200, theta_guess, phi_guess, Eguess, 1, pressure)
     res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")
     if return_dict != None:
         return_dict[return_key] = res
@@ -154,9 +157,8 @@ for p in processes:
 
 print('fitting took %f s'%(time.time() - start_time))
 
-results_by_cat = {}
+evts, xs,ys,zs,thetas, phis, charge_spreads, lls, cats, Es, Ps = [], [],[],[],[],[],[],[],[],[],[]
 for cat in range(len(events_in_catagory)):
-    results_by_cat[cat] = []
     for evt in events_in_catagory[cat]:
         if evt not in fit_results_dict:
             print('evt %d (cat %d)not in results dict'%(evt, cat))
@@ -164,13 +166,18 @@ for cat in range(len(events_in_catagory)):
         res = fit_results_dict[evt]
         if not res.success:
             print('evt %d (cat %d)not succesfully fit'%(evt, cat))
-        results_by_cat[cat].append(res)
+        xs.append(res.x[0])
+        ys.append(res.x[1])
+        zs.append(res.x[2])
+        thetas.append(res.x[3])
+        phis.append(res.x[4])
+        Es.append(res.x[5])
+        charge_spreads.append(res.x[6])
+        Ps.append(res.x[7])
+        lls.append(res.fun)
+        cats.append(cat)
+        evts.append(evt)
 
-
-Ps = np.array([fit_results_dict[k].x[0] for k in fit_results_dict])
+Ps = np.array(Ps)
 Pgood = Ps[(np.abs(Ps - np.mean(Ps)) < np.std(Ps))]
 Pbest = Pgood[(np.abs(Pgood - np.mean(Pgood)) < np.std(Pgood))]
-print(np.mean(Pbest), np.std(Pbest))
-plt.figure()
-plt.hist(Pbest, 20)
-plt.show()
