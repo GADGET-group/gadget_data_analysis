@@ -14,9 +14,11 @@ import multiprocessing
 import numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
+import emcee
 
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
+
 
 start_time = time.time()
 
@@ -93,25 +95,22 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     theta_guess = np.arctan2(dz, np.sqrt(furthest_dist_sqrd))
     phi_guess = np.arctan2(brag_y-y_guess, brag_x-x_guess)
     def neg_log_likelihood(params):
-        x,y,z,theta, phi, E, charge_spread, P = params
+        x,y,z,theta, phi, E, charge_spread = params
         if z > 400 or z<10:
             return np.inf
         if x**2 + y**2 > 40**2:
             return np.inf
         if charge_spread <0 or charge_spread>10:
             return np.inf
-        if P<760  or P>1000:
-            return np.inf
         trace_sim.theta, trace_sim.phi = theta, phi
         trace_sim.initial_point = (x,y,z)
         trace_sim.charge_spreading_sigma = charge_spread
         trace_sim.initial_energy = E
-        trace_sim.load_srim_table(particle_type, get_gas_density(P))
         trace_sim.simulate_event()
         trace_sim.align_pad_traces()
         return -trace_sim.log_likelihood()
     
-    init_guess = (x_guess, y_guess, 200, theta_guess, phi_guess, Eguess, 1, pressure)
+    init_guess = (x_guess, y_guess, 200, theta_guess, phi_guess, Eguess, 1)
     res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")
     if return_dict != None:
         return_dict[return_key] = res
@@ -181,3 +180,21 @@ for cat in range(len(events_in_catagory)):
 Ps = np.array(Ps)
 Pgood = Ps[(np.abs(Ps - np.mean(Ps)) < np.std(Ps))]
 Pbest = Pgood[(np.abs(Pgood - np.mean(Pgood)) < np.std(Pgood))]
+
+#cs_mu, cs_sigma = np.mean(charge_spreads), np.std(charge_spreads)
+#now do MCMC to characterize systematics
+def log_priors(params):
+    #uninformed priors, just require each parameter to be >=0
+    m, c, charge_spreads = params
+    if m < 0 or c < 0 or charge_spreads < 0:
+        return -np.inf
+    return 0
+
+def log_likelihood(params):
+    m, c, charge_spreads = params
+
+def posterior(params):
+    to_return =  log_likelihood(params) + log_priors(params)
+    if np.isnan(to_return):
+        to_return = -np.inf
+    return to_return
