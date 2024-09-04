@@ -48,7 +48,7 @@ class SingleParticleEvent:
         #parameters for grid size and other numerics
         self.num_stopping_power_points = 500 #number of points at which to compute 1D energy deposition
         self.kernel_size = 31 #size of gaussian kernels. MUST BE ODD!
-        self.grid_resolution = 1.3  #spacing between grid lines mm
+        self.grid_resolution = 0.5  #spacing between grid lines mm
         self.shaping_kernel_size = 31 #must be odd
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
@@ -85,6 +85,8 @@ class SingleParticleEvent:
             self.srim_table = srim_interface.SRIM_Table('track_fitting/H_in_P10.txt', gas_density)
         elif particle.lower() == 'alpha':
             self.srim_table = srim_interface.SRIM_Table('track_fitting/He_in_P10.txt', gas_density)
+        else:
+            assert False
 
     def get_pad_from_xy(self, xy):
             '''
@@ -449,7 +451,7 @@ class SingleParticleEvent:
         ax.axes.set_zlim3d(bottom=0, top=200)
         plt.title(title)
 
-    def plot_simulated_3d_data(self, mode='simulated traces',  title='simulated_data', threshold=-np.inf): #show plots of initial guess
+    def plot_simulated_3d_data(self, mode='aligned',  title='simulated_data', threshold=-np.inf): #show plots of initial guess
         self.plot_xyze(*self.get_xyze(mode, threshold), title, threshold)
     
     def plot_residuals_3d(self, title='residuals', energy_threshold=0):
