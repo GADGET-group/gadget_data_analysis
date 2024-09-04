@@ -52,7 +52,7 @@ shaping_width  = shaping_time*clock_freq*2.355
 
 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
 #which seems to be a good assumtion. See c48097904a89edc1131d7aa2d216ca6d045b5137
-Pguess = 800#860.3 #torr
+Pguess = 860.3 #torr
 
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
@@ -140,7 +140,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         return to_return
     
     init_guess = (theta_guess, phi_guess, x_guess, y_guess, 200, Eguess, Pguess,1)
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'maxiter':5, 'disp':True})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead")#, options={'maxiter':5, 'disp':True})
     if return_dict != None:
         return_dict[return_key] = res
     if debug_plots:
@@ -152,10 +152,10 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     return res
 
 #55, 108, 132
-#pads, traces = h5file.get_pad_traces(132, False)
-#fit_event(pads, traces, 'proton', debug_plots=True)
+pads, traces = h5file.get_pad_traces(132, False)
+fit_event(pads, traces, 'proton', debug_plots=True)
 
-if True:
+if False:
     events_in_catagory = [[],[],[],[]]
     events_per_catagory = 50
     processes = []
