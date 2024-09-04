@@ -58,6 +58,12 @@ rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
+#factors to scale parameters by, so they are all of order 1
+angle_scale = 3
+distance_scale = 50
+e_scale = 2
+p_scale = 700
+cs_scale = 1
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, return_dict=None, debug_plots=False):
     trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(Pguess), particle_type)
@@ -113,8 +119,14 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         trace_sim.plot_residuals_3d(energy_threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
+
     def neg_log_likelihood(params):
         theta, phi, x,y,z, E, P, charge_spread = params
+        theta, phi = theta*angle_scale, phi*angle_scale
+        x,y,z = x*distance_scale, y*distance_scale, z*distance_scale
+        P = P*p_scale
+        E = E*e_scale
+        charge_spread = charge_spread*cs_scale
         if z > 400 or z<10:
             return np.inf
         if x**2 + y**2 > 40**2:
@@ -139,12 +151,13 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
             print('%e'%to_return, params)
         return to_return
     
-    init_guess = (theta_guess, phi_guess, x_guess, y_guess, 200, Eguess, Pguess,1)
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead")#, options={'maxiter':5, 'disp':True})
+    init_guess = (theta_guess/angle_scale, phi_guess/angle_scale, x_guess/distance_scale, y_guess/distance_scale, 200/distance_scale, Eguess/e_scale, Pguess/p_scale,1/cs_scale)
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive':True})#method="Powell", options={'ftol':0.01, 'xtol':0.01})#, options={'maxiter':5, 'disp':True})
     if return_dict != None:
         return_dict[return_key] = res
-    if debug_plots:
         print(return_key, res)
+    if debug_plots:
+        print(res)
         trace_sim.plot_residuals_3d(title=str(return_key)+particle_type, energy_threshold=20)
         trace_sim.plot_simulated_3d_data(title=str(return_key)+particle_type, threshold=20)
         trace_sim.plot_residuals()
@@ -152,117 +165,132 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     return res
 
 #55, 108, 132
-pads, traces = h5file.get_pad_traces(132, False)
-fit_event(pads, traces, 'proton', debug_plots=True)
+#pads, traces = h5file.get_pad_traces(108, False)
+#fit_event(pads, traces, 'proton', debug_plots=True)
 
-if False:
-    events_in_catagory = [[],[],[],[]]
-    events_per_catagory = 50
-    processes = []
+events_in_catagory = [[],[],[],[]]
+events_per_catagory = 50
+processes = []
 
-    def classify(range, counts):
-        if counts > 2e5 and counts < 4e5 and range < 25 and range > 15:
-            return 0 #low energy alpha
-        if counts > 4e5 and counts < 1e6 and range >20 and range < 100:
-            return 1 #high energy alpha
-        if counts > 7e4 and counts < 1e5 and range > 13 and range < 22:
-            return 2 #757 keV proton
-        if counts > 1.54e5 and counts < 2.1e5 and range > 34 and range < 55:
-            return 3 #higher energy proton
-        return -1
+def classify(range, counts):
+    if counts > 2e5 and counts < 4e5 and range < 25 and range > 15:
+        return 0 #low energy alpha
+    if counts > 4e5 and counts < 1e6 and range >20 and range < 100:
+        return 1 #high energy alpha
+    if counts > 7e4 and counts < 1e5 and range > 13 and range < 22:
+        return 2 #757 keV proton
+    if counts > 1.54e5 and counts < 2.1e5 and range > 34 and range < 55:
+        return 3 #higher energy proton
+    return -1
 
-    veto_threshold = 300
+veto_threshold = 300
 
-    n = h5file.get_event_num_bounds()[0]
-    manager = multiprocessing.Manager()
+n = h5file.get_event_num_bounds()[0]
+manager = multiprocessing.Manager()
 
-    fit_results_dict = manager.dict()
-    while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
-        max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
-        l = np.sqrt(dxy**2 + dz**2)
-        event_catagory = classify(l, counts)
-        #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
-        if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
-            if event_catagory in [0, 1]:
-                particle_type = 'alpha'
-            else:
-                particle_type = 'proton'
-            pads, traces  = h5file.get_pad_traces(n, include_veto_pads=False)
-            processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, particle_type, 50, n, fit_results_dict)))
-            processes[-1].start()
-            events_in_catagory[event_catagory].append(n)
-            print([len(x) for x in events_in_catagory])
-        n += 1
-    #wait for all processes to end
-    for p in processes:
-        p.join()
+fit_results_dict = manager.dict()
+while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
+    max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
+    l = np.sqrt(dxy**2 + dz**2)
+    event_catagory = classify(l, counts)
+    #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
+    if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
+        if event_catagory in [0, 1]:
+            particle_type = 'alpha'
+        else:
+            particle_type = 'proton'
+        pads, traces  = h5file.get_pad_traces(n, include_veto_pads=False)
+        processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, particle_type, 50, n, fit_results_dict)))
+        processes[-1].start()
+        events_in_catagory[event_catagory].append(n)
+        print([len(x) for x in events_in_catagory])
+    n += 1
+#wait for all processes to end
+for p in processes:
+    p.join()
 
-    print('fitting took %f s'%(time.time() - start_time))
+print('fitting took %f s'%(time.time() - start_time))
 
-    evts, xs,ys,zs,thetas, phis, charge_spreads, lls, cats, Es, Ps = [], [],[],[],[],[],[],[],[],[],[]
-    for cat in range(len(events_in_catagory)):
-        for evt in events_in_catagory[cat]:
-            if evt not in fit_results_dict:
-                print('evt %d (cat %d)not in results dict'%(evt, cat))
-                continue
-            res = fit_results_dict[evt]
-            if not res.success:
-                print('evt %d (cat %d)not succesfully fit'%(evt, cat))
-            xs.append(res.x[0])
-            ys.append(res.x[1])
-            zs.append(res.x[2])
-            thetas.append(res.x[3])
-            phis.append(res.x[4])
-            Es.append(res.x[5])
-            charge_spreads.append(res.x[6])
-            Ps.append(res.x[7])
-            lls.append(res.fun)
-            cats.append(cat)
-            evts.append(evt)
+evts, thetas, phis,xs,ys,zs, charge_spreads, lls, cats, Es, Ps = [], [],[],[],[],[],[],[],[],[],[]
+for cat in range(len(events_in_catagory)):
+    for evt in events_in_catagory[cat]:
+        if evt not in fit_results_dict:
+            print('evt %d (cat %d)not in results dict'%(evt, cat))
+            continue
+        res = fit_results_dict[evt]
+        if not res.success:
+            print('evt %d (cat %d)not succesfully fit'%(evt, cat))
+            continue
+        thetas.append(res.x[0]*angle_scale)
+        phis.append(res.x[1]*angle_scale)
+        xs.append(res.x[2]*distance_scale)
+        ys.append(res.x[3]*distance_scale)
+        zs.append(res.x[4]*distance_scale)
+        Es.append(res.x[5]*e_scale)
+        Ps.append(res.x[6]*p_scale)
+        charge_spreads.append(res.x[7]*cs_scale)
+        lls.append(res.fun)
+        cats.append(cat)
+        evts.append(evt)
 
-    Ps = np.array(Ps)
-    evts = np.array(evts)
-    Pgood = Ps[(np.abs(Ps - np.mean(Ps)) < np.std(Ps))]
-    Pbest = Pgood[(np.abs(Pgood - np.mean(Pgood)) < np.std(Pgood))]
+Ps = np.array(Ps)
+evts = np.array(evts)
+cats = np.array(cats)
 
-    ptype = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
+Pgood = Ps[(cats==1)|(cats==3)]
+Pbest = Pgood[(np.abs(Pgood - np.mean(Pgood)) < np.std(Pgood))]
 
-    def show_fit(evt):
-        i = np.where(evt==evts)[0][0]
-        sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(Ps[i]), ptype[i])
-        sim.initial_energy = Es[i]
-        sim.initial_point = (xs[i], ys[i], zs[i])
-        sim.theta = thetas[i]
-        sim.phi = phis[i]
-        sim.charge_spreading_sigma = charge_spreads[i]
-        sim.zscale = zscale
-        sim.shaping_width = shaping_width
-        sim.counts_per_MeV = adc_scale_mu
-        pads, traces = h5file.get_pad_traces(evt, False)
-        sim.set_real_data(pads, traces, 50, int(shaping_width))
-        sim.simulate_event()
-        sim.align_pad_traces()
-        sim.plot_simulated_3d_data(mode='aligned', threshold=25)
-        sim.plot_residuals_3d(energy_threshold=25)
-        sim.plot_residuals()
-        plt.show()
+pressure = np.mean(Pbest)
 
 
+ptype = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
 
-    #cs_mu, cs_sigma = np.mean(charge_spreads), np.std(charge_spreads)
-    #now do MCMC to characterize systematics
-    def log_priors(params):
-        #uninformed priors, just require each parameter to be >=0
-        m, c, charge_spreads = params
-        if m < 0 or c < 0 or charge_spreads < 0:
-            return -np.inf
-        return 0
+def show_fit(evt):
+    i = np.where(evt==evts)[0][0]
+    sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(Ps[i]), ptype[i])
+    sim.initial_energy = Es[i]
+    sim.initial_point = (xs[i], ys[i], zs[i])
+    sim.theta = thetas[i]
+    sim.phi = phis[i]
+    sim.charge_spreading_sigma = charge_spreads[i]
+    sim.zscale = zscale
+    sim.shaping_width = shaping_width
+    sim.counts_per_MeV = adc_scale_mu
+    pads, traces = h5file.get_pad_traces(evt, False)
+    sim.set_real_data(pads, traces, 50, int(shaping_width))
+    sim.simulate_event()
+    sim.align_pad_traces()
+    sim.plot_simulated_3d_data(mode='aligned', threshold=25)
+    sim.plot_residuals_3d(energy_threshold=25)
+    sim.plot_residuals()
+    plt.show()
 
-    def log_likelihood(params):
-        m, c, charge_spreads = params
 
-    def posterior(params):
-        to_return =  log_likelihood(params) + log_priors(params)
-        if np.isnan(to_return):
-            to_return = -np.inf
-        return to_return
+trace_sims = []
+for i in range(len(evts)):
+    pass
+    #new_sim = SingleParticleEvent
+
+#cs_mu, cs_sigma = np.mean(charge_spreads), np.std(charge_spreads)
+#now do MCMC to characterize systematics
+def log_priors(params):
+    #uninformed priors, just require each parameter to be >=0
+    m, c, charge_spreads = params
+    if m < 0 or c < 0 or charge_spreads < 0:
+        return -np.inf
+    return 0
+
+def log_likelihood(params):
+    m, c, charge_spreads = params
+    to_return = 0
+    for evt in evts:
+        pass
+
+def posterior(params):
+    prior =  log_priors(params)
+    if prior == -np.inf: #don't bother simulating if -inf anyway
+        return prior
+    to_return =  log_likelihood(params) + prior
+    if np.isnan(to_return):
+        to_return = -np.inf
+    return to_return
