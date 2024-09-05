@@ -52,7 +52,7 @@ shaping_width  = shaping_time*clock_freq*2.355
 
 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
 #which seems to be a good assumtion. See c48097904a89edc1131d7aa2d216ca6d045b5137
-Pguess = 860.3 #torr
+Pguess = 800 #torr
 
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
@@ -65,7 +65,7 @@ e_scale = 2
 p_scale = 700
 cs_scale = 1
 
-def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, return_dict=None, debug_plots=False):
+def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, return_dict=None, debug_plots=False, method='Powell'):
     trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(Pguess), particle_type)
     trace_sim.shaping_width = shaping_width
     trace_sim.zscale = zscale
@@ -152,7 +152,12 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         return to_return
     
     init_guess = (theta_guess/angle_scale, phi_guess/angle_scale, x_guess/distance_scale, y_guess/distance_scale, 200/distance_scale, Eguess/e_scale, Pguess/p_scale,1/cs_scale)
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})#, options={'ftol':0.001, 'xtol':0.01})#, options={'maxiter':5, 'disp':True})
+    if method == 'Nelder-Mead':
+        res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})
+    elif method == 'Powell':
+        res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell", options={'ftol':0.001, 'xtol':0.01})#, options={'maxiter':5, 'disp':True})
+    else:
+        assert False
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
@@ -181,7 +186,7 @@ def classify(range, counts):
         return 2 #757 keV proton
     if counts > 1.54e5 and counts < 2.1e5 and range > 34 and range < 55:
         return 3 #higher energy proton
-    return -1
+    return -1 
 
 veto_threshold = 300
 
@@ -244,15 +249,13 @@ cats = np.array(cats)
 
 Pgood = Ps[(cats==1)|(cats==3)]
 Pbest = Pgood[(np.abs(Pgood - np.mean(Pgood)) < np.std(Pgood))]
+ptypes = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
 
-pressure = np.mean(Pbest)
-
-
-ptype = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
+#save results arrays
 
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
-    sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(Ps[i]), ptype[i])
+    sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(Ps[i]), ptypes[i])
     sim.initial_energy = Es[i]
     sim.initial_point = (xs[i], ys[i], zs[i])
     sim.theta = thetas[i]
@@ -270,32 +273,75 @@ def show_fit(evt):
     sim.plot_residuals()
     plt.show()
 
+pressure = 860.3#need to nail this down better later, for now assume current offset #np.mean(Pbest)
 
 trace_sims = []
 for i in range(len(evts)):
-    pass
-    #new_sim = SingleParticleEvent
+    new_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle=ptypes[i])
+    new_sim.shaping_width = shaping_width
+    new_sim.zscale = zscale
+    new_sim.counts_per_MeV = adc_scale_mu
+    new_sim.initial_energy = Es[i]
+    new_sim.initial_point = (xs[i], ys[i], zs[i])
+    new_sim.theta = thetas[i]
+    new_sim.phi = phis[i]
+    pads, traces = h5file.get_pad_traces(evts[i], False)
+    new_sim.set_real_data(pads, traces, trim_threshold=50)
+    trace_sims.append(new_sim)
 
 #cs_mu, cs_sigma = np.mean(charge_spreads), np.std(charge_spreads)
 #now do MCMC to characterize systematics
 def log_priors(params):
     #uninformed priors, just require each parameter to be >=0
-    m, c, charge_spreads = params
-    if m < 0 or c < 0 or charge_spreads < 0:
+    m, c, charge_spread = params
+    if m < 0 or c < 0  or m > 1 or c>4000 or charge_spread < 0 or charge_spread > 10:
         return -np.inf
     return 0
 
 def log_likelihood(params):
-    m, c, charge_spreads = params
+    m, c, charge_spread = params
     to_return = 0
-    for evt in evts:
-        pass
+    for sim in trace_sims:
+        sim.charge_spreading_simga = charge_spread
+        sim.pad_gain_match_uncertainty = m
+        sim.other_systematics = c
+        sim.simulate_event()
+        sim.align_pad_traces()
+        to_return += sim.log_likelihood()
+    return to_return
 
-def posterior(params):
+def log_posterior(params):
     prior =  log_priors(params)
     if prior == -np.inf: #don't bother simulating if -inf anyway
         return prior
     to_return =  log_likelihood(params) + prior
     if np.isnan(to_return):
         to_return = -np.inf
+    print(params, to_return)
     return to_return
+
+systematics_fit = opt.minimize(log_posterior, (0.3, 20, 2))
+
+if False:
+    #turn off numpy threading to avoid conflicts with emcee
+    import os
+    os.environ["OMP_NUM_THREADS"] = "1"
+    import emcee
+
+
+
+    from multiprocessing import Pool
+    nwalkers = 50
+    nsteps=500
+    ndim = 3
+
+    backend_file = 'run%d_systematics.h5'%run_number
+    backend = emcee.backends.HDFBackend(backend_file)
+    backend.reset(nwalkers, ndim)
+
+    emcee_start_time = time.time()
+    initial = [(np.random.uniform(0,1), np.random.uniform(0,1000), np.random.uniform(0,10)) for x in range(nwalkers)]
+    with Pool(50) as pool:
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, pool=pool, backend=backend)
+        sampler.run_mcmc(initial, nsteps, progress=True)
+    print('emcee took %f s'%(time.time() - emcee_start_time))
