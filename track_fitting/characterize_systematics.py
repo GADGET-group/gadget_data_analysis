@@ -19,8 +19,6 @@ import emcee
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
 
-from tqdm import tqdm
-
 
 start_time = time.time()
 
@@ -212,12 +210,12 @@ while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
         print([len(x) for x in events_in_catagory])
     n += 1
 #wait for all processes to end
-for p in tqdm(processes):
+for p in processes:
     p.join()
 
 print('fitting took %f s'%(time.time() - start_time))
 
-evts, thetas, phis,xs,ys,zs, charge_spreads, lls, cats, Es, Ps = [], [],[],[],[],[],[],[],[],[],[]
+evts, thetas, phis,xs,ys,zs, charge_spreads, lls, cats, Es, Ps, nfev = [], [],[],[],[],[],[],[],[],[],[],[]
 for cat in range(len(events_in_catagory)):
     for evt in events_in_catagory[cat]:
         if evt not in fit_results_dict:
@@ -238,6 +236,7 @@ for cat in range(len(events_in_catagory)):
         lls.append(res.fun)
         cats.append(cat)
         evts.append(evt)
+        nfev.append(res.nfev)
 
 Ps = np.array(Ps)
 evts = np.array(evts)
