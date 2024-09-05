@@ -19,6 +19,8 @@ import emcee
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
 
+from tqdm import tqdm
+
 
 start_time = time.time()
 
@@ -152,7 +154,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         return to_return
     
     init_guess = (theta_guess/angle_scale, phi_guess/angle_scale, x_guess/distance_scale, y_guess/distance_scale, 200/distance_scale, Eguess/e_scale, Pguess/p_scale,1/cs_scale)
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'maxfev':10000, 'maxiter':10000})#, options={'ftol':0.001, 'xtol':0.01})#, options={'maxiter':5, 'disp':True})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})#, options={'ftol':0.001, 'xtol':0.01})#, options={'maxiter':5, 'disp':True})
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
@@ -210,7 +212,7 @@ while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
         print([len(x) for x in events_in_catagory])
     n += 1
 #wait for all processes to end
-for p in processes:
+for p in tqdm(processes):
     p.join()
 
 print('fitting took %f s'%(time.time() - start_time))
