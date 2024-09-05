@@ -152,7 +152,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         return to_return
     
     init_guess = (theta_guess/angle_scale, phi_guess/angle_scale, x_guess/distance_scale, y_guess/distance_scale, 200/distance_scale, Eguess/e_scale, Pguess/p_scale,1/cs_scale)
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive':True})#method="Powell", options={'ftol':0.01, 'xtol':0.01})#, options={'maxiter':5, 'disp':True})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'maxfev':10000, 'maxiter':10000})#, options={'ftol':0.001, 'xtol':0.01})#, options={'maxiter':5, 'disp':True})
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
@@ -185,9 +185,10 @@ def classify(range, counts):
 
 veto_threshold = 300
 
+fit_in_parrallel = True
+
 n = h5file.get_event_num_bounds()[0]
 manager = multiprocessing.Manager()
-
 fit_results_dict = manager.dict()
 while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
     max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
@@ -200,8 +201,11 @@ while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
         else:
             particle_type = 'proton'
         pads, traces  = h5file.get_pad_traces(n, include_veto_pads=False)
-        processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, particle_type, 50, n, fit_results_dict)))
-        processes[-1].start()
+        if fit_in_parrallel:
+            processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, particle_type, 50, n, fit_results_dict)))
+            processes[-1].start()
+        else:
+            fit_event(pads, traces, particle_type, 50, n, fit_results_dict)
         events_in_catagory[event_catagory].append(n)
         print([len(x) for x in events_in_catagory])
     n += 1
