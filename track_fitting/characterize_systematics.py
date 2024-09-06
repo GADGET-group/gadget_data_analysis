@@ -170,8 +170,8 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     return res
 
 #55, 108, 132
-#pads, traces = h5file.get_pad_traces(108, False)
-#fit_event(pads, traces, 'proton', debug_plots=True)
+pads, traces = h5file.get_pad_traces(108, False)
+fit_event(pads, traces, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
 events_per_catagory = 50

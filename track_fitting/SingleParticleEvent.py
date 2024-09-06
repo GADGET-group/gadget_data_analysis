@@ -48,7 +48,7 @@ class SingleParticleEvent:
         #parameters for grid size and other numerics
         self.num_stopping_power_points = 500 #number of points at which to compute 1D energy deposition
         self.kernel_size = 31 #size of gaussian kernels. MUST BE ODD!
-        self.grid_resolution = 0.5  #spacing between grid lines mm
+        self.grid_resolution = 1  #spacing between grid lines mm
         self.shaping_kernel_size = 31 #must be odd
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
@@ -393,23 +393,25 @@ class SingleParticleEvent:
         to_return = 0
         for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
             if pad in self.aligned_sim_traces: #if the pad trace was simulated
-                sigma = self.aligned_sim_traces[pad]*self.pad_gain_match_uncertainty + self.other_systematics
-                to_return += np.sum(-np.log(np.sqrt(2*np.pi)*sigma))
+                cov_matrix = np.matrix(np.zeros((self.num_trimmed_trace_bins, self.num_trimmed_trace_bins)))
+                for i in range(self.num_trimmed_trace_bins):
+                    for j in range(self.num_trimmed_trace_bins):
+                        cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.aligned_sim_traces[pad][i]*self.aligned_sim_traces[pad][j]
+                        if i ==j:
+                            cov_matrix[i,j] += self.other_systematics**2
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.aligned_sim_traces[pad] - self.traces_to_fit[pad]
-                    to_return += np.sum(-residuals*residuals/(2*sigma**2))
                 else: #pad was simulated firing, but did not
-                    sigma = self.other_systematics
-                    to_return += -self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi)*sigma)
-                    to_return += -np.sum(self.aligned_sim_traces[pad]*self.aligned_sim_traces[pad])/2/sigma**2
+                    residuals = self.aligned_sim_traces[pad]
+                to_return -= self.num_trimmed_trace_bins/2*np.log(2*np.pi)
+                to_return -= 0.5*np.log(np.linalg.det(cov_matrix))
+                residuals = np.matrix(residuals)
+                to_return -= 0.5*(residuals*cov_matrix**-1*residuals.T)[0]
             else: #pad was not simulated
+                to_return -= 0.5*self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
                 if pad in self.traces_to_fit: #pad fired, but was not simulated
-                    sigma = self.other_systematics
-                    to_return += -self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi)*sigma)
-                    to_return += -np.sum(self.traces_to_fit[pad]*self.traces_to_fit[pad])/2/sigma**2
-                else: #pad did not fire and was not simulated
-                    sigma = self.other_systematics
-                    to_return += -self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi)*sigma)
+                    residuals = np.matrix(-self.traces_to_fit[pad])
+                    to_return -= 0.5*(residuals*residuals.T)[0]/self.other_systematics**2
 
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
