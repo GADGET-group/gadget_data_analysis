@@ -243,6 +243,7 @@ for cat in range(len(events_in_catagory)):
         evts.append(evt)
         nfev.append(res.nfev)
 
+lls = np.array(lls)
 Ps = np.array(Ps)
 evts = np.array(evts)
 cats = np.array(cats)
@@ -275,26 +276,30 @@ def show_fit(evt):
 
 pressure = 860.3#need to nail this down better later, for now assume current offset #np.mean(Pbest)
 
+
+ll_cutoff = [np.median(lls[cats==cat]) for cat in [0,1,2,3]]
+
 trace_sims = []
 for i in range(len(evts)):
-    new_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle=ptypes[i])
-    new_sim.shaping_width = shaping_width
-    new_sim.zscale = zscale
-    new_sim.counts_per_MeV = adc_scale_mu
-    new_sim.initial_energy = Es[i]
-    new_sim.initial_point = (xs[i], ys[i], zs[i])
-    new_sim.theta = thetas[i]
-    new_sim.phi = phis[i]
-    pads, traces = h5file.get_pad_traces(evts[i], False)
-    new_sim.set_real_data(pads, traces, trim_threshold=50)
-    trace_sims.append(new_sim)
+    if lls[i] <= ll_cutoff[cats[i]]:
+        new_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle=ptypes[i])
+        new_sim.shaping_width = shaping_width
+        new_sim.zscale = zscale
+        new_sim.counts_per_MeV = adc_scale_mu
+        new_sim.initial_energy = Es[i]
+        new_sim.initial_point = (xs[i], ys[i], zs[i])
+        new_sim.theta = thetas[i]
+        new_sim.phi = phis[i]
+        pads, traces = h5file.get_pad_traces(evts[i], False)
+        new_sim.set_real_data(pads, traces, trim_threshold=50)
+        trace_sims.append(new_sim)
 
 #cs_mu, cs_sigma = np.mean(charge_spreads), np.std(charge_spreads)
 #now do MCMC to characterize systematics
 def log_priors(params):
     #uninformed priors, just require each parameter to be >=0
     m, c, charge_spread = params
-    if m < 0 or c < 0  or m > 1 or c>4000 or charge_spread < 0 or charge_spread > 10:
+    if m < 0 or c < 0  or m > 10 or c>4000 or charge_spread < 0 or charge_spread > 10:
         return -np.inf
     return 0
 
@@ -317,10 +322,10 @@ def log_posterior(params):
     to_return =  log_likelihood(params) + prior
     if np.isnan(to_return):
         to_return = -np.inf
-    print(params, to_return)
+    print(params, '%e'%to_return)
     return to_return
 
-systematics_fit = opt.minimize(log_posterior, (0.3, 20, 2))
+systematics_fit = opt.minimize(lambda params: -log_posterior(params), (0.3, 20, 2))
 
 if False:
     #turn off numpy threading to avoid conflicts with emcee
