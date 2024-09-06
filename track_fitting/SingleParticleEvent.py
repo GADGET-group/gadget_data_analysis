@@ -47,9 +47,9 @@ class SingleParticleEvent:
         
         #parameters for grid size and other numerics
         self.num_stopping_power_points = 500 #number of points at which to compute 1D energy deposition
-        self.kernel_size = 31 #size of gaussian kernels. MUST BE ODD!
+        self.kernel_size = 61 #size of gaussian kernels. MUST BE ODD!
         self.grid_resolution = 0.5  #spacing between grid lines mm
-        self.shaping_kernel_size = 31 #must be odd
+        self.shaping_kernel_size = 61 #must be odd
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
