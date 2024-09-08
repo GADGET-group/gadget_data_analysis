@@ -10,6 +10,7 @@
 
 import time
 import multiprocessing
+import pickle
 
 import numpy as np
 import matplotlib.pylab as plt
@@ -161,6 +162,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
+        print('total completed:', len(return_dict.keys()))
     if debug_plots:
         print(res)
         trace_sim.plot_residuals_3d(title=str(return_key)+particle_type, energy_threshold=20)
@@ -170,11 +172,11 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     return res
 
 #55, 108, 132
-pads, traces = h5file.get_pad_traces(108, False)
-fit_event(pads, traces, 'proton', debug_plots=True)
+#pads, traces = h5file.get_pad_traces(108, False)
+#fit_event(pads, traces, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
-events_per_catagory = 50
+events_per_catagory = 5
 processes = []
 
 def classify(range, counts):
@@ -217,6 +219,12 @@ while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
 #wait for all processes to end
 for p in processes:
     p.join()
+
+#save results objects
+pickle_fname = 'run%d_results_objects.dat'%run_number
+with open(pickle_fname, 'wb') as f:
+    pickle.dump(fit_results_dict, f)
+    
 
 print('fitting took %f s'%(time.time() - start_time))
 
@@ -278,10 +286,11 @@ pressure = 860.3#need to nail this down better later, for now assume current off
 
 
 ll_cutoff = [np.median(lls[cats==cat]) for cat in [0,1,2,3]]
-
+evts_to_fit = []
 trace_sims = []
 for i in range(len(evts)):
     if lls[i] <= ll_cutoff[cats[i]]:
+        evts_to_fit.append(evts[i])
         new_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle=ptypes[i])
         new_sim.shaping_width = shaping_width
         new_sim.zscale = zscale
@@ -326,6 +335,7 @@ def log_posterior(params):
     return to_return
 
 systematics_fit = opt.minimize(lambda params: -log_posterior(params), (0.3, 20, 2))
+
 
 if False:
     #turn off numpy threading to avoid conflicts with emcee
