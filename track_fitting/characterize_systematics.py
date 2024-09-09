@@ -23,9 +23,12 @@ from raw_viewer import raw_h5_file
 
 start_time = time.time()
 
-folder = '../../shared/Run_Data/'
+h5_folder = '../../shared/Run_Data/'
 run_number = 124
-run_h5_path = folder +'run_%04d.h5'%run_number
+run_h5_path = h5_folder +'run_%04d.h5'%run_number
+pickle_fname = 'run%d_results_objects.dat'%run_number
+
+load_previous_fit = False
 
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -176,7 +179,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
 #fit_event(pads, traces, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
-events_per_catagory = 5
+events_per_catagory = 50
 processes = []
 
 def classify(range, counts):
@@ -194,39 +197,48 @@ veto_threshold = 300
 
 fit_in_parrallel = True
 
-n = h5file.get_event_num_bounds()[0]
-manager = multiprocessing.Manager()
-fit_results_dict = manager.dict()
-while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
-    max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
-    l = np.sqrt(dxy**2 + dz**2)
-    event_catagory = classify(l, counts)
-    #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
-    if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
-        if event_catagory in [0, 1]:
-            particle_type = 'alpha'
-        else:
-            particle_type = 'proton'
-        pads, traces  = h5file.get_pad_traces(n, include_veto_pads=False)
-        if fit_in_parrallel:
-            processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, particle_type, 50, n, fit_results_dict)))
-            processes[-1].start()
-        else:
-            fit_event(pads, traces, particle_type, 50, n, fit_results_dict)
-        events_in_catagory[event_catagory].append(n)
-        print([len(x) for x in events_in_catagory])
-    n += 1
-#wait for all processes to end
-for p in processes:
-    p.join()
-
-#save results objects
-pickle_fname = 'run%d_results_objects.dat'%run_number
-with open(pickle_fname, 'wb') as f:
-    pickle.dump(fit_results_dict, f)
+if not load_previous_fit:
+    n = h5file.get_event_num_bounds()[0]
+    manager = multiprocessing.Manager()
+    fit_results_dict = manager.dict()
+    while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
+        max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
+        l = np.sqrt(dxy**2 + dz**2)
+        event_catagory = classify(l, counts)
+        #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
+        if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
+            if event_catagory in [0, 1]:
+                particle_type = 'alpha'
+            else:
+                particle_type = 'proton'
+            pads, traces  = h5file.get_pad_traces(n, include_veto_pads=False)
+            if fit_in_parrallel:
+                processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, particle_type, 50, n, fit_results_dict)))
+                processes[-1].start()
+            else:
+                fit_event(pads, traces, particle_type, 50, n, fit_results_dict)
+            events_in_catagory[event_catagory].append(n)
+            print([len(x) for x in events_in_catagory])
+        n += 1
+    #wait for all processes to end
+    for p in processes:
+        p.join()
     
+    print('fitting took %f s'%(time.time() - start_time))
 
-print('fitting took %f s'%(time.time() - start_time))
+    #save results objects
+    fit_results_dict = {k:fit_results_dict[k] for k in fit_results_dict}
+    with open(pickle_fname, 'wb') as f:
+        pickle.dump(fit_results_dict, f)
+else:
+    with open(pickle_fname, 'rb') as f:
+        fit_results_dict = pickle.load(f)
+    events_in_catagory = [[],[],[],[]]
+    for evt in fit_results_dict:
+        max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(evt)
+        l = np.sqrt(dxy**2 + dz**2)
+        event_catagory = classify(l, counts)
+        events_in_catagory[event_catagory].append(evt)
 
 evts, thetas, phis,xs,ys,zs, charge_spreads, lls, cats, Es, Ps, nfev = [], [],[],[],[],[],[],[],[],[],[],[]
 for cat in range(len(events_in_catagory)):
@@ -334,7 +346,7 @@ def log_posterior(params):
     print(params, '%e'%to_return)
     return to_return
 
-systematics_fit = opt.minimize(lambda params: -log_posterior(params), (0.3, 20, 2))
+#systematics_fit = opt.minimize(lambda params: -log_posterior(params), (0.3, 20, 2), method="Powell")
 
 
 if False:
