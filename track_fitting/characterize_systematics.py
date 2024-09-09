@@ -28,7 +28,7 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-load_previous_fit = True
+load_previous_fit = False
 
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -176,7 +176,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
 #fit_event(pads, traces, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
-events_per_catagory = 1
+events_per_catagory = 50
 processes = []
 
 def classify(range, counts):
@@ -314,7 +314,7 @@ for i in range(len(evts)):
         if  val > max_residual_percent:
             max_residual_percent = val
     print(evts[i], max_residual_percent)
-    if max_residual_percent < 0.7:
+    if max_residual_percent < 0.6:
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
 
@@ -356,13 +356,13 @@ def to_minimize(params):
         sim.pad_gain_match_uncertainty = m
         sim.simulate_event()
         sim.align_pad_traces()
-        to_add = sim.log_likelihood()/fit_results_dict[evt].fun
+        to_add = -sim.log_likelihood()/fit_results_dict[evt].fun
         print(evt, to_add)
         to_return += to_add
     print('==================',to_return, params, '===================')
     return to_return
 
-#systematics_fit = opt.minimize(lambda params: -log_posterior(params), (0.3, 20, 2), method="Powell")
+systematics_fit = opt.minimize(lambda params: to_minimize(params), (0.3, 5), method="Powell")
 
 
 if False:

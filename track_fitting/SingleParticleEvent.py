@@ -406,7 +406,7 @@ class SingleParticleEvent:
                 to_return -= self.num_trimmed_trace_bins/2*np.log(2*np.pi)
                 to_return -= 0.5*np.log(np.linalg.det(cov_matrix))
                 residuals = np.matrix(residuals)
-                to_return -= 0.5*(residuals*cov_matrix**-1*residuals.T)[0]
+                to_return -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]
             else: #pad was not simulated
                 to_return -= 0.5*self.num_trimmed_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
                 if pad in self.traces_to_fit: #pad fired, but was not simulated
