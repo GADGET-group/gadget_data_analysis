@@ -28,7 +28,7 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-load_previous_fit = False
+load_previous_fit = True
 
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -57,6 +57,7 @@ shaping_width  = shaping_time*clock_freq*2.355
 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
 #which seems to be a good assumtion. See c48097904a89edc1131d7aa2d216ca6d045b5137
 pressure = 860.3 #torr
+charge_spread = 2. #mm
 
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
@@ -66,8 +67,6 @@ get_gas_density = lambda P: rho0*(P/760)*(300./T)
 angle_scale = 3
 distance_scale = 50
 e_scale = 2
-p_scale = 700
-cs_scale = 1
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False, method='Powell'):
@@ -114,11 +113,11 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     if debug_plots:
         print('max pad:', max_pad)
         print('brag x,y:', brag_x, brag_y)
-        z_guess, charge_spead_guess = 200, 1
+        z_guess = 200
         print('guess:',x_guess, y_guess, z_guess, theta_guess, phi_guess, Eguess, pressure)
         trace_sim.theta, trace_sim.phi = theta_guess, phi_guess
         trace_sim.initial_point = (x_guess,y_guess,z_guess)
-        trace_sim.charge_spreading_sigma = charge_spead_guess
+        trace_sim.charge_spreading_sigma = charge_spread
         trace_sim.initial_energy = Eguess
         trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(pressure))
         trace_sim.simulate_event()
@@ -129,16 +128,13 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         plt.show(block=True)
 
     def neg_log_likelihood(params):
-        theta, phi, x,y,z, E, charge_spread = params
+        theta, phi, x,y,z, E = params
         theta, phi = theta*angle_scale, phi*angle_scale
         x,y,z = x*distance_scale, y*distance_scale, z*distance_scale
         E = E*e_scale
-        charge_spread = charge_spread*cs_scale
         if z > 400 or z<10:
             return np.inf
         if x**2 + y**2 > 40**2:
-            return np.inf
-        if charge_spread <0 or charge_spread>10:
             return np.inf
         if E < 0 or E > 10: #stopping power tables currently only go to 10 MeV
             return np.inf
@@ -156,7 +152,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
             print('%e'%to_return, params)
         return to_return
     
-    init_guess = (theta_guess/angle_scale, phi_guess/angle_scale, x_guess/distance_scale, y_guess/distance_scale, 200/distance_scale, Eguess/e_scale,1/cs_scale)
+    init_guess = (theta_guess/angle_scale, phi_guess/angle_scale, x_guess/distance_scale, y_guess/distance_scale, 200/distance_scale, Eguess/e_scale)
     if method == 'Nelder-Mead':
         res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})
     elif method == 'Powell':
@@ -241,7 +237,7 @@ else:
         event_catagory = classify(l, counts)
         events_in_catagory[event_catagory].append(evt)
 
-evts, thetas, phis,xs,ys,zs, charge_spreads, lls, cats, Es, nfev = [], [],[],[],[],[],[],[],[],[],[]
+evts, thetas, phis,xs,ys,zs, lls, cats, Es, nfev = [], [],[],[],[],[],[],[],[],[]
 for cat in range(len(events_in_catagory)):
     for evt in events_in_catagory[cat]:
         if evt not in fit_results_dict:
@@ -257,31 +253,27 @@ for cat in range(len(events_in_catagory)):
         ys.append(res.x[3]*distance_scale)
         zs.append(res.x[4]*distance_scale)
         Es.append(res.x[5]*e_scale)
-        charge_spreads.append(res.x[6]*cs_scale)
         lls.append(res.fun)
         cats.append(cat)
         evts.append(evt)
         nfev.append(res.nfev)
 
 lls = np.array(lls)
-Ps = np.array(Ps)
 evts = np.array(evts)
 cats = np.array(cats)
 
-Pgood = Ps[(cats==1)|(cats==3)]
-Pbest = Pgood[(np.abs(Pgood - np.mean(Pgood)) < np.std(Pgood))]
 ptypes = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
 
 #save results arrays
 
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
-    sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(Ps[i]), ptypes[i])
+    sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), ptypes[i])
     sim.initial_energy = Es[i]
     sim.initial_point = (xs[i], ys[i], zs[i])
     sim.theta = thetas[i]
     sim.phi = phis[i]
-    sim.charge_spreading_sigma = charge_spreads[i]
+    sim.charge_spreading_sigma = charge_spread
     sim.zscale = zscale
     sim.shaping_width = shaping_width
     sim.counts_per_MeV = adc_scale_mu
@@ -296,7 +288,6 @@ def show_fit(evt):
 
 #pressure = 860.3#need to nail this down better later, for now assume current offset #np.mean(Pbest)
 
-
 evts_to_fit = []
 trace_sims = []
 for i in range(len(evts)):
@@ -310,8 +301,9 @@ for i in range(len(evts)):
     new_sim.initial_point = (xs[i], ys[i], zs[i])
     new_sim.theta = thetas[i]
     new_sim.phi = phis[i]
+    new_sim.charge_spreading_sigma = charge_spread
     pads, traces = h5file.get_pad_traces(evts[i], False)
-    new_sim.set_real_data(pads, traces, trim_threshold=50)
+    new_sim.set_real_data(pads, traces, 50, int(shaping_width))
     new_sim.simulate_event()
     new_sim.align_pad_traces()
     max_trace = np.max(traces)
@@ -330,16 +322,15 @@ for i in range(len(evts)):
 #now do MCMC to characterize systematics
 def log_priors(params):
     #uninformed priors, just require each parameter to be >=0
-    m, c, charge_spread = params
-    if m < 0 or c < 0  or m > 10 or c>4000 or charge_spread < 0 or charge_spread > 10:
+    m, c = params
+    if m < 0 or c < 0  or m > 10 or c>4000 :
         return -np.inf
     return 0
 
 def log_likelihood(params):
-    m, c, charge_spread = params
+    m, c = params
     to_return = 0
     for sim in trace_sims:
-        sim.charge_spreading_simga = charge_spread
         sim.pad_gain_match_uncertainty = m
         sim.other_systematics = c
         sim.simulate_event()
@@ -359,11 +350,10 @@ def log_posterior(params):
 
 def to_minimize(params):
     to_return = 0
-    m, c, cs = params
+    m, c, = params
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
-        sim.pad_gain_match_uncertainty = cs
-        sim.charge_spreading_sigma = cs
+        sim.pad_gain_match_uncertainty = m
         sim.simulate_event()
         sim.align_pad_traces()
         to_add = sim.log_likelihood()/fit_results_dict[evt].fun
