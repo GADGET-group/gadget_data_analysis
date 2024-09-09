@@ -28,7 +28,7 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-load_previous_fit = True
+load_previous_fit = False
 
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -176,11 +176,11 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     return res
 
 #55, 108, 132
-pads, traces = h5file.get_pad_traces(108, False)
-fit_event(pads, traces, 'proton', debug_plots=True)
+#pads, traces = h5file.get_pad_traces(108, False)
+#fit_event(pads, traces, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
-events_per_catagory = 50
+events_per_catagory = 1
 processes = []
 
 def classify(range, counts):
@@ -241,7 +241,7 @@ else:
         event_catagory = classify(l, counts)
         events_in_catagory[event_catagory].append(evt)
 
-evts, thetas, phis,xs,ys,zs, charge_spreads, lls, cats, Es, Ps, nfev = [], [],[],[],[],[],[],[],[],[],[],[]
+evts, thetas, phis,xs,ys,zs, charge_spreads, lls, cats, Es, nfev = [], [],[],[],[],[],[],[],[],[],[]
 for cat in range(len(events_in_catagory)):
     for evt in events_in_catagory[cat]:
         if evt not in fit_results_dict:
@@ -257,8 +257,7 @@ for cat in range(len(events_in_catagory)):
         ys.append(res.x[3]*distance_scale)
         zs.append(res.x[4]*distance_scale)
         Es.append(res.x[5]*e_scale)
-        Ps.append(res.x[6]*p_scale)
-        charge_spreads.append(res.x[7]*cs_scale)
+        charge_spreads.append(res.x[6]*cs_scale)
         lls.append(res.fun)
         cats.append(cat)
         evts.append(evt)
