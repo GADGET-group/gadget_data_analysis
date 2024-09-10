@@ -13,9 +13,10 @@ import corner
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 17
+event_num = 34
 run_h5_path = folder +'run_%04d.h5'%run_number
 
+init_by_priors = True
 resume_previous_run = False
 
 if folder == '/mnt/analysis/e21072/gastest_h5_files/':
@@ -101,6 +102,8 @@ elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
             init_position_guess = (-29, -8, 200)
             theta_guess = np.radians(80)
             phi_guess = np.radians(-45)
+        if event_num == 34 or event_num == 91:
+            particle_type = 'proton'
         #1587 keV or 1574 keV protons
         if event_num == 55:
             #note: this one covers a pad which is missing pad mapping
@@ -175,9 +178,10 @@ def neg_log_likelihood_init_min(params):
 
 fit_start_time = time.time()
 
-initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess)
+
 
 if not init_by_priors and not resume_previous_run:
+    initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess)
     #get log likilihood within 0.1%
     res = opt.minimize(fun=neg_log_likelihood_init_min, x0=initial_guess, method="Powell", options={'disp':True})#, 'ftol':0.001, 'xtol':1})
 
