@@ -248,7 +248,9 @@ beta = 0 #inverse temperature for tempering
 def log_posterior(params):
     to_return = log_priors(params)
     if to_return != -np.inf:
-        to_return += log_likelihood_mcmc(params)**beta
+        ll =  log_likelihood_mcmc(params)
+        assert ll <= 0
+        to_return -= np.abs(ll)**beta
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
@@ -284,39 +286,46 @@ backend = emcee.backends.HDFBackend(backend_file)
 if not resume_previous_run:
     backend.reset(nwalkers, ndim)
 
-sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
+#sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
 if resume_previous_run:
     init_walker_pos = sampler.get_last_sample()
 
 
 # We'll track how the average autocorrelation time estimate changes
 index = 0
-autocorr = np.empty(max_n)
-# This will be useful to testing convergence
-old_tau = np.inf
 
-cooling_timescale = 50
-# Now we'll sample for up to max_n steps
-for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
-    # Only check convergence every 10 steps
-    #if sampler.iteration % 100:
-    #    continue
+beta_profile = [0.1,0.2,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+steps_per_beta = 100
+for b in beta_profile:
+    beta = b
+    if b == beta_profile[0]:
+        p = init_walker_pos
+    else:
+        p = sampler.get_chain()[-1,:,:]
+    #print(p)
+    #print(np.shape(p))
+    
 
-    # Compute the autocorrelation time so far
-    # Using tol=0 means that we'll always get an estimate even
-    # if it isn't trustworthy
-    tau = sampler.get_autocorr_time(tol=0)
-    autocorr[index] = np.mean(tau)
-    index += 1
-    print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior)
 
-    # Check convergence
-    converged = np.all(tau * 50 < sampler.iteration)
-    #converged &= np.all(np.abs(old_tau - tau) / tau < 0.01)
-    if converged:
-        break
-    old_tau = tau
-    beta = 1-np.e**(-index/cooling_timescale)
+    for sample in sampler.sample(p, iterations=steps_per_beta, progress=True):
+        tau = sampler.get_autocorr_time(tol=0)
+        print('beta=', beta, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+
+    samples = sampler.get_chain()
+    labels = ['E', 'x','y','z','theta', 'phi']
+    fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
+    plt.title('beta=%f'%beta)
+    for i in range(len(labels)):
+        ax = axes[i]
+        ax.plot(samples[:, :, i], "k", alpha=0.3)
+        ax.set_xlim(0, len(samples))
+        ax.set_ylabel(labels[i])
+        ax.yaxis.set_label_coords(-0.1, 0.5)
+
+    axes[-1].set_xlabel("step number")
+
+    plt.show(block=True)
 
 
 #sampler.run_mcmc(init_walker_pos, 100, progress=True)

@@ -28,7 +28,7 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-load_previous_fit = False
+load_previous_fit = True
 
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -350,7 +350,7 @@ def log_posterior(params):
 
 
 
-m_guess, c_guess =  6.734e+01,  8.281e+00 #same as used for chi^2
+m_guess, c_guess =  3.116e+00,  1.500e+01
 normalizations = {}
 for evt, sim in zip(evts_to_fit, trace_sims):
     sim.pad_gain_match_uncertainty = m_guess
@@ -375,10 +375,10 @@ def to_minimize(params):
     print('==================',to_return, params, '===================')
     return to_return
 
-systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="BFGS", options={'xrtol':0.01})
-#systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
+#systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Nelder-Mead")
+systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
-#results with chi^2 guess (m=0, c=1)
+#results with chi^2 guess (m=0, c=1). 
 '''
 >>> systematics_fit
  message: Optimization terminated successfully.
@@ -391,46 +391,23 @@ systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_g
            [-1.046e+00 -1.137e-01]]
     nfev: 54
 '''
-
+#next iteration: 3, 14. Then:
 '''
 systematics_fit
  message: Optimization terminated successfully.
  success: True
   status: 0
-     fun: 5.120794545777729
-       x: [ 2.978e+00  8.315e+00]
-     nit: 3
+     fun: 167.93861907164978
+       x: [ 3.116e+00  1.500e+01]
+     nit: 1
    direc: [[ 1.000e+00  0.000e+00]
-           [-5.828e-03 -3.929e-03]]
-    nfev: 76
+           [ 0.000e+00  1.000e+00]]
+    nfev: 11
+
 '''
 #next iteration
 '''
 
->>> systematics_fit
- message: Optimization terminated successfully.
- success: True
-  status: 0
-     fun: 157.26266704085822
-       x: [ 3.093e+00  1.299e+01]
-     nit: 2
-   direc: [[ 1.000e+00  0.000e+00]
-           [-7.701e-03 -1.879e-02]]
-    nfev: 51
-
-'''
-'''
->>> systematics_fit
- message: Optimization terminated successfully.
- success: True
-  status: 0
-     fun: 167.55448770838174
-       x: [ 3.475e+00  1.399e+01]
-     nit: 1
-   direc: [[ 1.000e+00  0.000e+00]
-           [ 0.000e+00  1.000e+00]]
-    nfev: 9
->>>
 '''
 
 if False:

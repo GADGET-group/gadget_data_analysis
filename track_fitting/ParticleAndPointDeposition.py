@@ -28,6 +28,6 @@ def show_simulated_palpha_track(decay_point, theta, phi, Eproton, Ealpha, charge
     sim.charge_spreading_sigma = charge_spread
     sim.shaping_width = shaping_time
     sim.simulate_event()
-    sim.plot_xyze(*sim.get_xyze(), energy_threshold=20)
+    sim.plot_xyze(*sim.get_xyze(), energy_threshold=0.0001)
     return sim
 

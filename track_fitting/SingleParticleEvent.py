@@ -415,7 +415,7 @@ class SingleParticleEvent:
 
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
-        return to_return
+        return to_return[0,0]
     
     #######################
     # Visualization Tools #
