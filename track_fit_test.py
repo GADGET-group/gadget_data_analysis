@@ -13,7 +13,7 @@ import corner
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 34
+event_num = 4
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 init_by_priors = True
@@ -122,6 +122,8 @@ elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
             init_position_guess = (3,-24, 200)
             theta_guess = np.radians(40)
             phi_guess = np.radians(200)
+        if event_num in [246,253,290]:
+            particle_type = 'proton'
 
         
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
@@ -252,11 +254,7 @@ beta = 0 #inverse temperature for tempering
 def log_posterior(params):
     to_return = log_priors(params)
     if to_return != -np.inf:
-        ll =  log_likelihood_mcmc(params)
-        if ll < 0:
-            to_return -= np.abs(ll)**beta
-        else:
-            to_return += ll**beta
+        ll =  log_likelihood_mcmc(params)*beta
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
@@ -292,7 +290,7 @@ if resume_previous_run:
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 
-beta_profile = [0.1,0.2,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+beta_profile = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
 steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
 steps_per_beta[-1] = 1000
 
