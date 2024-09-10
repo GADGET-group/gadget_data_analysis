@@ -348,22 +348,76 @@ def log_posterior(params):
     print(params, '%e'%to_return)
     return to_return
 
+
+
+m_guess, c_guess = 0,1 #same as used for chi^2
+normalizations = {}
+for evt, sim in zip(evts_to_fit, trace_sims):
+    sim.pad_gain_match_uncertainty = m_guess
+    sim.other_systematics = c_guess
+    sim.simulate_event()
+    sim.align_pad_traces()
+    normalizations[evt] = -sim.log_likelihood()
+
+
 def to_minimize(params):
     to_return = 0
     m, c, = params
+    manager = multiprocessing.Manager()
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
         sim.pad_gain_match_uncertainty = m
-        sim.simulate_event()
-        sim.align_pad_traces()
-        to_add = -sim.log_likelihood()/fit_results_dict[evt].fun
+        #sim.simulate_event()
+        #sim.align_pad_traces()
+        to_add = -sim.log_likelihood()/normalizations[evt]
         print(evt, to_add)
         to_return += to_add
     print('==================',to_return, params, '===================')
     return to_return
 
-systematics_fit = opt.minimize(lambda params: to_minimize(params), (0.3, 5), method="Powell")
+systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
+#results with chi^2 guess
+'''
+systematics_fit
+ message: Optimization terminated successfully.
+ success: True
+  status: 0
+     fun: 5.120794545777729
+       x: [ 2.978e+00  8.315e+00]
+     nit: 3
+   direc: [[ 1.000e+00  0.000e+00]
+           [-5.828e-03 -3.929e-03]]
+    nfev: 76
+'''
+#next iteration
+'''
+
+>>> systematics_fit
+ message: Optimization terminated successfully.
+ success: True
+  status: 0
+     fun: 157.26266704085822
+       x: [ 3.093e+00  1.299e+01]
+     nit: 2
+   direc: [[ 1.000e+00  0.000e+00]
+           [-7.701e-03 -1.879e-02]]
+    nfev: 51
+
+'''
+'''
+>>> systematics_fit
+ message: Optimization terminated successfully.
+ success: True
+  status: 0
+     fun: 167.55448770838174
+       x: [ 3.475e+00  1.399e+01]
+     nit: 1
+   direc: [[ 1.000e+00  0.000e+00]
+           [ 0.000e+00  1.000e+00]]
+    nfev: 9
+>>>
+'''
 
 if False:
     #turn off numpy threading to avoid conflicts with emcee

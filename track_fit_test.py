@@ -44,20 +44,17 @@ if folder == '/mnt/analysis/e21072/gastest_h5_files/':
         shaping_time = 117e-9 #s
         shaping_width  = shaping_time*clock_freq*2.355
 
-        P_guess = 1157
+        pressure = 1157
         if event_num == 5:
             init_position_guess = (-12, 13, 100)
-            charge_spreading_guess = 3
             theta_guess = np.radians(90)
             phi_guess = np.radians(-30)
         elif event_num == 331:
             init_position_guess = (36, 1.5, 100)
-            charge_spreading_guess = 3
             theta_guess = np.radians(50)
             phi_guess = np.radians(120)
         elif event_num == 12:
             init_position_guess = (28, 20, 100)
-            charge_spreading_guess = 3
             theta_guess = np.radians(90+46)
             phi_guess = np.radians(160)
 elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
@@ -81,31 +78,29 @@ elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
         h5file.near_peak_window_width = 50
         h5file.require_peak_within= (-np.inf, np.inf)
         h5file.num_background_bins=(160, 250)
+        h5file.zscale = zscale
 
         shaping_time = 70e-9 #s, from e21062 config file on mac minis
         shaping_width  = shaping_time*clock_freq*2.355
 
-        P_guess = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
-        Pmin, Pmax = 700, 1000
+        pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
+        charge_spread = 2. #mm, value used when fitting before
 
         #757 keV proton events
         if event_num == 4:
             #this one is very vertical
             particle_type = 'proton'
             init_position_guess = (-11, -3, 200)
-            charge_spreading_guess = 3
             theta_guess = np.radians(0)
             phi_guess = np.radians(0)
         if event_num == 17:
             particle_type = 'proton'
             init_position_guess = (-21, 11, 200)
-            charge_spreading_guess = 3
             theta_guess = np.radians(80)
             phi_guess = np.radians(-45)
         if event_num == 29:
             particle_type = 'proton'
             init_position_guess = (-29, -8, 200)
-            charge_spreading_guess = 3
             theta_guess = np.radians(80)
             phi_guess = np.radians(-45)
         #1587 keV or 1574 keV protons
@@ -114,19 +109,16 @@ elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
             #which currently prevents the sim from running
             particle_type = 'proton'
             init_position_guess = (11, 15, 200)
-            charge_spreading_guess = 3
             theta_guess = np.radians(36)
             phi_guess = np.radians(-180)
         if event_num == 108:
             particle_type = 'proton'
             init_position_guess = (0,0, 200)
-            charge_spreading_guess = 3
             theta_guess = np.radians(82)
             phi_guess = np.radians(-45)
         if event_num == 132:
             particle_type = 'proton'
             init_position_guess = (3,-24, 200)
-            charge_spreading_guess = 3
             theta_guess = np.radians(40)
             phi_guess = np.radians(200)
 
@@ -134,7 +126,7 @@ elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
-trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(P_guess), particle_type)
+trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
 trace_sim.shaping_width = shaping_width
 trace_sim.zscale = zscale
 trace_sim.counts_per_MeV = adc_scale_mu
@@ -155,16 +147,17 @@ class GaussianVar:
 max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
 E_from_ic = measured_counts/adc_scale_mu
 E_prior = GaussianVar(E_from_ic, detector_E_sigma(E_from_ic))
-P_prior = GaussianVar(P_guess, P_guess*0.01)#assumes pressure transducer accuracy of 1%, should check what this really should be
 x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
 xmin, xmax = np.min(x_real), np.max(x_real)
 ymin, ymax = np.min(y_real), np.max(y_real)
 zmin, zmax = 5, 400
 
+pad_gain_match_uncertainty = 2.978e+00
+other_systematics = 8.315e+00
 
 #do initial minimization before starting MCMC
 def neg_log_likelihood_init_min(params):
-    E, x, y, z, theta, phi, charge_spread, P,  likelihood_sigma = params
+    E, x, y, z, theta, phi = params
     #P = P_guess
     #z = init_position_guess[2]
     trace_sim.load_srim_table(particle_type, get_gas_density(P))
@@ -174,7 +167,7 @@ def neg_log_likelihood_init_min(params):
     trace_sim.phi = phi
     trace_sim.charge_spreading_sigma = charge_spread
     trace_sim.shaping_width = shaping_width
-    trace_sim.sigma_for_likelihood = likelihood_sigma
+    
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
     to_return = -trace_sim.log_likelihood()
@@ -184,7 +177,7 @@ def neg_log_likelihood_init_min(params):
 
 fit_start_time = time.time()
 
-initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess, charge_spreading_guess, P_guess, 20)
+initial_guess = (E_from_ic, *init_position_guess, theta_guess, phi_guess)
 
 if not init_by_priors and not resume_previous_run:
     #get log likilihood within 0.1%
@@ -214,19 +207,18 @@ if not init_by_priors and not resume_previous_run:
 import emcee
 
 def log_likelihood_mcmc(params):
-    E, x, y, z, theta, phi, charge_spread, P,  likelihood_sigma = params
+    E, x, y, z, theta, phi = params
 
-    z,P, adc_scale = 50., P_guess, adc_scale_mu
-
-    trace_sim.load_srim_table(particle_type, get_gas_density(P))
+    trace_sim.load_srim_table(particle_type, get_gas_density(pressure))
     trace_sim.initial_energy = E
     trace_sim.initial_point = (x,y,z)
     trace_sim.theta = theta
     trace_sim.phi = phi
     trace_sim.charge_spreading_sigma = charge_spread
     trace_sim.shaping_width = shaping_width
-    trace_sim.counts_per_MeV = adc_scale
-    trace_sim.sigma_for_likelihood = likelihood_sigma
+    trace_sim.counts_per_MeV = adc_scale_mu
+    trace_sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
+    trace_sim.other_systematics = other_systematics
     trace_sim.simulate_event()
     trace_sim.align_pad_traces()
     to_return = trace_sim.log_likelihood()
@@ -237,7 +229,7 @@ def log_likelihood_mcmc(params):
 
 
 def log_priors(params):
-    E, x, y, z, theta, phi, charge_spread, P,  likelihood_sigma = params
+    E, x, y, z, theta, phi = params
     
     #uniform priors
     if x**2 + y**2 > 40**2:
@@ -249,10 +241,6 @@ def log_priors(params):
     if shaping_width <=0 or shaping_width > 20:
         return -np.inf
     if charge_spread < 0:
-        return -np.inf
-    if P < Pmin or P>Pmax:
-        return -np.inf
-    if likelihood_sigma <= 1 or likelihood_sigma > 1000:
         return -np.inf
     #gaussian prior for energy, and assume uniform over solid angle
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
@@ -270,24 +258,21 @@ max_n = 5000
 
 if not resume_previous_run:
     if not init_by_priors:
-        Efit, xfit, yfit, zfit, thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit = res.x
+        Efit, xfit, yfit, zfit, thetafit, phifit = res.x
         if thetafit < 0:
             thetafit = -thetafit
             phitfit = phifit + np.pi
             if phifit > 2*np.pi:
                 phifit -= 2*np.pi
-        if charge_spread_best_fit < 0:
-            charge_spread_best_fit = 0
-        start_pos = [Efit, xfit,yfit,zfit,thetafit, phifit, charge_spread_best_fit, Pfit, sigma_per_bin_fit]
+        start_pos = [Efit, xfit,yfit,zfit,thetafit, phifit]
         init_walker_pos =  [np.array(start_pos) + .001*np.random.randn(ndim) for i in range(nwalkers)]
     else:
         init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
                             np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
-                            np.random.uniform(-np.pi, np.pi), np.random.uniform(0,10), np.random.uniform(Pmin, Pmax),
-                            np.random.uniform(20, 300)] for i in range(nwalkers)]
+                            np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
 
 
-ndim = 9
+ndim = 5
 
 if init_by_priors:
     backend_file = 'run%d_event%d_init_by_priors.h5'%(run_number, event_num) 
