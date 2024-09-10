@@ -375,7 +375,8 @@ def to_minimize(params):
     print('==================',to_return, params, '===================')
     return to_return
 
-systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
+systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="BFGS", options={'xrtol':0.01})
+#systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
 #results with chi^2 guess (m=0, c=1)
 '''

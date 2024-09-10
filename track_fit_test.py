@@ -243,10 +243,12 @@ def log_priors(params):
     #gaussian prior for energy, and assume uniform over solid angle
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
+beta = 0 #inverse temperature for tempering
+
 def log_posterior(params):
     to_return = log_priors(params)
     if to_return != -np.inf:
-        to_return += log_likelihood_mcmc(params)
+        to_return += log_likelihood_mcmc(params)**beta
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
@@ -292,6 +294,8 @@ index = 0
 autocorr = np.empty(max_n)
 # This will be useful to testing convergence
 old_tau = np.inf
+
+cooling_timescale = 50
 # Now we'll sample for up to max_n steps
 for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
     # Only check convergence every 10 steps
@@ -312,6 +316,7 @@ for sample in sampler.sample(init_walker_pos, iterations=max_n, progress=True):
     if converged:
         break
     old_tau = tau
+    beta = 1-np.e**(-index/cooling_timescale)
 
 
 #sampler.run_mcmc(init_walker_pos, 100, progress=True)
