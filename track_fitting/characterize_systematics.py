@@ -350,7 +350,7 @@ def log_posterior(params):
 
 
 
-m_guess, c_guess =  3.116e+00,  1.500e+01
+m_guess, c_guess =   2.91765033, 14.77951817
 normalizations = {}
 for evt, sim in zip(evts_to_fit, trace_sims):
     sim.pad_gain_match_uncertainty = m_guess
@@ -378,58 +378,11 @@ def to_minimize(params):
 #systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Nelder-Mead")
 systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
-#results with chi^2 guess (m=0, c=1). 
 '''
->>> systematics_fit
- message: Optimization terminated successfully.
- success: True
-  status: 0
-     fun: 5.132226924371855
-       x: [ 6.734e+01  8.281e+00]
-     nit: 2
-   direc: [[ 0.000e+00  1.000e+00]
-           [-1.046e+00 -1.137e-01]]
-    nfev: 54
+sequence of results for run 124, starting with m=0,c=1
+[ 6.734e+01  8.281e+00]
+ [ 3.116e+00  1.500e+01]
+ [ 2.954e+00  1.484e+01]
+[ 2.91765033 14.77951817] 
+ [ 2.93400081 14.79047985]
 '''
-#next iteration: 3, 14. Then:
-'''
-systematics_fit
- message: Optimization terminated successfully.
- success: True
-  status: 0
-     fun: 167.93861907164978
-       x: [ 3.116e+00  1.500e+01]
-     nit: 1
-   direc: [[ 1.000e+00  0.000e+00]
-           [ 0.000e+00  1.000e+00]]
-    nfev: 11
-
-'''
-#next iteration
-'''
-
-'''
-
-if False:
-    #turn off numpy threading to avoid conflicts with emcee
-    import os
-    os.environ["OMP_NUM_THREADS"] = "1"
-    import emcee
-
-
-
-    from multiprocessing import Pool
-    nwalkers = 50
-    nsteps=500
-    ndim = 3
-
-    backend_file = 'run%d_systematics.h5'%run_number
-    backend = emcee.backends.HDFBackend(backend_file)
-    backend.reset(nwalkers, ndim)
-
-    emcee_start_time = time.time()
-    initial = [(np.random.uniform(0,1), np.random.uniform(0,1000), np.random.uniform(0,10)) for x in range(nwalkers)]
-    with Pool(50) as pool:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, pool=pool, backend=backend)
-        sampler.run_mcmc(initial, nsteps, progress=True)
-    print('emcee took %f s'%(time.time() - emcee_start_time))

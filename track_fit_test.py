@@ -249,8 +249,10 @@ def log_posterior(params):
     to_return = log_priors(params)
     if to_return != -np.inf:
         ll =  log_likelihood_mcmc(params)
-        assert ll <= 0
-        to_return -= np.abs(ll)**beta
+        if ll < 0:
+            to_return -= np.abs(ll)**beta
+        else:
+            to_return += ll**beta
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
@@ -328,37 +330,3 @@ for b in beta_profile:
     plt.show(block=True)
 
 
-#sampler.run_mcmc(init_walker_pos, 100, progress=True)
-
-samples = sampler.get_chain()
-labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread', 'shaping_width', 'P', 'adc_scale', 'logf']
-fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
-for i in range(len(labels)):
-    ax = axes[i]
-    ax.plot(samples[:, :, i], "k", alpha=0.3)
-    ax.set_xlim(0, len(samples))
-    ax.set_ylabel(labels[i])
-    ax.yaxis.set_label_coords(-0.1, 0.5)
-
-axes[-1].set_xlabel("step number")
-
-import corner
-tau = sampler.get_autocorr_time()
-burnin = int(2 * np.max(tau))
-thin = int(0.5 * np.min(tau))
-samples = sampler.get_chain(discard=burnin, flat=True, thin=thin)
-log_prob_samples = sampler.get_log_prob(discard=burnin, flat=True, thin=thin)
-log_prior_samples = sampler.get_blobs(discard=burnin, flat=True, thin=thin)
-
-print("burn-in: {0}".format(burnin))
-print("thin: {0}".format(thin))
-print("flat chain shape: {0}".format(samples.shape))
-print("flat log prob shape: {0}".format(log_prob_samples.shape))
-print("flat log prior shape: {0}".format(log_prior_samples.shape))
-
-all_samples = np.concatenate(
-    (samples, log_prob_samples[:, None], log_prior_samples[:, None]), axis=1
-)
-
-corner.corner(all_samples, labels=labels)
-plt.show()
