@@ -1,7 +1,4 @@
 import time
-
-#import os
-#os.environ['OPENBLAS_NUM_THREADS'] = '5'
 import numpy as np
 
 import matplotlib.pylab as plt
@@ -9,6 +6,7 @@ import scipy.optimize as opt
 
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
+
 
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
@@ -133,7 +131,7 @@ trace_sim.counts_per_MeV = adc_scale_mu
 
 trace_sim.simulate_event()
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-trace_sim.set_real_data(pads_to_fit, traces_to_fit, fit_threshold=ic_threshold, trim_pad = 5)
+trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50)#match trim threshold used for systematics determination
 trace_sim.align_pad_traces()
 
 #MCMC priors
@@ -246,15 +244,18 @@ def log_priors(params):
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
 def log_posterior(params):
-    to_return = log_priors(params) + log_likelihood_mcmc(params)
+    to_return = log_priors(params)
+    if to_return != -np.inf:
+        to_return += log_likelihood_mcmc(params)
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
     return to_return
 
 
-nwalkers = 300
+nwalkers = 50
 max_n = 5000
+ndim = 6
 
 if not resume_previous_run:
     if not init_by_priors:
@@ -271,8 +272,6 @@ if not resume_previous_run:
                             np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
                             np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
 
-
-ndim = 5
 
 if init_by_priors:
     backend_file = 'run%d_event%d_init_by_priors.h5'%(run_number, event_num) 

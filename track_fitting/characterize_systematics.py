@@ -350,7 +350,7 @@ def log_posterior(params):
 
 
 
-m_guess, c_guess = 0,1 #same as used for chi^2
+m_guess, c_guess =  6.734e+01,  8.281e+00 #same as used for chi^2
 normalizations = {}
 for evt, sim in zip(evts_to_fit, trace_sims):
     sim.pad_gain_match_uncertainty = m_guess
@@ -377,7 +377,20 @@ def to_minimize(params):
 
 systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
-#results with chi^2 guess
+#results with chi^2 guess (m=0, c=1)
+'''
+>>> systematics_fit
+ message: Optimization terminated successfully.
+ success: True
+  status: 0
+     fun: 5.132226924371855
+       x: [ 6.734e+01  8.281e+00]
+     nit: 2
+   direc: [[ 0.000e+00  1.000e+00]
+           [-1.046e+00 -1.137e-01]]
+    nfev: 54
+'''
+
 '''
 systematics_fit
  message: Optimization terminated successfully.
