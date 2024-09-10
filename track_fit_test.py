@@ -1,20 +1,21 @@
 import time
-import numpy as np
+import os
 
+import numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
 
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
+import corner
 
 
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 4
+event_num = 17
 run_h5_path = folder +'run_%04d.h5'%run_number
 
-init_by_priors = True
 resume_previous_run = False
 
 if folder == '/mnt/analysis/e21072/gastest_h5_files/':
@@ -57,7 +58,6 @@ if folder == '/mnt/analysis/e21072/gastest_h5_files/':
             phi_guess = np.radians(160)
 elif '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
     if run_number == 124:
-        #TODO: make energy resolution energy dependent
         adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
         detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
 
@@ -278,15 +278,7 @@ if not resume_previous_run:
                             np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
                             np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
 
-
-if init_by_priors:
-    backend_file = 'run%d_event%d_init_by_priors.h5'%(run_number, event_num) 
-else:
-    backend_file = 'run%d_event%d_init_by_best_fit.h5'%(run_number, event_num)
-backend = emcee.backends.HDFBackend(backend_file)
-
-if not resume_previous_run:
-    backend.reset(nwalkers, ndim)
+    
 
 #sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
 if resume_previous_run:
@@ -297,20 +289,32 @@ if resume_previous_run:
 index = 0
 
 beta_profile = [0.1,0.2,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-steps_per_beta = 100
-for b in beta_profile:
+steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
+steps_per_beta[-1] = 1000
+
+
+directory = 'run%d_mcmc/event%d'%(run_number, event_num)
+if not os.path.exists(directory):
+    os.makedirs(directory)
+
+for steps, b in zip(steps_per_beta, beta_profile):
+    print(steps, b)
     beta = b
     if b == beta_profile[0]:
         p = init_walker_pos
     else:
         p = sampler.get_chain()[-1,:,:]
-    #print(p)
-    #print(np.shape(p))
+    #reset phi to be between -pi and pi
+    p = np.array(p)
+    p[:,5] -= np.trunc(p[:, 5]/np.pi)*np.pi
     
+    backend_file = os.path.join(directory, 'beta%f.h5'%(beta) )
+    backend = emcee.backends.HDFBackend(backend_file)
+    backend.reset(nwalkers, ndim)
 
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
 
-    for sample in sampler.sample(p, iterations=steps_per_beta, progress=True):
+    for sample in sampler.sample(p, iterations=steps, progress=True):
         tau = sampler.get_autocorr_time(tol=0)
         print('beta=', beta, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
@@ -324,9 +328,14 @@ for b in beta_profile:
         ax.set_xlim(0, len(samples))
         ax.set_ylabel(labels[i])
         ax.yaxis.set_label_coords(-0.1, 0.5)
-
     axes[-1].set_xlabel("step number")
+    plt.savefig(os.path.join(directory, 'beta%f.png'%(  beta)))
 
-    plt.show(block=True)
+    flat_samples = sampler.get_chain(discard=int(steps/2), flat=True)
+    corner.corner(flat_samples, labels=labels)
+    plt.savefig(os.path.join(directory, 'beta%f_corner_plot.png'%beta))
+
+
+    #plt.show(block=True)
 
 
