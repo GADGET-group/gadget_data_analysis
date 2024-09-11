@@ -316,7 +316,8 @@ for i in range(len(evts)):
         if  val > max_residual_percent:
             max_residual_percent = val
     print(evts[i], max_residual_percent)
-    if True: #fit all events #max_residual_percent < 0.6:
+    #only fit events with residuals no more than 60% of traces
+    if max_residual_percent < 0.6: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
 
@@ -359,20 +360,22 @@ for evt, sim in zip(evts_to_fit, trace_sims):
     normalizations[evt] = -sim.log_likelihood()
 
 
-def to_minimize(params):
-    to_return = 0
-    m, c, = params
-    manager = multiprocessing.Manager()
-    for evt, sim in zip(evts_to_fit, trace_sims):
-        sim.other_systematics = c
-        sim.pad_gain_match_uncertainty = m
-        #sim.simulate_event()
-        #sim.align_pad_traces()
-        to_add = -sim.log_likelihood()/normalizations[evt]
-        print(evt, to_add)
-        to_return += to_add
-    print('==================',to_return, params, '===================')
-    return to_return
+if False:
+    def to_minimize(params):
+        to_return = 0
+        m, c, = params
+        manager = multiprocessing.Manager()
+        for evt, sim in zip(evts_to_fit, trace_sims):
+            sim.other_systematics = c
+            sim.pad_gain_match_uncertainty = m
+            #sim.simulate_event()
+            #sim.align_pad_traces()
+            to_add = -sim.log_likelihood()/normalizations[evt]
+            print(evt, to_add)
+            to_return += to_add
+        print('==================',to_return, params, '===================')
+        return to_return
+
 
 #systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
@@ -387,5 +390,51 @@ Then iterated on m & c, renormalizing each time
  [ 2.93400081 14.79047985]
 Then fit all events, using the last m & c.
 Changed code to not exclude any events (previously removed those with residuals >60 of max trace).
+This then leads to even bigger estimates for m. m should be <1, so this is obviously wrong.
 
+New approach:
+    After doing chi^2 fit, estimate pad gain match uncertainty from standard deviation
+of (residuals at peaks)/peak values, for peaks above some value. We don't include small peaks, 
+becuase these would have a signifigant effect from other systematics.
+    Estimate other systematics by looking at standard deviation of residuals away from the peak.
 '''
+
+
+peak_residuals_fraction = []
+peak_vals = []
+peak_threshold = 100
+for evt, sim in zip(evts_to_fit, trace_sims):
+    simulated_traces = sim.aligned_sim_traces
+    for pad in simulated_traces:
+        if pad not in sim.traces_to_fit:
+            continue
+        sim_peak_index = np.argmax(simulated_traces[pad])
+        act_peak_index = np.argmax(sim.traces_to_fit[pad])
+        #don't use peaks if not well alligned
+        if np.abs(sim_peak_index - act_peak_index) > 3: 
+            continue
+        sim_peak = simulated_traces[pad][sim_peak_index]
+        observed_peak  = sim.traces_to_fit[pad][act_peak_index]
+        if sim_peak >= peak_threshold and observed_peak > peak_threshold:
+            peak_residuals_fraction.append(2*(sim_peak - observed_peak)/(sim_peak + observed_peak))
+            peak_vals.append((sim_peak + observed_peak)/2)
+peak_residuals_fraction = np.array(peak_residuals_fraction)
+peak_vals = np.array(peak_vals)
+
+pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
+
+def to_minimize(c):
+    to_return = 0
+    for evt, sim in zip(evts_to_fit, trace_sims):
+        sim.other_systematics = c[0]
+        sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
+        #sim.simulate_event()
+        #sim.align_pad_traces()
+        to_add = -sim.log_likelihood()#/normalizations[evt]
+        print(evt, to_add)
+        to_return += to_add
+    print('==================',to_return, c, '===================')
+    return to_return
+
+c_min = opt.minimize(to_minimize, 20)
+

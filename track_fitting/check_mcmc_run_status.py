@@ -44,7 +44,7 @@ if True:
     run_number, event_number, beta = 124, 108, 1
     filename = '../run%d_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
     labels = ['E', 'x','y','z','theta', 'phi']
-    tau = [2]
+    tau = [20,40]
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
