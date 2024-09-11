@@ -436,5 +436,9 @@ def to_minimize(c):
     print('==================',to_return, c, '===================')
     return to_return
 
-c_min = opt.minimize(to_minimize, 20)
-
+#c_min = opt.minimize(to_minimize, 20)
+'''
+results oth this method:
+other systematics = 16.86638095
+pad gain match = 0.381959476
+'''

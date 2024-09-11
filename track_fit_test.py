@@ -155,8 +155,8 @@ xmin, xmax = np.min(x_real), np.max(x_real)
 ymin, ymax = np.min(y_real), np.max(y_real)
 zmin, zmax = 5, 400
 
-pad_gain_match_uncertainty = 2.978e+00
-other_systematics = 8.315e+00
+pad_gain_match_uncertainty = 0.381959476
+other_systematics = 16.86638095
 
 #do initial minimization before starting MCMC
 def neg_log_likelihood_init_min(params):
@@ -290,7 +290,7 @@ if resume_previous_run:
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 
-beta_profile = [1e-5,1e-4, 1e-3,1e-2, 1e-1, 1]#[0.1,0.2,0.3,0.4,0.5, 0.6, 0.7, 0.8, 0.9, 0.9999]
+beta_profile = [1]#[1e-5,1e-4, 1e-3,1e-2, 1e-1, 1]#[0.1,0.2,0.3,0.4,0.5, 0.6, 0.7, 0.8, 0.9, 0.9999]
 steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
 steps_per_beta[-1] = 1000
 
@@ -314,7 +314,11 @@ for steps, b in zip(steps_per_beta, beta_profile):
     backend = emcee.backends.HDFBackend(backend_file)
     backend.reset(nwalkers, ndim)
 
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
+                                    moves=[
+                                        (emcee.moves.DEMove(), 0.8),
+                                        (emcee.moves.DESnookerMove(), 0.2),
+                                    ])
 
     for sample in sampler.sample(p, iterations=steps, progress=True):
         tau = sampler.get_autocorr_time(tol=0)
