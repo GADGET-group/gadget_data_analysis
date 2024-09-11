@@ -403,7 +403,7 @@ class SingleParticleEvent:
                     residuals = self.aligned_sim_traces[pad] - self.traces_to_fit[pad]
                 else: #pad was simulated firing, but did not
                     residuals = self.aligned_sim_traces[pad]
-                to_return -= self.num_trimmed_trace_bins/2*np.log(2*np.pi)
+                to_return -= self.num_trimmed_trace_bins*0.5*np.log(2*np.pi)
                 to_return -= 0.5*np.log(np.linalg.det(cov_matrix))
                 residuals = np.matrix(residuals)
                 to_return -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]

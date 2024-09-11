@@ -13,7 +13,7 @@ import corner
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 4
+event_num = 108
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 init_by_priors = True
@@ -155,8 +155,8 @@ xmin, xmax = np.min(x_real), np.max(x_real)
 ymin, ymax = np.min(y_real), np.max(y_real)
 zmin, zmax = 5, 400
 
-pad_gain_match_uncertainty = 2.978e+00
-other_systematics = 8.315e+00
+pad_gain_match_uncertainty = 0.3#2.978e+00
+other_systematics = 23#8.315e+00
 
 #do initial minimization before starting MCMC
 def neg_log_likelihood_init_min(params):
@@ -254,7 +254,7 @@ beta = 0 #inverse temperature for tempering
 def log_posterior(params):
     to_return = log_priors(params)
     if to_return != -np.inf:
-        ll =  log_likelihood_mcmc(params)*beta
+        to_return +=  log_likelihood_mcmc(params)*beta
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
@@ -290,9 +290,9 @@ if resume_previous_run:
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 
-beta_profile = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
-steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
-steps_per_beta[-1] = 1000
+beta_profile = [1]#[0.95,0.96,0.97,0.98,0.99,1]#[0.5, 0.6, 0.7, 0.8, 0.9, 1]
+steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*50
+steps_per_beta[-1] = 2000
 
 
 directory = 'run%d_mcmc/event%d'%(run_number, event_num)

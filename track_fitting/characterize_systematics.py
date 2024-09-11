@@ -68,6 +68,8 @@ angle_scale = 3
 distance_scale = 50
 e_scale = 2
 
+m_guess, c_guess =   2.91765033, 14.77951817 #guesses for pad gain match uncertainty and other systematics
+
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False, method='Powell'):
     trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
@@ -79,8 +81,8 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trimmed_trace_bins)
         return 
     #want max likilihood to just be least squares for this fit
-    trace_sim.pad_gain_match_uncertainty = 0
-    trace_sim.other_systematics = 1
+    trace_sim.pad_gain_match_uncertainty = m_guess
+    trace_sim.other_systematics = c_guess
     #to get initial guess
     #Energy: from integrated charge
     #z: center of the detector
@@ -314,7 +316,7 @@ for i in range(len(evts)):
         if  val > max_residual_percent:
             max_residual_percent = val
     print(evts[i], max_residual_percent)
-    if max_residual_percent < 0.6:
+    if True: #fit all events #max_residual_percent < 0.6:
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
 
@@ -348,9 +350,6 @@ def log_posterior(params):
     print(params, '%e'%to_return)
     return to_return
 
-
-
-m_guess, c_guess =   2.91765033, 14.77951817
 normalizations = {}
 for evt, sim in zip(evts_to_fit, trace_sims):
     sim.pad_gain_match_uncertainty = m_guess
@@ -375,14 +374,18 @@ def to_minimize(params):
     print('==================',to_return, params, '===================')
     return to_return
 
-#systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Nelder-Mead")
-systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
+#systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
 '''
-sequence of results for run 124, starting with m=0,c=1
+run 124
+started  with m=0,c=1
 [ 6.734e+01  8.281e+00]
+Then iterated on m & c, renormalizing each time
  [ 3.116e+00  1.500e+01]
  [ 2.954e+00  1.484e+01]
 [ 2.91765033 14.77951817] 
  [ 2.93400081 14.79047985]
+Then fit all events, using the last m & c.
+Changed code to not exclude any events (previously removed those with residuals >60 of max trace).
+
 '''

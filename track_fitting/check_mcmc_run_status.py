@@ -35,9 +35,14 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi', 'charge_spread',  'P', 'sigma']
     tau = [95,256]
     
-if True:
+if False:
     run_number, event_number = 124, 4
     filename = '../run%d_event%d_init_by_priors.h5'%(run_number, event_number)
+    labels = ['E', 'x','y','z','theta', 'phi']
+    tau = [2]
+if True:
+    run_number, event_number, beta = 124, 108, 1
+    filename = '../run%d_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [2]
 
