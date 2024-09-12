@@ -40,12 +40,12 @@ if False:
     filename = '../run%d_event%d_init_by_priors.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [2]
-if False:
-    run_number, event_number, beta = 124, 4, 1
+if True:
+    run_number, event_number, beta = 124, 17, 1
     filename = '../run%d_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [12,30]
-if True:
+if False:
     run_number, event_number = 124, 4
     filename = '../run%d_mcmc/event%d/after_clustering.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi']
