@@ -41,15 +41,15 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [2]
 if True:
-    run_number, event_number, beta = 124, 17, 1
+    run_number, event_number, beta = 124, 34, 1
     filename = '../run%d_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
     labels = ['E', 'x','y','z','theta', 'phi']
-    tau = [12,30]
+    tau = [400,100]
 if False:
-    run_number, event_number = 124, 4
+    run_number, event_number = 124, 29
     filename = '../run%d_mcmc/event%d/after_clustering.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi']
-    tau = [2]
+    tau = [100,400]
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
