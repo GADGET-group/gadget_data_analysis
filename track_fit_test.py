@@ -4,16 +4,17 @@ import os
 import numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
+import corner
+import sklearn.cluster as cluster
 
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
-import corner
 
 
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 4
+event_num = 29
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 init_by_priors = True
@@ -316,8 +317,9 @@ for steps, b in zip(steps_per_beta, beta_profile):
 
     sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
                                     moves=[
-                                        (emcee.moves.DEMove(), 0.8),
-                                        (emcee.moves.DESnookerMove(), 0.2),
+                                        (emcee.moves.StretchMove(), 0.5), 
+                                        (emcee.moves.DEMove(), 0.4),
+                                        (emcee.moves.DESnookerMove(), 0.1),
                                     ])
 
     for sample in sampler.sample(p, iterations=steps, progress=True):
@@ -342,6 +344,29 @@ for steps, b in zip(steps_per_beta, beta_profile):
     plt.savefig(os.path.join(directory, 'beta%f_corner_plot.png'%beta))
 
 
-    #plt.show(block=True)
+#cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
+ll_to_cluster = sampler.get_log_prob()[-1].reshape(-1,1)
+cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
+clusters_to_propagate = cluster_object.labels_==np.argmax(cluster_object.cluster_centers_)
+samples_to_propagate = sampler.get_chain()[-1][clusters_to_propagate]
+new_init_pos = list(samples_to_propagate)
 
+#randomly select samples to perturb and add to the list until we have the desired number of walkers
+nwalkers = 100
+while len(new_init_pos) < nwalkers:
+    i = np.random.randint(0, len(samples_to_propagate))
+    new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
 
+#restart mcmc
+backend_file = os.path.join(directory, 'after_clustering.h5')
+backend = emcee.backends.HDFBackend(backend_file)
+backend.reset(nwalkers, ndim)
+sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
+                                    moves=[
+                                        (emcee.moves.StretchMove(), 0.5), 
+                                        (emcee.moves.DEMove(), 0.4),
+                                        (emcee.moves.DESnookerMove(), 0.1),
+                                    ])
+for sample in sampler.sample(new_init_pos, iterations=steps, progress=True):
+    tau = sampler.get_autocorr_time(tol=0)
+    print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
