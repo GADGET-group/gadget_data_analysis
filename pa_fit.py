@@ -147,7 +147,7 @@ init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.unif
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 
-beta_profile = 0.3**np.arange(-12,1)
+beta_profile =  0.3**np.arange(12,-1, -1)
 steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
 steps_per_beta[-1] = 1000
 
