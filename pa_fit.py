@@ -20,7 +20,7 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 51777
+event_num = 68129
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
@@ -105,7 +105,7 @@ def log_likelihood_mcmc(params):
     #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr, adc_scale=%f, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, adc_scale, to_return))
     return to_return
 
-def log_priors(params):
+def log_priors(params, phi_lim):
     E, Ea_frac, x, y, z, theta, phi = params
     
     #uniform priors
@@ -113,7 +113,9 @@ def log_priors(params):
         return -np.inf
     if z < 0 or z >400:
         return -np.inf
-    if theta < 0 or theta >= np.pi or phi < -np.pi or phi>np.pi:
+    if theta < 0 or theta >= np.pi:# or phi < -np.pi or phi>np.pi:
+        return -np.inf
+    if phi < phi_lim[0] or phi>phi_lim[1]:
         return -np.inf 
     if shaping_width <=0 or shaping_width > 20:
         return -np.inf
@@ -125,10 +127,10 @@ def log_priors(params):
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
 
-def log_posterior(params, beta):
-    to_return = log_priors(params)
+def log_posterior(params, phi_lim):
+    to_return = log_priors(params, phi_lim)
     if to_return != -np.inf:
-        to_return +=  log_likelihood_mcmc(params)*beta
+        to_return +=  log_likelihood_mcmc(params)
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
@@ -139,46 +141,26 @@ nwalkers = 200
 max_n = 5000
 ndim = 7
 
-init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
-                            np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
-                            np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
-
 # We'll track how the average autocorrelation time estimate changes
-index = 0
-
-beta_profile =  (3**0.5)**np.arange(-20, 1)
-steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
-#steps_per_beta[-1] = 1000
-
-
 directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
 if not os.path.exists(directory):
     os.makedirs(directory)
-with multiprocessing.Pool() as pool:
-    for steps, beta in zip(steps_per_beta, beta_profile):
-        print(steps, beta)
-        if beta == beta_profile[0]:
-            p = init_walker_pos
-        else:
-            p = sampler.get_chain()[-1,:,:]
-        #reset phi to be between -pi and pi
-        p = np.array(p)
-        p[:,5] -= np.trunc(p[:, 5]/np.pi)*np.pi
-        
-        backend_file = os.path.join(directory, 'beta%f.h5'%(beta) )
+
+def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi)):
+    with multiprocessing.Pool(nwalkers) as pool:
+        backend_file = os.path.join(directory, '%s.h5'%(save_name) )
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
         
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool, args=(beta,))
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool, args=(phi_lim,))
 
-        for sample in sampler.sample(p, iterations=steps, progress=True):
+        for sample in sampler.sample(init_pos, iterations=steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
-            print('beta=', beta, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+            print(save_name, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
         samples = sampler.get_chain()
         labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
         fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
-        plt.title('beta=%f'%beta)
         for i in range(len(labels)):
             ax = axes[i]
             ax.plot(samples[:, :, i], "k", alpha=0.3)
@@ -186,36 +168,72 @@ with multiprocessing.Pool() as pool:
             ax.set_ylabel(labels[i])
             ax.yaxis.set_label_coords(-0.1, 0.5)
         axes[-1].set_xlabel("step number")
-        plt.savefig(os.path.join(directory, 'beta%f.png'%(  beta)))
+        plt.savefig(os.path.join(directory, '%s.png'%(save_name)))
 
         flat_samples = sampler.get_chain(discard=int(steps/2), flat=True)
         corner.corner(flat_samples, labels=labels)
-        plt.savefig(os.path.join(directory, 'beta%f_corner_plot.png'%beta))
+        plt.savefig(os.path.join(directory, '%s_corner_plot.png'%save_name))
 
-if False:
-    #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
-    ll_to_cluster = sampler.get_log_prob()[-1].reshape(-1,1)
-    cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
-    clusters_to_propagate = cluster_object.labels_==np.argmax(cluster_object.cluster_centers_)
-    samples_to_propagate = sampler.get_chain()[-1][clusters_to_propagate]
-    new_init_pos = list(samples_to_propagate)
+    return emcee.backends.HDFBackend(filename=backend_file, read_only=True)
 
-    #randomly select samples to perturb and add to the list until we have the desired number of walkers
-    nwalkers = 100
-    while len(new_init_pos) < nwalkers:
-        i = np.random.randint(0, len(samples_to_propagate))
-        new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
+#run 1000 samples
+init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
+                            np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
+                            np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
+init_run = do_mcmc(init_walker_pos, 1000, 'initial_run')
 
-    #restart mcmc
-    backend_file = os.path.join(directory, 'after_clustering.h5')
-    backend = emcee.backends.HDFBackend(backend_file)
-    backend.reset(nwalkers, ndim)
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                        moves=[
-                                            (emcee.moves.StretchMove(), 0.5), 
-                                            (emcee.moves.DEMove(), 0.4),
-                                            (emcee.moves.DESnookerMove(), 0.1),
-                                        ])
-    for sample in sampler.sample(new_init_pos, iterations=steps, progress=True):
-        tau = sampler.get_autocorr_time(tol=0)
-        print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+samples = init_run.get_chain()
+log_prob = init_run.get_log_prob()
+thetas = samples[-1][:, -2]
+phis = samples[-1][:, -1]
+plt.figure()
+plt.title("before clustering")
+plt.scatter(np.degrees(thetas), np.degrees(phis), c=log_prob[-1])
+plt.colorbar(label="log prob")
+plt.xlabel('theta (deg)')
+plt.ylabel('phi (deg)')
+plt.savefig(os.path.join(directory,'before_clustering.png'))
+
+#cluster by direction vector, to avoid issues at phi=0/pi
+#keep all clusters of size >10
+zhat = np.cos(thetas)
+xhat = np.sin(thetas)*np.cos(phis)
+yhat = np.sin(thetas)*np.sin(phis)
+cluster_obj = cluster.DBSCAN(0.1).fit(np.vstack((xhat, yhat, zhat)).T)
+cluster_label, cluster_counts = np.unique(cluster_obj.labels_, return_counts=True)
+clusters_to_keep = cluster_label[(cluster_label>=0) & (cluster_counts>10)]
+to_keep = np.in1d(cluster_obj.labels_, clusters_to_keep)
+plt.figure()
+plt.title("clusters to fit")
+plt.scatter(np.degrees(thetas)[to_keep], np.degrees(phis)[to_keep], c=cluster_obj.labels_[to_keep])
+plt.colorbar(label="cluster id")
+plt.xlabel('theta (deg)')
+plt.ylabel('phi (deg)')
+plt.savefig(os.path.join(directory,'clusters.png'))
+
+starting_points = [] #list of initial walker positions for each cluster
+phi_limits = []
+for c in clusters_to_keep:
+    this_cluster = cluster_obj.labels_ == c
+    plt.figure()
+    plt.title("cluster %d"%c)
+    plt.scatter(np.degrees(thetas[this_cluster]), np.degrees(phis[this_cluster]), c=log_prob[-1][this_cluster])
+    plt.colorbar(label="log prob")
+    plt.xlabel('theta (deg)')
+    plt.ylabel('phi (deg)')
+
+    #add slightly perturbed data points until init points has required number
+    samples_in_cluster = samples[-1][this_cluster]
+    init_points = list(samples_in_cluster)
+    while len(init_points) < nwalkers:
+        random_point = samples_in_cluster[np.random.randint(0, len(samples_in_cluster))]
+        init_points.append(random_point + .001*np.random.randn(ndim))
+    starting_points.append(init_points)
+    phi = init_points[0][-1]
+    phi_limits.append((phi - np.pi, phi+np.pi))
+
+#run sampler on each cluster
+for i in range(len(clusters_to_keep)):
+    do_mcmc(init_pos=starting_points[i],
+            steps=1000, save_name='cluster%d'%clusters_to_keep[i], 
+            phi_lim=phi_limits[i])

@@ -49,10 +49,9 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [100,400]
 if True:
-    beta=0.192450
-    run_number, event_number = 124, 68192
+    run_number, event_number = 124, 68129
     #filename = '../run%d_palpha_mcmc/event%d/beta%f_no_tempering.h5'%(run_number, event_number, beta)
-    filename = '../run%d_palpha_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
+    filename = '../run%d_palpha_mcmc/event%d/initial_run.h5'%(run_number, event_number)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
     tau = [2]#[35,200]
 
@@ -97,7 +96,7 @@ to_keep = np.in1d(cluster_obj.labels_, clusters_to_keep)
 plt.figure()
 plt.title("clusters to fit")
 plt.scatter(np.degrees(thetas)[to_keep], np.degrees(phis)[to_keep], c=cluster_obj.labels_[to_keep])
-plt.colorbar(label="log prob")
+plt.colorbar(label="cluster id")
 plt.xlabel('theta (deg)')
 plt.ylabel('phi (deg)')
 
