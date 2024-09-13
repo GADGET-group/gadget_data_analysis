@@ -48,11 +48,11 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [100,400]
 if True:
-    beta=.001
+    beta=1
     run_number, event_number = 124, 68192
     filename = '../run%d_palpha_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
-    tau = [6,40]#[35,200]
+    tau = [2]#[35,200]
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 

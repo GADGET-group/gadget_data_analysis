@@ -124,9 +124,8 @@ def log_priors(params):
     #gaussian prior for energy, and assume uniform over solid angle
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
-beta = 0 #inverse temperature for tempering
 
-def log_posterior(params):
+def log_posterior(params, beta):
     to_return = log_priors(params)
     if to_return != -np.inf:
         to_return +=  log_likelihood_mcmc(params)*beta
@@ -147,7 +146,7 @@ init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.unif
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 
-beta_profile =  0.3**np.arange(12,-1, -1)
+beta_profile =  [1]#0.3**np.arange(12,-1, -1)
 steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
 steps_per_beta[-1] = 1000
 
@@ -156,10 +155,9 @@ directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
 if not os.path.exists(directory):
     os.makedirs(directory)
 with multiprocessing.Pool(nwalkers) as pool:
-    for steps, b in zip(steps_per_beta, beta_profile):
-        print(steps, b)
-        beta = b
-        if b == beta_profile[0]:
+    for steps, beta in zip(steps_per_beta, beta_profile):
+        print(steps, beta)
+        if beta == beta_profile[0]:
             p = init_walker_pos
         else:
             p = sampler.get_chain()[-1,:,:]
@@ -171,7 +169,7 @@ with multiprocessing.Pool(nwalkers) as pool:
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
         
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool, args=(beta,))
 
         for sample in sampler.sample(p, iterations=steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
