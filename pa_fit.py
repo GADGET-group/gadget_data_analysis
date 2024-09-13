@@ -155,22 +155,22 @@ steps_per_beta[-1] = 1000
 directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
 if not os.path.exists(directory):
     os.makedirs(directory)
-
-for steps, b in zip(steps_per_beta, beta_profile):
-    print(steps, b)
-    beta = b
-    if b == beta_profile[0]:
-        p = init_walker_pos
-    else:
-        p = sampler.get_chain()[-1,:,:]
-    #reset phi to be between -pi and pi
-    p = np.array(p)
-    p[:,5] -= np.trunc(p[:, 5]/np.pi)*np.pi
-    
-    backend_file = os.path.join(directory, 'beta%f.h5'%(beta) )
-    backend = emcee.backends.HDFBackend(backend_file)
-    backend.reset(nwalkers, ndim)
-    with multiprocessing.Pool() as pool:
+with multiprocessing.Pool(nwalkers) as pool:
+    for steps, b in zip(steps_per_beta, beta_profile):
+        print(steps, b)
+        beta = b
+        if b == beta_profile[0]:
+            p = init_walker_pos
+        else:
+            p = sampler.get_chain()[-1,:,:]
+        #reset phi to be between -pi and pi
+        p = np.array(p)
+        p[:,5] -= np.trunc(p[:, 5]/np.pi)*np.pi
+        
+        backend_file = os.path.join(directory, 'beta%f.h5'%(beta) )
+        backend = emcee.backends.HDFBackend(backend_file)
+        backend.reset(nwalkers, ndim)
+        
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
 
         for sample in sampler.sample(p, iterations=steps, progress=True):
