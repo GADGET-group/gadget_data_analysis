@@ -170,7 +170,7 @@ for steps, b in zip(steps_per_beta, beta_profile):
     backend_file = os.path.join(directory, 'beta%f.h5'%(beta) )
     backend = emcee.backends.HDFBackend(backend_file)
     backend.reset(nwalkers, ndim)
-    with multiprocessing.Pool(nwalkers) as pool:
+    with multiprocessing.Pool() as pool:
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
 
         for sample in sampler.sample(p, iterations=steps, progress=True):
