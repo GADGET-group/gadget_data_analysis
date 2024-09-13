@@ -108,7 +108,7 @@ def log_priors(params):
         return -np.inf
     if z < 0 or z >400:
         return -np.inf
-    if theta < 0 or theta >= np.pi or phi < -2*np.pi or phi>2*np.pi:
+    if theta < 0 or theta >= np.pi or phi < -np.pi or phi>np.pi:
         return -np.inf 
     if shaping_width <=0 or shaping_width > 20:
         return -np.inf
@@ -142,7 +142,7 @@ init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.unif
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 
-beta_profile = [1]#[1e-5,1e-4, 1e-3,1e-2, 1e-1, 1]#[0.1,0.2,0.3,0.4,0.5, 0.6, 0.7, 0.8, 0.9, 0.9999]
+beta_profile = [0.001,0.01,0.1,0.9999]#[1e-5,1e-4, 1e-3,1e-2, 1e-1, 1]#[0.1,0.2,0.3,0.4,0.5, 0.6, 0.7, 0.8, 0.9, 0.9999]
 steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
 steps_per_beta[-1] = 1000
 
@@ -173,7 +173,7 @@ for steps, b in zip(steps_per_beta, beta_profile):
         print('beta=', beta, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
     samples = sampler.get_chain()
-    labels = ['E', 'x','y','z','theta', 'phi']
+    labels = ['E', 'Ea_frac' 'x','y','z','theta', 'phi']
     fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
     plt.title('beta=%f'%beta)
     for i in range(len(labels)):

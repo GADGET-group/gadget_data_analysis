@@ -1,6 +1,3 @@
-import os
-os.environ['OPENBLAS_NUM_THREADS'] = '5'
-
 import emcee
 import matplotlib.pylab as plt
 import corner
@@ -40,7 +37,7 @@ if False:
     filename = '../run%d_event%d_init_by_priors.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [2]
-if True:
+if False:
     run_number, event_number, beta = 124, 34, 1
     filename = '../run%d_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
     labels = ['E', 'x','y','z','theta', 'phi']
@@ -50,6 +47,12 @@ if False:
     filename = '../run%d_mcmc/event%d/after_clustering.h5'%(run_number, event_number)
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [100,400]
+if True:
+    beta=1
+    run_number, event_number = 124, 68192
+    filename = '../run%d_palpha_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
+    labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
+    tau = [20,100]
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
@@ -59,7 +62,10 @@ samples = reader.get_chain()
 fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
 for i in range(len(labels)):
     ax = axes[i]
-    ax.plot(samples[:, :, i], "k", alpha=0.3)
+    to_plot = samples[:, :, i]
+    if labels[i] == 'theta' or labels[i] == 'phi':
+        to_plot = np.degrees(to_plot)
+    ax.plot(to_plot, "k", alpha=0.3)
     ax.set_xlim(0, len(samples))
     ax.set_ylabel(labels[i])
     ax.yaxis.set_label_coords(-0.1, 0.5)
@@ -81,6 +87,8 @@ corner.corner(flat_samples, labels=labels)
 ndim = len(labels)
 for i in range(ndim):
     mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+    if labels[i] == 'theta' or labels[i] == 'phi':
+        mcmc = np.degrees(mcmc)
     q = np.diff(mcmc)
     txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
     txt = txt.format(mcmc[1], q[0], q[1], labels[i])
