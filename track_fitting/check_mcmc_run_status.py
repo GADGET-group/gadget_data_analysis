@@ -49,9 +49,9 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [100,400]
 if True:
-    run_number, event_number = 124, 68129
-    #filename = '../run%d_palpha_mcmc/event%d/beta%f_no_tempering.h5'%(run_number, event_number, beta)
-    filename = '../run%d_palpha_mcmc/event%d/initial_run.h5'%(run_number, event_number)
+    run_number, event_number, beta = 124, 68129, 0.9999
+    filename = '../run%d_palpha_mcmc/event%d/initial_run_beta%f.h5'%(run_number, event_number, beta)
+    filename = '../run%d_palpha_mcmc/event%d/cluster0.h5'%(run_number, event_number)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
     tau = [2]#[35,200]
 

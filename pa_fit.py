@@ -86,9 +86,7 @@ def log_likelihood_mcmc(params):
     trace_sim.shaping_width = shaping_width
     trace_sim.zscale = zscale
     trace_sim.counts_per_MeV = adc_scale_mu
-    trace_sim.simulate_event()
     trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50)#match trim threshold used for systematics determination
-    trace_sim.align_pad_traces()
     trace_sim.initial_energy = E*(1-Ea_frac)
     trace_sim.point_energy_deposition = E*Ea_frac
     trace_sim.initial_point = (x,y,z)
@@ -127,10 +125,10 @@ def log_priors(params, phi_lim):
     return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
 
-def log_posterior(params, phi_lim):
+def log_posterior(params, phi_lim, beta):
     to_return = log_priors(params, phi_lim)
     if to_return != -np.inf:
-        to_return +=  log_likelihood_mcmc(params)
+        to_return +=  log_likelihood_mcmc(params)*beta
     if np.isnan(to_return):
         to_return = -np.inf
     #print('log posterior: %e'%to_return)
@@ -146,13 +144,13 @@ directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
 if not os.path.exists(directory):
     os.makedirs(directory)
 
-def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi)):
+def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
     with multiprocessing.Pool(nwalkers) as pool:
         backend_file = os.path.join(directory, '%s.h5'%(save_name) )
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
         
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool, args=(phi_lim,))
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool, args=(phi_lim,beta))
 
         for sample in sampler.sample(init_pos, iterations=steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
@@ -176,11 +174,13 @@ def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi)):
 
     return emcee.backends.HDFBackend(filename=backend_file, read_only=True)
 
-#run 1000 samples
-init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
+#initial runs to find clusters, using a tempering profile
+next_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
                             np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
                             np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
-init_run = do_mcmc(init_walker_pos, 1000, 'initial_run')
+for b in (3**.5)**np.arange(-20, 1):
+    init_run = do_mcmc(next_walker_pos, 100, 'initial_run_beta%f'%b, beta=b)
+    next_walker_pos = init_run.get_chain()[-1]
 
 samples = init_run.get_chain()
 log_prob = init_run.get_log_prob()
@@ -234,6 +234,4 @@ for c in clusters_to_keep:
 
 #run sampler on each cluster
 for i in range(len(clusters_to_keep)):
-    do_mcmc(init_pos=starting_points[i],
-            steps=1000, save_name='cluster%d'%clusters_to_keep[i], 
-            phi_lim=phi_limits[i])
+    do_mcmc(init_pos=starting_points[i], steps=1000, save_name='cluster%d'%clusters_to_keep[i], phi_lim=phi_limits[i])
