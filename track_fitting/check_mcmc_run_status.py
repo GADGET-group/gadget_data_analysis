@@ -2,6 +2,7 @@ import emcee
 import matplotlib.pylab as plt
 import corner
 import numpy as np
+import sklearn.cluster as cluster
 
 '''
 olds
@@ -48,8 +49,9 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [100,400]
 if True:
-    beta=1
+    beta=0.192450
     run_number, event_number = 124, 68192
+    #filename = '../run%d_palpha_mcmc/event%d/beta%f_no_tempering.h5'%(run_number, event_number, beta)
     filename = '../run%d_palpha_mcmc/event%d/beta%f.h5'%(run_number, event_number, beta)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
     tau = [2]#[35,200]
@@ -58,7 +60,9 @@ reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
 
 samples = reader.get_chain()
+log_prob = reader.get_log_prob()
 
+#show time series
 fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
 for i in range(len(labels)):
     ax = axes[i]
@@ -69,8 +73,33 @@ for i in range(len(labels)):
     ax.set_xlim(0, len(samples))
     ax.set_ylabel(labels[i])
     ax.yaxis.set_label_coords(-0.1, 0.5)
-
 axes[-1].set_xlabel("step number")
+
+#show plot of ll vs phi in last step
+thetas = samples[-1][:, -2]
+phis = samples[-1][:, -1]
+plt.figure()
+plt.title("before clustering")
+plt.scatter(np.degrees(thetas), np.degrees(phis), c=log_prob[-1])
+plt.colorbar(label="log prob")
+plt.xlabel('theta (deg)')
+plt.ylabel('phi (deg)')
+
+#cluster by direction vector, to avoid issues at phi=0/pi
+#keep all clusters of size >10
+zhat = np.cos(thetas)
+xhat = np.sin(thetas)*np.cos(phis)
+yhat = np.sin(thetas)*np.sin(phis)
+cluster_obj = cluster.DBSCAN(0.1).fit(np.vstack((xhat, yhat, zhat)).T)
+cluster_label, cluster_counts = np.unique(cluster_obj.labels_, return_counts=True)
+clusters_to_keep = cluster_label[(cluster_label>=0) & (cluster_counts>10)]
+to_keep = np.in1d(cluster_obj.labels_, clusters_to_keep)
+plt.figure()
+plt.title("clusters to fit")
+plt.scatter(np.degrees(thetas)[to_keep], np.degrees(phis)[to_keep], c=cluster_obj.labels_[to_keep])
+plt.colorbar(label="log prob")
+plt.xlabel('theta (deg)')
+plt.ylabel('phi (deg)')
 
 plt.show()
 

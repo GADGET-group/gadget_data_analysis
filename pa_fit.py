@@ -20,7 +20,7 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 68192
+event_num = 51777
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
@@ -154,7 +154,7 @@ steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
 directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
 if not os.path.exists(directory):
     os.makedirs(directory)
-with multiprocessing.Pool(nwalkers) as pool:
+with multiprocessing.Pool() as pool:
     for steps, beta in zip(steps_per_beta, beta_profile):
         print(steps, beta)
         if beta == beta_profile[0]:
