@@ -1,11 +1,17 @@
+#turn off numpy multithreading to avoid conflicts with emcee
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+
 import time
 import os
+import multiprocessing
 
 import numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
 import corner
 import sklearn.cluster as cluster
+import emcee
 
 from track_fitting import ParticleAndPointDeposition
 from raw_viewer import raw_h5_file
@@ -49,15 +55,10 @@ if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
-trace_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), 'proton')
-trace_sim.shaping_width = shaping_width
-trace_sim.zscale = zscale
-trace_sim.counts_per_MeV = adc_scale_mu
 
-trace_sim.simulate_event()
+
+
 pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50)#match trim threshold used for systematics determination
-trace_sim.align_pad_traces()
 
 #MCMC priors
 class GaussianVar:
@@ -79,11 +80,15 @@ pad_gain_match_uncertainty = 0.381959476
 other_systematics = 16.86638095
 
 #do MCMC
-import emcee
-
 def log_likelihood_mcmc(params):
     E, Ea_frac, x, y, z, theta, phi = params
-
+    trace_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), 'proton')
+    trace_sim.shaping_width = shaping_width
+    trace_sim.zscale = zscale
+    trace_sim.counts_per_MeV = adc_scale_mu
+    trace_sim.simulate_event()
+    trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50)#match trim threshold used for systematics determination
+    trace_sim.align_pad_traces()
     trace_sim.initial_energy = E*(1-Ea_frac)
     trace_sim.point_energy_deposition = E*Ea_frac
     trace_sim.initial_point = (x,y,z)
@@ -131,7 +136,7 @@ def log_posterior(params):
     return to_return
 
 
-nwalkers = 50
+nwalkers = 200
 max_n = 5000
 ndim = 7
 
@@ -142,7 +147,7 @@ init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.unif
 # We'll track how the average autocorrelation time estimate changes
 index = 0
 
-beta_profile = [0.001,0.01,0.1,0.9999]#[1e-5,1e-4, 1e-3,1e-2, 1e-1, 1]#[0.1,0.2,0.3,0.4,0.5, 0.6, 0.7, 0.8, 0.9, 0.9999]
+beta_profile = 0.3**np.arange(-12,1)
 steps_per_beta = np.ones(len(beta_profile), dtype=np.int64)*100
 steps_per_beta[-1] = 1000
 
@@ -165,29 +170,29 @@ for steps, b in zip(steps_per_beta, beta_profile):
     backend_file = os.path.join(directory, 'beta%f.h5'%(beta) )
     backend = emcee.backends.HDFBackend(backend_file)
     backend.reset(nwalkers, ndim)
+    with multiprocessing.Pool(nwalkers) as pool:
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
 
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend)
+        for sample in sampler.sample(p, iterations=steps, progress=True):
+            tau = sampler.get_autocorr_time(tol=0)
+            print('beta=', beta, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
-    for sample in sampler.sample(p, iterations=steps, progress=True):
-        tau = sampler.get_autocorr_time(tol=0)
-        print('beta=', beta, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+        samples = sampler.get_chain()
+        labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
+        fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
+        plt.title('beta=%f'%beta)
+        for i in range(len(labels)):
+            ax = axes[i]
+            ax.plot(samples[:, :, i], "k", alpha=0.3)
+            ax.set_xlim(0, len(samples))
+            ax.set_ylabel(labels[i])
+            ax.yaxis.set_label_coords(-0.1, 0.5)
+        axes[-1].set_xlabel("step number")
+        plt.savefig(os.path.join(directory, 'beta%f.png'%(  beta)))
 
-    samples = sampler.get_chain()
-    labels = ['E', 'Ea_frac' 'x','y','z','theta', 'phi']
-    fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
-    plt.title('beta=%f'%beta)
-    for i in range(len(labels)):
-        ax = axes[i]
-        ax.plot(samples[:, :, i], "k", alpha=0.3)
-        ax.set_xlim(0, len(samples))
-        ax.set_ylabel(labels[i])
-        ax.yaxis.set_label_coords(-0.1, 0.5)
-    axes[-1].set_xlabel("step number")
-    plt.savefig(os.path.join(directory, 'beta%f.png'%(  beta)))
-
-    flat_samples = sampler.get_chain(discard=int(steps/2), flat=True)
-    corner.corner(flat_samples, labels=labels)
-    plt.savefig(os.path.join(directory, 'beta%f_corner_plot.png'%beta))
+        flat_samples = sampler.get_chain(discard=int(steps/2), flat=True)
+        corner.corner(flat_samples, labels=labels)
+        plt.savefig(os.path.join(directory, 'beta%f_corner_plot.png'%beta))
 
 if False:
     #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
