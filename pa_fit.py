@@ -20,7 +20,7 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 68129
+event_num = 68192
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
@@ -136,7 +136,6 @@ def log_posterior(params, phi_lim, beta):
 
 
 nwalkers = 200
-max_n = 5000
 ndim = 7
 
 # We'll track how the average autocorrelation time estimate changes
@@ -178,8 +177,8 @@ def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
 next_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
                             np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
                             np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
-for b in (3**.5)**np.arange(-20, 1):
-    init_run = do_mcmc(next_walker_pos, 100, 'initial_run_beta%f'%b, beta=b)
+for b in [1]:#in (2**.5)**np.arange(-20, 1):
+    init_run = do_mcmc(next_walker_pos, 1000, 'initial_run_beta%f'%b, beta=b)
     next_walker_pos = init_run.get_chain()[-1]
 
 samples = init_run.get_chain()
