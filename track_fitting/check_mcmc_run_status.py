@@ -51,7 +51,7 @@ if False:
 if True:
     run_number, event_number, beta = 124, 68192, 1
     #filename = '../run%d_palpha_mcmc/event%d/initial_run_beta%f.h5'%(run_number, event_number, beta)
-    filename = '../run%d_palpha_mcmc/event%d/cluster2.h5'%(run_number, event_number)
+    filename = '../run%d_palpha_mcmc/event%d/cluster1.h5'%(run_number, event_number)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
     tau = [100,400]#[35,200]
 

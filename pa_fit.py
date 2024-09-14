@@ -167,20 +167,25 @@ def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
         axes[-1].set_xlabel("step number")
         plt.savefig(os.path.join(directory, '%s.png'%(save_name)))
 
-        flat_samples = sampler.get_chain(discard=int(steps/2), flat=True)
+        tau = sampler.get_autocorr_time()
+        burnin = int(2 * np.max(tau))
+        thin = int(0.5 * np.min(tau))
+        flat_samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
         corner.corner(flat_samples, labels=labels)
         plt.savefig(os.path.join(directory, '%s_corner_plot.png'%save_name))
 
     return emcee.backends.HDFBackend(filename=backend_file, read_only=True)
 
-#initial runs to find clusters, using a tempering profile
-next_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
-                            np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
-                            np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
-for b in [1]:#in (2**.5)**np.arange(-20, 1):
-    init_run = do_mcmc(next_walker_pos, 1000, 'initial_run_beta%f'%b, beta=b)
-    next_walker_pos = init_run.get_chain()[-1]
-
+if False:#redo initial mcmc
+    #initial runs to find clusters, using a tempering profile
+    next_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
+                                np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
+                                np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
+    for b in [1]:#in (2**.5)**np.arange(-20, 1):
+        init_run = do_mcmc(next_walker_pos, 1000, 'initial_run_beta%f'%b, beta=b)
+        next_walker_pos = init_run.get_chain()[-1]
+else: #reload previously done initial clustering
+    init_run = emcee.backends.HDFBackend(filename=os.path.join(directory,'initial_run_beta%f.h5'%1), read_only=True)
 samples = init_run.get_chain()
 log_prob = init_run.get_log_prob()
 thetas = samples[-1][:, -2]
@@ -192,6 +197,7 @@ plt.colorbar(label="log prob")
 plt.xlabel('theta (deg)')
 plt.ylabel('phi (deg)')
 plt.savefig(os.path.join(directory,'before_clustering.png'))
+
 
 #cluster by direction vector, to avoid issues at phi=0/pi
 #keep all clusters of size >10
@@ -223,14 +229,19 @@ for c in clusters_to_keep:
 
     #add slightly perturbed data points until init points has required number
     samples_in_cluster = samples[-1][this_cluster]
-    init_points = list(samples_in_cluster)
-    while len(init_points) < nwalkers:
-        random_point = samples_in_cluster[np.random.randint(0, len(samples_in_cluster))]
-        init_points.append(random_point + .001*np.random.randn(ndim))
+    lls_in_cluster = log_prob[-1][this_cluster]
+    if False: #initialize using previous cluster
+        init_points = list(samples_in_cluster)
+        while len(init_points) < nwalkers:
+            random_point = samples_in_cluster[np.random.randint(0, len(samples_in_cluster))]
+            init_points.append(random_point + .001*np.random.randn(ndim))
+    else: #choose best point in the cluster
+        best_point = samples_in_cluster[np.argmax(lls_in_cluster)]
+        init_points = [best_point + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
     starting_points.append(init_points)
     phi = init_points[0][-1]
     phi_limits.append((phi - np.pi, phi+np.pi))
 
 #run sampler on each cluster
 for i in range(len(clusters_to_keep)):
-    do_mcmc(init_pos=starting_points[i], steps=1000, save_name='cluster%d'%clusters_to_keep[i], phi_lim=phi_limits[i])
+    do_mcmc(init_pos=starting_points[i], steps=10000, save_name='cluster%d'%clusters_to_keep[i], phi_lim=phi_limits[i])
