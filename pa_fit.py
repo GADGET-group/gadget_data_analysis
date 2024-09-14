@@ -167,7 +167,7 @@ def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
         axes[-1].set_xlabel("step number")
         plt.savefig(os.path.join(directory, '%s.png'%(save_name)))
 
-        tau = sampler.get_autocorr_time()
+        tau = sampler.get_autocorr_time(tol=0)
         burnin = int(2 * np.max(tau))
         thin = int(0.5 * np.min(tau))
         flat_samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)

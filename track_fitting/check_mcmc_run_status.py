@@ -53,7 +53,7 @@ if True:
     #filename = '../run%d_palpha_mcmc/event%d/initial_run_beta%f.h5'%(run_number, event_number, beta)
     filename = '../run%d_palpha_mcmc/event%d/cluster1.h5'%(run_number, event_number)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
-    tau = [100,400]#[35,200]
+    tau = 2#[100,400]
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
@@ -84,25 +84,27 @@ plt.colorbar(label="log prob")
 plt.xlabel('theta (deg)')
 plt.ylabel('phi (deg)')
 
-#cluster by direction vector, to avoid issues at phi=0/pi
-#keep all clusters of size >10
-zhat = np.cos(thetas)
-xhat = np.sin(thetas)*np.cos(phis)
-yhat = np.sin(thetas)*np.sin(phis)
-cluster_obj = cluster.DBSCAN(0.1).fit(np.vstack((xhat, yhat, zhat)).T)
-cluster_label, cluster_counts = np.unique(cluster_obj.labels_, return_counts=True)
-clusters_to_keep = cluster_label[(cluster_label>=0) & (cluster_counts>10)]
-to_keep = np.in1d(cluster_obj.labels_, clusters_to_keep)
-plt.figure()
-plt.title("clusters to fit")
-plt.scatter(np.degrees(thetas)[to_keep], np.degrees(phis)[to_keep], c=cluster_obj.labels_[to_keep])
-plt.colorbar(label="cluster id")
-plt.xlabel('theta (deg)')
-plt.ylabel('phi (deg)')
+#make plot with proton and alpha energies, instead of total and Ea_frac
+Ea_Ep_samples = np.copy(samples)
+Ea_Ep_samples[:,:,0] = samples[:,:,0]*samples[:,:,1]
+Ea_Ep_samples[:,:,1] = samples[:,:,0]*(1-samples[:,:,1])
+Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi']
+fig, axes = plt.subplots(len(Ea_Ep_labels), figsize=(10, 7), sharex=True)#len(labels)
+for i in range(len(labels)):
+    ax = axes[i]
+    to_plot = Ea_Ep_samples[:, :, i]
+    if labels[i] == 'theta' or labels[i] == 'phi':
+        to_plot = np.degrees(to_plot)
+    ax.plot(to_plot, "k", alpha=0.3)
+    ax.set_xlim(0, len(Ea_Ep_samples))
+    ax.set_ylabel(Ea_Ep_labels[i])
+    ax.yaxis.set_label_coords(-0.1, 0.5)
+axes[-1].set_xlabel("step number")
 
 plt.show()
 
-#tau=reader.get_autocorr_time()
+tau=reader.get_autocorr_time(tol=0)
+print('autocorrelation times:', tau)
 
 burnin = int(2 * np.max(tau))
 thin = int(0.5 * np.min(tau))
@@ -121,6 +123,11 @@ for i in range(ndim):
     txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
     txt = txt.format(mcmc[1], q[0], q[1], labels[i])
     print(txt)
+plt.savefig('corner_plot.png')
 
-plt.savefig('test.png')
 
+EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
+EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
+EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
+corner.corner(flat_samples, labels=Ea_Ep_labels)
+plt.savefig('corner_plot_EaEp.png')
