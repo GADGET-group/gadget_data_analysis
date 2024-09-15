@@ -176,7 +176,7 @@ def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
 
     return emcee.backends.HDFBackend(filename=backend_file, read_only=True)
 
-if False:#redo initial mcmc
+if True:#do/redo initial mcmc
     #initial runs to find clusters, using a tempering profile
     next_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
                                 np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
