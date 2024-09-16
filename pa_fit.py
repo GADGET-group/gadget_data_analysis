@@ -20,8 +20,10 @@ from raw_viewer import raw_h5_file
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 68192
+event_num = 10356
 run_h5_path = folder +'run_%04d.h5'%run_number
+
+run_init_fit = True #if false, will look for h5 file from previously run intiial fit
 
 if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
     if run_number == 124:
@@ -176,7 +178,7 @@ def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
 
     return emcee.backends.HDFBackend(filename=backend_file, read_only=True)
 
-if True:#do/redo initial mcmc
+if run_init_fit:#do/redo initial mcmc
     #initial runs to find clusters, using a tempering profile
     next_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
                                 np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 

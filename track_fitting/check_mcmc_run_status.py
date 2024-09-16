@@ -49,11 +49,11 @@ if False:
     labels = ['E', 'x','y','z','theta', 'phi']
     tau = [100,400]
 if True:
-    run_number, event_number, beta = 124, 68192, 1
+    run_number, event_number, beta = 124, 51777, 1
     #filename = '../run%d_palpha_mcmc/event%d/initial_run_beta%f.h5'%(run_number, event_number, beta)
-    filename = '../run%d_palpha_mcmc/event%d/cluster2.h5'%(run_number, event_number)
+    filename = '../run%d_palpha_mcmc/event%d/cluster1.h5'%(run_number, event_number)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
-    tau = 2#[100,400]
+    #tau = [100,400]
 
 reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
 
@@ -131,3 +131,14 @@ EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
 EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
 corner.corner(EaEp_flat, labels=Ea_Ep_labels)
 plt.savefig('corner_plot_EaEp.png')
+
+ndim = len(labels)
+for i in range(ndim):
+    mcmc = np.percentile(EaEp_flat[:, i], [16, 50, 84])
+    if Ea_Ep_labels[i] == 'theta' or Ea_Ep_labels[i] == 'phi':
+        mcmc = np.degrees(mcmc)
+    q = np.diff(mcmc)
+    txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
+    txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
+    print(txt)
+plt.savefig('corner_plot.png')
