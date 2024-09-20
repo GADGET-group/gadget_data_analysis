@@ -16,11 +16,10 @@ import emcee
 from track_fitting import ParticleAndPointDeposition
 from raw_viewer import raw_h5_file
 
-
 #folder = '/mnt/analysis/e21072/gastest_h5_files/'
 folder = '../../shared/Run_Data/'
 run_number = 124
-event_num = 51777
+event_num = 68192
 run_h5_path = folder +'run_%04d.h5'%run_number
 
 run_init_fit = True #if false, will look for h5 file from previously run intiial fit
@@ -152,11 +151,11 @@ def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
         backend.reset(nwalkers, ndim)
         
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool,
-                                        args=(phi_lim,beta),
-                                        moves=[
-                                            (emcee.moves.DEMove(), 0.8),
-                                            (emcee.moves.DESnookerMove(), 0.2),
-                                        ])
+                                        args=(phi_lim,beta), moves=[emcee.moves.StretchMove(a=1.4)])
+                                        #moves=[
+                                         #   (emcee.moves.DEMove(), 0.8),
+                                          #  (emcee.moves.DESnookerMove(), 0.2),
+                                        #])
 
         for sample in sampler.sample(init_pos, iterations=steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
