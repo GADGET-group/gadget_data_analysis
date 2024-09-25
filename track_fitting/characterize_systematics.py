@@ -154,11 +154,11 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     
     init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
     
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':100})
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':100})
     #if method == 'Nelder-Mead':
-    #    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True})#, 'maxfev':10000, 'maxiter':10000})
     #elif method == 'Powell':
-    #    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell", options={'ftol':0.001, 'xtol':0.01})
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
@@ -312,8 +312,8 @@ for i in range(len(evts)):
         if  val > max_residual_percent:
             max_residual_percent = val
     print(evts[i], max_residual_percent)
-    #only fit events with residuals no more than 40% of traces
-    if max_residual_percent < 0.4: 
+    #only fit events with residuals no more than 50% of traces
+    if max_residual_percent < 0.5: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
 
