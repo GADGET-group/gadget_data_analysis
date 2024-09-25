@@ -77,8 +77,8 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     trace_sim.zscale = zscale
     trace_sim.counts_per_MeV = adc_scale_mu
     trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=trim_threshold, trim_pad=int(shaping_width))
-    if trace_sim.num_trimmed_trace_bins > 100:
-        print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trimmed_trace_bins)
+    if trace_sim.num_trace_bins > 100:
+        print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
     #want max likilihood to just be least squares for this fit
     trace_sim.pad_gain_match_uncertainty = m_guess
