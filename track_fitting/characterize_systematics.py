@@ -27,7 +27,7 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-load_previous_fit = True
+load_previous_fit = False
 
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -62,7 +62,7 @@ get_gas_density = lambda P: rho0*(P/760)*(300./T)
 m_guess, c_guess =   0, 1 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
-              return_dict=None, debug_plots=False, method='Powell'):
+              return_dict=None, debug_plots=False):
     trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
     trace_sim.zscale = zscale
     trace_sim.counts_per_MeV = adc_scale_mu
@@ -81,7 +81,10 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     #x,y,z: Find the pixel where the brag peak occured by finding the brightest pixel.
     #     Then find the pixel farthest from there.
     #theta, phi: from guessed decay location to brag peak
-    #sigma_xy and sigma_z: just use 1
+    #sigma_xy and sigma_z: just guess
+    sigma_xy_guess = 5
+    sigma_z_guess = 10
+
     Eguess = np.sum(traces_to_fit)/adc_scale_mu
     #find guess for Brag peak location
     max_pad, max_val, max_index = 0,0,0
@@ -115,6 +118,8 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         trace_sim.theta, trace_sim.phi = theta_guess, phi_guess
         trace_sim.initial_point = (x_guess,y_guess,z_guess)
         trace_sim.initial_energy = Eguess
+        trace_sim.sigma_xy = sigma_xy_guess
+        trace_sim.sigma_z = sigma_z_guess
         trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(pressure))
         trace_sim.simulate_event()
         trace_sim.plot_residuals()
@@ -147,13 +152,13 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
             print('%e'%to_return, params)
         return to_return
     
-    init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, 1, 1)
-    if method == 'Nelder-Mead':
-        res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})
-    elif method == 'Powell':
-        res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell", options={'ftol':0.001, 'xtol':0.01})
-    else:
-        assert False
+    init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
+    
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':100})
+    #if method == 'Nelder-Mead':
+    #    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})
+    #elif method == 'Powell':
+    #    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell", options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
@@ -166,9 +171,9 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         plt.show()
     return res
 
-#55, 108, 132
-pads, traces = h5file.get_pad_traces(108, False)
-fit_event(pads, traces, 'proton', debug_plots=True)
+if False:
+    pads, traces = h5file.get_pad_traces(108, False)
+    fit_event(pads, traces, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
 events_per_catagory = 50
@@ -232,7 +237,7 @@ else:
         event_catagory = classify(l, counts)
         events_in_catagory[event_catagory].append(evt)
 
-evts, thetas, phis,xs,ys,zs, lls, cats, Es, nfev = [], [],[],[],[],[],[],[],[],[]
+evts, thetas, phis,xs,ys,zs, lls, cats, Es, nfev, sigma_xys, sigma_zs = [], [],[],[],[],[],[],[],[],[],[],[]
 for cat in range(len(events_in_catagory)):
     for evt in events_in_catagory[cat]:
         if evt not in fit_results_dict:
@@ -248,6 +253,8 @@ for cat in range(len(events_in_catagory)):
         ys.append(res.x[3])
         zs.append(res.x[4])
         Es.append(res.x[5])
+        sigma_xys.append(res.x[6])
+        sigma_zs.append(res.x[7])
         lls.append(res.fun)
         cats.append(cat)
         evts.append(evt)
@@ -259,8 +266,6 @@ cats = np.array(cats)
 
 ptypes = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
 
-#save results arrays
-
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
     sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), ptypes[i])
@@ -268,15 +273,14 @@ def show_fit(evt):
     sim.initial_point = (xs[i], ys[i], zs[i])
     sim.theta = thetas[i]
     sim.phi = phis[i]
-    sim.charge_spreading_sigma = charge_spread
+    sim.sigma_xy = sigma_xys[i]
+    sim.sigma_z = sigma_zs[i]
     sim.zscale = zscale
-    sim.shaping_width = shaping_width
     sim.counts_per_MeV = adc_scale_mu
     pads, traces = h5file.get_pad_traces(evt, False)
-    sim.set_real_data(pads, traces, 50, int(shaping_width))
+    sim.set_real_data(pads, traces, 50, 10)
     sim.simulate_event()
-    sim.align_pad_traces()
-    sim.plot_simulated_3d_data(mode='aligned', threshold=25)
+    sim.plot_simulated_3d_data(threshold=25)
     sim.plot_residuals_3d(energy_threshold=25)
     sim.plot_residuals()
     plt.show()
@@ -289,18 +293,17 @@ for i in range(len(evts)):
     #if lls[i] <= ll_cutoff[cats[i]]:
     #if i == 127:
     new_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle=ptypes[i])
-    new_sim.shaping_width = shaping_width
+    new_sim.sigma_xy = sigma_xys[i]
+    new_sim.sigma_z = sigma_zs[i]
     new_sim.zscale = zscale
     new_sim.counts_per_MeV = adc_scale_mu
     new_sim.initial_energy = Es[i]
     new_sim.initial_point = (xs[i], ys[i], zs[i])
     new_sim.theta = thetas[i]
     new_sim.phi = phis[i]
-    new_sim.charge_spreading_sigma = charge_spread
     pads, traces = h5file.get_pad_traces(evts[i], False)
-    new_sim.set_real_data(pads, traces, 50, int(shaping_width))
+    new_sim.set_real_data(pads, traces, 50, 10)
     new_sim.simulate_event()
-    new_sim.align_pad_traces()
     max_trace = np.max(traces)
     residuals_dict = new_sim.get_residuals()
     max_residual_percent = 0
@@ -309,8 +312,8 @@ for i in range(len(evts)):
         if  val > max_residual_percent:
             max_residual_percent = val
     print(evts[i], max_residual_percent)
-    #only fit events with residuals no more than 60% of traces
-    if max_residual_percent < 0.6: 
+    #only fit events with residuals no more than 40% of traces
+    if max_residual_percent < 0.4: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
 
@@ -344,16 +347,17 @@ def log_posterior(params):
     print(params, '%e'%to_return)
     return to_return
 
-normalizations = {}
-for evt, sim in zip(evts_to_fit, trace_sims):
-    sim.pad_gain_match_uncertainty = m_guess
-    sim.other_systematics = c_guess
-    sim.simulate_event()
-    sim.align_pad_traces()
-    normalizations[evt] = -sim.log_likelihood()
-
-
 if False:
+    normalizations = {}
+    for evt, sim in zip(evts_to_fit, trace_sims):
+        sim.pad_gain_match_uncertainty = m_guess
+        sim.other_systematics = c_guess
+        sim.simulate_event()
+        sim.align_pad_traces()
+        normalizations[evt] = -sim.log_likelihood()
+
+
+
     def to_minimize(params):
         to_return = 0
         m, c, = params
@@ -372,64 +376,46 @@ if False:
 
 #systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
 
-'''
-run 124
-started  with m=0,c=1
-[ 6.734e+01  8.281e+00]
-Then iterated on m & c, renormalizing each time
- [ 3.116e+00  1.500e+01]
- [ 2.954e+00  1.484e+01]
-[ 2.91765033 14.77951817] 
- [ 2.93400081 14.79047985]
-Then fit all events, using the last m & c.
-Changed code to not exclude any events (previously removed those with residuals >60 of max trace).
-This then leads to even bigger estimates for m. m should be <1, so this is obviously wrong.
 
-New approach:
-    After doing chi^2 fit, estimate pad gain match uncertainty from standard deviation
-of (residuals at peaks)/peak values, for peaks above some value. We don't include small peaks, 
-becuase these would have a signifigant effect from other systematics.
-    Estimate other systematics by looking at standard deviation of residuals away from the peak.
-'''
+if False:
+    peak_residuals_fraction = []
+    peak_vals = []
+    peak_threshold = 100
+    for evt, sim in zip(evts_to_fit, trace_sims):
+        simulated_traces = sim.aligned_sim_traces
+        for pad in simulated_traces:
+            if pad not in sim.traces_to_fit:
+                continue
+            sim_peak_index = np.argmax(simulated_traces[pad])
+            act_peak_index = np.argmax(sim.traces_to_fit[pad])
+            #don't use peaks if not well alligned
+            if np.abs(sim_peak_index - act_peak_index) > 3: 
+                continue
+            sim_peak = simulated_traces[pad][sim_peak_index]
+            observed_peak  = sim.traces_to_fit[pad][act_peak_index]
+            if sim_peak >= peak_threshold and observed_peak > peak_threshold:
+                peak_residuals_fraction.append(2*(sim_peak - observed_peak)/(sim_peak + observed_peak))
+                peak_vals.append((sim_peak + observed_peak)/2)
+    peak_residuals_fraction = np.array(peak_residuals_fraction)
+    peak_vals = np.array(peak_vals)
 
+    pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
 
-peak_residuals_fraction = []
-peak_vals = []
-peak_threshold = 100
-for evt, sim in zip(evts_to_fit, trace_sims):
-    simulated_traces = sim.aligned_sim_traces
-    for pad in simulated_traces:
-        if pad not in sim.traces_to_fit:
-            continue
-        sim_peak_index = np.argmax(simulated_traces[pad])
-        act_peak_index = np.argmax(sim.traces_to_fit[pad])
-        #don't use peaks if not well alligned
-        if np.abs(sim_peak_index - act_peak_index) > 3: 
-            continue
-        sim_peak = simulated_traces[pad][sim_peak_index]
-        observed_peak  = sim.traces_to_fit[pad][act_peak_index]
-        if sim_peak >= peak_threshold and observed_peak > peak_threshold:
-            peak_residuals_fraction.append(2*(sim_peak - observed_peak)/(sim_peak + observed_peak))
-            peak_vals.append((sim_peak + observed_peak)/2)
-peak_residuals_fraction = np.array(peak_residuals_fraction)
-peak_vals = np.array(peak_vals)
-
-pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
-
-def to_minimize(c):
+def to_minimize(params):
+    m, c = params
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
-        sim.other_systematics = c[0]
-        sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
+        sim.other_systematics = c
+        sim.pad_gain_match_uncertainty = m
         #sim.simulate_event()
         #sim.align_pad_traces()
         to_add = -sim.log_likelihood()#/normalizations[evt]
-        print(evt, to_add)
+        #print(evt, to_add)
         to_return += to_add
-    print('==================',to_return, c, '===================')
+    print('==================',to_return, m, c, '===================')
     return to_return
 
-#c_min = opt.minimize(to_minimize, 20)
+systematics_results = opt.minimize(to_minimize, (0.1, 10))
 '''
 results oth this method:
 other systematics = 16.86638095

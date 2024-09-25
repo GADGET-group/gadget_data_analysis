@@ -43,8 +43,7 @@ class SingleParticleEvent:
         self.load_srim_table(particle, gas_density)
         
         #parameters for grid size and other numerics
-        self.num_stopping_power_points = 500 #number of points at which to compute 1D energy deposition
-
+        self.num_stopping_power_points = 100 #number of points at which to compute 1D energy deposition
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
