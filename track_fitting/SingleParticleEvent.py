@@ -33,7 +33,6 @@ class SingleParticleEvent:
         #physical constants relating to the detector
         self.sigma_xy = 1 #mm
         self.sigma_z = 1 #mm
-        self.shaping_width = 7 #FWHM of the shaping amplifier in time bins
         self.zscale = 1.45 #mm/time bin
         self.counts_per_MeV = 1
         
@@ -140,7 +139,7 @@ class SingleParticleEvent:
                 dy = self.pad_to_xy[pad][1] - point[1]
                 yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2*self.sigma_xy)) - \
                              erf((dy - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))
-                trace += edep *xfrac*yfrac*zfrac
+                trace += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
             self.sim_traces[pad] = trace
         time3 = time.time()
         
@@ -240,7 +239,7 @@ class SingleParticleEvent:
                         self.pads_to_sim.append(adj_pad)
 
     def get_residuals(self):
-        sim_trace_dict = self.aligned_sim_traces
+        sim_trace_dict = self.sim_traces
         real_trace_dict = self.traces_to_fit
         residuals_dict = {}
         for pad in sim_trace_dict:

@@ -15,7 +15,6 @@ import pickle
 import numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
-import emcee
 
 from track_fitting import SingleParticleEvent
 from raw_viewer import raw_h5_file
@@ -51,32 +50,25 @@ h5file.require_peak_within= (-np.inf, np.inf)
 h5file.num_background_bins=(160, 250)
 h5file.ic_counts_threshold = 25
 
-shaping_time = 70e-9 #s, from e21062 config file on mac minis
-shaping_width  = shaping_time*clock_freq*2.355
-
 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
 #which seems to be a good assumtion. See c48097904a89edc1131d7aa2d216ca6d045b5137
 pressure = 860.3 #torr
-charge_spread = 2. #mm
 
 rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
 T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
-#factors to scale parameters by, so they are all of order 1
-angle_scale = 3
-distance_scale = 50
-e_scale = 2
 
-m_guess, c_guess =   2.91765033, 14.77951817 #guesses for pad gain match uncertainty and other systematics
+m_guess, c_guess =   0, 1 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False, method='Powell'):
     trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
-    trace_sim.shaping_width = shaping_width
     trace_sim.zscale = zscale
     trace_sim.counts_per_MeV = adc_scale_mu
-    trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=trim_threshold, trim_pad=int(shaping_width))
+    trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=trim_threshold, trim_pad=int(10))
+    #set use trimmed traces going forwards
+    traces_to_fit = [trace_sim.traces_to_fit[pad] for pad in pads_to_fit]
     if trace_sim.num_trace_bins > 100:
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
@@ -85,10 +77,11 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     trace_sim.other_systematics = c_guess
     #to get initial guess
     #Energy: from integrated charge
-    #z: center of the detector
-    #x,y: Find the pixel where the brag peak occured by finding the brightest pixel.
+    #z: center of track
+    #x,y,z: Find the pixel where the brag peak occured by finding the brightest pixel.
     #     Then find the pixel farthest from there.
     #theta, phi: from guessed decay location to brag peak
+    #sigma_xy and sigma_z: just use 1
     Eguess = np.sum(traces_to_fit)/adc_scale_mu
     #find guess for Brag peak location
     max_pad, max_val, max_index = 0,0,0
@@ -108,32 +101,32 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         if dist > furthest_dist_sqrd:
             furthest_dist_sqrd = dist
             x_guess, y_guess = x,y
+            z_guess = np.argmax(trace)*zscale
             furthest_pad_trace = trace
     dz = brag_z - np.argmax(furthest_pad_trace)*zscale
     theta_guess = np.arctan2(np.sqrt(furthest_dist_sqrd), dz)
     phi_guess = np.arctan2(brag_y-y_guess, brag_x-x_guess)
     if debug_plots:
+        print('num pads to simultate: ', len(trace_sim.pads_to_sim))
         print('max pad:', max_pad)
         print('brag x,y:', brag_x, brag_y)
-        z_guess = 200
-        print('guess:',x_guess, y_guess, z_guess, theta_guess, phi_guess, Eguess, pressure)
+        print('guess:',x_guess, y_guess, z_guess, np.degrees(theta_guess), 
+              np.degrees(phi_guess), Eguess, pressure)
         trace_sim.theta, trace_sim.phi = theta_guess, phi_guess
         trace_sim.initial_point = (x_guess,y_guess,z_guess)
-        trace_sim.charge_spreading_sigma = charge_spread
         trace_sim.initial_energy = Eguess
         trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(pressure))
         trace_sim.simulate_event()
-        trace_sim.align_pad_traces()
         trace_sim.plot_residuals()
         trace_sim.plot_residuals_3d(energy_threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
 
     def neg_log_likelihood(params):
-        theta, phi, x,y,z, E = params
-        theta, phi = theta*angle_scale, phi*angle_scale
-        x,y,z = x*distance_scale, y*distance_scale, z*distance_scale
-        E = E*e_scale
+        theta, phi, x,y,z, E, sigma_xy, sigma_z = params
+        theta, phi = theta, phi
+        x,y,z = x, y, z
+        E = E
         if z > 400 or z<10:
             return np.inf
         if x**2 + y**2 > 40**2:
@@ -144,17 +137,17 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
             return np.inf #greater than 6 MeV protons always escape the detector at these pressures
         trace_sim.theta, trace_sim.phi = theta, phi
         trace_sim.initial_point = (x,y,z)
-        trace_sim.charge_spreading_sigma = charge_spread
+        trace_sim.sigma_xy = sigma_xy
+        trace_sim.sigma_z = sigma_z
         trace_sim.initial_energy = E
         trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(pressure))
         trace_sim.simulate_event()
-        trace_sim.align_pad_traces()
         to_return = -trace_sim.log_likelihood()
         if debug_plots:
             print('%e'%to_return, params)
         return to_return
     
-    init_guess = (theta_guess/angle_scale, phi_guess/angle_scale, x_guess/distance_scale, y_guess/distance_scale, 200/distance_scale, Eguess/e_scale)
+    init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, 1, 1)
     if method == 'Nelder-Mead':
         res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':10000, 'maxiter':10000})
     elif method == 'Powell':
@@ -174,8 +167,8 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     return res
 
 #55, 108, 132
-#pads, traces = h5file.get_pad_traces(108, False)
-#fit_event(pads, traces, 'proton', debug_plots=True)
+pads, traces = h5file.get_pad_traces(108, False)
+fit_event(pads, traces, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
 events_per_catagory = 50
@@ -249,12 +242,12 @@ for cat in range(len(events_in_catagory)):
         if not res.success:
             print('evt %d (cat %d)not succesfully fit'%(evt, cat))
             continue
-        thetas.append(res.x[0]*angle_scale)
-        phis.append(res.x[1]*angle_scale)
-        xs.append(res.x[2]*distance_scale)
-        ys.append(res.x[3]*distance_scale)
-        zs.append(res.x[4]*distance_scale)
-        Es.append(res.x[5]*e_scale)
+        thetas.append(res.x[0])
+        phis.append(res.x[1])
+        xs.append(res.x[2])
+        ys.append(res.x[3])
+        zs.append(res.x[4])
+        Es.append(res.x[5])
         lls.append(res.fun)
         cats.append(cat)
         evts.append(evt)
