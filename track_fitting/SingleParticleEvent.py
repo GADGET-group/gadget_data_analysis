@@ -53,7 +53,7 @@ class SingleParticleEvent:
         self.pad_width = 2.2 #mm
 
         #event parameters
-        self.initial_energy = 6 #MeV
+        self.initial_energy = 1 #MeV
         self.initial_point = (0,0,0) #(x,y,z) mm. z coordinate only effects peak position in trace.
         self.theta, self.phi = 0,0 #angles describing direction in which emmitted particle travels, in radians
 
@@ -101,11 +101,11 @@ class SingleParticleEvent:
         Return energy deposition vs distance.
         returns distances, energy deposition
         '''
-        # Integrate stopping powers
         stopping_distance = self.srim_table.get_stopping_distance(self.initial_energy)
-        distances = np.linspace(0, stopping_distance, self.num_stopping_power_points)
-        dx = distances[1] - distances[0]
-        energy_deposition = self.srim_table.get_stopping_power_after_distances(self.initial_energy, distances)*dx
+        distances = np.linspace(0, stopping_distance, self.num_stopping_power_points+1)
+        energy_remaining = self.srim_table.get_energy_w_stopping_distance(stopping_distance - distances)
+        energy_deposition = energy_remaining[0:-1] - energy_remaining[1:]
+        distances = (distances[0:-1] + distances[1:])/2
         return distances, energy_deposition
 
     def simulate_event(self, map_to_pads=True):

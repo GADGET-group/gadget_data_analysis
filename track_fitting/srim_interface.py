@@ -7,10 +7,10 @@ class SRIM_Table:
         material_density: Density of material in mg/cm^3
         '''
         # Initialize lists to store the data
-        energy_MeV = []
-        electronic_stopping_MeV_um = []  # Stopping power in MeV/(mg/cm^2)
-        nuclear_stopping_MeV_um = []
-        path_length_mm = []
+        energy_MeV = [0]
+        electronic_stopping_MeV_um = [0]  # Stopping power in MeV/(mg/cm^2)
+        nuclear_stopping_MeV_um = [0]
+        path_length_mm = [0]
         
         # Read the file
         with open(data_path, 'r') as file:
