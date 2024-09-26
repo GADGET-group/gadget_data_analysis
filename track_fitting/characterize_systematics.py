@@ -365,5 +365,9 @@ def to_minimize(params):
 
 systematics_results = opt.minimize(to_minimize, (0.5, 20))
 '''
+Fit with adaptive stopping powers
+num events to fit: 142
+catagories, counts: (array([0, 1, 2, 3]), array([41, 27, 46, 28]))
+ 0.7308398770265849 11.94172668946808
 
 '''

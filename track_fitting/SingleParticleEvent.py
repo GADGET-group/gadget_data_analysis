@@ -44,8 +44,9 @@ class SingleParticleEvent:
         
         #parameters for grid size and other numerics
         self.points_per_bin = 1
-        #number of points at which to compute 1D energy deposition. This will be set when simulate event is called.
-        self.num_stopping_power_points = None 
+        #number of points at which to compute 1D energy deposition
+        self.num_stopping_power_points = 50 
+        self.adaptive_stopping_power = True #if true, will compute number of stopping poer points based on points per bin and track length
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
@@ -71,6 +72,9 @@ class SingleParticleEvent:
                 pad = self.pad_plane[x,y]
                 if pad != -1:
                     self.pad_to_xy_index[int(pad)] = (x,y)
+    
+    def get_num_stopping_points_for_energy(self, E):
+        return int(np.ceil(self.points_per_bin*self.srim_table.get_stopping_distance(E)/np.min((self.pad_width, self.zscale))))
         
     def load_srim_table(self, particle:str, gas_density:float):
         '''
@@ -102,7 +106,8 @@ class SingleParticleEvent:
         returns distances, energy deposition
         '''
         stopping_distance = self.srim_table.get_stopping_distance(self.initial_energy)
-        self.num_stopping_power_points = int(np.ceil(self.points_per_bin*stopping_distance/np.min((self.pad_width, self.zscale))))
+        if self.adaptive_stopping_power:
+            self.num_stopping_power_points = self.get_num_stopping_points_for_energy(self.initial_energy)
         distances = np.linspace(0, stopping_distance, self.num_stopping_power_points+1)
         energy_remaining = self.srim_table.get_energy_w_stopping_distance(stopping_distance - distances)
         energy_deposition = energy_remaining[0:-1] - energy_remaining[1:]
