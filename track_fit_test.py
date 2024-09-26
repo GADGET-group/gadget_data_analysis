@@ -1,5 +1,6 @@
 import time
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
 import matplotlib.pylab as plt
@@ -98,6 +99,7 @@ zmin = 0
 temp_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
 temp_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)
 zmax = temp_sim.num_trace_bins*zscale
+num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
 
 pad_gain_match_uncertainty = 0.7308398770265849
 other_systematics = 11.94172668946808
@@ -119,7 +121,7 @@ def log_likelihood(params):
     trace_sim.sigma_xy = sigma_xy
     trace_sim.sigma_z = sigma_z
     trace_sim.adaptive_stopping_power = False
-    trace_sim.num_stopping_power_points
+    trace_sim.num_stopping_power_points = num_stopping_points
     
     trace_sim.simulate_event()
     to_return = trace_sim.log_likelihood()
@@ -152,8 +154,9 @@ def log_posterior(params):
     return to_return
 
 fit_start_time = time.time()
-nwalkers = 500
-num_steps = 1000
+nwalkers = 200
+clustering_steps = 200
+post_cluster_steps=1000
 ndim = 8
 
 init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
@@ -171,34 +174,17 @@ backend.reset(nwalkers, ndim)
 
 with multiprocessing.Pool() as pool:
     sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                    moves=[
-                                            (emcee.moves.DESnookerMove(), 0.1),
-                                            (emcee.moves.DEMove(), 0.9 * 0.9),
-                                            (emcee.moves.DEMove(gamma0=1.0), 0.9 * 0.1)
-                                    ], pool=pool)
+                                    # moves=[
+                                    #         (emcee.moves.DESnookerMove(), 0.1),
+                                    #         (emcee.moves.DEMove(), 0.9 * 0.9),
+                                    #         (emcee.moves.DEMove(gamma0=1.0), 0.9 * 0.1)
+                                    # ],
+                                     pool=pool)
 
-    for sample in sampler.sample(init_walker_pos, iterations=num_steps, progress=True):
+    for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
         tau = sampler.get_autocorr_time(tol=0)
         print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
-    samples = sampler.get_chain()
-    labels = ['E', 'x','y','z','theta', 'phi']
-    fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
-    plt.title('beta=%f'%num_steps)
-    for i in range(len(labels)):
-        ax = axes[i]
-        ax.plot(samples[:, :, i], "k", alpha=0.3)
-        ax.set_xlim(0, len(samples))
-        ax.set_ylabel(labels[i])
-        ax.yaxis.set_label_coords(-0.1, 0.5)
-    axes[-1].set_xlabel("step number")
-    plt.savefig(os.path.join(directory, 'init_run.png'))
-
-    flat_samples = sampler.get_chain(discard=int(steps/2), flat=True)
-    corner.corner(flat_samples, labels=labels)
-    plt.savefig(os.path.join(directory, 'init_run_corner_plot.png'))
-
-if False:
     #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
     ll_to_cluster = sampler.get_log_prob()[-1].reshape(-1,1)
     cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
@@ -207,21 +193,15 @@ if False:
     new_init_pos = list(samples_to_propagate)
 
     #randomly select samples to perturb and add to the list until we have the desired number of walkers
-    nwalkers = 100
     while len(new_init_pos) < nwalkers:
         i = np.random.randint(0, len(samples_to_propagate))
         new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
 
     #restart mcmc
-    backend_file = os.path.join(directory, 'after_clustering.h5')
+    backend_file = os.path.join(directory, 'best_cluster.h5')
     backend = emcee.backends.HDFBackend(backend_file)
     backend.reset(nwalkers, ndim)
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                        moves=[
-                                            (emcee.moves.StretchMove(), 0.5), 
-                                            (emcee.moves.DEMove(), 0.4),
-                                            (emcee.moves.DESnookerMove(), 0.1),
-                                        ])
-    for sample in sampler.sample(new_init_pos, iterations=steps, progress=True):
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
+    for sample in sampler.sample(new_init_pos, iterations=post_cluster_steps, progress=True):
         tau = sampler.get_autocorr_time(tol=0)
         print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
