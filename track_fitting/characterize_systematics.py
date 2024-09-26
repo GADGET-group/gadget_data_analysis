@@ -326,48 +326,52 @@ for i in range(len(evts)):
 
 print('num events to fit:', len(evts_to_fit))
 print('catagories, counts:', np.unique(cats_to_fit, return_counts=True))
-if False:
-    peak_residuals_fraction = []
-    peak_vals = []
-    peak_threshold = 100
-    for evt, sim in zip(evts_to_fit, trace_sims):
-        simulated_traces = sim.aligned_sim_traces
-        for pad in simulated_traces:
-            if pad not in sim.traces_to_fit:
-                continue
-            sim_peak_index = np.argmax(simulated_traces[pad])
-            act_peak_index = np.argmax(sim.traces_to_fit[pad])
-            #don't use peaks if not well alligned
-            if np.abs(sim_peak_index - act_peak_index) > 3: 
-                continue
-            sim_peak = simulated_traces[pad][sim_peak_index]
-            observed_peak  = sim.traces_to_fit[pad][act_peak_index]
-            if sim_peak >= peak_threshold and observed_peak > peak_threshold:
-                peak_residuals_fraction.append(2*(sim_peak - observed_peak)/(sim_peak + observed_peak))
-                peak_vals.append((sim_peak + observed_peak)/2)
-    peak_residuals_fraction = np.array(peak_residuals_fraction)
-    peak_vals = np.array(peak_vals)
 
-    pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
+peak_residuals_fraction = []
+peak_vals = []
+peak_threshold = 100
+for evt, sim in zip(evts_to_fit, trace_sims):
+    simulated_traces = sim.sim_traces
+    for pad in simulated_traces:
+        if pad not in sim.traces_to_fit:
+            continue
+        sim_peak_index = np.argmax(simulated_traces[pad])
+        act_peak_index = np.argmax(sim.traces_to_fit[pad])
+        #don't use peaks if not well alligned
+        if np.abs(sim_peak_index - act_peak_index) > 3: 
+            continue
+        sim_peak = simulated_traces[pad][sim_peak_index]
+        observed_peak  = sim.traces_to_fit[pad][act_peak_index]
+        if sim_peak >= peak_threshold and observed_peak > peak_threshold:
+            peak_residuals_fraction.append(2*(sim_peak - observed_peak)/(sim_peak + observed_peak))
+            peak_vals.append((sim_peak + observed_peak)/2)
+peak_residuals_fraction = np.array(peak_residuals_fraction)
+peak_vals = np.array(peak_vals)
+
+pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
+print(pad_gain_match_uncertainty)
 
 def to_minimize(params):
-    m, c = params
-    if m < 0 or c < 0:
+    c = params[0]
+    if c < 0:
         return np.inf
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
-        sim.pad_gain_match_uncertainty = m
+        sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
         to_add = -sim.log_likelihood()
         to_return += to_add
-    print('==================',to_return, m, c, '===================')
+    print('==================',to_return, c, '===================')
     return to_return
 
-systematics_results = opt.minimize(to_minimize, (0.5, 20))
+systematics_results = opt.minimize(to_minimize, (20,))
 '''
-Fit with adaptive stopping powers
+Fit with adaptive stopping powers, and doing max likilihood of both pad gain match uncertainty and other systematics
 num events to fit: 142
 catagories, counts: (array([0, 1, 2, 3]), array([41, 27, 46, 28]))
- 0.7308398770265849 11.94172668946808
-
+m,c= 0.7308398770265849, 11.94172668946808
+'''
+'''
+Same fit as above, but this time pad gain match from peaks only, and max likelihood for other systematics
+m=0.19464779124824114
 '''
