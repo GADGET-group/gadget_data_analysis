@@ -27,7 +27,7 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-load_previous_fit = False
+load_previous_fit = True
 
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -289,6 +289,7 @@ def show_fit(evt):
 
 evts_to_fit = []
 trace_sims = []
+normalizations = {}
 for i in range(len(evts)):
     #if lls[i] <= ll_cutoff[cats[i]]:
     #if i == 127:
@@ -301,6 +302,8 @@ for i in range(len(evts)):
     new_sim.initial_point = (xs[i], ys[i], zs[i])
     new_sim.theta = thetas[i]
     new_sim.phi = phis[i]
+    new_sim.pad_gain_match_uncertainty = m_guess
+    new_sim.other_systematics = c_guess
     pads, traces = h5file.get_pad_traces(evts[i], False)
     new_sim.set_real_data(pads, traces, 50, 10)
     new_sim.simulate_event()
@@ -312,69 +315,11 @@ for i in range(len(evts)):
         if  val > max_residual_percent:
             max_residual_percent = val
     print(evts[i], max_residual_percent)
-    #only fit events with residuals no more than 50% of traces
-    if max_residual_percent < 0.5: 
+    #only fit events with residuals no more than 40% of traces, and which are
+    if max_residual_percent < 0.4: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
-
-#cs_mu, cs_sigma = np.mean(charge_spreads), np.std(charge_spreads)
-#now do MCMC to characterize systematics
-def log_priors(params):
-    #uninformed priors, just require each parameter to be >=0
-    m, c = params
-    if m < 0 or c < 0  or m > 10 or c>4000 :
-        return -np.inf
-    return 0
-
-def log_likelihood(params):
-    m, c = params
-    to_return = 0
-    for sim in trace_sims:
-        sim.pad_gain_match_uncertainty = m
-        sim.other_systematics = c
-        sim.simulate_event()
-        sim.align_pad_traces()
-        to_return += sim.log_likelihood()
-    return to_return
-
-def log_posterior(params):
-    prior =  log_priors(params)
-    if prior == -np.inf: #don't bother simulating if -inf anyway
-        return prior
-    to_return =  log_likelihood(params) + prior
-    if np.isnan(to_return):
-        to_return = -np.inf
-    print(params, '%e'%to_return)
-    return to_return
-
-if False:
-    normalizations = {}
-    for evt, sim in zip(evts_to_fit, trace_sims):
-        sim.pad_gain_match_uncertainty = m_guess
-        sim.other_systematics = c_guess
-        sim.simulate_event()
-        sim.align_pad_traces()
-        normalizations[evt] = -sim.log_likelihood()
-
-
-
-    def to_minimize(params):
-        to_return = 0
-        m, c, = params
-        manager = multiprocessing.Manager()
-        for evt, sim in zip(evts_to_fit, trace_sims):
-            sim.other_systematics = c
-            sim.pad_gain_match_uncertainty = m
-            #sim.simulate_event()
-            #sim.align_pad_traces()
-            to_add = -sim.log_likelihood()/normalizations[evt]
-            print(evt, to_add)
-            to_return += to_add
-        print('==================',to_return, params, '===================')
-        return to_return
-
-
-#systematics_fit = opt.minimize(lambda params: to_minimize(params), (m_guess, c_guess), method="Powell", options={'ftol':0.01, 'xtol':0.01})
+        #normalizations[evts[i]] = new_sim.log_likelihood()
 
 
 if False:
@@ -407,17 +352,12 @@ def to_minimize(params):
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
         sim.pad_gain_match_uncertainty = m
-        #sim.simulate_event()
-        #sim.align_pad_traces()
-        to_add = -sim.log_likelihood()#/normalizations[evt]
-        #print(evt, to_add)
+        to_add = -sim.log_likelihood()
         to_return += to_add
     print('==================',to_return, m, c, '===================')
     return to_return
 
 systematics_results = opt.minimize(to_minimize, (0.1, 10))
 '''
-results oth this method:
-other systematics = 16.86638095
-pad gain match = 0.381959476
+
 '''
