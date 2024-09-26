@@ -286,10 +286,11 @@ def show_fit(evt):
     plt.show()
 
 #pressure = 860.3#need to nail this down better later, for now assume current offset #np.mean(Pbest)
+ll_thresh = [2*np.median(lls[cats==cat]) for cat in range(4)]
 
 evts_to_fit = []
 trace_sims = []
-normalizations = {}
+cats_to_fit = []
 for i in range(len(evts)):
     #if lls[i] <= ll_cutoff[cats[i]]:
     #if i == 127:
@@ -315,13 +316,16 @@ for i in range(len(evts)):
         if  val > max_residual_percent:
             max_residual_percent = val
     print(evts[i], max_residual_percent)
-    #only fit events with residuals no more than 40% of traces, and which are
-    if max_residual_percent < 0.4: 
+    #only fit events with residuals no more than 40% of traces
+    #and no more than 2x the median for the catagory
+    if max_residual_percent < 0.4 and new_sim.log_likelihood() < ll_thresh[cats[i]]: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
+        cats_to_fit.append(cats[i])
         #normalizations[evts[i]] = new_sim.log_likelihood()
 
-
+print('num events to fit:', len(evts_to_fit))
+print('catagories, counts:', np.unique(cats_to_fit, return_counts=True))
 if False:
     peak_residuals_fraction = []
     peak_vals = []
@@ -348,6 +352,8 @@ if False:
 
 def to_minimize(params):
     m, c = params
+    if m < 0 or c < 0:
+        return np.inf
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
@@ -357,7 +363,7 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-systematics_results = opt.minimize(to_minimize, (0.1, 10))
+systematics_results = opt.minimize(to_minimize, (0.5, 20))
 '''
 
 '''
