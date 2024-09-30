@@ -7,13 +7,18 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
+load_previous_fit = False
 
 import time
 import multiprocessing
 import pickle
+import os
+if not load_previous_fit:
+    os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
 import matplotlib.pylab as plt
+import matplotlib as mpl
 import scipy.optimize as opt
 
 from track_fitting import SingleParticleEvent
@@ -27,8 +32,6 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-load_previous_fit = True
-
 adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
 
@@ -36,6 +39,8 @@ detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for ab
 clock_freq = 50e6 #Hz, from e21062 config file on mac minis
 drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
 zscale = drift_speed/clock_freq
+
+pad_threshold = 60 #from looking at a number of background subtracted events, and not seeing any peaks below this
 
 h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                 zscale=0.9, #use same zscale as was used for cut
@@ -59,7 +64,7 @@ T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
 
-m_guess, c_guess =   0, 1 #guesses for pad gain match uncertainty and other systematics
+m_guess, c_guess = 0,1 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
@@ -75,6 +80,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     #want max likilihood to just be least squares for this fit
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
+    trace_sim.pad_threshold = pad_threshold
     #to get initial guess
     #Energy: from integrated charge
     #z: center of track
@@ -145,6 +151,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         trace_sim.sigma_xy = sigma_xy
         trace_sim.sigma_z = sigma_z
         trace_sim.initial_energy = E
+        trace_sim.pad_threshold = pad_threshold
         trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(pressure))
         trace_sim.simulate_event()
         to_return = -trace_sim.log_likelihood()
@@ -156,7 +163,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':100})
     #if method == 'Nelder-Mead':
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True})#, 'maxfev':10000, 'maxiter':10000})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
@@ -171,7 +178,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         plt.show()
     return res
 
-if False:
+if False: #try fitting one event to make sure it looks ok
     pads, traces = h5file.get_pad_traces(108, False)
     fit_event(pads, traces, 'proton', debug_plots=True)
 
@@ -305,6 +312,8 @@ for i in range(len(evts)):
     new_sim.phi = phis[i]
     new_sim.pad_gain_match_uncertainty = m_guess
     new_sim.other_systematics = c_guess
+    new_sim.pad_threshold = pad_threshold
+    
     pads, traces = h5file.get_pad_traces(evts[i], False)
     new_sim.set_real_data(pads, traces, 50, 10)
     new_sim.simulate_event()
@@ -318,7 +327,7 @@ for i in range(len(evts)):
     print(evts[i], max_residual_percent)
     #only fit events with residuals no more than 40% of traces
     #and no more than 2x the median for the catagory
-    if max_residual_percent < 0.4 and new_sim.log_likelihood() < ll_thresh[cats[i]]: 
+    if  new_sim.log_likelihood() < ll_thresh[cats[i]]: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
         cats_to_fit.append(cats[i])
@@ -349,10 +358,10 @@ peak_residuals_fraction = np.array(peak_residuals_fraction)
 peak_vals = np.array(peak_vals)
 
 pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
-print(pad_gain_match_uncertainty)
+print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
 def to_minimize(params):
-    c = params[0]
+    m, c = params
     if c < 0:
         return np.inf
     to_return = 0
@@ -361,10 +370,15 @@ def to_minimize(params):
         sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
         to_add = -sim.log_likelihood()
         to_return += to_add
-    print('==================',to_return, c, '===================')
+    print('==================',to_return, m, c, '===================')
     return to_return
 
-systematics_results = opt.minimize(to_minimize, (20,))
+if True:
+    systematics_results = opt.minimize(to_minimize, (m_guess, c_guess))
+    pad_gain_match_uncertainty,other_systematics = systematics_results.x
+else:
+    pad_gain_match_uncertainty,other_systematics = 0.7308398770265849, 11.94172668946808
+
 '''
 Fit with adaptive stopping powers, and doing max likilihood of both pad gain match uncertainty and other systematics
 num events to fit: 142
@@ -373,5 +387,65 @@ m,c= 0.7308398770265849, 11.94172668946808
 '''
 '''
 Same fit as above, but this time pad gain match from peaks only, and max likelihood for other systematics
-m=0.19464779124824114
+m, c=0.19464779124824114, 11.991125862279635
+
+with pad gain match set to 0: c=17.97
 '''
+
+plt.figure()
+plt.hist2d(peak_vals, peak_residuals_fraction, 100, norm=mpl.colors.LogNorm())
+plt.xlabel('peak value (adc counts)')
+plt.ylabel('peak residual fraction')
+plt.colorbar()
+
+plt.figure()
+plt.hist2d(peak_vals, peak_residuals_fraction*peak_vals, 100, norm=mpl.colors.LogNorm())
+plt.xlabel('peak value (adc counts)')
+plt.ylabel('peak residual (adc counts)')
+plt.colorbar()
+
+dcounts = 100
+counts = np.arange(150, 3050, dcounts)
+
+mean_res, median_res, std_res = [],[],[]
+mean_res_frac, median_res_frac, std_res_frac = [],[],[]
+for c in counts:
+    filter = (c -dcounts/2 < peak_vals) & (peak_vals < (c+dcounts/2))
+    mean_res.append(np.mean(peak_vals[filter]*peak_residuals_fraction[filter]))
+    median_res.append(np.median(peak_vals[filter]*peak_residuals_fraction[filter]))
+    std_res.append(np.std(peak_vals[filter]*peak_residuals_fraction[filter]))
+    mean_res_frac.append(np.mean(peak_residuals_fraction[filter]))
+    median_res_frac.append(np.median(peak_residuals_fraction[filter]))
+    std_res_frac.append(np.std(peak_residuals_fraction[filter]))
+
+plt.figure()
+plt.scatter(counts, mean_res, label='mean residuals')
+plt.scatter(counts, median_res, label='median residuals')
+plt.scatter(counts, std_res, label='residuals standard deviation')
+plt.legend()
+
+plt.figure()
+plt.scatter(counts, mean_res_frac, label='mean residual fraction')
+plt.scatter(counts, median_res_frac, label='median residual fraction')
+plt.scatter(counts, std_res_frac, label='residual fraction standard deviation')
+plt.legend()
+
+plt.show()
+
+
+for sim in trace_sims:
+    sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
+    sim.other_systematics = other_systematics
+
+def plot_likelihood(sim:SingleParticleEvent.SingleParticleEvent, var:str, ds:np.array):
+    x0 = sim.__dict__[var]
+    xs = x0 + ds
+    lls = []
+    for x in xs:
+        sim.__dict__[var] = x
+        sim.simulate_event()
+        lls.append(sim.log_likelihood())
+    plt.figure()
+    plt.scatter(ds, lls)
+    plt.show()
+    sim.__dict__[var] = x0#set it back when done

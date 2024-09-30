@@ -35,6 +35,10 @@ class SingleParticleEvent:
         self.sigma_z = 1 #mm
         self.zscale = 1.45 #mm/time bin
         self.counts_per_MeV = 1
+        #minimum number of counts above background required for the pad to fire
+        #only used when calculating log liklihood
+        self.pad_threshold = 0 
+        #TODO: implement clipping
         
         self.pad_gain_match_uncertainty = 0 #unitless
         self.other_systematics = 0 #adc counts
@@ -289,7 +293,10 @@ class SingleParticleEvent:
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
                 else: #pad was simulated firing, but did not
+                    #if trace < self.pad_threshold, pad would not have fired. Assume the experimental trace could be
+                    #anything less than this.
                     residuals = self.sim_traces[pad]
+                    residuals[np.abs(residuals) < self.pad_threshold] = 0
                 to_return -= self.num_trace_bins*0.5*np.log(2*np.pi)
                 to_return -= 0.5*np.log(np.linalg.det(cov_matrix))
                 residuals = np.matrix(residuals)
