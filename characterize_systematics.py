@@ -161,9 +161,9 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     
     init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
     
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':100})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
     #if method == 'Nelder-Mead':
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
@@ -178,7 +178,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         plt.show()
     return res
 
-if False: #try fitting one event to make sure it looks ok
+if True: #try fitting one event to make sure it looks ok
     pads, traces = h5file.get_pad_traces(108, False)
     fit_event(pads, traces, 'proton', debug_plots=True)
 
@@ -390,6 +390,9 @@ Same fit as above, but this time pad gain match from peaks only, and max likelih
 m, c=0.19464779124824114, 11.991125862279635
 
 with pad gain match set to 0: c=17.97
+
+===After adding pad threshold===
+
 '''
 
 plt.figure()
