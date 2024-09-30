@@ -296,7 +296,8 @@ class SingleParticleEvent:
                     #if trace < self.pad_threshold, pad would not have fired. Assume the experimental trace could be
                     #anything less than this.
                     residuals = self.sim_traces[pad]
-                    residuals[np.abs(residuals) < self.pad_threshold] = 0
+                    residuals[residuals < self.pad_threshold] = 0
+                    residuals[residuals >= self.pad_threshold] -= self.pad_threshold
                 to_return -= self.num_trace_bins*0.5*np.log(2*np.pi)
                 to_return -= 0.5*np.log(np.linalg.det(cov_matrix))
                 residuals = np.matrix(residuals)
