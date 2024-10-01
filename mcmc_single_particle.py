@@ -48,6 +48,8 @@ if __name__ == '__main__':
 
         shaping_time = 70e-9 #s, from e21062 config file on mac minis
 
+        pad_threshold = 65
+
 
         pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
 
@@ -81,15 +83,12 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*zscale
     num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
 
-    pad_gain_match_uncertainty = 0.7308398770265849
-    other_systematics = 11.94172668946808
 
-    #do initial minimization before starting MCMC
     def log_likelihood(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
         trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
-        trace_sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
-        trace_sim.other_systematics = other_systematics
+        trace_sim.pad_gain_match_uncertainty = m
+        trace_sim.other_systematics = c
         trace_sim.zscale = zscale
         trace_sim.counts_per_MeV = adc_scale_mu
         trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)#match trim threshold used for systematics determination\
@@ -109,8 +108,12 @@ if __name__ == '__main__':
         return to_return
 
     def log_priors(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
         #uniform priors
+        if m < 0 or m > 1:
+            return -np.inf
+        if c < 0 or c > 4000:
+            return -np.inf
         if x**2 + y**2 > 40**2:
             return -np.inf
         if z < zmin or z >zmax:
@@ -134,54 +137,59 @@ if __name__ == '__main__':
         return to_return
 
     fit_start_time = time.time()
-    nwalkers = 200
-    clustering_steps = 200
+    nwalkers = 250
+    clustering_steps = 100
+    times_to_repeat_clustering = 4
     post_cluster_steps=1000
-    ndim = 8
+    ndim = 10
 
     init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
                                 np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
-                                np.random.uniform(-np.pi, np.pi), np.random.uniform(0,40), np.random.uniform(0,40)] for i in range(nwalkers)]
+                                np.random.uniform(-np.pi, np.pi), np.random.uniform(0,40), np.random.uniform(0,40),
+                                np.random.uniform(0, 1), np.random.uniform(0,4000)] for i in range(nwalkers)]
 
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    backend_file = os.path.join(directory, 'init_run.h5')
-    backend = emcee.backends.HDFBackend(backend_file)
-    backend.reset(nwalkers, ndim)
 
     with multiprocessing.Pool() as pool:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                        # moves=[
-                                        #         (emcee.moves.DESnookerMove(), 0.1),
-                                        #         (emcee.moves.DEMove(), 0.9 * 0.9),
-                                        #         (emcee.moves.DEMove(gamma0=1.0), 0.9 * 0.1)
-                                        # ],
-                                        pool=pool)
+        for step in range(clustering_steps):
+            backend_file = os.path.join(directory, 'clustering_run%d.h5'%step)
+            backend = emcee.backends.HDFBackend(backend_file)
+            backend.reset(nwalkers, ndim)
+            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
+                                            #  moves=[
+                                            #          (emcee.moves.DESnookerMove(), 0.2),
+                                            #          (emcee.moves.StretchMove(), 0.6),
+                                            #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
+                                            #  ],
+                                            pool=pool)
 
-        for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
-            tau = sampler.get_autocorr_time(tol=0)
-            print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+            for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
+                tau = sampler.get_autocorr_time(tol=0)
+                print('iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
-        #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
-        ll_to_cluster = sampler.get_log_prob()[-1].reshape(-1,1)
-        cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
-        clusters_to_propagate = cluster_object.labels_==np.argmax(cluster_object.cluster_centers_)
-        samples_to_propagate = sampler.get_chain()[-1][clusters_to_propagate]
-        new_init_pos = list(samples_to_propagate)
+            #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
+            ll = sampler.get_log_prob()[-1]
+            ll_to_cluster = ll[np.isfinite(ll)].reshape(-1,1)
+            cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
+            clusters_to_propagate = cluster_object.labels_==np.argmax(cluster_object.cluster_centers_)
+            samples_to_propagate = sampler.get_chain()[-1][np.isfinite(ll)][clusters_to_propagate]
+            new_init_pos = list(samples_to_propagate)
 
-        #randomly select samples to perturb and add to the list until we have the desired number of walkers
-        while len(new_init_pos) < nwalkers:
-            i = np.random.randint(0, len(samples_to_propagate))
-            new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
+            #randomly select samples to perturb and add to the list until we have the desired number of walkers
+            while len(new_init_pos) < nwalkers:
+                i = np.random.randint(0, len(samples_to_propagate))
+                new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
+            init_walker_pos = new_init_pos
 
         #restart mcmc
-        backend_file = os.path.join(directory, 'best_cluster.h5')
+        backend_file = os.path.join(directory, 'final_run.h5')
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
-        for sample in sampler.sample(new_init_pos, iterations=post_cluster_steps, progress=True):
+        for sample in sampler.sample(init_walker_pos, iterations=post_cluster_steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
             print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))

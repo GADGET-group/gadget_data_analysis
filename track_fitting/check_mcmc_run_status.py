@@ -9,9 +9,9 @@ import sklearn.cluster as cluster
 
 if True:
     run_number, event_number= 124, 4
-    #filename = '../run%d_mcmc/event%d/init_run.h5'%(run_number, event_number)
-    filename = '../run%d_mcmc/event%d/best_cluster.h5'%(run_number, event_number)
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
+    filename = '../run%d_mcmc/event%d/clustering_run1'%(run_number, event_number)
+    #filename = '../run%d_mcmc/event%d/best_cluster.h5'%(run_number, event_number)
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
     theta_index, phi_index = 4,5
     ea_ep_plots = False
     tau = [2]
