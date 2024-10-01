@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = False
+load_previous_fit = True
 
 import time
 import multiprocessing
@@ -178,7 +178,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         plt.show()
     return res
 
-if True: #try fitting one event to make sure it looks ok
+if False: #try fitting one event to make sure it looks ok
     pads, traces = h5file.get_pad_traces(108, False)
     fit_event(pads, traces, 'proton', debug_plots=True)
 
@@ -362,12 +362,12 @@ print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
 def to_minimize(params):
     m, c = params
-    if c < 0:
+    if m < 0 or c < 0:
         return np.inf
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
-        sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
+        sim.pad_gain_match_uncertainty = m
         to_add = -sim.log_likelihood()
         to_return += to_add
     print('==================',to_return, m, c, '===================')
