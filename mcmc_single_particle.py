@@ -139,7 +139,7 @@ if __name__ == '__main__':
     fit_start_time = time.time()
     nwalkers = 250
     clustering_steps = 200
-    times_to_repeat_clustering = 4
+    times_to_repeat_clustering = 0
     post_cluster_steps=6000
     ndim = 10
 
@@ -156,7 +156,8 @@ if __name__ == '__main__':
 
     with multiprocessing.Pool() as pool:
         for step in range(times_to_repeat_clustering):
-            backend_file = os.path.join(directory, 'clustering_run%d.h5'%step)
+            backend_fname = 'clustering_run%d.h5'%step
+            backend_file = os.path.join(directory, backend_fname)
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
             sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
@@ -189,7 +190,12 @@ if __name__ == '__main__':
         backend_file = os.path.join(directory, 'final_run.h5')
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool,
+                                         moves=[
+                                                     (emcee.moves.DESnookerMove(), 0.2),
+                                                     (emcee.moves.StretchMove(), 0.6),
+                                                     (emcee.moves.DEMove(gamma0=1.0), 0.2)
+                                             ])
         for sample in sampler.sample(init_walker_pos, iterations=post_cluster_steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
             print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
