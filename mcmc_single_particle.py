@@ -83,12 +83,11 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*zscale
     num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
 
-
-    def log_likelihood(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
+    def get_sim(params):
+        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
         trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
-        trace_sim.pad_gain_match_uncertainty = m
-        trace_sim.other_systematics = c
+        trace_sim.pad_gain_match_uncertainty = 1.867
+        trace_sim.other_systematics = 13.5
         trace_sim.zscale = zscale
         trace_sim.counts_per_MeV = adc_scale_mu
         trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)#match trim threshold used for systematics determination\
@@ -101,39 +100,42 @@ if __name__ == '__main__':
         trace_sim.sigma_z = sigma_z
         trace_sim.adaptive_stopping_power = False
         trace_sim.num_stopping_power_points = num_stopping_points
-        
+        trace_sim.pad_threshold = pad_threshold
         trace_sim.simulate_event()
+        return trace_sim
+
+    def log_likelihood(params, print_out=False):
+        trace_sim = get_sim(params)
         to_return = trace_sim.log_likelihood()
+        if print_out:
+            print(params, to_return)
         #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
         return to_return
 
     def log_priors(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
         #uniform priors
-        if m < 0 or m > 1:
-            return -np.inf
-        if c < 0 or c > 4000:
-            return -np.inf
         if x**2 + y**2 > 40**2:
             return -np.inf
         if z < zmin or z >zmax:
             return -np.inf
         if theta < 0 or theta >= np.pi or phi < -2*np.pi or phi>2*np.pi:
             return -np.inf 
-        if sigma_xy < 0 or sigma_xy > 40:
+        if sigma_xy < 0 or sigma_xy > 20:
             return -np.inf
-        if sigma_z < 0 or sigma_z > 40:
+        if sigma_z < 0 or sigma_z > 20:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
-    def log_posterior(params):
+    def log_posterior(params, print_out=False):
         to_return = log_priors(params)
         if to_return != -np.inf:
             to_return +=  log_likelihood(params)
         if np.isnan(to_return):
             to_return = -np.inf
-        #print('log posterior: %e'%to_return)
+        if print_out:
+            print('log posterior: %e'%to_return, params)
         return to_return
 
     fit_start_time = time.time()
@@ -141,13 +143,36 @@ if __name__ == '__main__':
     clustering_steps = 200
     times_to_repeat_clustering = 0
     post_cluster_steps=6000
-    ndim = 10
+    ndim = 8
 
-    init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
-                                np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
-                                np.random.uniform(-np.pi, np.pi), np.random.uniform(0,40), np.random.uniform(0,40),
-                                np.random.uniform(0, 1), np.random.uniform(0,4000)] for i in range(nwalkers)]
+    #find global minimum of log posterior
+    print('finding global maximum of liklihood')
+    opt_res = opt.shgo(lambda params: -log_posterior(params, False), 
+                       ((np.max((0, E_prior.mu - E_prior.sigma*4)),E_prior.mu + E_prior.sigma*4),
+                        (xmin, xmax), (ymin, ymax), (zmin, zmax), (0, np.pi), (-np.pi, np.pi), (0.1, 20), (0.1,20)))
+    print(opt_res)
 
+    if True:
+        best_sim = get_sim(opt_res.x)
+        best_sim.plot_simulated_3d_data(threshold=25)
+        best_sim.plot_residuals_3d(threshold=25)
+        best_sim.plot_residuals()
+
+        plt.figure()
+        plt.title('log posterior vs E')
+        dE=0.1
+        Es = np.linspace(opt_res.x[0]-dE, opt_res.x[0]+dE)
+        lls = []
+        for E in Es:
+            params = np.copy(opt_res.x)
+            params[0] = E
+            lls.append(log_posterior(params))
+        plt.scatter(Es, lls)
+
+        plt.show()
+    
+    
+    init_walker_pos = opt_res.x + 1e-4*np.random.randn(nwalkers, ndim)
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
@@ -190,12 +215,7 @@ if __name__ == '__main__':
         backend_file = os.path.join(directory, 'final_run.h5')
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool,
-                                         moves=[
-                                                     (emcee.moves.DESnookerMove(), 0.2),
-                                                     (emcee.moves.StretchMove(), 0.6),
-                                                     (emcee.moves.DEMove(gamma0=1.0), 0.2)
-                                             ])
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
         for sample in sampler.sample(init_walker_pos, iterations=post_cluster_steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
             print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))

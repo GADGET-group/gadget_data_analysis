@@ -13,11 +13,11 @@ if True:
     run_number= 124
     steps = 0
     filenames = []
-    for event in [4]#,17,29,34,91]:
+    for event in [17]:
         for step in range(steps):
             filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']#, 'm', 'c']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None

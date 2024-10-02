@@ -39,6 +39,8 @@ detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for ab
 clock_freq = 50e6 #Hz, from e21062 config file on mac minis
 drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
 zscale = drift_speed/clock_freq
+shaping_time = 70e-9 #s, from e21062 config file on mac minis
+shaping_width  = shaping_time*clock_freq*2.355
 
 pad_threshold = 60 #from looking at a number of background subtracted events, and not seeing any peaks below this
 
@@ -64,13 +66,15 @@ T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
 
-m_guess, c_guess = 0,1 #guesses for pad gain match uncertainty and other systematics
+m_guess, c_guess, b_guess = 0, 0, 1 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
     trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
     trace_sim.zscale = zscale
     trace_sim.counts_per_MeV = adc_scale_mu
+    trace_sim.shaping_width = shaping_width
+    trace_sim.pre_shaping_systematics = c_guess
     trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=trim_threshold, trim_pad=int(10))
     #set use trimmed traces going forwards
     traces_to_fit = [trace_sim.traces_to_fit[pad] for pad in pads_to_fit]
@@ -79,7 +83,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         return 
     #want max likilihood to just be least squares for this fit
     trace_sim.pad_gain_match_uncertainty = m_guess
-    trace_sim.other_systematics = c_guess
+    trace_sim.other_systematics = b_guess
     trace_sim.pad_threshold = pad_threshold
     #to get initial guess
     #Energy: from integrated charge
@@ -161,11 +165,11 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     
     init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
     
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
     #if method == 'Nelder-Mead':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
@@ -311,7 +315,7 @@ for i in range(len(evts)):
     new_sim.theta = thetas[i]
     new_sim.phi = phis[i]
     new_sim.pad_gain_match_uncertainty = m_guess
-    new_sim.other_systematics = c_guess
+    new_sim.other_systematics = b_guess
     new_sim.pad_threshold = pad_threshold
     
     pads, traces = h5file.get_pad_traces(evts[i], False)
@@ -327,7 +331,7 @@ for i in range(len(evts)):
     print(evts[i], max_residual_percent)
     #only fit events with residuals no more than 40% of traces
     #and no more than 2x the median for the catagory
-    if  new_sim.log_likelihood() < ll_thresh[cats[i]]: 
+    if  True: #new_sim.log_likelihood() < ll_thresh[cats[i]]: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
         cats_to_fit.append(cats[i])
@@ -361,20 +365,19 @@ pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
 print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
 def to_minimize(params):
-    m, c = params
-    if m < 0 or c < 0:
-        return np.inf
+    m, c, b = params
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
-        sim.other_systematics = c
+        sim.other_systematics = b
         sim.pad_gain_match_uncertainty = m
+        sim.set_pre_shaping_systematics(shaping_width, c)
         to_add = -sim.log_likelihood()
         to_return += to_add
-    print('==================',to_return, m, c, '===================')
+    print('==================',to_return, m, c, b, '===================')
     return to_return
 
 if True:
-    systematics_results = opt.minimize(to_minimize, (m_guess, c_guess))
+    systematics_results = opt.minimize(to_minimize, (m_guess, c_guess, b_guess), method='Powell')
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
     pad_gain_match_uncertainty,other_systematics = 0.7308398770265849, 11.94172668946808

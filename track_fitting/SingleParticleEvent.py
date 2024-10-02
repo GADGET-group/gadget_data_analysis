@@ -40,8 +40,13 @@ class SingleParticleEvent:
         self.pad_threshold = 0 
         #TODO: implement clipping
         
+        #parameters used when calculating likelihood
         self.pad_gain_match_uncertainty = 0 #unitless
-        self.other_systematics = 0 #adc counts
+        self.pre_shaping_systematics = 0#adc units
+        self.shaping_width = 1 #width in time bins
+        self.shaping_cov_matrix = None
+        self.other_systematics = 0 #adc counts, applied to each bin independently
+        
 
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
         self.load_srim_table(particle, gas_density)
@@ -77,6 +82,20 @@ class SingleParticleEvent:
                 if pad != -1:
                     self.pad_to_xy_index[int(pad)] = (x,y)
     
+    def set_pre_shaping_systematics(self, shaping_width, systematics_magnitude):
+        '''
+        The propper way to set shaping width and systematics magnitude.
+        '''
+        self.shaping_width = shaping_width
+        self.pre_shaping_systematics = systematics_magnitude
+        self.shaping_cov_matrix = np.zeros((self.num_trace_bins, self.num_trace_bins))
+        f_ik = lambda i, k: 0.5*(scipy.special.erf((np.abs(i - k)+0.5)/np.sqrt(2)/self.pre_shaping_systematics) \
+                                 - scipy.special.erf((np.abs(i - k)-0.5)/np.sqrt(2)/self.pre_shaping_systematics))
+        i, j = np.meshgrid(np.arange(self.num_trace_bins), np.arange(self.num_trace_bins))
+        self.shaping_cov_matrix = np.matrix(f_ik(i, j)*(1+self.pad_gain_match_uncertainty**2)*self.pre_shaping_systematics**2)
+
+
+
     def get_num_stopping_points_for_energy(self, E):
         return int(np.ceil(self.points_per_bin*self.srim_table.get_stopping_distance(E)/np.min((self.pad_width, self.zscale))))
         
@@ -248,6 +267,7 @@ class SingleParticleEvent:
                 for adj_pad in self.get_adjacent_pads(pad):
                     if adj_pad not in self.pads_to_sim:
                         self.pads_to_sim.append(adj_pad)
+        self.set_pre_shaping_systematics(self.shaping_width, self.pre_shaping_systematics) #recalculate this portion of the covariance matrix
 
     def get_residuals(self):
         sim_trace_dict = self.sim_traces
@@ -285,6 +305,7 @@ class SingleParticleEvent:
         for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
             if pad in self.sim_traces: #if the pad trace was simulated
                 cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
+                cov_matrix += self.shaping_cov_matrix
                 for i in range(self.num_trace_bins):
                     for j in range(self.num_trace_bins):
                         cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
@@ -328,14 +349,14 @@ class SingleParticleEvent:
     def plot_residuals(self):
         self.plot_traces(self.get_residuals(), 'residuals')
 
-    def plot_xyze(self, xs, ys, zs, es, title='', energy_threshold=-np.inf):
+    def plot_xyze(self, xs, ys, zs, es, title='', threshold=-np.inf):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         # Plot the 3D scatter plot with energy values as color
-        xs = xs[es>energy_threshold]
-        ys = ys[es>energy_threshold]
-        zs = zs[es>energy_threshold]
-        es = es[es>energy_threshold]
+        xs = xs[es>threshold]
+        ys = ys[es>threshold]
+        zs = zs[es>threshold]
+        es = es[es>threshold]
         sc = ax.scatter(xs, ys,zs, c=es,  alpha=0.5)#, cmap='inferno', marker='o',)# norm=matplotlib.colors.LogNorm())
         # Add colorbar
         cbar = plt.colorbar(sc, ax=ax)
@@ -351,11 +372,11 @@ class SingleParticleEvent:
     def plot_simulated_3d_data(self,  title='simulated_data', threshold=-np.inf): #show plots of initial guess
         self.plot_xyze(*self.get_xyze(threshold), title, threshold)
     
-    def plot_residuals_3d(self, title='residuals', energy_threshold=0):
+    def plot_residuals_3d(self, title='residuals', threshold=0):
         #in this case treshold is applied to absolute value
         xs, ys, zs, es = self.get_residuals_xyze()
-        xs = xs[np.abs(es)>energy_threshold]
-        ys = ys[np.abs(es)>energy_threshold]
-        zs = zs[np.abs(es)>energy_threshold]
-        es = es[np.abs(es)>energy_threshold]
+        xs = xs[np.abs(es)>threshold]
+        ys = ys[np.abs(es)>threshold]
+        zs = zs[np.abs(es)>threshold]
+        es = es[np.abs(es)>threshold]
         self.plot_xyze(xs, ys, zs, es, title)
