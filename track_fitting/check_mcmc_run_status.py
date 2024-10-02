@@ -1,3 +1,5 @@
+import os
+
 import emcee
 import matplotlib.pylab as plt
 import corner
@@ -8,172 +10,184 @@ import sklearn.cluster as cluster
 
 
 if True:
-    run_number, event_number= 124, 4
-    filename = '../run%d_mcmc/event%d/clustering_run1'%(run_number, event_number)
-    #filename = '../run%d_mcmc/event%d/best_cluster.h5'%(run_number, event_number)
+    run_number= 124
+    step = 2
+    filenames = []
+    for event in [4,17,29,34,91]:
+        for step in range(4):
+            filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+        filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
     theta_index, phi_index = 4,5
-    ea_ep_plots = False
     tau = [2]
+    Ea_Ep_labels = None
 if False:
     run_number, event_number, beta = 124, 68192, 1
     #filename = '../run%d_palpha_mcmc/event%d/initial_run_beta%f.h5'%(run_number, event_number, beta)
-    filename = './run%d_palpha_mcmc/event%d/cluster0.h5'%(run_number, event_number)
+    filepath = './run%d_palpha_mcmc/event%d/cluster0.h5'%(run_number, event_number)
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
     Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     tau = [100,400]
 
-reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
+for filepath in filenames:
+    base_fname = os.path.splitext(filepath)[0]
+    reader = emcee.backends.HDFBackend(filename=filepath, read_only=True)
+    with open(base_fname+'.txt', 'w') as output_text_file:
+        samples = reader.get_chain()
+        log_prob = reader.get_log_prob()
+
+        show_time_series_plots = True
+
+        if show_time_series_plots:
+            #show time series
+            fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
+            for i in range(len(labels)):
+                ax = axes[i]
+                to_plot = samples[:, :, i]
+                if labels[i] == 'theta' or labels[i] == 'phi':
+                    to_plot = np.degrees(to_plot)
+                ax.plot(to_plot, "k", alpha=0.3)
+                ax.set_xlim(0, len(samples))
+                ax.set_ylabel(labels[i])
+                ax.yaxis.set_label_coords(-0.1, 0.5)
+            axes[-1].set_xlabel("step number")
+            plt.savefig(base_fname+'_chain.png')
+
+            #show plot of ll vs phi in last step
+            thetas = samples[-1][:, theta_index]
+            phis = samples[-1][:, phi_index]
+            plt.figure()
+            plt.title("before clustering")
+            plt.scatter(np.degrees(thetas), np.degrees(phis), c=log_prob[-1])
+            plt.colorbar(label="log prob")
+            plt.xlabel('theta (deg)')
+            plt.ylabel('phi (deg)')
+            plt.savefig(base_fname+'_theta_phi_ll.png')
+            
 
 
-samples = reader.get_chain()
-log_prob = reader.get_log_prob()
+        #make plot with proton and alpha energies, instead of total and Ea_frac
+        if show_time_series_plots and Ea_Ep_labels != None:
+            Ea_Ep_samples = np.copy(samples)
+            Ea_Ep_samples[:,:,0] = samples[:,:,0]*samples[:,:,1]
+            Ea_Ep_samples[:,:,1] = samples[:,:,0]*(1-samples[:,:,1])
+            fig, axes = plt.subplots(len(Ea_Ep_labels), figsize=(10, 7), sharex=True)#len(labels)
+            for i in range(len(labels)):
+                ax = axes[i]
+                to_plot = Ea_Ep_samples[:, :, i]
+                if labels[i] == 'theta' or labels[i] == 'phi':
+                    to_plot = np.degrees(to_plot)
+                ax.plot(to_plot, "k", alpha=0.3)
+                ax.set_xlim(0, len(Ea_Ep_samples))
+                ax.set_ylabel(Ea_Ep_labels[i])
+                ax.yaxis.set_label_coords(-0.1, 0.5)
+            axes[-1].set_xlabel("step number")
 
-show_time_series_plots = True
+            #scatter plot of Ea and Ep color coded by posterior
+            Ea = Ea_Ep_samples[-1][:, 0]
+            Ep = Ea_Ep_samples[-1][:, 1]
+            plt.figure()
+            plt.scatter(Ea, Ep, c=log_prob[-1])
+            plt.colorbar(label="log prob")
+            plt.xlabel('Ea')
+            plt.ylabel('Ep')
+            plt.savefig(base_fname+'Ea_Ep_ll.png')
 
-if show_time_series_plots:
-    #show time series
-    fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
-    for i in range(len(labels)):
-        ax = axes[i]
-        to_plot = samples[:, :, i]
-        if labels[i] == 'theta' or labels[i] == 'phi':
-            to_plot = np.degrees(to_plot)
-        ax.plot(to_plot, "k", alpha=0.3)
-        ax.set_xlim(0, len(samples))
-        ax.set_ylabel(labels[i])
-        ax.yaxis.set_label_coords(-0.1, 0.5)
-    axes[-1].set_xlabel("step number")
+        #plt.show()
 
-    #show plot of ll vs phi in last step
-    thetas = samples[-1][:, theta_index]
-    phis = samples[-1][:, phi_index]
-    plt.figure()
-    plt.title("before clustering")
-    plt.scatter(np.degrees(thetas), np.degrees(phis), c=log_prob[-1])
-    plt.colorbar(label="log prob")
-    plt.xlabel('theta (deg)')
-    plt.ylabel('phi (deg)')
+        tau_auto=reader.get_autocorr_time(tol=0)
+        output_text_file.write('autocorrelation times: '+str(tau_auto)+'\n')
 
-#make plot with proton and alpha energies, instead of total and Ea_frac
-if show_time_series_plots and ea_ep_plots:
-    Ea_Ep_samples = np.copy(samples)
-    Ea_Ep_samples[:,:,0] = samples[:,:,0]*samples[:,:,1]
-    Ea_Ep_samples[:,:,1] = samples[:,:,0]*(1-samples[:,:,1])
-    fig, axes = plt.subplots(len(Ea_Ep_labels), figsize=(10, 7), sharex=True)#len(labels)
-    for i in range(len(labels)):
-        ax = axes[i]
-        to_plot = Ea_Ep_samples[:, :, i]
-        if labels[i] == 'theta' or labels[i] == 'phi':
-            to_plot = np.degrees(to_plot)
-        ax.plot(to_plot, "k", alpha=0.3)
-        ax.set_xlim(0, len(Ea_Ep_samples))
-        ax.set_ylabel(Ea_Ep_labels[i])
-        ax.yaxis.set_label_coords(-0.1, 0.5)
-    axes[-1].set_xlabel("step number")
+        if True not in np.isnan(tau_auto):
+            tau = tau_auto
+        burnin = int(2 * np.max(tau))
+        thin = int(0.5 * np.min(tau))
+        output_text_file.write('burnin: %f\n'%burnin)
+        output_text_file.write('thin: %f\n'%thin)
 
-    #scatter plot of Ea and Ep color coded by posterior
-    Ea = Ea_Ep_samples[-1][:, 0]
-    Ep = Ea_Ep_samples[-1][:, 1]
-    plt.figure()
-    plt.scatter(Ea, Ep, c=log_prob[-1])
-    plt.colorbar(label="log prob")
-    plt.xlabel('Ea')
-    plt.ylabel('Ep')
-
-plt.show()
-
-tau_auto=reader.get_autocorr_time(tol=0)
-print('autocorrelation times:', tau)
-
-if True not in np.isnan(tau_auto):
-    tau = tau_auto
-burnin = int(2 * np.max(tau))
-thin = int(0.5 * np.min(tau))
-
-#flat_samples = reader.get_chain(discard=0, thin=1, flat=True)
-#corner.corner(flat_samples, labels=labels)
-flat_samples = reader.get_chain(discard=burnin, thin=thin, flat=True)
-
-ndim = len(labels)
-for i in range(ndim):
-    mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
-    if labels[i] == 'theta' or labels[i] == 'phi':
-        mcmc = np.degrees(mcmc)
-    q = np.diff(mcmc)
-    txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
-    txt = txt.format(mcmc[1], q[0], q[1], labels[i])
-    print(txt)
-if True: #make corner plots
-    corner.corner(flat_samples, labels=labels)
-    plt.savefig('corner_plot.png')
-    if ea_ep_plots:
-        EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
-        EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
-        EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
-        corner.corner(EaEp_flat, labels=Ea_Ep_labels)
-        plt.savefig('corner_plot_EaEp.png')
-
+        #flat_samples = reader.get_chain(discard=0, thin=1, flat=True)
+        #corner.corner(flat_samples, labels=labels)
+        flat_samples = reader.get_chain(discard=burnin, thin=thin, flat=True)
 
         ndim = len(labels)
         for i in range(ndim):
-            mcmc = np.percentile(EaEp_flat[:, i], [16, 50, 84])
-            if Ea_Ep_labels[i] == 'theta' or Ea_Ep_labels[i] == 'phi':
+            mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+            if labels[i] == 'theta' or labels[i] == 'phi':
                 mcmc = np.degrees(mcmc)
             q = np.diff(mcmc)
             txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
-            txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
-            print(txt)
+            txt = txt.format(mcmc[1], q[0], q[1], labels[i])
+            output_text_file.write('%s\n'%txt)
+        if True: #make corner plots
+            corner.corner(flat_samples, labels=labels)
+            plt.savefig(base_fname+'_corner_plot.png')
+            if Ea_Ep_labels != None:
+                EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
+                EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
+                EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
+                corner.corner(EaEp_flat, labels=Ea_Ep_labels)
+                plt.savefig(base_fname+'corner_plot_EaEp.png')
 
-if False:
-    h5_folder = '../../shared/Run_Data/'
-    run_number = 124
-    run_h5_path = h5_folder +'run_%04d.h5'%run_number
 
-    clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-    drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+                ndim = len(labels)
+                for i in range(ndim):
+                    mcmc = np.percentile(EaEp_flat[:, i], [16, 50, 84])
+                    if Ea_Ep_labels[i] == 'theta' or Ea_Ep_labels[i] == 'phi':
+                        mcmc = np.degrees(mcmc)
+                    q = np.diff(mcmc)
+                    txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
+                    txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
+                    output_text_file.write('%s\n'%txt)
 
-    h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
-                                    zscale=drift_speed/clock_freq,
-                                    flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-    h5file.background_subtract_mode='fixed window'
-    h5file.data_select_mode='near peak'
-    h5file.remove_outliers=True
-    h5file.near_peak_window_width = 50
-    h5file.require_peak_within= (-np.inf, np.inf)
-    h5file.num_background_bins=(160, 250)
-    h5file.ic_counts_threshold = 25
+        if False:
+            h5_folder = '../../shared/Run_Data/'
+            run_number = 124
+            run_h5_path = h5_folder +'run_%04d.h5'%run_number
 
-    def get_sim(params, grid_size=0.5, pad_gain_match_uncertainty=0.381959476, other_systematics=16.86638095):
-        rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-        T = 20+273.15 #K
-        get_gas_density = lambda P: rho0*(P/760)*(300./T)
-        sim=ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(800), 'proton')
-        sim.initial_energy = params[1]
-        sim.point_energy_deposition = params[0]
-        sim.initial_point = params[2:5]
-        sim.theta = params[5]
-        sim.phi = params[6]
-        sim.charge_spreading_sigma = 2
-        sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
-        sim.other_systematics = other_systematics
-        sim.grid_resolution = grid_size
-        #use theoretical zscale
-        
-        sim.zscale =  drift_speed/clock_freq
-        shaping_time = 70e-9 #s, from e21062 config file on mac minis
-        sim.shaping_width = shaping_time*clock_freq*2.355
-        sim.counts_per_MeV = 86431./0.757
-        #
-        pads, traces = h5file.get_pad_traces(event_number, False)
-        sim.set_real_data(pads, traces, 50, int(sim.shaping_width))
-        sim.simulate_event()
-        sim.align_pad_traces()
-        return sim
-    
+            clock_freq = 50e6 #Hz, from e21062 config file on mac minis
+            drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
 
-    #sim.plot_simulated_3d_data(mode='aligned', threshold=25)
-    #sim.plot_residuals_3d(energy_threshold=25)
-    #sim.plot_residuals()
-    #print(sim.log_likelihood())
-    #plt.show(block=False)
+            h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
+                                            zscale=drift_speed/clock_freq,
+                                            flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+            h5file.background_subtract_mode='fixed window'
+            h5file.data_select_mode='near peak'
+            h5file.remove_outliers=True
+            h5file.near_peak_window_width = 50
+            h5file.require_peak_within= (-np.inf, np.inf)
+            h5file.num_background_bins=(160, 250)
+            h5file.ic_counts_threshold = 25
+
+            def get_sim(params, grid_size=0.5, pad_gain_match_uncertainty=0.381959476, other_systematics=16.86638095):
+                rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
+                T = 20+273.15 #K
+                get_gas_density = lambda P: rho0*(P/760)*(300./T)
+                sim=ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(800), 'proton')
+                sim.initial_energy = params[1]
+                sim.point_energy_deposition = params[0]
+                sim.initial_point = params[2:5]
+                sim.theta = params[5]
+                sim.phi = params[6]
+                sim.charge_spreading_sigma = 2
+                sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
+                sim.other_systematics = other_systematics
+                sim.grid_resolution = grid_size
+                #use theoretical zscale
+                
+                sim.zscale =  drift_speed/clock_freq
+                shaping_time = 70e-9 #s, from e21062 config file on mac minis
+                sim.shaping_width = shaping_time*clock_freq*2.355
+                sim.counts_per_MeV = 86431./0.757
+                #
+                pads, traces = h5file.get_pad_traces(event_number, False)
+                sim.set_real_data(pads, traces, 50, int(sim.shaping_width))
+                sim.simulate_event()
+                sim.align_pad_traces()
+                return sim
+            
+
+            #sim.plot_simulated_3d_data(mode='aligned', threshold=25)
+            #sim.plot_residuals_3d(energy_threshold=25)
+            #sim.plot_residuals()
+            #print(sim.log_likelihood())
+            #plt.show(block=False)

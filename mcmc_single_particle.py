@@ -138,9 +138,9 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 250
-    clustering_steps = 100
+    clustering_steps = 200
     times_to_repeat_clustering = 4
-    post_cluster_steps=1000
+    post_cluster_steps=6000
     ndim = 10
 
     init_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(xmin, xmax), 
@@ -155,7 +155,7 @@ if __name__ == '__main__':
 
 
     with multiprocessing.Pool() as pool:
-        for step in range(clustering_steps):
+        for step in range(times_to_repeat_clustering):
             backend_file = os.path.join(directory, 'clustering_run%d.h5'%step)
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
