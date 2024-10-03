@@ -163,7 +163,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
     #if method == 'Nelder-Mead':
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True})#, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
@@ -376,7 +376,7 @@ if False:
     systematics_results = opt.minimize(to_minimize, (m_guess, c_guess))
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
-    pad_gain_match_uncertainty,other_systematics = 1.70585, 13.76306
+    pad_gain_match_uncertainty,other_systematics = m_guess, c_guess
 
 '''
 Fit with adaptive stopping powers, and doing max likilihood of both pad gain match uncertainty and other systematics
