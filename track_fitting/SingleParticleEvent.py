@@ -152,7 +152,7 @@ class SingleParticleEvent:
                              erf((dy - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))
                 trace += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
             #adc_correction_factor = 1+1.558e-1 - 2.968e-5*trace
-            #self.sim_traces[pad] = trace*adc_correction_factor
+            self.sim_traces[pad] = trace#*adc_correction_factor
         time3 = time.time()
         
         
