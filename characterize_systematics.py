@@ -327,10 +327,10 @@ for i in range(len(evts)):
     print(evts[i], max_residual_percent)
     #only fit events with residuals no more than 40% of traces
     #and no more than 2x the median for the catagory
-    if  new_sim.log_likelihood() < ll_thresh[cats[i]]: 
+    if  max_residual_percent < 0.40: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
-        cats_to_fit.append(cats[i])
+        cats_to_fit.append(cats[i]) 
         #normalizations[evts[i]] = new_sim.log_likelihood()
 
 print('num events to fit:', len(evts_to_fit))
@@ -361,12 +361,11 @@ pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
 print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
 def to_minimize(params):
-    m, c, b = params
+    m, c = params
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
         sim.pad_gain_match_uncertainty = m
-        sim.correlated_systematics = b
         to_add = -sim.log_likelihood()
         to_return += to_add
     print('==================',to_return, m, c, '===================')
@@ -394,6 +393,8 @@ with pad gain match set to 0: c=17.97
 when including all pads: 1.867, 13.5
 fitting only included pads observed to fire: 1.70585, 13.76306
 And adding in correlated systematics (gain match, uncorrelated correlated): leads to same thing but uncorrelated = 0
+After tring to correct for non-linear gain:  0.4803254606352363 7.396550896490688
+
 '''
 
 plt.figure()
