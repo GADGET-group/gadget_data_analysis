@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = True
+load_previous_fit = False
 
 import time
 import multiprocessing
@@ -64,7 +64,7 @@ T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
 
-m_guess, c_guess = 0,1 #guesses for pad gain match uncertainty and other systematics
+m_guess, c_guess = 0.26,13 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
@@ -161,9 +161,9 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     
     init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
     
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
     #if method == 'Nelder-Mead':
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
@@ -178,7 +178,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         plt.show()
     return res
 
-if False: #try fitting one event to make sure it looks ok
+if True: #try fitting one event to make sure it looks ok
     pads, traces = h5file.get_pad_traces(108, False)
     fit_event(pads, traces, 'proton', debug_plots=True)
 
@@ -361,21 +361,22 @@ pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
 print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
 def to_minimize(params):
-    m, c = params
+    m, c, b = params
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
         sim.pad_gain_match_uncertainty = m
+        sim.correlated_systematics = b
         to_add = -sim.log_likelihood()
         to_return += to_add
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if True:
+if False:
     systematics_results = opt.minimize(to_minimize, (m_guess, c_guess))
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
-    pad_gain_match_uncertainty,other_systematics = 0.7308398770265849, 11.94172668946808
+    pad_gain_match_uncertainty,other_systematics = 1.70585, 13.76306
 
 '''
 Fit with adaptive stopping powers, and doing max likilihood of both pad gain match uncertainty and other systematics
@@ -389,8 +390,10 @@ m, c=0.19464779124824114, 11.991125862279635
 
 with pad gain match set to 0: c=17.97
 
-===After adding pad threshold===
-
+===After adding pad threshold and ===
+when including all pads: 1.867, 13.5
+fitting only included pads observed to fire: 1.70585, 13.76306
+And adding in correlated systematics (gain match, uncorrelated correlated): leads to same thing but uncorrelated = 0
 '''
 
 plt.figure()
