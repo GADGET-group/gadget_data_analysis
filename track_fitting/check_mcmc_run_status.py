@@ -13,7 +13,7 @@ if True:
     run_number= 124
     steps = 0
     filenames = []
-    for event in [17]:
+    for event in [4,17,29,34,91]:
         for step in range(steps):
             filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))

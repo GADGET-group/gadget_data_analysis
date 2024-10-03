@@ -48,7 +48,7 @@ if __name__ == '__main__':
 
         shaping_time = 70e-9 #s, from e21062 config file on mac minis
 
-        pad_threshold = 65
+        pad_threshold = 70
 
 
         pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
@@ -110,7 +110,7 @@ if __name__ == '__main__':
         if print_out:
             print(params, to_return)
         #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
-        return to_return
+        return to_return/(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
         E, x, y, z, theta, phi, sigma_xy, sigma_z = params

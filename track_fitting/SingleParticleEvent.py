@@ -40,13 +40,8 @@ class SingleParticleEvent:
         self.pad_threshold = 0 
         #TODO: implement clipping
         
-        #parameters used when calculating likelihood
         self.pad_gain_match_uncertainty = 0 #unitless
-        self.pre_shaping_systematics = 0#adc units
-        self.shaping_width = 1 #width in time bins
-        self.shaping_cov_matrix = None
-        self.other_systematics = 0 #adc counts, applied to each bin independently
-        
+        self.other_systematics = 0 #adc counts
 
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
         self.load_srim_table(particle, gas_density)
@@ -82,20 +77,6 @@ class SingleParticleEvent:
                 if pad != -1:
                     self.pad_to_xy_index[int(pad)] = (x,y)
     
-    def set_pre_shaping_systematics(self, shaping_width, systematics_magnitude):
-        '''
-        The propper way to set shaping width and systematics magnitude.
-        '''
-        self.shaping_width = shaping_width
-        self.pre_shaping_systematics = systematics_magnitude
-        self.shaping_cov_matrix = np.zeros((self.num_trace_bins, self.num_trace_bins))
-        f_ik = lambda i, k: 0.5*(scipy.special.erf((np.abs(i - k)+0.5)/np.sqrt(2)/self.pre_shaping_systematics) \
-                                 - scipy.special.erf((np.abs(i - k)-0.5)/np.sqrt(2)/self.pre_shaping_systematics))
-        i, j = np.meshgrid(np.arange(self.num_trace_bins), np.arange(self.num_trace_bins))
-        self.shaping_cov_matrix = np.matrix(f_ik(i, j)*(1+self.pad_gain_match_uncertainty**2)*self.pre_shaping_systematics**2)
-
-
-
     def get_num_stopping_points_for_energy(self, E):
         return int(np.ceil(self.points_per_bin*self.srim_table.get_stopping_distance(E)/np.min((self.pad_width, self.zscale))))
         
@@ -267,7 +248,6 @@ class SingleParticleEvent:
                 for adj_pad in self.get_adjacent_pads(pad):
                     if adj_pad not in self.pads_to_sim:
                         self.pads_to_sim.append(adj_pad)
-        self.set_pre_shaping_systematics(self.shaping_width, self.pre_shaping_systematics) #recalculate this portion of the covariance matrix
 
     def get_residuals(self):
         sim_trace_dict = self.sim_traces
@@ -305,7 +285,6 @@ class SingleParticleEvent:
         for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
             if pad in self.sim_traces: #if the pad trace was simulated
                 cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
-                cov_matrix += self.shaping_cov_matrix
                 for i in range(self.num_trace_bins):
                     for j in range(self.num_trace_bins):
                         cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
