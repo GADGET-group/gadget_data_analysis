@@ -9,7 +9,7 @@ import sklearn.cluster as cluster
 #from raw_viewer import raw_h5_file
 
 
-if True:
+if False:
     run_number= 124
     steps = 5
     filenames = []
@@ -23,11 +23,11 @@ if True:
     Ea_Ep_labels = None
 else:
     run_number= 124
-    steps = 5
+    steps = 3
     filenames = []
-    for event in [87480]:
+    for event in [17,19699,51777,87480]:
         for step in range(steps):
-            filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+            filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
     theta_index, phi_index = 5,6

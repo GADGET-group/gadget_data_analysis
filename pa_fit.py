@@ -188,7 +188,7 @@ if __name__ == '__main__':
                              np.random.uniform(0, 20), np.random.uniform(0,20),
                              np.random.uniform(0,1), np.random.uniform(0,20)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
-    directory = 'run%d_mcmc/event%d'%(run_number, event_num)
+    directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 
