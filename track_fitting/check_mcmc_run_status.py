@@ -23,12 +23,12 @@ if False:
     Ea_Ep_labels = None
 else:
     run_number= 124
-    steps = 3
+    steps = 5
     filenames = []
-    for event in [17,19699,51777,87480]:
+    for event in [17,19699,51777,87480, 68192, 68087]:
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
-        #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
+        filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
     theta_index, phi_index = 5,6
     tau = [2]
@@ -143,6 +143,8 @@ for filepath in filenames:
                     txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
                     txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
                     output_text_file.write('%s\n'%txt)
+
+        plt.close('all') 
 
         if False:
             h5_folder = '../../shared/Run_Data/'
