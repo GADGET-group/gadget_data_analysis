@@ -16,18 +16,23 @@ if True:
     for event in [17,29,34,43,91]:
         for step in range(steps):
             filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
-        #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
+        filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None
-if False:
-    run_number, event_number, beta = 124, 68192, 1
-    #filename = '../run%d_palpha_mcmc/event%d/initial_run_beta%f.h5'%(run_number, event_number, beta)
-    filepath = './run%d_palpha_mcmc/event%d/cluster0.h5'%(run_number, event_number)
-    labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
-    tau = [100,400]
+else:
+    run_number= 124
+    steps = 5
+    filenames = []
+    for event in [87480]:
+        for step in range(steps):
+            filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+        #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
+    labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
+    theta_index, phi_index = 5,6
+    tau = [2]
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
 
 for filepath in filenames:
     base_fname = os.path.splitext(filepath)[0]
