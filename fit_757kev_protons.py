@@ -214,7 +214,7 @@ if not load_previous_fit:
                 processes[-1].start()
             else:
                 fit_event(pads, traces, ptype, 50, n, fit_results_dict)
-            events.append.append(n)
+            events.append(n)
             print(len(events))
         n += 1
     #wait for all processes to end
