@@ -1,30 +1,31 @@
-#turn off numpy multithreading to avoid conflicts with emcee
-import os
-os.environ["OMP_NUM_THREADS"] = "1"
-
 import time
 import os
-import multiprocessing
+os.environ["OMP_NUM_THREADS"] = "1"
+import sys
 
 import numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
-import corner
 import sklearn.cluster as cluster
+import multiprocessing
+
 import emcee
+import corner
 
 from track_fitting import ParticleAndPointDeposition
 from raw_viewer import raw_h5_file
 
-#folder = '/mnt/analysis/e21072/gastest_h5_files/'
-folder = '../../shared/Run_Data/'
-run_number = 124
-event_num = 68192
-run_h5_path = folder +'run_%04d.h5'%run_number
+if __name__ == '__main__':
+    run_number, event_num = sys.argv[1:]
+    particle_type = 'proton'
+    run_number = int(run_number)
+    event_num = int(event_num)
+    #folder = '/mnt/analysis/e21072/gastest_h5_files/'
+    folder = '../../shared/Run_Data/'
 
-run_init_fit = True #if false, will look for h5 file from previously run intiial fit
 
-if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
+    run_h5_path = folder +'run_%04d.h5'%run_number
+
     if run_number == 124:
         adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
         detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
@@ -34,6 +35,7 @@ if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
         zscale = drift_speed/clock_freq
 
+        ic_threshold = 25
         h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                         zscale=zscale,
                                         flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -44,210 +46,190 @@ if folder == '../../shared/Run_Data/':#folder == '/mnt/analysis/e21072/h5test/':
         h5file.require_peak_within= (-np.inf, np.inf)
         h5file.num_background_bins=(160, 250)
         h5file.zscale = zscale
-        h5file.ic_counts_threshold = 24
 
         shaping_time = 70e-9 #s, from e21062 config file on mac minis
-        shaping_width  = shaping_time*clock_freq*2.355
+
+        pad_threshold = 70
+
 
         pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
-        charge_spread = 2. #mm, value used when fitting systematics
 
-        
-rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-T = 20+273.15 #K
-get_gas_density = lambda P: rho0*(P/760)*(300./T)
-
+            
+    rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
+    T = 20+273.15 #K
+    get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
 
-pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
 
-#MCMC priors
-class GaussianVar:
-    def __init__(self, mu, sigma):
-        self.mu, self.sigma  = mu, sigma
+    pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
 
-    def log_likelihood(self, val):
-        return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
+    #MCMC priors
+    class GaussianVar:
+        def __init__(self, mu, sigma):
+            self.mu, self.sigma  = mu, sigma
 
-max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
-E_from_ic = measured_counts/adc_scale_mu
-E_prior = GaussianVar(E_from_ic, detector_E_sigma(E_from_ic))
-x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
-xmin, xmax = np.min(x_real), np.max(x_real)
-ymin, ymax = np.min(y_real), np.max(y_real)
-zmin, zmax = 5, 400
+        def log_likelihood(self, val):
+            return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
 
-pad_gain_match_uncertainty = 0.381959476
-other_systematics = 16.86638095
+    max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
+    E_from_ic = measured_counts/adc_scale_mu
+    E_prior = GaussianVar(E_from_ic, detector_E_sigma(E_from_ic))
+    x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
+    xmin, xmax = np.min(x_real), np.max(x_real)
+    ymin, ymax = np.min(y_real), np.max(y_real)
+    zmin = 0
+    #set zmax to length of trimmed traces
+    temp_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), particle_type)
+    temp_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)
+    zmax = temp_sim.num_trace_bins*zscale
+    num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
 
-#do MCMC
-def log_likelihood_mcmc(params):
-    E, Ea_frac, x, y, z, theta, phi = params
-    trace_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), 'proton')
-    trace_sim.shaping_width = shaping_width
-    trace_sim.zscale = zscale
-    trace_sim.counts_per_MeV = adc_scale_mu
-    trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50)#match trim threshold used for systematics determination
-    trace_sim.initial_energy = E*(1-Ea_frac)
-    trace_sim.point_energy_deposition = E*Ea_frac
-    trace_sim.initial_point = (x,y,z)
-    trace_sim.theta = theta
-    trace_sim.phi = phi
-    trace_sim.charge_spreading_sigma = charge_spread
-    trace_sim.shaping_width = shaping_width
-    trace_sim.counts_per_MeV = adc_scale_mu
-    trace_sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
-    trace_sim.other_systematics = other_systematics
-    trace_sim.simulate_event()
-    trace_sim.align_pad_traces()
-    to_return = trace_sim.log_likelihood()
-    #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, cs=%f mm, shaping=%f, P=%f torr, adc_scale=%f, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), charge_spread, shaping_width, P, adc_scale, to_return))
-    return to_return
+    def get_sim(params):
+        E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
+        Ep = E*(1-Ea_frac)
+        Ea = E*Ea_frac
+        trace_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), particle_type)
+        trace_sim.pad_gain_match_uncertainty = m
+        trace_sim.other_systematics = c
+        trace_sim.zscale = zscale
+        trace_sim.counts_per_MeV = adc_scale_mu
+        trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)#match trim threshold used for systematics determination\
+        trace_sim.load_srim_table(particle_type, get_gas_density(pressure))
+        trace_sim.initial_energy = Ep
+        trace_sim.point_energy_deposition = Ea
+        trace_sim.initial_point = (x,y,z)
+        trace_sim.theta = theta
+        trace_sim.phi = phi
+        trace_sim.sigma_xy = sigma_xy
+        trace_sim.sigma_z = sigma_z
+        trace_sim.adaptive_stopping_power = False
+        trace_sim.num_stopping_power_points = num_stopping_points
+        trace_sim.pad_threshold = pad_threshold
+        trace_sim.simulate_event()
+        return trace_sim
 
-def log_priors(params, phi_lim):
-    E, Ea_frac, x, y, z, theta, phi = params
+    def log_likelihood(params, print_out=False):
+        trace_sim = get_sim(params)
+        to_return = trace_sim.log_likelihood()
+        if print_out:
+            print(params, to_return)
+        #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
+        return to_return/trace_sim.num_trace_bins#(2.355*shaping_time*clock_freq)
+
+    def log_priors(params):
+        E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
+        #uniform priors
+        if Ea_frac < 0 or Ea_frac > 1:
+            return -np.inf
+        if x**2 + y**2 > 40**2:
+            return -np.inf
+        if z < zmin or z >zmax:
+            return -np.inf
+        if theta < 0 or theta >= np.pi or phi < -2*np.pi or phi>2*np.pi:
+            return -np.inf 
+        if sigma_xy < 0 or sigma_xy > 20:
+            return -np.inf
+        if sigma_z < 0 or sigma_z > 20:
+            return -np.inf
+        if m < 0 or c < 0 or m > 2 or c > 200:
+            return -np.inf
+        #gaussian prior for energy, and assume uniform over solid angle
+        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
+
+    def log_posterior(params, print_out=False):
+        to_return = log_priors(params)
+        if to_return != -np.inf:
+            to_return +=  log_likelihood(params)
+        if np.isnan(to_return):
+            to_return = -np.inf
+        if print_out:
+            print('log posterior: %e'%to_return, params)
+        return to_return
+
+    fit_start_time = time.time()
+    nwalkers = 250
+    clustering_steps = 200
+    times_to_repeat_clustering = 5
+    post_cluster_steps=6000
+    ndim = 11
+
+
+    if False:
+        #find global minimum of log posterior
+        print('finding global maximum of liklihood')
+        opt_res = opt.shgo(lambda params: -log_posterior(params, False), 
+                        ((np.max((0, E_prior.mu - E_prior.sigma*4)),E_prior.mu + E_prior.sigma*4),
+                            (xmin, xmax), (ymin, ymax), (zmin, zmax), (0, np.pi), (-np.pi, np.pi), (0.1, 20), (0.1,20), (0.1,1), (0.1,20)))
+        print(opt_res)
+        best_sim = get_sim(opt_res.x)
+        best_sim.plot_simulated_3d_data(threshold=25)
+        best_sim.plot_residuals_3d(threshold=25)
+        best_sim.plot_residuals()
+
+        plt.figure()
+        plt.title('log posterior vs E')
+        dE=0.1
+        Es = np.linspace(opt_res.x[0]-dE, opt_res.x[0]+dE)
+        lls = []
+        for E in Es:
+            params = np.copy(opt_res.x)
+            params[0] = E
+            lls.append(log_posterior(params))
+        plt.scatter(Es, lls)
+
+        plt.show()
     
-    #uniform priors
-    if x**2 + y**2 > 40**2:
-        return -np.inf
-    if z < 0 or z >400:
-        return -np.inf
-    if theta < 0 or theta >= np.pi:# or phi < -np.pi or phi>np.pi:
-        return -np.inf
-    if phi < phi_lim[0] or phi>phi_lim[1]:
-        return -np.inf 
-    if shaping_width <=0 or shaping_width > 20:
-        return -np.inf
-    if charge_spread < 0:
-        return -np.inf
-    if Ea_frac < 0 or Ea_frac > 1:
-        return -np.inf
-    #gaussian prior for energy, and assume uniform over solid angle
-    return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
+    
+        init_walker_pos = opt_res.x + 1e-4*np.random.randn(nwalkers, ndim)
+    else:
+        init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
+                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
+                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
+                             np.random.uniform(0, 20), np.random.uniform(0,20),
+                             np.random.uniform(0,1), np.random.uniform(0,20)) for w in range(nwalkers)]
+    # We'll track how the average autocorrelation time estimate changes
+    directory = 'run%d_mcmc/event%d'%(run_number, event_num)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
 
-def log_posterior(params, phi_lim, beta):
-    to_return = log_priors(params, phi_lim)
-    if to_return != -np.inf:
-        to_return +=  log_likelihood_mcmc(params)*beta
-    if np.isnan(to_return):
-        to_return = -np.inf
-    #print('log posterior: %e'%to_return)
-    return to_return
+    with multiprocessing.Pool() as pool:
+        for step in range(times_to_repeat_clustering):
+            backend_fname = 'clustering_run%d.h5'%step
+            backend_file = os.path.join(directory, backend_fname)
+            backend = emcee.backends.HDFBackend(backend_file)
+            backend.reset(nwalkers, ndim)
+            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
+                                            #  moves=[
+                                            #          (emcee.moves.DESnookerMove(), 0.2),
+                                            #          (emcee.moves.DEMove(), 0.6),
+                                            #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
+                                            #  ],
+                                            pool=pool)
 
+            for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
+                tau = sampler.get_autocorr_time(tol=0)
+                print(backend_fname, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
-nwalkers = 200
-ndim = 7
+            #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
+            ll = sampler.get_log_prob()[-1]
+            ll_to_cluster = ll[np.isfinite(ll)].reshape(-1,1)
+            cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
+            clusters_to_propagate = cluster_object.labels_==np.argmax(cluster_object.cluster_centers_)
+            samples_to_propagate = sampler.get_chain()[-1][np.isfinite(ll)][clusters_to_propagate]
+            new_init_pos = list(samples_to_propagate)
 
-# We'll track how the average autocorrelation time estimate changes
-directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
-if not os.path.exists(directory):
-    os.makedirs(directory)
+            #randomly select samples to perturb and add to the list until we have the desired number of walkers
+            while len(new_init_pos) < nwalkers:
+                i = np.random.randint(0, len(samples_to_propagate))
+                new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
+            init_walker_pos = new_init_pos
 
-def do_mcmc(init_pos, steps, save_name, phi_lim=(-np.pi, np.pi), beta=1):
-    with multiprocessing.Pool(nwalkers) as pool:
-        backend_file = os.path.join(directory, '%s.h5'%(save_name) )
+        #restart mcmc
+        backend_file = os.path.join(directory, 'final_run.h5')
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
-        
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool,
-                                        args=(phi_lim,beta), moves=[emcee.moves.StretchMove(a=1.4)])
-                                        #moves=[
-                                         #   (emcee.moves.DEMove(), 0.8),
-                                          #  (emcee.moves.DESnookerMove(), 0.2),
-                                        #])
-
-        for sample in sampler.sample(init_pos, iterations=steps, progress=True):
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
+        for sample in sampler.sample(init_walker_pos, iterations=post_cluster_steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
-            print(save_name, 'iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
-
-        samples = sampler.get_chain()
-        labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi']
-        fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
-        for i in range(len(labels)):
-            ax = axes[i]
-            ax.plot(samples[:, :, i], "k", alpha=0.3)
-            ax.set_xlim(0, len(samples))
-            ax.set_ylabel(labels[i])
-            ax.yaxis.set_label_coords(-0.1, 0.5)
-        axes[-1].set_xlabel("step number")
-        plt.savefig(os.path.join(directory, '%s.png'%(save_name)))
-
-        tau = sampler.get_autocorr_time(tol=0)
-        burnin = int(2 * np.max(tau))
-        thin = int(0.5 * np.min(tau))
-        flat_samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
-        corner.corner(flat_samples, labels=labels)
-        plt.savefig(os.path.join(directory, '%s_corner_plot.png'%save_name))
-
-    return emcee.backends.HDFBackend(filename=backend_file, read_only=True)
-
-if run_init_fit:#do/redo initial mcmc
-    #initial runs to find clusters, using a tempering profile
-    next_walker_pos = [[E_prior.mu + E_prior.sigma*np.random.randn(), np.random.uniform(0,1),np.random.uniform(xmin, xmax), 
-                                np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax), np.random.uniform(0, np.pi), 
-                                np.random.uniform(-np.pi, np.pi)] for i in range(nwalkers)]
-    for b in [1]:#in (2**.5)**np.arange(-20, 1):
-        init_run = do_mcmc(next_walker_pos, 1000, 'initial_run_beta%f'%b, beta=b)
-        next_walker_pos = init_run.get_chain()[-1]
-else: #reload previously done initial clustering
-    init_run = emcee.backends.HDFBackend(filename=os.path.join(directory,'initial_run_beta%f.h5'%1), read_only=True)
-samples = init_run.get_chain()
-log_prob = init_run.get_log_prob()
-thetas = samples[-1][:, -2]
-phis = samples[-1][:, -1]
-plt.figure()
-plt.title("before clustering")
-plt.scatter(np.degrees(thetas), np.degrees(phis), c=log_prob[-1])
-plt.colorbar(label="log prob")
-plt.xlabel('theta (deg)')
-plt.ylabel('phi (deg)')
-plt.savefig(os.path.join(directory,'before_clustering.png'))
-
-
-#cluster by direction vector, to avoid issues at phi=0/pi
-#keep all clusters of size >10
-zhat = np.cos(thetas)
-xhat = np.sin(thetas)*np.cos(phis)
-yhat = np.sin(thetas)*np.sin(phis)
-cluster_obj = cluster.DBSCAN(0.1).fit(np.vstack((xhat, yhat, zhat)).T)
-cluster_label, cluster_counts = np.unique(cluster_obj.labels_, return_counts=True)
-clusters_to_keep = cluster_label[(cluster_label>=0) & (cluster_counts>10)]
-to_keep = np.in1d(cluster_obj.labels_, clusters_to_keep)
-plt.figure()
-plt.title("clusters to fit")
-plt.scatter(np.degrees(thetas)[to_keep], np.degrees(phis)[to_keep], c=cluster_obj.labels_[to_keep])
-plt.colorbar(label="cluster id")
-plt.xlabel('theta (deg)')
-plt.ylabel('phi (deg)')
-plt.savefig(os.path.join(directory,'clusters.png'))
-
-starting_points = [] #list of initial walker positions for each cluster
-phi_limits = []
-for c in clusters_to_keep:
-    this_cluster = cluster_obj.labels_ == c
-    plt.figure()
-    plt.title("cluster %d"%c)
-    plt.scatter(np.degrees(thetas[this_cluster]), np.degrees(phis[this_cluster]), c=log_prob[-1][this_cluster])
-    plt.colorbar(label="log prob")
-    plt.xlabel('theta (deg)')
-    plt.ylabel('phi (deg)')
-
-    #add slightly perturbed data points until init points has required number
-    samples_in_cluster = samples[-1][this_cluster]
-    lls_in_cluster = log_prob[-1][this_cluster]
-    if True: #initialize using previous cluster
-        init_points = list(samples_in_cluster)
-        while len(init_points) < nwalkers:
-            random_point = samples_in_cluster[np.random.randint(0, len(samples_in_cluster))]
-            init_points.append(random_point + .001*np.random.randn(ndim))
-    else: #choose best point in the cluster
-        best_point = samples_in_cluster[np.argmax(lls_in_cluster)]
-        init_points = [best_point + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
-    starting_points.append(init_points)
-    phi = init_points[0][-1]
-    phi_limits.append((phi - np.pi, phi+np.pi))
-
-#run sampler on each cluster
-for i in range(len(clusters_to_keep)):
-    do_mcmc(init_pos=starting_points[i], steps=10000, save_name='cluster%d'%clusters_to_keep[i], phi_lim=phi_limits[i])
+            print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
