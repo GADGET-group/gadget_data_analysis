@@ -32,8 +32,9 @@ run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
 pickle_fname = 'run%d_results_objects.dat'%run_number
 
-adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
-detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
+adc_scale_mu = 124673.72676265772 #trying value from fitting 100 757 keV protons
+#old value for adcscalemu: 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
+detector_E_sigma = lambda E: (5631./(86431./0.757))*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
 
 #use theoretical zscale
 clock_freq = 50e6 #Hz, from e21062 config file on mac minis
@@ -361,12 +362,11 @@ pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
 print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
 def to_minimize(params):
-    m, c, b = params
+    m, c = params
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
         sim.pad_gain_match_uncertainty = m
-        sim.correlated_systematics = b
         to_add = -sim.log_likelihood()
         to_return += to_add
     print('==================',to_return, m, c, '===================')

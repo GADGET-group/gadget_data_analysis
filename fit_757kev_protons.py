@@ -355,14 +355,16 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if True:
+if False:
     systematics_results = opt.minimize(to_minimize, (m_guess, c_guess))
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
     pad_gain_match_uncertainty,other_systematics = m_guess, c_guess
 
 '''
-
+np.median(counts_per_MeV[counts_per_MeV>0])
+124673.72676265772
+This is about 10% higher than that from fitting the peak with the Raw Data GUI.
 '''
 
 plt.figure()
