@@ -9,11 +9,11 @@ import sklearn.cluster as cluster
 #from raw_viewer import raw_h5_file
 
 
-if False:
+if True:
     run_number= 124
     steps = 5
     filenames = []
-    for event in [17,29,34,43,91]:
+    for event in [17,108]:#[17,29,34,43,91]:
         for step in range(steps):
             filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
