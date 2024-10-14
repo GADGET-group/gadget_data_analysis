@@ -27,7 +27,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/Run_Data', title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)

@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = False
+load_previous_fit = True
 
 import time
 import multiprocessing
@@ -179,7 +179,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         plt.show()
     return res
 
-if True: #try fitting one event to make sure it looks ok
+if False: #try fitting one event to make sure it looks ok
     pads, traces = h5file.get_pad_traces(108, False)
     fit_event(pads, traces, 'proton', debug_plots=True)
 

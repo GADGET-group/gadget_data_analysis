@@ -13,8 +13,6 @@ class ParticleAndPointDeposition(SingleParticleEvent):
         distances, energy_dep = super().get_energy_deposition()
         energy_dep[0] += self.point_energy_deposition
         return distances, energy_dep
-
-
     
 def show_simulated_palpha_track(decay_point, theta, phi, Eproton, Ealpha, charge_spread, shaping_time, pressure):
     rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr

@@ -154,13 +154,16 @@ if __name__ == '__main__':
     ndim = 11
 
 
-    if False:
+    if True:
         #find global minimum of log posterior
         print('finding global maximum of liklihood')
-        opt_res = opt.shgo(lambda params: -log_posterior(params, False), 
-                        ((np.max((0, E_prior.mu - E_prior.sigma*4)),E_prior.mu + E_prior.sigma*4),
+        opt_res = opt.shgo(lambda params: -log_posterior(params), 
+                        ((np.max((0, E_prior.mu - E_prior.sigma*4)), E_prior.mu + E_prior.sigma*4), (0,1),
                             (xmin, xmax), (ymin, ymax), (zmin, zmax), (0, np.pi), (-np.pi, np.pi), (0.1, 20), (0.1,20), (0.1,1), (0.1,20)))
         print(opt_res)
+        #print('local minimization')
+        #opt_res = opt.minimize(lambda params: -log_posterior(params, False), opt_res.x)
+        #print(opt_res.x)
         best_sim = get_sim(opt_res.x)
         best_sim.plot_simulated_3d_data(threshold=25)
         best_sim.plot_residuals_3d(threshold=25)
