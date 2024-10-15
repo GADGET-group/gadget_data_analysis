@@ -23,5 +23,6 @@ class GEntry(ttk.Entry):
 
 from PIL import Image, ImageTk
 def get_background_image():
+        return None
         return ImageTk.PhotoImage(Image.open(
             '/mnt/projects/e21072/OfflineAnalysis/backups/art_GADGETII.PNG').resize((500,500)))

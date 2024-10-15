@@ -103,13 +103,36 @@ def apply_params(sim, params):
     sim.sigma_z = sigma_z
     sim.simulate_event()
 
-def fit_event(sim:ParticleAndPointDeposition.ParticleAndPointDeposition, bounds, Eprior):
+def fit_event(sim:ParticleAndPointDeposition.ParticleAndPointDeposition, bounds, Eprior, fit_results_dict=None, results_key=None):
     #tries to maximize posterior of each of the sims passed in subject to the given parameter bounds
     def to_minimize(params):
         apply_params(sim, params)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
-    return opt.shgo(to_minimize, bounds)
+    #res =  opt.shgo(to_minimize, bounds, sampling_method='halton')
+    res =  opt.direct(to_minimize, bounds)
+    if fit_results_dict != None:
+        fit_results_dict[results_key]=res
+        print(results_key, res)
+    return res
+
+
+def fit_events(run_num, events):
+    manager = multiprocessing.Manager()
+    fit_results_dict = manager.dict()
+    results = []
+    processes = []
+    sims, bounds, epriors = get_sims_and_param_bounds(run_num, events)
+    for i in range(len(sims)):
+        processes.append(multiprocessing.Process(target=fit_event, args=(sims[i], bounds[i], epriors[i], fit_results_dict, events[i])))
+        processes[-1].start()
+    for p in processes:
+        p.join()
+    fit_results_dict = {k:fit_results_dict[k] for k in fit_results_dict}
+    return fit_results_dict
+
 
 #from track_fitting.pa_fit import *
-sims, bounds, epriors = get_sims_and_param_bounds(124, [87480,19699,51777])
-#res1   = fit_event(sims[1], bounds[1], epriors[1]) 
+
+res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
+Ea = [res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict]
+Ep = [res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict]
