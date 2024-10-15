@@ -1,7 +1,7 @@
 import time
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
-import sys
+import pickle
 
 import numpy as np
 import matplotlib.pylab as plt
@@ -112,14 +112,15 @@ def fit_event(sim:ParticleAndPointDeposition.ParticleAndPointDeposition, bounds,
         apply_params(sim, params)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
     #res =  opt.shgo(to_minimize, bounds, sampling_method='halton')
-    res =  opt.direct(to_minimize, bounds)
+    res =  opt.direct(to_minimize, bounds, vol_tol=0, len_tol=1e-4)
+    #res =  opt.differential_evolution(to_minimize, bounds)
     if fit_results_dict != None:
         fit_results_dict[results_key]=res
         print(results_key, res)
     return res
 
 
-def fit_events(run_num, events):
+def fit_events(run_num, events, timeout=3600):
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()
     results = []
@@ -128,8 +129,21 @@ def fit_events(run_num, events):
     for i in range(len(sims)):
         processes.append(multiprocessing.Process(target=fit_event, args=(sims[i], bounds[i], epriors[i], fit_results_dict, events[i])))
         processes[-1].start()
-    for p in processes:
-        p.join()
+    #for p in processes:
+    #    p.join()
+    start = time.time()
+    while time.time() - start <= timeout:
+        if not any(p.is_alive() for p in processes):
+            # All the processes are done, break now.
+            break
+
+        time.sleep(.1)  # Just to avoid hogging the CPU
+    else:
+        # We only enter this if we didn't 'break' above.
+        print("timed out, killing all processes")
+        for p in processes:
+            p.terminate()
+            p.join()
     fit_results_dict = {k:fit_results_dict[k] for k in fit_results_dict}
     return fit_results_dict
 
@@ -152,6 +166,28 @@ def get_cnn_events(run_num):
 #from track_fitting.pa_fit import *
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
-res_dict = fit_events(270, get_cnn_events(270))
-Ea = [res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict]
-Ep = [res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict]
+run_num = 270
+if True:
+    events_to_fit = get_cnn_events(run_num)
+    res_dict = fit_events(270, get_cnn_events(run_num), timeout=3600)
+    with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'wb') as f:
+        pickle.dump(res_dict, f)
+else:
+    with open('run_%d_cnn_palpha_fits.dat'%run_num,'rb') as f:
+        res_dict = pickle.load(f)
+Ea = np.array([res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict])
+Ep = np.array([res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict])
+ll = np.array([res_dict[k].fun for k in res_dict])
+
+plt.scatter(Ea[ll<0.8e6], Ep[ll<0.8e6], c=ll[ll<0.8e6])
+plt.xlabel('alpha energy (MeV)')
+plt.ylabel('proton energy (MeV)')
+plt.colorbar()
+
+plt.figure()
+plt.hist2d(Ea, Ep, 50)
+plt.xlabel('alpha energy (MeV)')
+plt.ylabel('proton energy (MeV)')
+plt.colorbar()
+plt.show()
+
