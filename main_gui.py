@@ -19,10 +19,10 @@ class GadgetAnalysisGUI(tk.Tk):
 
         #set up window
         self.title('GADGET II Analysis')
-        if "nt" == os.name:
-            self.wm_iconbitmap(bitmap = "/mnt/projects/e21072/OfflineAnalysis/backups/icons8-physics-48.ico")
-        else:
-            self.wm_iconbitmap(bitmap = "@/mnt/projects/e21072/OfflineAnalysis/backups/icons8-physics-48.xbm")
+        #if "nt" == os.name:
+        #    self.wm_iconbitmap(bitmap = "/mnt/projects/e21072/OfflineAnalysis/backups/icons8-physics-48.ico")
+        #else:
+        #    self.wm_iconbitmap(bitmap = "@/mnt/projects/e21072/OfflineAnalysis/backups/icons8-physics-48.xbm")
         self.configure(background=bg_color)
         #self.geometry('800x600')
         #put title and version at the top of the window
