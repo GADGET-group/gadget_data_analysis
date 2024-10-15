@@ -31,8 +31,11 @@ def get_sims_and_param_bounds(run_number, events):
     if run_number == 124:
         adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
         adc_scale_sigma = 5631.
-        detector_E_sigma = lambda E: (adc_scale_sigma/adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
-
+        
+    elif run_number == 270:
+        adc_scale_mu = 151984/0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
+        adc_scale_sigma = 8485.
+    detector_E_sigma = lambda E: (adc_scale_sigma/adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
     #use theoretical zscale
     clock_freq = 50e6 #Hz, from e21062 config file on mac minis
     drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
@@ -130,9 +133,25 @@ def fit_events(run_num, events):
     fit_results_dict = {k:fit_results_dict[k] for k in fit_results_dict}
     return fit_results_dict
 
+def get_cnn_events(run_num):
+    data_dir = '/egr/research-tpc/shared/Run_Data/run_%04d/'%run_num
+    for dir in os.listdir(data_dir):
+        if 'Boxes' in dir:
+            cut_dir = data_dir + dir
+    images = os.listdir(cut_dir)
+    good_events = np.load(data_dir + 'good_events.npy') #maps image numbers to GET event nuber
+    events = []
+    for img in images:
+        if '.png' not in img:
+            continue
+        events.append(good_events[int(img.split('_')[2])])
+    return events
+    
+
 
 #from track_fitting.pa_fit import *
 
-res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
+#res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
+res_dict = fit_events(270, get_cnn_events(270))
 Ea = [res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict]
 Ep = [res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict]

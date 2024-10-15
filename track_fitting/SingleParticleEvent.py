@@ -229,7 +229,10 @@ class SingleParticleEvent:
         for pad in self.traces_to_fit:
             trace = self.traces_to_fit[pad]
             above_threshold_bins = np.nonzero(trace >= trim_threshold)
-            first, last = np.min(above_threshold_bins), np.max(above_threshold_bins)
+            if len(above_threshold_bins) == 0:
+                first = last = 0
+            else:
+                first, last = np.min(above_threshold_bins), np.max(above_threshold_bins)
             if first < trim_before:
                 trim_before = first
             if last > trim_after:
