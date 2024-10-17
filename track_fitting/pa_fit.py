@@ -167,7 +167,7 @@ def get_cnn_events(run_num):
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
 run_num = 270
-if True:
+if False:
     events_to_fit = get_cnn_events(run_num)
     res_dict = fit_events(270, get_cnn_events(run_num), timeout=3600)
     with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'wb') as f:
@@ -179,7 +179,7 @@ Ea = np.array([res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict])
 Ep = np.array([res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict])
 ll = np.array([res_dict[k].fun for k in res_dict])
 
-plt.scatter(Ea[ll<0.8e6], Ep[ll<0.8e6], c=ll[ll<0.8e6])
+plt.scatter(Ea[ll<0.8e6], Ep[ll<1e5], c=ll[ll<0.8e6])
 plt.xlabel('alpha energy (MeV)')
 plt.ylabel('proton energy (MeV)')
 plt.colorbar()
@@ -191,3 +191,8 @@ plt.ylabel('proton energy (MeV)')
 plt.colorbar()
 plt.show()
 
+def show_fit(event_num):
+    sim, bounds, eprior = get_sims_and_param_bounds(run_num, [event_num])
+    sim = sim[0]
+    params = res_dict[event_num].x
+    apply_params(sim, params)
