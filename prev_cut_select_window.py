@@ -14,7 +14,6 @@ class PrevCutSelectWindow(tk.Toplevel):
     def __init__(self, parent, run_data, **kwargs):
         super().__init__(parent, **kwargs)
         self.run_data = run_data
-
         #get previous cut information
         prev_cut_path = os.path.join(self.run_data.folder_path, "*.jpg")
         self.image_path_list = glob.glob(prev_cut_path)
@@ -65,6 +64,8 @@ class PrevCutSelectWindow(tk.Toplevel):
          dir = self.image_path_list[self.current_image_index][:-4] #-4 takes off the .jpg
          ViewCutImagesWindow(self.master, self.run_data, dir)
          self.destroy()
+         
+
     
     def create_h5(self):
         dir_select = self.image_path_list[self.current_image_index][:-4]

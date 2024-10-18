@@ -32,13 +32,21 @@ class IndividualEventFrame(ttk.Frame):
 
         self.threeD_frame = ttk.LabelFrame(self, text='Point Cloud Viewer')
         track_w_trace_button = ttk.Button(self.threeD_frame,
-                                          text='Show Track w/ Trace',
+                                          text='Show Track w/ Trace (Point Cloud)',
                                           command = self.track_w_trace)
-        track_w_trace_button.grid(row=0, column=0, columnspan=2)
+        track_w_trace_button.grid(row=0, column=0) #, columnspan=2
+        track_w_trace_button_raw = ttk.Button(self.threeD_frame,
+                                          text='Show Track w/ Trace (Raw Data) : Unfiltered Trace',
+                                          command = self.track_w_trace_raw)
+        track_w_trace_button_raw.grid(row=0, column=1)
+        track_w_trace_button_raw_smooth = ttk.Button(self.threeD_frame,
+                                          text='Show Track w/ Trace (Raw Data) : Smooth Trace',
+                                          command = self.track_w_trace_raw_smooth)
+        track_w_trace_button_raw_smooth.grid(row=1, column=0)
         ttk.Button(self.threeD_frame, text='3D Point Cloud', 
-                   command=self.show_point_cloud).grid(row=1, column=0)
+                   command=self.show_point_cloud).grid(row=2, column=0)
         ttk.Button(self.threeD_frame, text='3D Dense Point Cloud',
-                   command=self.plot_dense_3d_track).grid(row=1, column=1)
+                   command=self.plot_dense_3d_track).grid(row=2, column=1)
         self.threeD_frame.pack()
 
         fitting_frame = ttk.LabelFrame(self, text='Point Cloud Fitting Tools')
@@ -139,6 +147,19 @@ class IndividualEventFrame(ttk.Frame):
         index = self.run_data.get_index(event_num)
         plt.figure()
         self.run_data.make_image(index, show=True)
+
+    def track_w_trace_raw(self):
+        event_num = int(self.event_num_entry.get())
+        index = self.run_data.get_index(event_num)
+        plt.figure()
+        self.run_data.make_image(index, use_raw_data = True, show=True)
+
+    def track_w_trace_raw_smooth(self):
+        event_num = int(self.event_num_entry.get())
+        index = self.run_data.get_index(event_num)
+        plt.figure()
+        self.run_data.make_image(index, use_raw_data = True, show=True, smoothen = True)
+
 
     def show_point_cloud(self):
         event_num = int(self.event_num_entry.get())
