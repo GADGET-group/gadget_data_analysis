@@ -117,7 +117,7 @@ if __name__ == '__main__':
         if print_out:
             print(params, to_return)
         #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
-        return to_return/trace_sim.num_trace_bins#(2.355*shaping_time*clock_freq)
+        return to_return/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
         E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z = params
