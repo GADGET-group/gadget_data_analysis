@@ -148,13 +148,13 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 250
-    clustering_steps = 200
+    clustering_steps = 400
     times_to_repeat_clustering = 5
-    post_cluster_steps=6000
+    post_cluster_steps=2000
     ndim = 11
 
 
-    if True:
+    if False:
         #find global minimum of log posterior
         print('finding global maximum of liklihood')
         opt_res = opt.shgo(lambda params: -log_posterior(params), 
