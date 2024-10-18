@@ -7,6 +7,7 @@ This file contains the following
 import os
 import numpy as np
 import random
+import socket
 
 #imports for reading files
 import h5py
@@ -25,13 +26,22 @@ from skspatial.objects import Line
 from raw_viewer.raw_h5_file import raw_h5_file
 from raw_viewer.raw_h5_file import raw_h5_file
 
+zscale = 1.45
+
 def run_num_to_str(run_num):
     run_num = int(run_num)
     return  ('%4d'%run_num).replace(' ', '0')
 
+def get_h5_path():
+    if socket.gethostname() == 'tpcgpu':
+        return "/egr/research-tpc/shared/Run_Data/"
+    else:
+        return "/mnt/analysis/e21072/h5test/"
+
 def get_default_path(run_id):    
     run_str = run_num_to_str(run_id)
-    return f"/mnt/analysis/e21072/h5test/run_{run_str}"
+    return get_h5_path() + f'run_{run_str}'
+    
 
 def smooth_trace(trace, window_length=15, polyorder=3):
         smoothed_trace = savgol_filter(trace, window_length, polyorder)
@@ -80,8 +90,20 @@ class GadgetRunH5:
         self.trace_list = np.load(os.path.join(folder_path, 'trace_list.npy'), allow_pickle=True)
         #
         self.angle_list = np.load(os.path.join(folder_path, 'angle_list.npy'), allow_pickle=True)
-        self.file_path = '/mnt/analysis/e21072/h5test/run_'+ ('%4d'%self.run_num).replace(' ', '0') + '.h5'
+        self.file_path = get_h5_path() + ('run_%04d.h5'%run_num)
+    
         self.h5_file = raw_h5_file(self.file_path, flat_lookup_csv='./raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        self.h5_file.background_subtract_mode='fixed window'
+        self.h5_file.data_select_mode='near peak'
+        self.h5_file.remove_outliers=True
+        self.h5_file.near_peak_window_width = 50
+        self.h5_file.require_peak_within= (-np.inf, np.inf)
+        self.h5_file.num_background_bins=(160, 250)
+        self.h5_file.zscale = zscale
+        self.h5_filelength_counts_threshold = 100
+        self.h5_file.ic_counts_threshold = 25
+        self.h5_file.include_counts_on_veto_pads = False
+
 
         #TODO: decide how to store calibration information with runs
         calib_point_1 = (0.806, 156745)
@@ -441,18 +463,6 @@ class GadgetRunH5:
         if use_raw_data:
             VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
             file = self.h5_file
-            file.background_subtract_mode = 'fixed window'
-            file.remove_outliers=True
-            file.data_select_mode = 'near peak'
-            file.require_peak_within = (20,180)
-            file.near_peak_window_width = 50
-            # file.range_bounds=(0, np.inf)
-            # file.ic_bounds=(-np.inf, np.inf)
-            file.num_background_bins=(200,400)
-            file.zscale=1.45
-            file.length_counts_threshold = 100
-            file.ic_counts_threshold = 75
-            file.include_counts_on_veto_pads = False
 
             xHit, yHit, zHit, eHit = file.get_xyze(self.good_events[index],threshold=20,include_veto_pads=False)
             energy = np.sum(eHit)
@@ -817,18 +827,6 @@ class GadgetRunH5:
                 if use_raw_data:
                     VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
                     file = self.h5_file
-                    file.apply_background_subtraction=True
-                    file.remove_outliers=True
-                    file.mode = 'near peak'
-                    file.require_peak_within = (20,180)
-                    file.near_peak_window_width = 50
-                    file.range_bounds=(0, np.inf)
-                    file.ic_bounds=(-np.inf, np.inf)
-                    file.num_background_bins=(200,400)
-                    file.zscale=1.45
-                    file.length_counts_threshold = 100
-                    file.ic_counts_threshold = 75
-                    file.include_counts_on_veto_pads = False
 
                     xHit, yHit, zHit, eHit = file.get_xyze(self.good_events[event_num],threshold=20,include_veto_pads=False)
                     energy = np.sum(eHit)
@@ -1137,7 +1135,7 @@ def generate_files(run_num, length, ic, pads, eps, samps, poly):
                 continue
             """
             # Move track next to pad plane for 3D view and scale by appropriate factor
-            cloud_z = (cloud_z  - np.min(cloud_z ))*1.45 # Have also used 1.92
+            cloud_z = (cloud_z  - np.min(cloud_z ))*zscale # Have also used 1.92
             #cloud_z = (cloud_z  - np.min(cloud_z ))
 
             # Call track_len() to create lists of all track lengths

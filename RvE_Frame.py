@@ -161,6 +161,8 @@ class RvE_Frame(ttk.Frame):
         now = datetime.datetime.now()
         rand_num = str(random.randrange(0,1000000,1))
         cut_name = rand_num+now.strftime("CUT_Date_%m_%d_%Y")
+        if use_raw_data:
+            cut_name += '_raw'
         imageCut_path = os.path.join(self.run_data.folder_path, cut_name)
         print('NEW DIRECTORY', imageCut_path)
 
@@ -261,7 +263,7 @@ class RvE_Frame(ttk.Frame):
         print("All images have been processed")
 		
 		# Pickle cut_indices
-        cut_indices_H5list = good_events[cut_indices]
+        cut_indices_H5list = self.run_data.good_events[cut_indices]
         cut_indices_str = f"cut_indices_H5list.pkl"
         cut_indices_path = os.path.join(imageCut_path, cut_indices_str)
         with open(cut_indices_path, "wb") as file:

@@ -1,5 +1,6 @@
 from tkinter import ttk
 import tkinter as tk
+from PIL import Image, ImageTk
 
 class GEntry(ttk.Entry):
     '''
@@ -21,7 +22,6 @@ class GEntry(ttk.Entry):
         if event.widget.get() == '':
             event.widget.insert(0, event.widget.default_text)
 
-from PIL import Image, ImageTk
 def get_background_image():
-        return ImageTk.PhotoImage(Image.open(
-            '/mnt/projects/e21072/OfflineAnalysis/backups/art_GADGETII.PNG').resize((500,500)))
+    return ImageTk.PhotoImage(Image.open(
+               './art_GADGETII.PNG').resize((500,500)))
