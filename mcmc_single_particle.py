@@ -34,6 +34,9 @@ if __name__ == '__main__':
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
         zscale = drift_speed/clock_freq
 
+        pad_gain_match_uncertainty = 0.3286
+        other_systematics = 8.876
+
         ic_threshold = 25
         h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                         zscale=zscale,
@@ -84,10 +87,10 @@ if __name__ == '__main__':
     num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
 
     def get_sim(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
         trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
-        trace_sim.pad_gain_match_uncertainty = m
-        trace_sim.other_systematics = c
+        trace_sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
+        trace_sim.other_systematics = other_systematics
         trace_sim.zscale = zscale
         trace_sim.counts_per_MeV = adc_scale_mu
         trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)#match trim threshold used for systematics determination\
@@ -110,10 +113,10 @@ if __name__ == '__main__':
         if print_out:
             print(params, to_return)
         #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
-        return to_return/trace_sim.num_trace_bins#(2.355*shaping_time*clock_freq)
+        return to_return/len(trace_sim.pads_to_sim)#trace_sim.num_trace_bins#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z, m, c = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
         #uniform priors
         if x**2 + y**2 > 40**2:
             return -np.inf
@@ -124,8 +127,6 @@ if __name__ == '__main__':
         if sigma_xy < 0 or sigma_xy > 20:
             return -np.inf
         if sigma_z < 0 or sigma_z > 20:
-            return -np.inf
-        if m < 0 or c < 0 or m > 2 or c > 200:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
@@ -142,10 +143,10 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 250
-    clustering_steps = 200
+    clustering_steps = 400
     times_to_repeat_clustering = 5
-    post_cluster_steps=6000
-    ndim = 10
+    post_cluster_steps=2000
+    ndim = 8
 
 
     if False:
@@ -179,8 +180,7 @@ if __name__ == '__main__':
         init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu,
                              np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
                              np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                             np.random.uniform(0, 20), np.random.uniform(0,20),
-                             np.random.uniform(0,1), np.random.uniform(0,20)) for w in range(nwalkers)]
+                             np.random.uniform(0, 30), np.random.uniform(0,30)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):

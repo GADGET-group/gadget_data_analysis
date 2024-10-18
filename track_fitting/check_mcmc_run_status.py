@@ -9,15 +9,15 @@ import sklearn.cluster as cluster
 #from raw_viewer import raw_h5_file
 
 
-if False:
+if True:
     run_number= 124
     steps = 5
     filenames = []
-    for event in [17,108]:#[17,29,34,43,91]:
+    for event in [17]:#[17,29,34,43,91]:
         for step in range(steps):
             filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None
@@ -29,10 +29,10 @@ else:
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         #filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
+    labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 5,6
     tau = [2]
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
 
 for filepath in filenames:
     base_fname = os.path.splitext(filepath)[0]
