@@ -362,7 +362,8 @@ pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
 print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
 def to_minimize(params):
-    m, c = params
+    c = params[0]
+    m = pad_gain_match_uncertainty
     to_return = 0
     for evt, sim in zip(evts_to_fit, trace_sims):
         sim.other_systematics = c
@@ -372,8 +373,8 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if False:
-    systematics_results = opt.minimize(to_minimize, (m_guess, c_guess))
+if True:
+    systematics_results = opt.minimize(to_minimize, (c_guess, ))
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
     pad_gain_match_uncertainty,other_systematics = m_guess, c_guess
@@ -391,9 +392,13 @@ m, c=0.19464779124824114, 11.991125862279635
 with pad gain match set to 0: c=17.97
 
 ===After adding pad threshold and ===
+Fit with mguess, cguess =0.26, 13
 when including all pads: 1.867, 13.5
 fitting only included pads observed to fire: 1.70585, 13.76306
 And adding in correlated systematics (gain match, uncorrelated correlated): leads to same thing but uncorrelated = 0
+
+gain match uncertainty from peak bins = 0.3286
+best fit c with this m = 8.876
 '''
 
 plt.figure()

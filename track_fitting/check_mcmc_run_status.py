@@ -23,12 +23,12 @@ if False:
     Ea_Ep_labels = None
 else:
     run_number= 124
-    steps = 1#5
+    steps = 2#5
     filenames = []
     for event in [10356, 21640, 96369, 21662, 26303, 50543]:
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
-        filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
+        #filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'm', 'c']
     theta_index, phi_index = 5,6
     tau = [2]
