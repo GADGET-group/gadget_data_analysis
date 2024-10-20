@@ -44,8 +44,9 @@ def get_sims_and_param_bounds(run_number, events):
     ic_threshold = 25
 
     pad_threshold = 70
-    gain_match_uncertainty = 0.28
-    other_systematics = 13.5
+
+    gain_match_uncertainty = 0.3286
+    other_systematics = 8.876
 
 
     pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
@@ -112,8 +113,8 @@ def fit_event(sim:ParticleAndPointDeposition.ParticleAndPointDeposition, bounds,
         apply_params(sim, params)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
     #res =  opt.shgo(to_minimize, bounds, sampling_method='halton')
-    res =  opt.direct(to_minimize, bounds, vol_tol=0, len_tol=1e-4)
-    #res =  opt.differential_evolution(to_minimize, bounds)
+    #res =  opt.direct(to_minimize, bounds)
+    res =  opt.differential_evolution(to_minimize, bounds)
     if fit_results_dict != None:
         fit_results_dict[results_key]=res
         print(results_key, res)
@@ -166,20 +167,23 @@ def get_cnn_events(run_num):
 #from track_fitting.pa_fit import *
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
-run_num = 270
-if False:
-    events_to_fit = get_cnn_events(run_num)
-    res_dict = fit_events(270, get_cnn_events(run_num), timeout=3600)
-    with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'wb') as f:
+run_num = 124
+if True:
+    #events_to_fit = get_cnn_events(run_num)
+    events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
+    res_dict = fit_events(run_num, events_to_fit, timeout=12*3600)
+    with open('run_%d_tylersevts_palpha_fits_w_devolution.dat'%run_num,'wb') as f:
         pickle.dump(res_dict, f)
 else:
-    with open('run_%d_cnn_palpha_fits.dat'%run_num,'rb') as f:
+    #with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'rb') as f:
+    with open('run_%d_tylersevts_palpha_fits_w_direct.dat'%run_num,'rb') as f:
         res_dict = pickle.load(f)
 Ea = np.array([res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict])
 Ep = np.array([res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict])
 ll = np.array([res_dict[k].fun for k in res_dict])
 
-plt.scatter(Ea[ll<0.8e6], Ep[ll<1e5], c=ll[ll<0.8e6])
+filter = ll<1.5e5
+plt.scatter(Ea[filter], Ep[filter], c=ll[filter])
 plt.xlabel('alpha energy (MeV)')
 plt.ylabel('proton energy (MeV)')
 plt.colorbar()

@@ -1,12 +1,6 @@
-python pa_mcmc.py 124 17 &
-python pa_mcmc.py 124 10356 &
-python pa_mcmc.py 124 19699 &
-python pa_mcmc.py 124 21640 &
-python pa_mcmc.py 124 21622 &
-python pa_mcmc.py 124 26303 &
-python pa_mcmc.py 124 50543 &
-python pa_mcmc.py 124 51777 &
-python pa_mcmc.py 124 68087 &
-python pa_mcmc.py 124 68192 &
-python pa_mcmc.py 124 87480 &
-python pa_mcmc.py 124 96369 
+#for i in  87480 19699 51777 68192 68087 10356 21640 96369 21662 26303 50543 27067 74443 25304 38909 104723 43833 52010 95644 98220
+for i in  74443 25304 38909 104723 43833 52010 95644 98220
+do
+    python pa_mcmc.py 124 $i &
+done
+wait

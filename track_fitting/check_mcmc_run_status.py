@@ -9,11 +9,11 @@ import sklearn.cluster as cluster
 #from raw_viewer import raw_h5_file
 
 
-if True:
+if False:
     run_number= 124
-    steps = 1
+    steps = 5
     filenames = []
-    for event in [17]:#[17,29,34,43,91]:
+    for event in [17,29,34,43,91, 108]:
         for step in range(steps):
             filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
@@ -23,12 +23,13 @@ if True:
     Ea_Ep_labels = None
 else:
     run_number= 124
-    steps = 2#5
+    steps = 5
     filenames = []
-    for event in [10356, 21640, 96369, 21662, 26303, 50543]:
+    #need to re-run on 21662 and 27067
+    for event in [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]: #17,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
-        #filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
+        filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 5,6
     tau = [2]
