@@ -5,37 +5,10 @@ import matplotlib.pylab as plt
 import corner
 import numpy as np
 import sklearn.cluster as cluster
-#from track_fitting import ParticleAndPointDeposition
+
+from track_fitting import ParticleAndPointDeposition
 #from raw_viewer import raw_h5_file
-
-
-if False:
-    run_number= 124
-    steps = 5
-    filenames = []
-    for event in [17,29,34,43,91, 108]:
-        for step in range(steps):
-            filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
-        #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
-    theta_index, phi_index = 4,5
-    tau = [2]
-    Ea_Ep_labels = None
-else:
-    run_number= 124
-    steps = 5
-    filenames = []
-    #need to re-run on 21662 and 27067
-    for event in [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]: #17,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067
-        for step in range(steps):
-            filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
-        filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
-    theta_index, phi_index = 5,6
-    tau = [2]
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
-
-for filepath in filenames:
+def process_h5(filepath, labels, Ea_Ep_labels=None):
     base_fname = os.path.splitext(filepath)[0]
     reader = emcee.backends.HDFBackend(filename=filepath, read_only=True)
     with open(base_fname+'.txt', 'w') as output_text_file:
@@ -152,8 +125,7 @@ for filepath in filenames:
             run_number = 124
             run_h5_path = h5_folder +'run_%04d.h5'%run_number
 
-            clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-            drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+            
 
             h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
                                             zscale=drift_speed/clock_freq,
@@ -166,32 +138,32 @@ for filepath in filenames:
             h5file.num_background_bins=(160, 250)
             h5file.ic_counts_threshold = 25
 
-            def get_sim(params, grid_size=0.5, pad_gain_match_uncertainty=0.381959476, other_systematics=16.86638095):
-                rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-                T = 20+273.15 #K
-                get_gas_density = lambda P: rho0*(P/760)*(300./T)
-                sim=ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(800), 'proton')
-                sim.initial_energy = params[1]
-                sim.point_energy_deposition = params[0]
-                sim.initial_point = params[2:5]
-                sim.theta = params[5]
-                sim.phi = params[6]
-                sim.charge_spreading_sigma = 2
-                sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
-                sim.other_systematics = other_systematics
-                sim.grid_resolution = grid_size
-                #use theoretical zscale
-                
-                sim.zscale =  drift_speed/clock_freq
-                shaping_time = 70e-9 #s, from e21062 config file on mac minis
-                sim.shaping_width = shaping_time*clock_freq*2.355
-                sim.counts_per_MeV = 86431./0.757
-                #
-                pads, traces = h5file.get_pad_traces(event_number, False)
-                sim.set_real_data(pads, traces, 50, int(sim.shaping_width))
-                sim.simulate_event()
-                sim.align_pad_traces()
-                return sim
+def get_pa_sim(params, get_data_h5, event_number):
+    #assumes params are: 'E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z'
+    rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
+    T = 20+273.15 #K
+    get_gas_density = lambda P: rho0*(P/760)*(300./T)
+    sim=ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(800), 'proton')
+    sim.initial_energy = params[0]*(1-params[1])
+    sim.point_energy_deposition = params[0]*params[1]
+    sim.initial_point = params[2:5]
+    sim.theta = params[5]
+    sim.phi = params[6]
+    sim.sigma_xy = params[7]
+    sim.sigma_z = params[8]
+    #use theoretical zscale
+    
+    clock_freq = 50e6 #Hz, from e21062 config file on mac minis
+    drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+    sim.zscale =  drift_speed/clock_freq
+    shaping_time = 70e-9 #s, from e21062 config file on mac minis
+    sim.shaping_width = shaping_time*clock_freq*2.355
+    sim.counts_per_MeV = 86431./0.757
+    #
+    pads, traces = event_number.get_pad_traces(event_number, False)
+    sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10)
+    sim.simulate_event()
+    return sim
             
 
             #sim.plot_simulated_3d_data(mode='aligned', threshold=25)
@@ -199,3 +171,33 @@ for filepath in filenames:
             #sim.plot_residuals()
             #print(sim.log_likelihood())
             #plt.show(block=False)
+
+if False:
+    run_number= 124
+    steps = 5
+    filenames = []
+    for event in [17,29,34,43,91, 108]:
+        for step in range(steps):
+            filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+        #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
+    theta_index, phi_index = 4,5
+    tau = [2]
+    Ea_Ep_labels = None
+else:
+    run_number= 124
+    steps = 5
+    filenames = []
+    #need to re-run on 21662 and 27067
+    for event in [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]: #17,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067
+        for step in range(steps):
+            filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+        filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
+    labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
+    theta_index, phi_index = 5,6
+    tau = [2]
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
+
+for filepath in filenames:
+    process_h5(filepath, labels, Ea_Ep_labels)
+
