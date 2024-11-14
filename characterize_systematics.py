@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = True
+load_previous_fit = False
 
 import time
 import multiprocessing
@@ -30,7 +30,7 @@ start_time = time.time()
 h5_folder = '../../shared/Run_Data/'
 run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
-pickle_fname = 'run%d_results_objects.dat'%run_number
+pickle_fname = 'run%d_results_objects_m0_c1.dat'%run_number
 
 adc_scale_mu = 124673.72676265772 #trying value from fitting 100 757 keV protons
 #old value for adcscalemu: 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
@@ -65,7 +65,7 @@ T = 20+273.15 #K
 get_gas_density = lambda P: rho0*(P/760)*(300./T)
 
 
-m_guess, c_guess = 0.26,13 #guesses for pad gain match uncertainty and other systematics
+m_guess, c_guess = 0,1 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
@@ -291,6 +291,7 @@ def show_fit(evt):
     sim.plot_simulated_3d_data(threshold=25)
     sim.plot_residuals_3d(threshold=25)
     sim.plot_residuals()
+    h5file.plot_3d_traces(evt, threshold=25)
     plt.show()
 
 #pressure = 860.3#need to nail this down better later, for now assume current offset #np.mean(Pbest)
@@ -328,7 +329,7 @@ for i in range(len(evts)):
     print(evts[i], max_residual_percent)
     #only fit events with residuals no more than 40% of traces
     #and no more than 2x the median for the catagory
-    if  new_sim.log_likelihood() < ll_thresh[cats[i]]: 
+    if  new_sim.log_likelihood() < ll_thresh[cats[i]]:#higher energy proton #: 
         trace_sims.append(new_sim)
         evts_to_fit.append(evts[i])
         cats_to_fit.append(cats[i])
@@ -373,11 +374,11 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if True:
+if False:
     systematics_results = opt.minimize(to_minimize, (c_guess, ))
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
-    pad_gain_match_uncertainty,other_systematics = m_guess, c_guess
+    pad_gain_match_uncertainty,other_systematics = 0.3286, 8.876#m_guess, c_guess
 
 '''
 Fit with adaptive stopping powers, and doing max likilihood of both pad gain match uncertainty and other systematics

@@ -2,18 +2,13 @@
 File for building sims, that can then be used for MCMC, fitting, or visualization.
 '''
 import socket
+import configparser
 
 import numpy as np
 import emcee 
 
 from raw_viewer.raw_h5_file import raw_h5_file
 from track_fitting.ParticleAndPointDeposition import ParticleAndPointDeposition
-class SimBuilder:
-    def get_raw_h5_file(run:int):
-        '''
-        should return a raw_h5_file object for the given run number
-        '''
-        pass
 
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
@@ -22,7 +17,9 @@ class SimBuilder:
 def get_adc_scale(experiment, run):
     if experiment == 'e21072':
         if run == 124:
-            return 86431./0.757 #counts/MeV
+            #return 86431./0.779 #counts/MeV, includes recoil in calibration point
+            return (183193-86431)/(1.623-.779) #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
+
 
 def get_gas_density(experiment, run):
     if experiment == 'e21072':
@@ -68,6 +65,9 @@ def get_rawh5_object(experiment, run):
         h5file.require_peak_within= (-np.inf, np.inf)
         h5file.num_background_bins=(160, 250)
         return h5file
+    
+def apply_config_to_object(config_file, object):
+    pass    
 
 #################
 # Functions to creating and manipulating sim objects
@@ -82,10 +82,14 @@ def create_pa_sim(experiment, run, event):
         sim = ParticleAndPointDeposition(get_gas_density(experiment, run), 'proton')
         sim.zscale = get_zscale(experiment, run)
         sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10)
-        sim.adaptive_stopping_power = True #todo: fix this
         sim.counts_per_MeV = get_adc_scale(experiment, run)
+        
+        sim.adaptive_stopping_power = False
+        max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event)
+        E_from_ic = measured_counts/sim.counts_per_MeV
+        sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
+        print(sim.num_stopping_power_points)
         return sim
-    
 
 def set_params_and_simulate(sim, param_dict):
     '''
@@ -96,7 +100,9 @@ def set_params_and_simulate(sim, param_dict):
     sim.simulate_event()
 
 def load_pa_mcmc_results(sim, run, event, mcmc_name='final_run'):
-    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+    #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+    
     samples = reader.get_chain()
     ll = reader.get_log_prob()
     best_params = samples[np.unravel_index(np.argmax(ll), ll.shape)]
@@ -112,10 +118,10 @@ def load_pa_mcmc_results(sim, run, event, mcmc_name='final_run'):
     sim.sigma_z = sigma_z
     sim.simulate_event()
 
-event = 74443
-sim = create_pa_sim('e21072', 124, event)
-load_pa_mcmc_results(sim, 124,event)
-import matplotlib.pylab as plt
-sim.plot_residuals_3d(threshold=20)
-sim.plot_simulated_3d_data(threshold=20)
-plt.show()
+def show_results(event):
+    sim = create_pa_sim('e21072', 124, event)
+    load_pa_mcmc_results(sim, 124,event)
+    import matplotlib.pylab as plt
+    sim.plot_residuals_3d(threshold=20)
+    sim.plot_simulated_3d_data(threshold=20)
+    plt.show()

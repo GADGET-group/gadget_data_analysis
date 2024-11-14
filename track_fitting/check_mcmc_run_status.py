@@ -6,7 +6,7 @@ import corner
 import numpy as np
 import sklearn.cluster as cluster
 
-from track_fitting import ParticleAndPointDeposition
+#from track_fitting import ParticleAndPointDeposition
 #from raw_viewer import raw_h5_file
 def process_h5(filepath, labels, Ea_Ep_labels=None):
     base_fname = os.path.splitext(filepath)[0]
@@ -189,7 +189,7 @@ else:
     steps = 5
     filenames = []
     #need to re-run on 21662 and 27067
-    for event in [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]: #17,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067
+    for event in [25304]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]: #17,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))

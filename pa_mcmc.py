@@ -128,7 +128,7 @@ if __name__ == '__main__':
             return -np.inf
         if z < zmin or z >zmax:
             return -np.inf
-        if theta < 0 or theta >= np.pi or phi < -2*np.pi or phi>2*np.pi:
+        if theta < 0 or theta >= np.pi or phi < np.pi/2 or phi > 3*np.pi/2:#TODO: phi < -2*np.pi or phi>2*np.pi:
             return -np.inf 
         if sigma_xy < 0 or sigma_xy > 20:
             return -np.inf
@@ -188,7 +188,7 @@ if __name__ == '__main__':
     else:
         init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
                              np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
-                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
+                             np.random.uniform(0,np.pi), np.random.uniform(np.pi/2, 3*np.pi/2),#TODO: np.random.uniform(-np.pi, np.pi),
                              np.random.uniform(0, 20), np.random.uniform(0,20)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)

@@ -1,7 +1,7 @@
-import time
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 import pickle
+import time
 
 import numpy as np
 import matplotlib.pylab as plt
@@ -168,7 +168,7 @@ def get_cnn_events(run_num):
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
 run_num = 124
-if True:
+if False:
     #events_to_fit = get_cnn_events(run_num)
     events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
     res_dict = fit_events(run_num, events_to_fit, timeout=12*3600)
@@ -200,3 +200,6 @@ def show_fit(event_num):
     sim = sim[0]
     params = res_dict[event_num].x
     apply_params(sim, params)
+    sim.plot_residuals_3d(threshold=20)
+    sim.plot_simulated_3d_data(threshold=20)
+    plt.show()
