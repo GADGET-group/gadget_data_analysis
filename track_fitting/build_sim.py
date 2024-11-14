@@ -99,7 +99,8 @@ def set_params_and_simulate(sim, param_dict):
         sim.__dict__[param] = param_dict[param]
     sim.simulate_event()
 
-def load_pa_mcmc_results(sim, run, event, mcmc_name='final_run'):
+def load_pa_mcmc_results(run, event, mcmc_name='final_run'):
+    sim = create_pa_sim('e21072', run, event)
     reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
@@ -117,6 +118,7 @@ def load_pa_mcmc_results(sim, run, event, mcmc_name='final_run'):
     sim.sigma_xy = sigma_xy
     sim.sigma_z = sigma_z
     sim.simulate_event()
+    return sim
 
 def show_results(event):
     sim = create_pa_sim('e21072', 124, event)
