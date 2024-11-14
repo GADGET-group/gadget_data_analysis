@@ -138,39 +138,6 @@ def process_h5(filepath, labels, Ea_Ep_labels=None):
             h5file.num_background_bins=(160, 250)
             h5file.ic_counts_threshold = 25
 
-def get_pa_sim(params, get_data_h5, event_number):
-    #assumes params are: 'E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z'
-    rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-    T = 20+273.15 #K
-    get_gas_density = lambda P: rho0*(P/760)*(300./T)
-    sim=ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(800), 'proton')
-    sim.initial_energy = params[0]*(1-params[1])
-    sim.point_energy_deposition = params[0]*params[1]
-    sim.initial_point = params[2:5]
-    sim.theta = params[5]
-    sim.phi = params[6]
-    sim.sigma_xy = params[7]
-    sim.sigma_z = params[8]
-    #use theoretical zscale
-    
-    clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-    drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
-    sim.zscale =  drift_speed/clock_freq
-    shaping_time = 70e-9 #s, from e21062 config file on mac minis
-    sim.shaping_width = shaping_time*clock_freq*2.355
-    sim.counts_per_MeV = 86431./0.757
-    #
-    pads, traces = event_number.get_pad_traces(event_number, False)
-    sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10)
-    sim.simulate_event()
-    return sim
-            
-
-            #sim.plot_simulated_3d_data(mode='aligned', threshold=25)
-            #sim.plot_residuals_3d(energy_threshold=25)
-            #sim.plot_residuals()
-            #print(sim.log_likelihood())
-            #plt.show(block=False)
 
 if False:
     run_number= 124
@@ -186,13 +153,13 @@ if False:
     Ea_Ep_labels = None
 else:
     run_number= 124
-    steps = 5
+    steps = 1
     filenames = []
     #need to re-run on 21662 and 27067
-    for event in [25304]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]: #17,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067
+    for event in [51777]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]: #17,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
-        filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
+        #filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'Ea_frac', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 5,6
     tau = [2]

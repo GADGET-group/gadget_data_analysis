@@ -27,7 +27,7 @@ if __name__ == '__main__':
     run_h5_path = folder +'run_%04d.h5'%run_number
 
     if run_number == 124:
-        adc_scale_mu = 86431./0.757*1.35 #counts/MeV
+        adc_scale_mu = 86431./0.757/1.35 #counts/MeV
         detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
 
         pad_gain_match_uncertainty = 0.3286
