@@ -30,9 +30,9 @@ start_time = time.time()
 h5_folder = '../../shared/Run_Data/'
 run_number = 124
 run_h5_path = h5_folder +'run_%04d.h5'%run_number
-pickle_fname = 'run%d_results_objects_m0_c1.dat'%run_number
+pickle_fname = 'run%d_results_objects_m0_c1_1.3xgain.dat'%run_number
 
-adc_scale_mu = 124673.72676265772 #trying value from fitting 100 757 keV protons
+adc_scale_mu = 124673.72676265772*1.3 #trying value from fitting 100 757 keV protons
 #old value for adcscalemu: 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
 detector_E_sigma = lambda E: (5631./(86431./0.757))*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
 
