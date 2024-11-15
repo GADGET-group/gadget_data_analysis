@@ -130,9 +130,9 @@ if __name__ == '__main__':
             return -np.inf
         if theta < 0 or theta >= np.pi or phi < -2*np.pi or phi>2*np.pi:
             return -np.inf 
-        if sigma_xy < 0 or sigma_xy > 20:
+        if sigma_xy < 0 or sigma_xy > 40:
             return -np.inf
-        if sigma_z < 0 or sigma_z > 20:
+        if sigma_z < 0 or sigma_z > 40:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
@@ -189,7 +189,7 @@ if __name__ == '__main__':
         init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
                              np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
                              np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                             np.random.uniform(0, 20), np.random.uniform(0,20)) for w in range(nwalkers)]
+                             np.random.uniform(0, 40), np.random.uniform(0,40)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
@@ -203,11 +203,11 @@ if __name__ == '__main__':
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
             sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                            #  moves=[
-                                            #          (emcee.moves.DESnookerMove(), 0.2),
-                                            #          (emcee.moves.DEMove(), 0.6),
-                                            #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
-                                            #  ],
+                                             moves=[
+                                                     (emcee.moves.DESnookerMove(), 0.2),
+                                                     (emcee.moves.DEMove(), 0.6),
+                                                     (emcee.moves.DEMove(gamma0=1.0), 0.2)
+                                             ],
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
