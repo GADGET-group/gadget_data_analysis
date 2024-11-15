@@ -149,7 +149,7 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 250
-    clustering_steps = 1000
+    clustering_steps = 5000
     times_to_repeat_clustering = 1
     post_cluster_steps=0
     ndim = 9
