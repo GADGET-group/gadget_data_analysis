@@ -79,6 +79,8 @@ def process_h5(filepath, labels, Ea_Ep_labels=None):
 
         if True not in np.isnan(tau_auto):
             tau = tau_auto
+        else:
+            tau = [2]
         burnin = int(2 * np.max(tau))
         thin = int(0.5 * np.min(tau))
         output_text_file.write('burnin: %f\n'%burnin)

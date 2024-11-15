@@ -203,11 +203,11 @@ if __name__ == '__main__':
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
             sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                             moves=[
-                                                     (emcee.moves.DESnookerMove(), 0.2),
-                                                     (emcee.moves.DEMove(), 0.6),
-                                                     (emcee.moves.DEMove(gamma0=1.0), 0.2)
-                                             ],
+                                            #  moves=[
+                                            #          (emcee.moves.DESnookerMove(), 0.2),
+                                            #          (emcee.moves.DEMove(), 0.6),
+                                            #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
+                                            #  ],
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
