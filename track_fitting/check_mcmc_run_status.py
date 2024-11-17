@@ -8,7 +8,7 @@ import sklearn.cluster as cluster
 
 #from track_fitting import ParticleAndPointDeposition
 #from raw_viewer import raw_h5_file
-def process_h5(filepath, labels, Ea_Ep_labels=None):
+def process_h5(filepath, labels, Ea_Ep_labels=None, summary_file=None):
     base_fname = os.path.splitext(filepath)[0]
     reader = emcee.backends.HDFBackend(filename=filepath, read_only=True)
     with open(base_fname+'.txt', 'w') as output_text_file:
@@ -119,26 +119,13 @@ def process_h5(filepath, labels, Ea_Ep_labels=None):
                     txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
                     txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
                     output_text_file.write('%s\n'%txt)
+                    if summary_file != None:
+                        summary_file.write('%f + %f - %f, '%(mcmc[1],mcmc[0], mcmc[2]))
+                if summary_file != None:
+                    summary_file.write('\n')
 
         plt.close('all') 
 
-        if False:
-            h5_folder = '../../shared/Run_Data/'
-            run_number = 124
-            run_h5_path = h5_folder +'run_%04d.h5'%run_number
-
-            
-
-            h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
-                                            zscale=drift_speed/clock_freq,
-                                            flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-            h5file.background_subtract_mode='fixed window'
-            h5file.data_select_mode='near peak'
-            h5file.remove_outliers=True
-            h5file.near_peak_window_width = 50
-            h5file.require_peak_within= (-np.inf, np.inf)
-            h5file.num_background_bins=(160, 250)
-            h5file.ic_counts_threshold = 25
 
 
 if False:
@@ -166,7 +153,10 @@ else:
     theta_index, phi_index = 5,6
     tau = [2]
     Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
+    summary_file_path = '../run%d_palpha_mcmc/summary.txt'%run_number
 
 for filepath in filenames:
-    process_h5(filepath, labels, Ea_Ep_labels)
+    with open(summary_file_path, 'w') as summary_file:
+        summary_file.write(str(Ea_Ep_labels) + '\n')
+        process_h5(filepath, labels, Ea_Ep_labels, summary_file)
 

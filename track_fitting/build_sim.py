@@ -122,8 +122,11 @@ def load_pa_mcmc_results(run, event, mcmc_name='final_run'):
 
 def show_results(event):
     sim = create_pa_sim('e21072', 124, event)
-    load_pa_mcmc_results(sim, 124,event)
+    load_pa_mcmc_results(124,event, 'clustering_run0')
     import matplotlib.pylab as plt
     sim.plot_residuals_3d(threshold=20)
     sim.plot_simulated_3d_data(threshold=20)
-    plt.show()
+
+    h5 = get_rawh5_object('e21072', 124)
+    h5.plot_3d_traces(event,threshold=20)
+    #plt.show()
