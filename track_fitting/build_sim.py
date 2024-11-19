@@ -92,7 +92,7 @@ def set_params_and_simulate(sim, param_dict):
 
 def load_pa_mcmc_results(run, event, mcmc_name='final_run'):
     sim = create_pa_sim('e21072', run, event)
-    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_11-18-2024/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
     samples = reader.get_chain()

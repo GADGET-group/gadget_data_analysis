@@ -42,6 +42,8 @@ class SimGui(ttk.Frame):
         self.param_types = []
         self.param_entries = []
         self.plottable_vars = []
+        self.single_var_fit_variables = []
+
         for var_name in sim.__dict__:
             value = sim.__dict__[var_name]
             if isinstance(value, np.floating) or isinstance(value, np.integer) or isinstance(value, int) or isinstance(value, float) or isinstance(value, str   ):
@@ -53,6 +55,9 @@ class SimGui(ttk.Frame):
                 ttk.Label(param_frame, text=var_name).grid(row=row, column=0)
                 new_entry.grid(row=row, column=1)
                 ttk.Label(param_frame, text=str(type(value))).grid(row=row, column=2)
+                check_var = tk.BooleanVar()
+                tk.Checkbutton(param_frame, variable=check_var).grid(row=row, column=3)
+                self.single_var_fit_variables.append(check_var)
                 row += 1
             if (isinstance(value, np.floating) or isinstance(value, np.integer) or isinstance(value, int) or isinstance(value, float)) and type(value) != bool:
                 self.plottable_vars.append(var_name) 
@@ -64,11 +69,15 @@ class SimGui(ttk.Frame):
         sim_frame = ttk.LabelFrame(self, text='simulate')
         row = 0
         ttk.Button(sim_frame, text='simulate', command=self.sim_button_clicked).grid(row=row, column=0)
+        ttk.Button(sim_frame, text='maximize likelihood', command=self.maximize_likelihood).grid(row=row, column=1)
         row += 1
         ttk.Label(sim_frame, text='view threshold:').grid(row=row, column=0)
         self.view_thresh_entry = ttk.Entry(sim_frame)
         self.view_thresh_entry.insert(0, '20')
         self.view_thresh_entry.grid(row=row, column=1)
+        row += 1
+        ttk.Button(sim_frame, text='save params', command=self.save_params_clicked).grid(row=row, column = 0)
+        ttk.Button(sim_frame, text='load params', command=self.load_params_clicked).grid(row=row, column = 1)
         sim_frame.grid()
         
         
@@ -100,14 +109,8 @@ class SimGui(ttk.Frame):
         ttk.Button(likelihood_plot_frame, text='plot log likelihood', command=self.ll_plot_clicked).grid(row=row, column=0)
         likelihood_plot_frame.grid()
 
-        
-        # check box to close existing plots when making a new plot
-
-        #entry for setting view theshold
-
-        #check boxes for which plots to show
-
-        #track fitting tools
+        self.saved_entry_vals = [] #strings to repopulate entries when load is clicked
+        self.save_params_clicked()
 
     def load_entries_to_sim(self):
         #set individual variables
@@ -159,3 +162,17 @@ class SimGui(ttk.Frame):
         plt.xlabel(var_to_plot)
         plt.ylabel('log likilihood')
         plt.show(block=False)
+
+    def save_params_clicked(self):
+        self.saved_entry_vals = []
+        for entry in self.param_entries:
+            self.saved_entry_vals.append(entry.get())
+
+    def load_params_clicked(self):
+        for saved_val, entry in zip(self.saved_entry_vals, self.param_entries):
+             entry.delete(0, tk.END)
+             entry.insert(0, saved_val)
+
+    def maximize_likelihood(self):
+        #def to_minimize
+        pass

@@ -233,7 +233,6 @@ class SingleParticleEvent:
         #perform thresholding and find indecies for trimming
         for pad in self.traces_to_fit:
             trace = self.traces_to_fit[pad]
-            trace[trace < 0] = 0 #TODO: undo this
             above_threshold_bins = np.nonzero(trace >= trim_threshold)
             if len(above_threshold_bins[0]) >0:
                 first, last = np.min(above_threshold_bins), np.max(above_threshold_bins)
