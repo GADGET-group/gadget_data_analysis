@@ -4,6 +4,7 @@ from tkinter import ttk
 
 import  numpy as np
 import matplotlib.pylab as plt
+import scipy.optimize as opt
 
 from track_fitting.SingleParticleEvent import SingleParticleEvent
 
@@ -23,18 +24,23 @@ class SimGui(ttk.Frame):
         #Iterable objects are only exposed if in "expose_iterables"
         self.array_types = expose_arrays
         self.array_entries = {}
+        self.array_fit_variables = {}
         for array_name in expose_arrays:
             array = sim.__dict__[array_name]
             ttk.Label(param_frame, text=array_name).grid(row=row, column=0)
             col = 1
             entries = []
+            self.array_fit_variables[array_name] = []
             for x in array:
                 new_entry = ttk.Entry(param_frame)
                 new_entry.insert(0, str(x))
                 new_entry.grid(row=row, column=col)
                 entries.append(new_entry)
+                check_var = tk.BooleanVar()
+                tk.Checkbutton(param_frame, variable=check_var).grid(row=row+1, column=col)
+                self.array_fit_variables[array_name].append(check_var)
                 col += 1
-            row += 1
+            row += 2
             self.array_entries[array_name] = entries
 
         #expose all ints, floats, and strings
@@ -70,14 +76,20 @@ class SimGui(ttk.Frame):
         row = 0
         ttk.Button(sim_frame, text='simulate', command=self.sim_button_clicked).grid(row=row, column=0)
         ttk.Button(sim_frame, text='maximize likelihood', command=self.maximize_likelihood).grid(row=row, column=1)
+        ttk.Button(sim_frame, text='save params', command=self.save_params_clicked).grid(row=row, column = 2)
+        ttk.Button(sim_frame, text='load params', command=self.load_params_clicked).grid(row=row, column = 3)
+        row += 1
+        ttk.Label(sim_frame, text='max iter:').grid(row=row, column=0)
+        self.max_iter_entry = ttk.Entry(sim_frame)
+        self.max_iter_entry.insert(0, '5')
+        self.max_iter_entry.grid(row=row, column=1)
         row += 1
         ttk.Label(sim_frame, text='view threshold:').grid(row=row, column=0)
         self.view_thresh_entry = ttk.Entry(sim_frame)
         self.view_thresh_entry.insert(0, '20')
         self.view_thresh_entry.grid(row=row, column=1)
         row += 1
-        ttk.Button(sim_frame, text='save params', command=self.save_params_clicked).grid(row=row, column = 0)
-        ttk.Button(sim_frame, text='load params', command=self.load_params_clicked).grid(row=row, column = 1)
+        
         sim_frame.grid()
         
         
@@ -174,5 +186,23 @@ class SimGui(ttk.Frame):
              entry.insert(0, saved_val)
 
     def maximize_likelihood(self):
-        #def to_minimize
-        pass
+        entries_to_fit = []
+        for array_name in self.array_entries:
+            for entry, var in zip(self.array_entries[array_name], self.array_fit_variables[array_name]):
+                if var.get():
+                    entries_to_fit.append(entry)
+        for entry, var in zip(self.param_entries, self.single_var_fit_variables):
+            if var.get():
+                entries_to_fit.append(entry)
+        
+        def to_minimize(vals):
+            for v, entry in zip(vals, entries_to_fit):
+                entry.delete(0, tk.END)
+                entry.insert(0, v)
+            self.load_entries_to_sim()
+            to_return = -self.sim.log_likelihood()
+            print(vals, to_return)
+            return to_return
+
+        starting_guess = [float(entry.get()) for entry in entries_to_fit]
+        print(opt.minimize(to_minimize, starting_guess, options={'maxiter':float(self.max_iter_entry.get())}))
