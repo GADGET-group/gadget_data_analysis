@@ -9,7 +9,7 @@ import emcee
 
 from raw_viewer.raw_h5_file import raw_h5_file
 from track_fitting.ParticleAndPointDeposition import ParticleAndPointDeposition
-
+from track_fitting.SimGui import SimGui
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
 #########################################################################
@@ -33,15 +33,6 @@ def get_zscale(experiment, run):
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
     return drift_speed/clock_freq
-
-#systematics to use for likelihood funciton
-def get_systematics(experiment, run):
-    '''
-    Returns gain match uncertainty, other systematics
-    '''
-    if experiment == 'e21072':
-        if run == 124:
-            return 0.3286, 8.876
 
 #raw h5 data location and processing settings
 def get_raw_h5_path(experiment, run):
@@ -88,7 +79,7 @@ def create_pa_sim(experiment, run, event):
         max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event)
         E_from_ic = measured_counts/sim.counts_per_MeV
         sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
-        print(sim.num_stopping_power_points)
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.3286, 8.876
         return sim
 
 def set_params_and_simulate(sim, param_dict):
@@ -112,7 +103,7 @@ def load_pa_mcmc_results(run, event, mcmc_name='final_run'):
     Ea = E*Ea_frac
     sim.initial_energy = Ep
     sim.point_energy_deposition = Ea
-    sim.initial_point = (x,y,z)
+    sim.initial_point = [x,y,z]
     sim.theta = theta
     sim.phi = phi
     sim.sigma_xy = sigma_xy
@@ -121,8 +112,7 @@ def load_pa_mcmc_results(run, event, mcmc_name='final_run'):
     return sim
 
 def show_results(event):
-    sim = create_pa_sim('e21072', 124, event)
-    load_pa_mcmc_results(124,event, 'clustering_run0')
+    sim = load_pa_mcmc_results(124,event, 'clustering_run2')
     import matplotlib.pylab as plt
     sim.plot_residuals_3d(threshold=20)
     sim.plot_simulated_3d_data(threshold=20)
@@ -130,3 +120,9 @@ def show_results(event):
     h5 = get_rawh5_object('e21072', 124)
     h5.plot_3d_traces(event,threshold=20)
     #plt.show()
+
+def open_gui(sim):
+    import tkinter as tk
+    root = tk.Tk()
+    SimGui(root, sim).grid()
+    root.mainloop()

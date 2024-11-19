@@ -1,0 +1,161 @@
+import numpy as np
+import tkinter as tk
+from tkinter import ttk
+
+import  numpy as np
+import matplotlib.pylab as plt
+
+from track_fitting.SingleParticleEvent import SingleParticleEvent
+
+class SimGui(ttk.Frame):
+    def __init__(self, parent, sim:SingleParticleEvent, expose_arrays={'initial_point':float}):
+        '''
+        sim: Simulation to adjust parameters of
+        expose_arrays: Dict of arrays which should be visbible in the gui. Keys are variable name, and index the 
+                        type that values should be case as when updating the array from the GUI. These arrays
+                        are currently assumed not to change length.
+        '''
+        super().__init__(parent)
+        self.sim = sim
+
+        param_frame = ttk.LabelFrame(self, text='simulation parameters')
+        row = 0
+        #Iterable objects are only exposed if in "expose_iterables"
+        self.array_types = expose_arrays
+        self.array_entries = {}
+        for array_name in expose_arrays:
+            array = sim.__dict__[array_name]
+            ttk.Label(param_frame, text=array_name).grid(row=row, column=0)
+            col = 1
+            entries = []
+            for x in array:
+                new_entry = ttk.Entry(param_frame)
+                new_entry.insert(0, str(x))
+                new_entry.grid(row=row, column=col)
+                entries.append(new_entry)
+                col += 1
+            row += 1
+            self.array_entries[array_name] = entries
+
+        #expose all ints, floats, and strings
+        self.param_names = []
+        self.param_types = []
+        self.param_entries = []
+        self.plottable_vars = []
+        for var_name in sim.__dict__:
+            value = sim.__dict__[var_name]
+            if isinstance(value, np.floating) or isinstance(value, np.integer) or isinstance(value, int) or isinstance(value, float) or isinstance(value, str   ):
+                self.param_names.append(var_name)
+                self.param_types.append(type(value))
+                new_entry = ttk.Entry(param_frame)
+                self.param_entries.append(new_entry)
+                new_entry.insert(0, str(value))
+                ttk.Label(param_frame, text=var_name).grid(row=row, column=0)
+                new_entry.grid(row=row, column=1)
+                ttk.Label(param_frame, text=str(type(value))).grid(row=row, column=2)
+                row += 1
+            if (isinstance(value, np.floating) or isinstance(value, np.integer) or isinstance(value, int) or isinstance(value, float)) and type(value) != bool:
+                self.plottable_vars.append(var_name) 
+        param_frame.grid()
+
+
+
+        #simulate button 
+        sim_frame = ttk.LabelFrame(self, text='simulate')
+        row = 0
+        ttk.Button(sim_frame, text='simulate', command=self.sim_button_clicked).grid(row=row, column=0)
+        row += 1
+        ttk.Label(sim_frame, text='view threshold:').grid(row=row, column=0)
+        self.view_thresh_entry = ttk.Entry(sim_frame)
+        self.view_thresh_entry.insert(0, '20')
+        self.view_thresh_entry.grid(row=row, column=1)
+        sim_frame.grid()
+        
+        
+
+        likelihood_plot_frame = ttk.LabelFrame(self, text='Log Likelihood Plotting')
+        row = 0
+        ttk.Label(likelihood_plot_frame, text='current log likelihood:').grid(row=row, column=0)
+        self.likelihood_label = ttk.Label(likelihood_plot_frame, text='---------')
+        self.likelihood_label.grid(row=row, column=1)
+        row += 1
+        self.likelihood_plot_var = tk.StringVar(self)
+        ttk.Label(likelihood_plot_frame, text='Variable to plot:').grid(row=row, column=0)
+        ttk.OptionMenu(likelihood_plot_frame, self.likelihood_plot_var, self.plottable_vars[0], *self.plottable_vars).grid(row=row, column=1)
+        row += 1
+        ttk.Label(likelihood_plot_frame, text="+").grid(row=row, column=0)
+        self.ll_plot_plus_entry = ttk.Entry(likelihood_plot_frame)
+        self.ll_plot_plus_entry.insert(0, '1')
+        self.ll_plot_plus_entry.grid(row=row, column=1)
+        ttk.Label(likelihood_plot_frame, text="-").grid(row=row, column=2)
+        self.ll_plot_minus_entry = ttk.Entry(likelihood_plot_frame)
+        self.ll_plot_minus_entry.insert(0, '1')
+        self.ll_plot_minus_entry.grid(row=row, column=3)
+        row += 1
+        ttk.Label(likelihood_plot_frame, text='Number of points:').grid(row=row, column=0)
+        self.ll_plot_points_entry = ttk.Entry(likelihood_plot_frame)
+        self.ll_plot_points_entry.insert(0, '9')
+        self.ll_plot_points_entry.grid(row=row, column=1)
+        row += 1
+        ttk.Button(likelihood_plot_frame, text='plot log likelihood', command=self.ll_plot_clicked).grid(row=row, column=0)
+        likelihood_plot_frame.grid()
+
+        
+        # check box to close existing plots when making a new plot
+
+        #entry for setting view theshold
+
+        #check boxes for which plots to show
+
+        #track fitting tools
+
+    def load_entries_to_sim(self):
+        #set individual variables
+        for name, entry, param_type in zip(self.param_names, self.param_entries, self.param_types):
+            if param_type != bool:
+                self.sim.__dict__[name] = param_type(entry.get())
+            else: #handle boolean variables
+                if entry.get().lower() == 'false':
+                    self.sim.__dict__[name] = False
+                elif entry.get().lower() == 'true':
+                    self.sim.__dict__[name] = True
+                else:
+                    assert False
+        #set array element values
+        for array_name in self.array_types:
+            array_type = self.array_types[array_name]
+            entries = self.array_entries[array_name]
+            for i in range(len(entries)):
+                self.sim.__dict__[array_name][i] = array_type(entries[i].get())
+        #reload srim table to match values set through gui, and then resimulate event
+        self.sim.load_srim_table(self.sim.particle, self.sim.gas_density)
+        self.sim.simulate_event()
+
+    def sim_button_clicked(self):
+        self.load_entries_to_sim()
+        #make plots
+        view_thresh = float(self.view_thresh_entry.get())
+        self.sim.plot_real_data_3d(threshold=view_thresh)
+        self.sim.plot_simulated_3d_data(threshold=view_thresh)
+        self.sim.plot_residuals_3d(threshold=view_thresh)
+        plt.show(block=False)
+
+        self.likelihood_label['text'] = '%e'%self.sim.log_likelihood()
+
+    def ll_plot_clicked(self):
+        self.load_entries_to_sim() #make sure sim is up to date with entries
+        var_to_plot = self.likelihood_plot_var.get()
+        p, m = float(self.ll_plot_plus_entry.get()), float(self.ll_plot_minus_entry.get())
+        current_val = self.sim.__dict__[var_to_plot]
+        vals_to_plot = np.linspace(current_val - m, current_val + p, int(self.ll_plot_points_entry.get()))
+        ll_vals = []
+        for v in vals_to_plot:
+            self.sim.__dict__[var_to_plot] = v
+            self.sim.load_srim_table(self.sim.particle, self.sim.gas_density)
+            self.sim.simulate_event()
+            ll_vals.append(self.sim.log_likelihood())
+        plt.figure()
+        plt.scatter(vals_to_plot, ll_vals)
+        plt.xlabel(var_to_plot)
+        plt.ylabel('log likilihood')
+        plt.show(block=False)

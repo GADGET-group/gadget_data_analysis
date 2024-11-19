@@ -27,6 +27,7 @@ class SingleParticleEvent:
         gas_density: density in mg/cm^3
         '''
         self.particle = particle #this variable should only be changed using the load_srim_table function
+        self.gas_density = gas_density  #this variable should only be changed using the load_srim_table function
     
         self.enable_print_statements = False
 
@@ -59,7 +60,7 @@ class SingleParticleEvent:
 
         #event parameters
         self.initial_energy = 1 #MeV
-        self.initial_point = (0,0,0) #(x,y,z) mm. z coordinate only effects peak position in trace.
+        self.initial_point = [0,0,0] #(x,y,z) mm. z coordinate only effects peak position in trace.
         self.theta, self.phi = 0,0 #angles describing direction in which emmitted particle travels, in radians
 
         #dictionary containing energy deposition on each pad as a function of z coordinate
@@ -87,6 +88,7 @@ class SingleParticleEvent:
         gas density: mg/cm^3
         '''
         self.particle = particle
+        self.gas_density = gas_density
         if particle.lower() == 'proton':
             self.srim_table = srim_interface.SRIM_Table('track_fitting/H_in_P10.txt', gas_density)
         elif particle.lower() == 'alpha':
@@ -161,19 +163,22 @@ class SingleParticleEvent:
             print("Time to compute traces: ", time3 - time2)
 
 
-    def get_xyze(self, threshold=-np.inf):
+    def get_xyze(self, threshold=-np.inf, traces=None):
         '''
         returns x,y,z,e arrays, similar to the same method in raw_h5_file
         
         source: can be 'energy grid', 'pad map', or 'aligned'
         threshold: only bins with more than this much energy deposition (in MeV) will be returned
+        traces: If none, use simulated traces dictionary. Otherwise, use passed in trace dict.
         '''
+        if traces == None:
+            traces = self.sim_traces
         xs, ys, es = [],[],[]
-        for pad in self.sim_traces:
+        for pad in traces:
             x,y = self.pad_to_xy[pad]
             xs.append(x)
             ys.append(y)
-            es.append(self.sim_traces[pad])
+            es.append(traces[pad])
         num_z_bins = self.num_trace_bins
         xs = np.repeat(xs, num_z_bins)
         ys = np.repeat(ys, num_z_bins)
@@ -353,6 +358,10 @@ class SingleParticleEvent:
 
     def plot_simulated_3d_data(self,  title='simulated_data', threshold=-np.inf): #show plots of initial guess
         self.plot_xyze(*self.get_xyze(threshold), title, threshold)
+
+    def plot_real_data_3d(self, title='observed_data', threshold=-np.inf):
+        self.plot_xyze(*self.get_xyze(threshold, traces=self.traces_to_fit), title, threshold)
+
     
     def plot_residuals_3d(self, title='residuals', threshold=0):
         #in this case treshold is applied to absolute value

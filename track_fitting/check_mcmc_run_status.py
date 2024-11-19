@@ -142,7 +142,7 @@ if False:
     Ea_Ep_labels = None
 else:
     run_number= 124
-    steps = 1
+    steps = 3
     filenames = []
     #need to re-run on 21662 and 27067
     for event in [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]:
