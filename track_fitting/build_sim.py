@@ -54,7 +54,7 @@ def get_rawh5_object(experiment, run):
         h5file.remove_outliers=True
         h5file.near_peak_window_width = 50
         h5file.require_peak_within= (-np.inf, np.inf)
-        h5file.num_background_bins=(160, 250)
+        h5file.num_background_bins=(40,50)#(160, 250)
         return h5file
     
 def apply_config_to_object(config_file, object):
