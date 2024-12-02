@@ -9,7 +9,7 @@ import scipy.optimize as opt
 import sklearn.cluster as cluster
 import multiprocessing
 
-from track_fitting import ParticleAndPointDeposition
+from track_fitting import ParticleAndPointDeposition, build_sim
 from raw_viewer import raw_h5_file
 
 particle_type = 'proton'
@@ -21,72 +21,19 @@ class GaussianVar:
     def log_likelihood(self, val):
         return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
 
-def get_sims_and_param_bounds(run_number, events):
-    #returns [sims], [parameter_bounds], energy_prior
-    folder = '../../shared/Run_Data/'
-
-
-    run_h5_path = folder +'run_%04d.h5'%run_number
-
-    if run_number == 124:
-        adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
-        adc_scale_sigma = 5631.
-        
-    elif run_number == 270:
-        adc_scale_mu = 151984/0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
-        adc_scale_sigma = 8485.
-    detector_E_sigma = lambda E: (adc_scale_sigma/adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
-    #use theoretical zscale
-    clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-    drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
-    zscale = drift_speed/clock_freq
-
-    ic_threshold = 25
-
-    pad_threshold = 70
-
-    gain_match_uncertainty = 0.3286
-    other_systematics = 8.876
-
-
-    pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
-
-            
-    rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-    T = 20+273.15 #K
-    get_gas_density = lambda P: rho0*(P/760)*(300./T)
-
-
-    h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
-                                    zscale=zscale,
-                                    flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-    h5file.background_subtract_mode='fixed window'
-    h5file.data_select_mode='near peak'
-    h5file.remove_outliers=True
-    h5file.near_peak_window_width = 50
-    h5file.require_peak_within= (-np.inf, np.inf)
-    h5file.num_background_bins=(160, 250)
-    h5file.zscale = zscale
-
+def get_sims_and_param_bounds(experiment, run_number, events):
     sims, bounds, epriors = [],[], []
     for event_num in events:
-        pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-        max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
-        x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
+        new_sim = build_sim.create_pa_sim(experiment, run_number)
+        E_from_ic = new_sim.get
+        x_real, y_real, z_real, ic_real = new_sim.get
 
-        E_from_ic = measured_counts/adc_scale_mu
         xmin, xmax = np.min(x_real), np.max(x_real)
         ymin, ymax = np.min(y_real), np.max(y_real)
         zmin = 0
         #set zmax to length of trimmed traces
-        new_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), particle_type)
-        new_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)
-        zmax = new_sim.num_trace_bins*zscale
-        new_sim.num_stopping_power_points = new_sim.get_num_stopping_points_for_energy(E_from_ic)
-        new_sim.adaptive_stopping_power = False
-        new_sim.pad_gain_match_uncertainty = gain_match_uncertainty
-        new_sim.other_systematics = other_systematics
-        new_sim.counts_per_MeV = adc_scale_mu
+        
+        
         sims.append(new_sim)
         bounds.append(((E_from_ic/2, E_from_ic*2), (0,1), 
                        (xmin, xmax), (ymin, ymax),(zmin, zmax),

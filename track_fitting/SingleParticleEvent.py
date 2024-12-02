@@ -140,10 +140,10 @@ class SingleParticleEvent:
         zs = np.arange(self.num_trace_bins)*self.zscale
         #loop over pads, and calculate energy deposition in each bin
         self.sim_traces = {}
+        erf = scipy.special.erf
         for pad in self.pads_to_sim:
             trace = np.zeros(self.num_trace_bins)
             for point, edep in zip(points, energy_deposition):
-                erf = scipy.special.erf
                 dz = zs - point[2]
                 zfrac = 0.5*(erf((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf(dz/np.sqrt(2*self.sigma_z)))
                 dx = self.pad_to_xy[pad][0] - point[0]
@@ -206,6 +206,15 @@ class SingleParticleEvent:
                 candidate = self.pad_plane[x+dx,y+dy]
                 if candidate != -1:
                     to_return.append(candidate)
+        return to_return
+
+    def get_observed_energy_from_ic(self):
+        '''
+        Returns energy of event being fit based on integrated charge
+        '''
+        to_return = 0
+        for pad in self.traces_to_fit:
+            to_return += np.sum(self.traces_to_fit[pad])/self.counts_per_MeV
         return to_return
 
     def set_real_data(self, pads, traces, trim_threshold, trim_pad = 5, pads_to_sim_select='adjacent'):
@@ -287,9 +296,11 @@ class SingleParticleEvent:
         return xs, ys, zs, es
 
     def log_likelihood(self):
+        self.pad_ll = {}
         start_time = time.time()
         to_return = 0
         for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
+            pad_ll = 0
             if pad in self.sim_traces: #if the pad trace was simulated
                 cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
                 for i in range(self.num_trace_bins):
@@ -305,15 +316,17 @@ class SingleParticleEvent:
                     residuals = self.sim_traces[pad]
                     residuals[residuals < self.pad_threshold] = 0
                     residuals[residuals >= self.pad_threshold] -= self.pad_threshold
-                to_return -= self.num_trace_bins*0.5*np.log(2*np.pi)
-                to_return -= 0.5*np.log(np.linalg.det(cov_matrix))
+                pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
+                pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
                 residuals = np.matrix(residuals)
-                to_return -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]
+                pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]
             else: #pad was not simulated
-                to_return -= 0.5*self.num_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
+                pad_ll -= 0.5*self.num_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
                 if pad in self.traces_to_fit: #pad fired, but was not simulated
                     residuals = np.matrix(-self.traces_to_fit[pad])
-                    to_return -= 0.5*(residuals*residuals.T)[0]/self.other_systematics**2
+                    pad_ll -= 0.5*(residuals*residuals.T)[0]/self.other_systematics**2
+            to_return += pad_ll
+            self.pad_ll[pad] = pad_ll
 
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))

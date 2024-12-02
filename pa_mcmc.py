@@ -30,7 +30,7 @@ if __name__ == '__main__':
         adc_scale_mu = 86431./0.757 #counts/MeV
         detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
 
-        pad_gain_match_uncertainty = 0#0.3286
+        pad_gain_match_uncertainty = 0.3286
         other_systematics = 8.876
 
         #use theoretical zscale
