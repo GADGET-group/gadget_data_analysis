@@ -32,8 +32,8 @@ class SingleParticleEvent:
         self.enable_print_statements = False
 
         #physical constants relating to the detector
-        self.sigma_xy = 1 #mm
-        self.sigma_z = 1 #mm
+        self.sigma_xy = 1. #mm
+        self.sigma_z = 1. #mm
         self.zscale = 1.45 #mm/time bin
         self.counts_per_MeV = 1
         #minimum number of counts above background required for the pad to fire

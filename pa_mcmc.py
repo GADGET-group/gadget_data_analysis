@@ -12,7 +12,7 @@ import multiprocessing
 import emcee
 import corner
 
-from track_fitting import ParticleAndPointDeposition
+from track_fitting import ParticleAndPointDeposition, build_sim
 from raw_viewer import raw_h5_file
 
 if __name__ == '__main__':
@@ -23,48 +23,7 @@ if __name__ == '__main__':
     #folder = '/mnt/analysis/e21072/gastest_h5_files/'
     folder = '../../shared/Run_Data/'
 
-
-    run_h5_path = folder +'run_%04d.h5'%run_number
-
-    if run_number == 124:
-        adc_scale_mu = 86431./0.757 #counts/MeV
-        detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
-
-        pad_gain_match_uncertainty = 0.3286
-        other_systematics = 8.876
-
-        #use theoretical zscale
-        clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-        drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
-        zscale = drift_speed/clock_freq
-
-        ic_threshold = 25
-        h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
-                                        zscale=zscale,
-                                        flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.background_subtract_mode='fixed window'
-        h5file.data_select_mode='near peak'
-        h5file.remove_outliers=True
-        h5file.near_peak_window_width = 50
-        h5file.require_peak_within= (-np.inf, np.inf)
-        h5file.num_background_bins=(160, 250)
-        h5file.zscale = zscale
-
-        shaping_time = 70e-9 #s, from e21062 config file on mac minis
-
-        pad_threshold = 70
-
-
-        pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
-
-            
-    rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-    T = 20+273.15 #K
-    get_gas_density = lambda P: rho0*(P/760)*(300./T)
-
-
-
-    pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
+    experiment = 'e21072'
 
     #MCMC priors
     class GaussianVar:
@@ -74,30 +33,24 @@ if __name__ == '__main__':
         def log_likelihood(self, val):
             return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
 
-    max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
-    E_from_ic = measured_counts/adc_scale_mu
-    E_prior = GaussianVar(E_from_ic, detector_E_sigma(E_from_ic))
+    E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
+    E_from_ic_simga = build_sim.get_detector_E_sigma(experiment, run_number, event_num, E_from_ic)
+    E_prior = GaussianVar(E_from_ic, E_from_ic_simga)
+
+    h5file = build_sim.get_rawh5_object(experiment, run_number)
     x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
     xmin, xmax = np.min(x_real), np.max(x_real)
     ymin, ymax = np.min(y_real), np.max(y_real)
     zmin = 0
     #set zmax to length of trimmed traces
-    temp_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), particle_type)
-    temp_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)
-    zmax = temp_sim.num_trace_bins*zscale
-    num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
+    temp_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
+    zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     def get_sim(params):
         E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
-        trace_sim = ParticleAndPointDeposition.ParticleAndPointDeposition(get_gas_density(pressure), particle_type)
-        trace_sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
-        trace_sim.other_systematics = other_systematics
-        trace_sim.zscale = zscale
-        trace_sim.counts_per_MeV = adc_scale_mu
-        trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)#match trim threshold used for systematics determination\
-        trace_sim.load_srim_table(particle_type, get_gas_density(pressure))
+        trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
         trace_sim.initial_energy = Ep
         trace_sim.point_energy_deposition = Ea
         trace_sim.initial_point = (x,y,z)
@@ -106,8 +59,6 @@ if __name__ == '__main__':
         trace_sim.sigma_xy = sigma_xy
         trace_sim.sigma_z = sigma_z
         trace_sim.adaptive_stopping_power = False
-        trace_sim.num_stopping_power_points = num_stopping_points
-        trace_sim.pad_threshold = pad_threshold
         trace_sim.simulate_event()
         return trace_sim
 
@@ -150,7 +101,7 @@ if __name__ == '__main__':
     fit_start_time = time.time()
     nwalkers = 250
     clustering_steps = 500
-    times_to_repeat_clustering = 3
+    times_to_repeat_clustering = 2
     post_cluster_steps=0
     ndim = 9
 

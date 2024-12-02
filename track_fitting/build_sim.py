@@ -15,12 +15,29 @@ from track_fitting.SimGui import SimGui
 # Functions for getting gain, pressure, etc which may vary between runs #
 #########################################################################
 #detector settings
-def get_adc_scale(experiment:str, run:int)->float:
-    if experiment == 'e21072':
-        if run == 124:
-            #return 86431./0.779 #counts/MeV, includes recoil in calibration point
-            return (183193-86431)/(1.623-.779) #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
+#list of 2 point calibrations, inexed by experiment and then run number.
+#contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
+calibration_points = {'e21072': #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
+                        {124:((183193, 86431),(1.623, 0.779))}}
 
+def get_adc_counts_per_MeV(experiment:str, run:int)->float:
+    adc_counts, MeV = calibration_points[experiment][run]
+    return (adc_counts[1] - adc_counts[0])/(MeV[1] - MeV[0])
+
+def get_integrated_charge_energy_offset(experiment:str, run:int)->float:
+    adc_counts, MeV = calibration_points[experiment][run]
+    return MeV[1] - adc_counts[1]/get_adc_counts_per_MeV(experiment, run)
+
+def get_energy_from_ic(experiment:str, run:int, event:int):
+    h5file = get_rawh5_object(experiment, run)
+    max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event)
+    return measured_counts/get_adc_counts_per_MeV(experiment, run) + get_integrated_charge_energy_offset(experiment, run)
+
+def get_detector_E_sigma(experiment:str, run:int, event:int, MeV):
+    if experiment == 'e21072':
+        #assume energy calibraiton goes as sqrt energy, and use 770 keV protons
+        if run == 124:
+            return (5631/86431)*0.779*(MeV/0.779)**0.5
 
 def get_gas_density(experiment:str, run:int)->float:
     if experiment == 'e21072':
@@ -65,21 +82,28 @@ def apply_config_to_object(config_file, object):
 #################
 # Functions to creating and manipulating sim objects
 #######
+pads_and_traces = {}#indexed by experiment, run, event
+energies_from_ic = {}
+
 def create_pa_sim(experiment, run, event)->ParticleAndPointDeposition:
     '''
     Gets a particle and point energy deposition sim object, and configures it for fitting a specific event.
     '''
-    if experiment == 'e21072':
+    if (experiment, run, event) not in pads_and_traces:
         h5file = get_rawh5_object(experiment, run)
-        pads, traces = h5file.get_pad_traces(event, False)
+        pads_and_traces[(experiment, run, event)] = h5file.get_pad_traces(event, False)
+        energies_from_ic[(experiment, run, event)] = get_energy_from_ic(experiment, run, event)
+    pads, traces = pads_and_traces[(experiment, run, event)]
+    E_from_ic = energies_from_ic[(experiment, run, event)]
+
+    if experiment == 'e21072':
         sim = ParticleAndPointDeposition(get_gas_density(experiment, run), 'proton')
         sim.zscale = get_zscale(experiment, run)
         sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')#'adjacent')#
-        sim.counts_per_MeV = get_adc_scale(experiment, run)
+        sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
         sim.adaptive_stopping_power = False
-        max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event)
-        E_from_ic = measured_counts/sim.counts_per_MeV
+
         sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.3286, 8.876
         sim.pad_threshold = 70
@@ -95,7 +119,7 @@ def set_params_and_simulate(sim, param_dict:dict):
 
 def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run')->ParticleAndPointDeposition:
     sim = create_pa_sim('e21072', run, event)
-    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_11-18-2024/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
     samples = reader.get_chain()
