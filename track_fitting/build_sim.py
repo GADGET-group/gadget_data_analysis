@@ -99,7 +99,7 @@ def create_pa_sim(experiment, run, event)->ParticleAndPointDeposition:
     if experiment == 'e21072':
         sim = ParticleAndPointDeposition(get_gas_density(experiment, run), 'proton')
         sim.zscale = get_zscale(experiment, run)
-        sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')#'adjacent')#
+        sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')#'unchanged')#
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
         sim.adaptive_stopping_power = False
