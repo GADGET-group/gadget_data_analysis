@@ -47,17 +47,20 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
         trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
-        trace_sim.initial_energy = Ep
-        trace_sim.point_energy_deposition = Ea
-        trace_sim.initial_point = (x,y,z)
-        trace_sim.theta = theta
-        trace_sim.phi = phi
-        trace_sim.sigma_xy = sigma_xy
-        trace_sim.sigma_z = sigma_z
+        trace_sim.sims[0].initial_energy = Ep
+        trace_sim.sims[1].initial_energy = Ea
+        for i in range(2):
+            trace_sim.sims[i].initial_point = (x,y,z)
+            trace_sim.sims[i].sigma_xy = sigma_xy
+            trace_sim.sims[i].sigma_z = sigma_z
+        trace_sim.sims[0].theta = theta_p
+        trace_sim.sims[0].phi = phi_p
+        trace_sim.sims[1].theta = theta_a
+        trace_sim.sims[1].phi = phi_a
         trace_sim.adaptive_stopping_power = False
         trace_sim.simulate_event()
         return trace_sim
@@ -71,7 +74,7 @@ if __name__ == '__main__':
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
-        E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -79,14 +82,16 @@ if __name__ == '__main__':
             return -np.inf
         if z < zmin or z >zmax:
             return -np.inf
-        if theta < 0 or theta >= np.pi or phi < -2*np.pi or phi>2*np.pi:
+        if theta_p < 0 or theta_p >= np.pi or phi_p < -2*np.pi or phi_p>2*np.pi:
+            return -np.inf 
+        if theta_a < 0 or theta_a >= np.pi or phi_a < -2*np.pi or phi_a>2*np.pi:
             return -np.inf 
         if sigma_xy < 0 or sigma_xy > 40:
             return -np.inf
         if sigma_z < 0 or sigma_z > 40:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
-        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
+        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta_a))) + + np.log(np.abs(np.sin(theta_p)))
 
     def log_posterior(params, print_out=False):
         to_return = log_priors(params)
@@ -103,7 +108,7 @@ if __name__ == '__main__':
     clustering_steps = 500
     times_to_repeat_clustering = 2
     post_cluster_steps=0
-    ndim = 9
+    ndim = 11
 
 
     if False:
@@ -139,7 +144,7 @@ if __name__ == '__main__':
     else:
         init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
                              np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
-                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
+                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
                              np.random.uniform(0, 40), np.random.uniform(0,40)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)

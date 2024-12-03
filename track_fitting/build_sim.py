@@ -117,6 +117,9 @@ def create_pa_sim(experiment:str, run:int, event:int):
     to_return =  MultiParticleEvent(sims)
     pads, traces = pads_and_traces[(experiment, run, event)]
     to_return.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')
+    to_return.pad_threshold = proton.pad_threshold
+    to_return.pad_gain_match_uncertainty = proton.pad_gain_match_uncertainty
+    to_return.other_systematics = proton.other_systematics
     return to_return
     
 
