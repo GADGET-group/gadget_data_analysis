@@ -79,7 +79,10 @@ class SingleParticleEvent:
                     self.pad_to_xy_index[int(pad)] = (x,y)
     
     def get_num_stopping_points_for_energy(self, E):
-        return int(np.ceil(self.points_per_bin*self.srim_table.get_stopping_distance(E)/np.min((self.pad_width, self.zscale))))
+        to_return = int(np.ceil(self.points_per_bin*self.srim_table.get_stopping_distance(E)/np.min((self.pad_width, self.zscale))))
+        if to_return < self.points_per_bin:
+            return self.points_per_bin
+        return to_return
         
     def load_srim_table(self, particle:str, gas_density:float):
         '''
