@@ -48,7 +48,7 @@ class SingleParticleEvent:
         self.load_srim_table(particle, gas_density)
         
         #parameters for grid size and other numerics
-        self.points_per_bin = 1
+        self.points_per_bin = 3
         #number of points at which to compute 1D energy deposition
         self.num_stopping_power_points = 50 
         self.adaptive_stopping_power = True #if true, will compute number of stopping poer points based on points per bin and track length
@@ -120,7 +120,7 @@ class SingleParticleEvent:
         distances = (distances[0:-1] + distances[1:])/2
         return distances, energy_deposition
 
-    def simulate_event(self, map_to_pads=True):
+    def simulate_event(self):
         '''
         
         '''

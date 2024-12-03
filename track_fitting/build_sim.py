@@ -10,6 +10,7 @@ import emcee
 from raw_viewer.raw_h5_file import raw_h5_file
 from track_fitting.ParticleAndPointDeposition import ParticleAndPointDeposition
 from track_fitting.SingleParticleEvent import SingleParticleEvent
+from track_fitting.MultiParticleEvent import MultiParticleEvent
 from track_fitting.SimGui import SimGui
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
@@ -85,9 +86,9 @@ def apply_config_to_object(config_file, object):
 pads_and_traces = {}#indexed by experiment, run, event
 energies_from_ic = {}
 
-def create_pa_sim(experiment, run, event)->ParticleAndPointDeposition:
+def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str):
     '''
-    Gets a particle and point energy deposition sim object, and configures it for fitting a specific event.
+    sim_constructor: assumed to take the same parameters as single particle event
     '''
     if (experiment, run, event) not in pads_and_traces:
         h5file = get_rawh5_object(experiment, run)
@@ -97,17 +98,27 @@ def create_pa_sim(experiment, run, event)->ParticleAndPointDeposition:
     E_from_ic = energies_from_ic[(experiment, run, event)]
 
     if experiment == 'e21072':
-        sim = ParticleAndPointDeposition(get_gas_density(experiment, run), 'proton')
+        sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
         sim.zscale = get_zscale(experiment, run)
         sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')#'unchanged')#
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
-        sim.adaptive_stopping_power = False
+        sim.adaptive_stopping_power = False #TODO: see if I can set this to True
 
         sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.3286, 8.876
         sim.pad_threshold = 70
         return sim
+
+def create_pa_sim(experiment:str, run:int, event:int):
+    proton = create_single_particle_sim(experiment, run, event, 'proton')
+    alpha = create_single_particle_sim(experiment, run, event, 'alpha')
+    sims = [proton, alpha]
+    to_return =  MultiParticleEvent(sims)
+    pads, traces = pads_and_traces[(experiment, run, event)]
+    to_return.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')
+    return to_return
+    
 
 def set_params_and_simulate(sim, param_dict:dict):
     '''
