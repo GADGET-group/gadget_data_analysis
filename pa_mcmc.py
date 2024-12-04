@@ -56,8 +56,8 @@ if __name__ == '__main__':
         trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
         trace_sim.sims[0].sigma_xy = sigma_p_xy
         trace_sim.sims[0].sigma_z = sigma_p_z
-        trace_sim.sims[1].sigma_a_xy = sigma_a_xy
-        trace_sim.sims[1].sigma_a_z = sigma_a_z
+        trace_sim.sims[1].sigma_xy = sigma_a_xy
+        trace_sim.sims[1].sigma_z = sigma_a_z
         trace_sim.sims[0].theta = theta_p
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
