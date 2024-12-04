@@ -1,5 +1,5 @@
 import os
-os.environ["OMP_NUM_THREADS"] = "1"
+#os.environ["OMP_NUM_THREADS"] = "1"
 import pickle
 import time
 
@@ -24,56 +24,63 @@ class GaussianVar:
 def get_sims_and_param_bounds(experiment, run_number, events):
     sims, bounds, epriors = [],[], []
     for event_num in events:
-        new_sim = build_sim.create_pa_sim(experiment, run_number)
-        E_from_ic = new_sim.get
-        x_real, y_real, z_real, ic_real = new_sim.get
-
-        xmin, xmax = np.min(x_real), np.max(x_real)
-        ymin, ymax = np.min(y_real), np.max(y_real)
+        new_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
+        E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
+        xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
+        for pad in new_sim.pads_to_sim:
+            x,y = new_sim.pad_to_xy[pad]
+            if x < xmin:
+                xmin = x
+            if y < ymin:
+                ymin = y
+            if x > xmax:
+                xmax = x
+            if y > ymax:
+                ymax = y
         zmin = 0
-        #set zmax to length of trimmed traces
+        zmax = new_sim.num_trace_bins
         
         
         sims.append(new_sim)
         bounds.append(((E_from_ic/2, E_from_ic*2), (0,1), 
                        (xmin, xmax), (ymin, ymax),(zmin, zmax),
-                       (0, np.pi), (0, 2*np.pi),
+                       (0, np.pi), (0, 2*np.pi), (0, np.pi), (0, 2*np.pi),
                        (2.2, 20), (2.2, 20)))
-        epriors.append(GaussianVar(E_from_ic, detector_E_sigma(E_from_ic)))
+        epriors.append(GaussianVar(E_from_ic, build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)))
     return sims, bounds, epriors
 
 
 def apply_params(sim, params):
-    E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z = params
-    sim.initial_energy = E*(1-Ea_frac)
-    sim.point_energy_deposition = E*Ea_frac
-    sim.initial_point = (x,y,z)
-    sim.theta = theta
-    sim.phi = phi
-    sim.sigma_xy = sigma_xy
-    sim.sigma_z = sigma_z
+    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
+    sim.sims[0].initial_energy = E*(1-Ea_frac)
+    sim.sims[1].initial_energy = E*Ea_frac
+    sim.sims[0].initial_point = sim.sims[1].initial_point = (x,y,z)
+    sim.sims[0].theta, sim.sims[0].phi= theta_p, phi_p
+    sim.sims[1].theta, sim.sims[1].phi= theta_a, phi_a
+    sim.sims[0].sigma_xy = sim.sims[1].sigma_xy =sigma_xy
+    sim.sims[0].sigma_z = sim.sims[1].sigma_z = sigma_z
     sim.simulate_event()
 
-def fit_event(sim:ParticleAndPointDeposition.ParticleAndPointDeposition, bounds, Eprior, fit_results_dict=None, results_key=None):
+def fit_event(sim, bounds, Eprior, fit_results_dict=None, results_key=None, workers=1):
     #tries to maximize posterior of each of the sims passed in subject to the given parameter bounds
     def to_minimize(params):
         apply_params(sim, params)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
-    #res =  opt.shgo(to_minimize, bounds, sampling_method='halton')
+    res =  opt.shgo(to_minimize, bounds, sampling_method='halton', options={'ftol':0.1}, workers=workers)
     #res =  opt.direct(to_minimize, bounds)
-    res =  opt.differential_evolution(to_minimize, bounds)
+    #res =  opt.differential_evolution(to_minimize, bounds)
     if fit_results_dict != None:
         fit_results_dict[results_key]=res
         print(results_key, res)
     return res
 
 
-def fit_events(run_num, events, timeout=3600):
+def fit_events(experiment, run_num, events, timeout=3600):
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()
     results = []
     processes = []
-    sims, bounds, epriors = get_sims_and_param_bounds(run_num, events)
+    sims, bounds, epriors = get_sims_and_param_bounds(experiment,run_num, events)
     for i in range(len(sims)):
         processes.append(multiprocessing.Process(target=fit_event, args=(sims[i], bounds[i], epriors[i], fit_results_dict, events[i])))
         processes[-1].start()
@@ -115,11 +122,11 @@ def get_cnn_events(run_num):
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
 run_num = 124
-if False:
+if True:
     #events_to_fit = get_cnn_events(run_num)
     events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
-    res_dict = fit_events(run_num, events_to_fit, timeout=12*3600)
-    with open('run_%d_tylersevts_palpha_fits_w_devolution.dat'%run_num,'wb') as f:
+    res_dict = fit_events('e21072', run_num, events_to_fit, timeout=12*3600)
+    with open('run_%d_hand_picked.dat'%run_num,'wb') as f:
         pickle.dump(res_dict, f)
 else:
     #with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'rb') as f:
@@ -143,10 +150,11 @@ plt.colorbar()
 plt.show()
 
 def show_fit(event_num):
-    sim, bounds, eprior = get_sims_and_param_bounds(run_num, [event_num])
+    sim, bounds, eprior = get_sims_and_param_bounds('e21072', run_num, [event_num])
     sim = sim[0]
     params = res_dict[event_num].x
     apply_params(sim, params)
     sim.plot_residuals_3d(threshold=20)
     sim.plot_simulated_3d_data(threshold=20)
     plt.show()
+

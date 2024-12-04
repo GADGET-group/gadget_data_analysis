@@ -34,7 +34,7 @@ if __name__ == '__main__':
             return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
 
     E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
-    E_from_ic_simga = build_sim.get_detector_E_sigma(experiment, run_number, event_num, E_from_ic)
+    E_from_ic_simga = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
     E_prior = GaussianVar(E_from_ic, E_from_ic_simga)
 
     h5file = build_sim.get_rawh5_object(experiment, run_number)
@@ -47,16 +47,17 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
         trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
         trace_sim.sims[0].initial_energy = Ep
         trace_sim.sims[1].initial_energy = Ea
-        for i in range(2):
-            trace_sim.sims[i].initial_point = (x,y,z)
-            trace_sim.sims[i].sigma_xy = sigma_xy
-            trace_sim.sims[i].sigma_z = sigma_z
+        trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
+        trace_sim.sims[0].sigma_xy = sigma_p_xy
+        trace_sim.sims[0].sigma_z = sigma_p_z
+        trace_sim.sims[1].sigma_a_xy = sigma_a_xy
+        trace_sim.sims[1].sigma_a_z = sigma_a_z
         trace_sim.sims[0].theta = theta_p
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
@@ -73,7 +74,7 @@ if __name__ == '__main__':
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z = params
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -85,9 +86,13 @@ if __name__ == '__main__':
             return -np.inf 
         if theta_a < 0 or theta_a >= np.pi or phi_a < -2*np.pi or phi_a>2*np.pi:
             return -np.inf 
-        if sigma_xy < 0 or sigma_xy > 40:
+        if sigma_p_xy < 0 or sigma_p_xy > 40:
             return -np.inf
-        if sigma_z < 0 or sigma_z > 40:
+        if sigma_p_z < 0 or sigma_p_z > 40:
+            return -np.inf
+        if sigma_a_xy < 0 or sigma_a_xy > 40:
+            return -np.inf
+        if sigma_a_z < 0 or sigma_a_z > 40:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta_a))) + + np.log(np.abs(np.sin(theta_p)))
@@ -104,47 +109,17 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 250
-    clustering_steps = 5000
-    times_to_repeat_clustering = 1
-    post_cluster_steps=0
-    ndim = 11
+    clustering_steps = 500
+    times_to_repeat_clustering = 5
+    post_cluster_steps=2000
+    ndim = 13
 
 
-    if False:
-        #find global minimum of log posterior
-        print('finding global maximum of liklihood')
-        opt_res = opt.shgo(lambda params: -log_posterior(params), 
-                        ((np.max((0, E_prior.mu - E_prior.sigma*4)), E_prior.mu + E_prior.sigma*4), (0,1),
-                            (xmin, xmax), (ymin, ymax), (zmin, zmax), (0, np.pi), (-np.pi, np.pi), (0.1, 20), (0.1,20), (0.1,1), (0.1,20)))
-        print(opt_res)
-        #print('local minimization')
-        #opt_res = opt.minimize(lambda params: -log_posterior(params, False), opt_res.x)
-        #print(opt_res.x)
-        best_sim = get_sim(opt_res.x)
-        best_sim.plot_simulated_3d_data(threshold=25)
-        best_sim.plot_residuals_3d(threshold=25)
-        best_sim.plot_residuals()
 
-        plt.figure()
-        plt.title('log posterior vs E')
-        dE=0.1
-        Es = np.linspace(opt_res.x[0]-dE, opt_res.x[0]+dE)
-        lls = []
-        for E in Es:
-            params = np.copy(opt_res.x)
-            params[0] = E
-            lls.append(log_posterior(params))
-        plt.scatter(Es, lls)
-
-        plt.show()
-    
-    
-        init_walker_pos = opt_res.x + 1e-4*np.random.randn(nwalkers, ndim)
-    else:
-        init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
-                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
-                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                             np.random.uniform(0, 40), np.random.uniform(0,40)) for w in range(nwalkers)]
+    init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
+                            np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
+                            np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
+                            np.random.uniform(0, 40), np.random.uniform(0,40), np.random.uniform(0, 40), np.random.uniform(0,40)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):

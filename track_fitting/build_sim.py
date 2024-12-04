@@ -29,12 +29,7 @@ def get_integrated_charge_energy_offset(experiment:str, run:int)->float:
     adc_counts, MeV = calibration_points[experiment][run]
     return MeV[1] - adc_counts[1]/get_adc_counts_per_MeV(experiment, run)
 
-def get_energy_from_ic(experiment:str, run:int, event:int):
-    h5file = get_rawh5_object(experiment, run)
-    max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event)
-    return measured_counts/get_adc_counts_per_MeV(experiment, run) + get_integrated_charge_energy_offset(experiment, run)
-
-def get_detector_E_sigma(experiment:str, run:int, event:int, MeV):
+def get_detector_E_sigma(experiment:str, run:int, MeV):
     if experiment == 'e21072':
         #assume energy calibraiton goes as sqrt energy, and use 770 keV protons
         if run == 124:
@@ -80,22 +75,34 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
 def apply_config_to_object(config_file, object):
     pass #TODO
 
-#################
-# Functions to creating and manipulating sim objects
-#######
+
 pads_and_traces = {}#indexed by experiment, run, event
+def get_pads_and_traces(experiment, run, event):
+    if (experiment, run, event) not in pads_and_traces:
+        h5file = get_rawh5_object(experiment, run)
+        pads_and_traces[(experiment, run, event)] = h5file.get_pad_traces(event, False)
+    return pads_and_traces[(experiment, run, event)]
+
 energies_from_ic = {}
+def get_energy_from_ic(experiment, run, event):
+    if (experiment, run, event) not in energies_from_ic:
+        h5file = get_rawh5_object(experiment, run)
+        max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event)
+        energies_from_ic[(experiment, run, event)] = measured_counts/get_adc_counts_per_MeV(experiment, run) + get_integrated_charge_energy_offset(experiment, run)
+    return energies_from_ic[(experiment, run, event)]
+
+
+########################################################
+# Functions to creating and manipulating sim objects
+########################################################
 
 def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str):
     '''
     sim_constructor: assumed to take the same parameters as single particle event
     '''
-    if (experiment, run, event) not in pads_and_traces:
-        h5file = get_rawh5_object(experiment, run)
-        pads_and_traces[(experiment, run, event)] = h5file.get_pad_traces(event, False)
-        energies_from_ic[(experiment, run, event)] = get_energy_from_ic(experiment, run, event)
-    pads, traces = pads_and_traces[(experiment, run, event)]
-    E_from_ic = energies_from_ic[(experiment, run, event)]
+    
+    pads, traces = get_pads_and_traces(experiment, run, event)
+    E_from_ic = get_energy_from_ic(experiment, run, event)
 
     if experiment == 'e21072':
         sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
@@ -103,11 +110,11 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
         sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')#'unchanged')#
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
-        sim.adaptive_stopping_power = True #TODO: see if I can set this to True
+        sim.adaptive_stopping_power = False #TODO: see if I can set this to True
 
         sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.3286, 8.876
-        sim.pad_threshold = 70
+        sim.pad_threshold = 50
         return sim
 
 def create_pa_sim(experiment:str, run:int, event:int):
