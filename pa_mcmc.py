@@ -95,7 +95,7 @@ if __name__ == '__main__':
         if sigma_a_z < 0 or sigma_a_z > 40:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
-        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta_a))) + + np.log(np.abs(np.sin(theta_p)))
+        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p)))
 
     def log_posterior(params, print_out=False):
         to_return = log_priors(params)
@@ -108,7 +108,7 @@ if __name__ == '__main__':
         return to_return
 
     fit_start_time = time.time()
-    nwalkers = 1000
+    nwalkers = 400
     clustering_steps = 5000
     times_to_repeat_clustering = 1
     post_cluster_steps=0
