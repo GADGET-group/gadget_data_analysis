@@ -108,10 +108,10 @@ if __name__ == '__main__':
         return to_return
 
     fit_start_time = time.time()
-    nwalkers = 250
-    clustering_steps = 500
-    times_to_repeat_clustering = 5
-    post_cluster_steps=2000
+    nwalkers = 1000
+    clustering_steps = 5000
+    times_to_repeat_clustering = 1
+    post_cluster_steps=0
     ndim = 13
 
 
@@ -138,6 +138,7 @@ if __name__ == '__main__':
                                             #          (emcee.moves.DEMove(), 0.6),
                                             #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
                                             #  ],
+                                            moves=[emcee.moves.KDEMove()],
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):

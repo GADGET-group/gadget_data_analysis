@@ -142,9 +142,9 @@ if False:
     Ea_Ep_labels = None
 else:
     run_number= 124
-    steps = 5
+    steps = 1
     filenames = []
-    for event in [21640,21662,52010]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]:
+    for event in [68192]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]:
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))

@@ -146,18 +146,23 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run')->ParticleAnd
     samples = reader.get_chain()
     ll = reader.get_log_prob()
     best_params = samples[np.unravel_index(np.argmax(ll), ll.shape)]
-    E, Ea_frac, x, y, z, theta, phi, sigma_xy, sigma_z = best_params
+    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z = best_params
     Ep = E*(1-Ea_frac)
     Ea = E*Ea_frac
-    sim.initial_energy = Ep
-    sim.point_energy_deposition = Ea
-    sim.initial_point = [x,y,z]
-    sim.theta = theta
-    sim.phi = phi
-    sim.sigma_xy = sigma_xy
-    sim.sigma_z = sigma_z
-    sim.simulate_event()
-    return sim
+    trace_sim = create_pa_sim('e21072', run, event)
+    trace_sim.sims[0].initial_energy = Ep
+    trace_sim.sims[1].initial_energy = Ea
+    trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
+    trace_sim.sims[0].sigma_xy = sigma_p_xy
+    trace_sim.sims[0].sigma_z = sigma_p_z
+    trace_sim.sims[1].sigma_xy = sigma_a_xy
+    trace_sim.sims[1].sigma_z = sigma_a_z
+    trace_sim.sims[0].theta = theta_p
+    trace_sim.sims[0].phi = phi_p
+    trace_sim.sims[1].theta = theta_a
+    trace_sim.sims[1].phi = phi_a
+    trace_sim.simulate_event()
+    return trace_sim
 
 def show_results(event:int):
     sim = load_pa_mcmc_results(124,event, 'clustering_run2')
