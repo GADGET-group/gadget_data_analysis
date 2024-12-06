@@ -113,7 +113,7 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
         sim.adaptive_stopping_power = True #TODO: see if I can set this to True
 
         sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0,8.876#0.3286, 8.876
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.3286, 8.876
         sim.pad_threshold = 50
         return sim
 
