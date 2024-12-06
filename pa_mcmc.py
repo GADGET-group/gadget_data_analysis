@@ -47,7 +47,7 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, gain_match, other_uncert = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
         trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
@@ -62,6 +62,8 @@ if __name__ == '__main__':
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
+        trace_sim.pad_gain_match_uncertainty = gain_match
+        trace_sim.other_systematics = other_uncert
         trace_sim.simulate_event()
         return trace_sim
 
@@ -74,7 +76,7 @@ if __name__ == '__main__':
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, gain_match, other_uncert = params
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -94,6 +96,10 @@ if __name__ == '__main__':
             return -np.inf
         if sigma_a_z < 0 or sigma_a_z > 40:
             return -np.inf
+        if gain_match > 1 or gain_match < 0:
+            return -np.inf
+        if other_uncert < 0 or other_uncert > 4000:
+            return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p)))
 
@@ -112,14 +118,15 @@ if __name__ == '__main__':
     clustering_steps = 5000
     times_to_repeat_clustering = 1
     post_cluster_steps=0
-    ndim = 13
+    ndim = 15
 
 
 
     init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                            np.random.uniform(0, 40), np.random.uniform(0,40), np.random.uniform(0, 40), np.random.uniform(0,40)) for w in range(nwalkers)]
+                            np.random.uniform(0, 40), np.random.uniform(0,40), np.random.uniform(0, 40), np.random.uniform(0,40), 
+                            np.random.uniform(0, 1), np.random.uniform(0,400)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):

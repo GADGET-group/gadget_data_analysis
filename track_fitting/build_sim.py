@@ -138,14 +138,14 @@ def set_params_and_simulate(sim, param_dict:dict):
         sim.__dict__[param] = param_dict[param]
     sim.simulate_event()
 
-def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run')->ParticleAndPointDeposition:
+def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->ParticleAndPointDeposition:
     sim = create_pa_sim('e21072', run, event)
     reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
-    samples = reader.get_chain()
-    ll = reader.get_log_prob()
-    best_params = samples[np.unravel_index(np.argmax(ll), ll.shape)]
+    samples = reader.get_chain()[step]
+    ll = reader.get_log_prob()[step]
+    best_params = samples[np.argmax(ll)]
     E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z = best_params
     Ep = E*(1-Ea_frac)
     Ea = E*Ea_frac

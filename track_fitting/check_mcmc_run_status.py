@@ -146,7 +146,7 @@ else:
     filenames = []
     for event in [68192]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]:
         for step in range(steps):
-            filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+            filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d copy.h5'%(run_number, event, step))
         filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
     theta_index, phi_index = 5,6
