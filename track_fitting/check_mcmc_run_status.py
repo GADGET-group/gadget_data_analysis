@@ -19,7 +19,7 @@ def process_h5(filepath, labels, Ea_Ep_labels=None, summary_file=None):
 
         if show_time_series_plots:
             #show time series
-            fig, axes = plt.subplots(len(labels), figsize=(10, 7), sharex=True)#len(labels)
+            fig, axes = plt.subplots(len(labels), figsize=(20, 20), sharex=True)#len(labels)
             for i in range(len(labels)):
                 ax = axes[i]
                 to_plot = samples[:, :, i]
@@ -144,14 +144,14 @@ else:
     run_number= 124
     steps = 1
     filenames = []
-    for event in [68192]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]:
+    for event in [51777]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]:
         for step in range(steps):
             filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d copy.h5'%(run_number, event, step))
         filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
+    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z', 'm', 'c']
     theta_index, phi_index = 5,6
     tau = [2]
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z', 'm', 'c']
     summary_file_path = '../run%d_palpha_mcmc/summary.txt'%run_number
 
 for filepath in filenames:

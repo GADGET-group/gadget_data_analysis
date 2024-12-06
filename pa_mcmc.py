@@ -114,7 +114,7 @@ if __name__ == '__main__':
         return to_return
 
     fit_start_time = time.time()
-    nwalkers = 400
+    nwalkers = 1200
     clustering_steps = 5000
     times_to_repeat_clustering = 1
     post_cluster_steps=0
@@ -145,11 +145,17 @@ if __name__ == '__main__':
                                             #          (emcee.moves.DEMove(), 0.6),
                                             #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
                                             #  ],
-                                            moves=[emcee.moves.KDEMove()],
+                                            moves=[(emcee.moves.KDEMove(), 0.5),
+                                                   (emcee.moves.StretchMove(), 0.5)],
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
                 tau = sampler.get_autocorr_time(tol=0)
+                sample = sampler.get_chain()[-1]
+                Ea = sample[:, 0]*sample[:, 1]
+                Ep = sample[:, 0]*(1-sample[:, 1])
+                print('Ea = ', np.percentile(Ea, [16, 50, 84]))
+                print('Ep = ', np.percentile(Ep, [16, 50, 84]))
                 print(backend_fname, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
 
             #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
