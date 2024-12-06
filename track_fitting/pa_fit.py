@@ -78,7 +78,6 @@ def fit_event(sim, bounds, Eprior, fit_results_dict=None, results_key=None, work
 def fit_events(experiment, run_num, events, timeout=3600):
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()
-    results = []
     processes = []
     sims, bounds, epriors = get_sims_and_param_bounds(experiment,run_num, events)
     for i in range(len(sims)):
