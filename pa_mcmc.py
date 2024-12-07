@@ -114,7 +114,7 @@ if __name__ == '__main__':
         return to_return
 
     fit_start_time = time.time()
-    nwalkers = 1200
+    nwalkers = 400
     clustering_steps = 5000
     times_to_repeat_clustering = 1
     post_cluster_steps=0
