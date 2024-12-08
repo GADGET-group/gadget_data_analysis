@@ -147,7 +147,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     samples = reader.get_chain()[step]
     ll = reader.get_log_prob()[step]
     best_params = samples[np.argmax(ll)]
-    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z = best_params
+    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, m, c = best_params
     Ep = E*(1-Ea_frac)
     Ea = E*Ea_frac
     trace_sim = create_pa_sim('e21072', run, event)
@@ -162,6 +162,8 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     trace_sim.sims[0].phi = phi_p
     trace_sim.sims[1].theta = theta_a
     trace_sim.sims[1].phi = phi_a
+    trace_sim.pad_gain_match_uncertainty = m
+    trace_sim.other_systematics = c
     trace_sim.simulate_event()
     return trace_sim
 

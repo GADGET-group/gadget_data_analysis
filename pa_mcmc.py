@@ -62,7 +62,7 @@ if __name__ == '__main__':
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
-        trace_sim.pad_gain_match_uncertainty = gain_match
+        trace_sim.pad_gain_match_uncertainty = 0#gain_match
         trace_sim.other_systematics = other_uncert
         trace_sim.simulate_event()
         return trace_sim

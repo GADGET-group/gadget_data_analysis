@@ -35,7 +35,7 @@ class SingleParticleEvent:
         self.sigma_xy = 1. #mm
         self.sigma_z = 1. #mm
         self.zscale = 1.45 #mm/time bin
-        self.counts_per_MeV = 1
+        self.counts_per_MeV = 1.
         #minimum number of counts above background required for the pad to fire
         #only used when calculating log liklihood
         self.pad_threshold = 0 
@@ -48,7 +48,7 @@ class SingleParticleEvent:
         self.load_srim_table(particle, gas_density)
         
         #parameters for grid size and other numerics
-        self.points_per_bin = 3
+        self.points_per_bin = 1
         #number of points at which to compute 1D energy deposition
         self.num_stopping_power_points = 50 
         self.adaptive_stopping_power = True #if true, will compute number of stopping poer points based on points per bin and track length
@@ -59,9 +59,9 @@ class SingleParticleEvent:
         self.pad_width = 2.2 #mm
 
         #event parameters
-        self.initial_energy = 1 #MeV
-        self.initial_point = [0,0,0] #(x,y,z) mm. z coordinate only effects peak position in trace.
-        self.theta, self.phi = 0,0 #angles describing direction in which emmitted particle travels, in radians
+        self.initial_energy = 1. #MeV
+        self.initial_point = [0.,0.,0.] #(x,y,z) mm. z coordinate only effects peak position in trace.
+        self.theta, self.phi = 0.,0. #angles describing direction in which emmitted particle travels, in radians
 
         #dictionary containing energy deposition on each pad as a function of z coordinate
         self.traces_to_fit = {} #trace data to try to fit. Populated by calling self.set_real_data
