@@ -25,6 +25,7 @@ def get_sims_and_param_bounds(experiment, run_number, events):
     sims, bounds, epriors = [],[], []
     for event_num in events:
         new_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
+        new_sim.pad_gain_match_uncertainty = 0
         E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
         xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
         for pad in new_sim.pads_to_sim:
