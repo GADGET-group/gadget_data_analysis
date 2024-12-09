@@ -107,7 +107,7 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
     if experiment == 'e21072':
         sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
         sim.zscale = get_zscale(experiment, run)
-        sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')
+        sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
         sim.adaptive_stopping_power = True #TODO: see if I can set this to True
@@ -124,7 +124,7 @@ def create_pa_sim(experiment:str, run:int, event:int):
     sims = [proton, alpha]
     to_return =  MultiParticleEvent(sims)
     pads, traces = pads_and_traces[(experiment, run, event)]
-    to_return.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')
+    to_return.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')
     to_return.pad_threshold = proton.pad_threshold
     to_return.pad_gain_match_uncertainty = proton.pad_gain_match_uncertainty
     to_return.other_systematics = proton.other_systematics
@@ -141,7 +141,7 @@ def set_params_and_simulate(sim, param_dict:dict):
 
 def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->ParticleAndPointDeposition:
     sim = create_pa_sim('e21072', run, event)
-    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d_12-7-2024/%s.h5'%(run, event, mcmc_name), read_only=True)
     #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
     samples = reader.get_chain()[step]

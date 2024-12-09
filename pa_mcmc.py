@@ -47,7 +47,7 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, gain_match, other_uncert = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, other_uncert = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
         trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
@@ -76,7 +76,7 @@ if __name__ == '__main__':
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, gain_match, other_uncert = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, other_uncert = params
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -84,9 +84,9 @@ if __name__ == '__main__':
             return -np.inf
         if z < zmin or z >zmax:
             return -np.inf
-        if theta_p < 0 or theta_p >= np.pi or phi_p < -2*np.pi or phi_p>2*np.pi:
+        if theta_p < 0 or theta_p >= np.pi or phi_p < 0 or phi_p>2*np.pi:
             return -np.inf 
-        if theta_a < 0 or theta_a >= np.pi or phi_a < -2*np.pi or phi_a>2*np.pi:
+        if theta_a < 0 or theta_a >= np.pi or phi_a < 0 or phi_a>2*np.pi:
             return -np.inf 
         if sigma_p_xy < 0 or sigma_p_xy > 40:
             return -np.inf
@@ -95,8 +95,6 @@ if __name__ == '__main__':
         if sigma_a_xy < 0 or sigma_a_xy > 40:
             return -np.inf
         if sigma_a_z < 0 or sigma_a_z > 40:
-            return -np.inf
-        if gain_match > 1 or gain_match < 0:
             return -np.inf
         if other_uncert < 0 or other_uncert > 4000:
             return -np.inf
@@ -116,9 +114,9 @@ if __name__ == '__main__':
     fit_start_time = time.time()
     nwalkers = 400
     clustering_steps = 1000
-    times_to_repeat_clustering = 1
+    times_to_repeat_clustering = 2
     post_cluster_steps=0
-    ndim = 15
+    ndim = 14
 
 
 
@@ -126,7 +124,8 @@ if __name__ == '__main__':
                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
                             np.random.uniform(0, 40), np.random.uniform(0,40), np.random.uniform(0, 40), np.random.uniform(0,40), 
-                            np.random.uniform(0, 1), np.random.uniform(0,400)) for w in range(nwalkers)]
+                            #np.random.uniform(0, 1),
+                              np.random.uniform(0,400)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
