@@ -107,7 +107,7 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
     if experiment == 'e21072':
         sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
         sim.zscale = get_zscale(experiment, run)
-        sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')
+        sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
         sim.adaptive_stopping_power = False
@@ -124,7 +124,7 @@ def create_pa_sim(experiment:str, run:int, event:int):
     sims = [proton, alpha]
     to_return =  MultiParticleEvent(sims)
     pads, traces = pads_and_traces[(experiment, run, event)]
-    to_return.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')
+    to_return.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')
     to_return.pad_threshold = proton.pad_threshold
     to_return.pad_gain_match_uncertainty = proton.pad_gain_match_uncertainty
     to_return.other_systematics = proton.other_systematics
