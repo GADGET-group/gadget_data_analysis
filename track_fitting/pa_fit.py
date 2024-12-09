@@ -66,6 +66,9 @@ def fit_event(sim, bounds, Eprior, fit_results_dict=None, results_key=None, work
     #tries to maximize posterior of each of the sims passed in subject to the given parameter bounds
     def to_minimize(params):
         apply_params(sim, params)
+        residuals = sim.get_residuals()
+        residuals = np.array([residuals[p] for p in residuals])
+        return np.sum(residuals*residuals)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
     res =  opt.shgo(to_minimize, bounds, sampling_method='halton', options={'ftol':0.1}, workers=workers)
     #res =  opt.direct(to_minimize, bounds)

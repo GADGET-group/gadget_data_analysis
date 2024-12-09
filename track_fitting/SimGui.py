@@ -100,9 +100,10 @@ class SimGui(ttk.Frame):
         self.likelihood_label = ttk.Label(likelihood_plot_frame, text='---------')
         self.likelihood_label.grid(row=row, column=1)
         row += 1
-        self.likelihood_plot_var = tk.StringVar(self)
-        ttk.Label(likelihood_plot_frame, text='Variable to plot:').grid(row=row, column=0)
-        ttk.OptionMenu(likelihood_plot_frame, self.likelihood_plot_var, self.plottable_vars[0], *self.plottable_vars).grid(row=row, column=1)
+        self.independent_plot_var = tk.StringVar(self)
+        ttk.Label(likelihood_plot_frame, text='independent variable:').grid(row=row, column=0)
+        ttk.OptionMenu(likelihood_plot_frame, self.independent_plot_var, self.plottable_vars[0], *self.plottable_vars).grid(row=row, column=1)
+        self.thing_to_plot_var = tk.StringVar(self)
         row += 1
         ttk.Label(likelihood_plot_frame, text="+").grid(row=row, column=0)
         self.ll_plot_plus_entry = ttk.Entry(likelihood_plot_frame)
@@ -119,6 +120,7 @@ class SimGui(ttk.Frame):
         self.ll_plot_points_entry.grid(row=row, column=1)
         row += 1
         ttk.Button(likelihood_plot_frame, text='plot log likelihood', command=self.ll_plot_clicked).grid(row=row, column=0)
+        ttk.Button(likelihood_plot_frame, text='plot X^2', command=self.chi_squared_plot_clicked).grid(row=row, column=1)
         likelihood_plot_frame.grid()
 
         self.saved_entry_vals = [] #strings to repopulate entries when load is clicked
@@ -159,7 +161,7 @@ class SimGui(ttk.Frame):
 
     def ll_plot_clicked(self):
         self.load_entries_to_sim() #make sure sim is up to date with entries
-        var_to_plot = self.likelihood_plot_var.get()
+        var_to_plot = self.independent_plot_var.get()
         p, m = float(self.ll_plot_plus_entry.get()), float(self.ll_plot_minus_entry.get())
         current_val = self.sim.__dict__[var_to_plot]
         vals_to_plot = np.linspace(current_val - m, current_val + p, int(self.ll_plot_points_entry.get()))
@@ -174,6 +176,27 @@ class SimGui(ttk.Frame):
         plt.xlabel(var_to_plot)
         plt.ylabel('log likilihood')
         plt.show(block=False)
+
+    def chi_squared_plot_clicked(self):
+        self.load_entries_to_sim() #make sure sim is up to date with entries
+        var_to_plot = self.independent_plot_var.get()
+        p, m = float(self.ll_plot_plus_entry.get()), float(self.ll_plot_minus_entry.get())
+        current_val = self.sim.__dict__[var_to_plot]
+        vals_to_plot = np.linspace(current_val - m, current_val + p, int(self.ll_plot_points_entry.get()))
+        ll_vals = []
+        for v in vals_to_plot:
+            self.sim.__dict__[var_to_plot] = v
+            self.sim.load_srim_table(self.sim.particle, self.sim.gas_density)
+            self.sim.simulate_event()
+            residuals = self.sim.get_residuals()
+            residuals = np.array([residuals[p] for p in residuals])
+            ll_vals.append(np.sum(residuals*residuals))
+        plt.figure()
+        plt.scatter(vals_to_plot, ll_vals)
+        plt.xlabel(var_to_plot)
+        plt.ylabel('sum of residuals squared')
+        plt.show(block=False)
+    
 
     def save_params_clicked(self):
         self.saved_entry_vals = []
