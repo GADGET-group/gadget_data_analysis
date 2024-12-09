@@ -110,9 +110,9 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
         sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='adjacent')
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
-        sim.adaptive_stopping_power = True #TODO: see if I can set this to True
+        sim.adaptive_stopping_power = False
         sim.points_per_bin = 5
-        #sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
+        sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
 
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.3286, 8.876
         sim.pad_threshold = 50
