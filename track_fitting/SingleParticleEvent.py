@@ -143,23 +143,33 @@ class SingleParticleEvent:
 
         zs = np.arange(self.num_trace_bins)*self.zscale
         #loop over pads, and calculate energy deposition in each bin
-        self.sim_traces = {}
-        erf = scipy.special.erf
-        for pad in self.pads_to_sim:
-            trace = np.zeros(self.num_trace_bins)
-            for point, edep in zip(points, energy_deposition):
-                dz = zs - point[2]
-                zfrac = 0.5*(erf((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf(dz/np.sqrt(2*self.sigma_z)))
+        self.sim_traces = {pad:np.zeros(self.num_trace_bins) for pad in self.pads_to_sim}
+        erf_dict = {}
+        def erf(val):
+            if val not in erf_dict:
+                erf_dict[val] = scipy.special.erf(val)
+            return erf_dict[val]
+
+        def erf_array(vals):
+            to_return = np.zeros(len(vals))
+            for i in range(len(vals)):
+                to_return[i] = erf(vals[i])
+            return to_return
+
+        for point, edep in zip(points, energy_deposition):
+            dz = zs - point[2]
+            zfrac = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf_array(dz/np.sqrt(2*self.sigma_z)))
+            for pad in self.pads_to_sim:
                 dx = self.pad_to_xy[pad][0] - point[0]
                 xfrac = 0.5*(erf((dx + self.pad_width/2)/np.sqrt(2*self.sigma_xy)) - \
                              erf((dx - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))
                 dy = self.pad_to_xy[pad][1] - point[1]
                 yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2*self.sigma_xy)) - \
                              erf((dy - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))
-                trace += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
+                self.sim_traces[pad] += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
             #adc_correction_factor = 1+1.558e-1 - 2.968e-5*trace
-            trace[trace<self.zero_traces_less_than] = 0
-            self.sim_traces[pad] = trace#*adc_correction_factor
+        for pad in self.pads_to_sim:
+            self.sim_traces[pad][self.sim_traces[pad]<self.zero_traces_less_than] = 0
         time3 = time.time()
         
         
