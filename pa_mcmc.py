@@ -47,7 +47,7 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, other_uncert = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, other_uncert = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
         trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
@@ -56,8 +56,8 @@ if __name__ == '__main__':
         trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
         trace_sim.sims[0].sigma_xy = sigma_p_xy
         trace_sim.sims[0].sigma_z = sigma_p_z
-        trace_sim.sims[1].sigma_xy = sigma_a_xy
-        trace_sim.sims[1].sigma_z = sigma_a_z
+        trace_sim.sims[1].sigma_xy = sigma_p_xy
+        trace_sim.sims[1].sigma_z = sigma_p_z
         trace_sim.sims[0].theta = theta_p
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
@@ -76,7 +76,7 @@ if __name__ == '__main__':
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, other_uncert = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, other_uncert = params
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -91,10 +91,6 @@ if __name__ == '__main__':
         if sigma_p_xy < 0 or sigma_p_xy > 40:
             return -np.inf
         if sigma_p_z < 0 or sigma_p_z > 40:
-            return -np.inf
-        if sigma_a_xy < 0 or sigma_a_xy > 40:
-            return -np.inf
-        if sigma_a_z < 0 or sigma_a_z > 40:
             return -np.inf
         if other_uncert < 0 or other_uncert > 4000:
             return -np.inf
@@ -116,14 +112,14 @@ if __name__ == '__main__':
     clustering_steps = 1000
     times_to_repeat_clustering = 2
     post_cluster_steps=0
-    ndim = 14
+    ndim = 12
 
 
 
     init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                            np.random.uniform(0, 40), np.random.uniform(0,40), np.random.uniform(0, 40), np.random.uniform(0,40), 
+                            np.random.uniform(0, 40), np.random.uniform(0,40),
                             #np.random.uniform(0, 1),
                               np.random.uniform(0,400)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes

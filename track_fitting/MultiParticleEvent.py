@@ -28,8 +28,8 @@ class ProtonAlphaEvent(MultiParticleEvent):
         super().__init__([proton, alpha])
         self.proton = proton
         self.alpha = alpha
-        self.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z']
-        self.shared_params = ['initial_point']
+        self.per_particle_params = ['initial_energy', 'theta', 'phi']
+        self.shared_params = ['initial_point', 'sigma_xy', 'sigma_z']
         for param in self.per_particle_params:
             self.__dict__['alpha_' + param] = alpha.__dict__[param]
             self.__dict__['proton_' + param] = proton.__dict__[param]
