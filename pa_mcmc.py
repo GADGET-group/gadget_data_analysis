@@ -119,7 +119,7 @@ if __name__ == '__main__':
     init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                            np.random.uniform(0, 40), np.random.uniform(0,40),
+                            np.random.uniform(0, 20), np.random.uniform(0,20),
                             #np.random.uniform(0, 1),
                               np.random.uniform(0,400)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
