@@ -68,6 +68,7 @@ class SingleParticleEvent:
         self.sim_traces = {} #simulated traces.
         self.pads_to_sim = [pad for pad in self.pad_to_xy] #can be set automatically when loading real traces
         self.num_trace_bins = 512 #set to length of trimmed traces when trimmed traces are loaded
+        self.zero_traces_less_than = 20
 
         self.pad_plane = np.genfromtxt('raw_viewer/PadPlane.csv', delimiter=',', 
                                        filling_values=-1, dtype=np.int64) #used for mapping pad numbers to a 2D grid
@@ -157,6 +158,7 @@ class SingleParticleEvent:
                              erf((dy - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))
                 trace += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
             #adc_correction_factor = 1+1.558e-1 - 2.968e-5*trace
+            trace[trace<self.zero_traces_less_than] = 0
             self.sim_traces[pad] = trace#*adc_correction_factor
         time3 = time.time()
         
@@ -257,6 +259,7 @@ class SingleParticleEvent:
         trim_end = min(trim_after + trim_pad, len(trace))
         for pad in self.traces_to_fit:
             self.traces_to_fit[pad] = self.traces_to_fit[pad][trim_start:trim_end]
+            self.traces_to_fit[pad][self.traces_to_fit[pad] < self.zero_traces_less_than] = 0
         self.num_trace_bins = trim_end - trim_start
         #select pads for simulation
         assert pads_to_sim_select in ['adjacent', 'observed', 'unchanged']
