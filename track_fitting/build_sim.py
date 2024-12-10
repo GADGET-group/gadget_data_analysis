@@ -6,11 +6,12 @@ import configparser
 
 import numpy as np
 import emcee 
+import matplotlib.pylab as plt
 
 from raw_viewer.raw_h5_file import raw_h5_file
 from track_fitting.ParticleAndPointDeposition import ParticleAndPointDeposition
 from track_fitting.SingleParticleEvent import SingleParticleEvent
-from track_fitting.MultiParticleEvent import MultiParticleEvent
+from track_fitting.MultiParticleEvent import MultiParticleEvent, ProtonAlphaEvent
 from track_fitting.SimGui import SimGui
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
@@ -107,7 +108,7 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
     if experiment == 'e21072':
         sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
         sim.zscale = get_zscale(experiment, run)
-        sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')
+        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
         sim.adaptive_stopping_power = False
@@ -123,8 +124,8 @@ def create_pa_sim(experiment:str, run:int, event:int):
     alpha = create_single_particle_sim(experiment, run, event, 'alpha')
     sims = [proton, alpha]
     to_return =  MultiParticleEvent(sims)
-    pads, traces = pads_and_traces[(experiment, run, event)]
-    to_return.set_real_data(pads, traces, trim_threshold=50, trim_pad=10, pads_to_sim_select='unchanged')
+    pads, traces = pads, traces = get_pads_and_traces(experiment, run, event)
+    to_return.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
     to_return.pad_threshold = proton.pad_threshold
     to_return.pad_gain_match_uncertainty = proton.pad_gain_match_uncertainty
     to_return.other_systematics = proton.other_systematics
@@ -141,13 +142,14 @@ def set_params_and_simulate(sim, param_dict:dict):
 
 def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->ParticleAndPointDeposition:
     sim = create_pa_sim('e21072', run, event)
-    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d_12-7-2024/%s.h5'%(run, event, mcmc_name), read_only=True)
+    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
     samples = reader.get_chain()[step]
     ll = reader.get_log_prob()[step]
     best_params = samples[np.argmax(ll)]
-    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, m, c = best_params
+    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, c = best_params
+    m = 0
     Ep = E*(1-Ea_frac)
     Ea = E*Ea_frac
     trace_sim = create_pa_sim('e21072', run, event)
@@ -162,9 +164,11 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     trace_sim.sims[0].phi = phi_p
     trace_sim.sims[1].theta = theta_a
     trace_sim.sims[1].phi = phi_a
+    trace_sim = ProtonAlphaEvent(*trace_sim.sims)
+    pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
+    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
     trace_sim.pad_gain_match_uncertainty = m
     trace_sim.other_systematics = c
-    trace_sim.simulate_event()
     return trace_sim
 
 def show_results(event:int):
@@ -182,3 +186,9 @@ def open_gui(sim:SingleParticleEvent):
     root = tk.Tk()
     SimGui(root, sim).grid()
     root.mainloop()
+
+def show_3d_plots(sim, view_thresh = 20):
+    sim.plot_real_data_3d(threshold=view_thresh)
+    sim.plot_simulated_3d_data(threshold=view_thresh)
+    sim.plot_residuals_3d(threshold=view_thresh)
+    plt.show(block=False)

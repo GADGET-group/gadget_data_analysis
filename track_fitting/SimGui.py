@@ -142,8 +142,7 @@ class SimGui(ttk.Frame):
         for array_name in self.array_types:
             array_type = self.array_types[array_name]
             entries = self.array_entries[array_name]
-            for i in range(len(entries)):
-                self.sim.__dict__[array_name][i] = array_type(entries[i].get())
+            self.sim.__dict__[array_name]= [array_type(entries[i].get()) for i in range(len(entries))]
         #reload srim table to match values set through gui, and then resimulate event
         self.sim.load_srim_table(self.sim.particle, self.sim.gas_density)
         self.sim.simulate_event()
