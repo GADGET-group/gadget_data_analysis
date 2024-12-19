@@ -29,7 +29,7 @@ class ProtonAlphaEvent(MultiParticleEvent):
         self.proton = proton
         self.alpha = alpha
         self.per_particle_params = ['initial_energy', 'theta', 'phi']
-        self.shared_params = ['initial_point', 'sigma_xy', 'sigma_z']
+        self.shared_params = ['initial_point', 'sigma_xy', 'sigma_z', 'pad_threshold', 'adaptive_stopping_power', 'num_stopping_power_points']
         for param in self.per_particle_params:
             self.__dict__['alpha_' + param] = alpha.__dict__[param]
             self.__dict__['proton_' + param] = proton.__dict__[param]
@@ -43,4 +43,6 @@ class ProtonAlphaEvent(MultiParticleEvent):
         for param in self.shared_params:
             self.proton.__dict__[param] = self.__dict__[param]
             self.alpha.__dict__[param] = self.__dict__[param]
+        self.proton.load_srim_table('proton', self.gas_density)
+        self.alpha.load_srim_table('alpha', self.gas_density)
         super().simulate_event()

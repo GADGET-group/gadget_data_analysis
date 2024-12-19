@@ -68,11 +68,11 @@ def fit_event(sim, bounds, Eprior, fit_results_dict=None, results_key=None, work
         apply_params(sim, params)
         residuals = sim.get_residuals()
         residuals = np.array([residuals[p] for p in residuals])
-        return np.sum(residuals*residuals)
+        #return np.sum(residuals*residuals)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
-    res =  opt.shgo(to_minimize, bounds, sampling_method='halton', options={'ftol':0.1}, workers=workers)
+    #res =  opt.shgo(to_minimize, bounds, sampling_method='halton', options={'ftol':0.1}, workers=workers)
     #res =  opt.direct(to_minimize, bounds)
-    #res =  opt.differential_evolution(to_minimize, bounds)
+    res =  opt.differential_evolution(to_minimize, bounds)
     if fit_results_dict != None:
         fit_results_dict[results_key]=res
         print(results_key, res)
@@ -125,7 +125,7 @@ def get_cnn_events(run_num):
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
 run_num = 124
-if True:
+if False:
     #events_to_fit = get_cnn_events(run_num)
     events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
     res_dict = fit_events('e21072', run_num, events_to_fit, timeout=12*3600)
@@ -133,7 +133,7 @@ if True:
         pickle.dump(res_dict, f)
 else:
     #with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'rb') as f:
-    with open('run_%d_tylersevts_palpha_fits_w_direct.dat'%run_num,'rb') as f:
+    with open('run_%d_hand_picked.dat'%run_num, 'rb') as f:
         res_dict = pickle.load(f)
 Ea = np.array([res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict])
 Ep = np.array([res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict])
@@ -159,5 +159,6 @@ def show_fit(event_num):
     apply_params(sim, params)
     sim.plot_residuals_3d(threshold=20)
     sim.plot_simulated_3d_data(threshold=20)
-    plt.show()
+    sim.plot_real_data_3d(threshold=20)
+    plt.show(block=False)
 

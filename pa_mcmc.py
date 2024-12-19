@@ -36,6 +36,8 @@ if __name__ == '__main__':
     E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
     E_from_ic_simga = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
     E_prior = GaussianVar(E_from_ic, E_from_ic_simga)
+    rho0 = build_sim.get_gas_density('e21072', run_number)
+    density_scale_prior = GaussianVar(1, 0.1)#TODO: decid on density range
 
     h5file = build_sim.get_rawh5_object(experiment, run_number)
     x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
@@ -47,23 +49,24 @@ if __name__ == '__main__':
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, other_uncert = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z, other_uncert, rho_scale = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
         trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
         trace_sim.sims[0].initial_energy = Ep
         trace_sim.sims[1].initial_energy = Ea
         trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
-        trace_sim.sims[0].sigma_xy = sigma_p_xy
-        trace_sim.sims[0].sigma_z = sigma_p_z
-        trace_sim.sims[1].sigma_xy = sigma_p_xy
-        trace_sim.sims[1].sigma_z = sigma_p_z
+        trace_sim.sims[0].sigma_xy = sigma_xy
+        trace_sim.sims[0].sigma_z = sigma_z
+        trace_sim.sims[1].sigma_xy = sigma_xy
+        trace_sim.sims[1].sigma_z = sigma_z
         trace_sim.sims[0].theta = theta_p
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
-        #trace_sim.pad_gain_match_uncertainty = 0#gain_match
-        trace_sim.other_systematics = other_uncert
+        trace_sim.other_systematics = other_uncert #gain match is set in buid_sim
+        for sim in trace_sim.sims:
+            sim.load_srim_table(sim.particle, rho0*rho_scale)
         trace_sim.simulate_event()
         return trace_sim
 
@@ -76,7 +79,7 @@ if __name__ == '__main__':
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, other_uncert = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, other_uncert, rho_scale = params
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -95,7 +98,7 @@ if __name__ == '__main__':
         if other_uncert < 0 or other_uncert > 4000:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
-        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p)))
+        return E_prior.log_likelihood(E) + density_scale_prior.log_likelihood(rho_scale) + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p)))
 
     def log_posterior(params, print_out=False):
         to_return = log_priors(params)
@@ -112,7 +115,7 @@ if __name__ == '__main__':
     clustering_steps = 1000
     times_to_repeat_clustering = 2
     post_cluster_steps=0
-    ndim = 12
+    ndim = 13
 
 
 
@@ -121,7 +124,8 @@ if __name__ == '__main__':
                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
                             np.random.uniform(0, 20), np.random.uniform(0,20),
                             #np.random.uniform(0, 1),
-                              np.random.uniform(0,400)) for w in range(nwalkers)]
+                            np.random.uniform(0,400), 
+                            density_scale_prior.sigma*np.random.randn() + density_scale_prior.mu) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):

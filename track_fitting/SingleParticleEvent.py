@@ -39,6 +39,7 @@ class SingleParticleEvent:
         #minimum number of counts above background required for the pad to fire
         #only used when calculating log liklihood
         self.pad_threshold = 0 
+        self.zero_traces_less_than = -np.inf
         #TODO: implement clipping
         
         self.pad_gain_match_uncertainty = 0 #unitless
@@ -68,7 +69,6 @@ class SingleParticleEvent:
         self.sim_traces = {} #simulated traces.
         self.pads_to_sim = [pad for pad in self.pad_to_xy] #can be set automatically when loading real traces
         self.num_trace_bins = 512 #set to length of trimmed traces when trimmed traces are loaded
-        self.zero_traces_less_than = 20
 
         self.pad_plane = np.genfromtxt('raw_viewer/PadPlane.csv', delimiter=',', 
                                        filling_values=-1, dtype=np.int64) #used for mapping pad numbers to a 2D grid

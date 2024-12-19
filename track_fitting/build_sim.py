@@ -142,14 +142,13 @@ def set_params_and_simulate(sim, param_dict:dict):
 
 def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->ParticleAndPointDeposition:
     sim = create_pa_sim('e21072', run, event)
-    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/12-9-2024/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
     samples = reader.get_chain()[step]
     ll = reader.get_log_prob()[step]
     best_params = samples[np.argmax(ll)]
-    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, sigma_a_xy, sigma_a_z, c = best_params
-    m = 0
+    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, c, rho_scale = best_params
     Ep = E*(1-Ea_frac)
     Ea = E*Ea_frac
     trace_sim = create_pa_sim('e21072', run, event)
@@ -158,8 +157,8 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
     trace_sim.sims[0].sigma_xy = sigma_p_xy
     trace_sim.sims[0].sigma_z = sigma_p_z
-    trace_sim.sims[1].sigma_xy = sigma_a_xy
-    trace_sim.sims[1].sigma_z = sigma_a_z
+    trace_sim.sims[1].sigma_xy = sigma_p_xy
+    trace_sim.sims[1].sigma_z = sigma_p_z
     trace_sim.sims[0].theta = theta_p
     trace_sim.sims[0].phi = phi_p
     trace_sim.sims[1].theta = theta_a
@@ -167,13 +166,15 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     trace_sim = ProtonAlphaEvent(*trace_sim.sims)
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
     trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
-    trace_sim.pad_gain_match_uncertainty = m
+    trace_sim.pad_gain_match_uncertainty, trace_sim.other_systematics = trace_sim.proton.pad_gain_match_uncertainty, trace_sim.proton.other_systematics
+    trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
+    #trace_sim.pad_gain_match_uncertainty = m
     trace_sim.other_systematics = c
+    sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
     return trace_sim
 
 def show_results(event:int):
     sim = load_pa_mcmc_results(124,event, 'clustering_run2')
-    import matplotlib.pylab as plt
     sim.plot_residuals_3d(threshold=20)
     sim.plot_simulated_3d_data(threshold=20)
 
@@ -184,6 +185,8 @@ def show_results(event:int):
 def open_gui(sim:SingleParticleEvent):
     import tkinter as tk
     root = tk.Tk()
+    if 'name' in sim.__dict__:
+        root.title(sim.name)
     SimGui(root, sim).grid()
     root.mainloop()
 
