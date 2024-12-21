@@ -70,6 +70,7 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.near_peak_window_width = 50
         h5file.require_peak_within= (-np.inf, np.inf)
         h5file.num_background_bins=(40,50)#(160, 250)
+        h5file.zscale = get_zscale(experiment, run)
         return h5file
     assert False
     

@@ -10,61 +10,16 @@ import sklearn.cluster as cluster
 import multiprocessing
 
 import emcee
-import corner
 
-from track_fitting import SingleParticleEvent
-from raw_viewer import raw_h5_file
+from track_fitting import SingleParticleEvent, build_sim
 
 if __name__ == '__main__':
     particle_type, run_number, event_num = sys.argv[1:]
     run_number = int(run_number)
     event_num = int(event_num)
-    #folder = '/mnt/analysis/e21072/gastest_h5_files/'
-    folder = '../../shared/Run_Data/'
+    experiment = 'e21072'
 
-
-    run_h5_path = folder +'run_%04d.h5'%run_number
-
-    if run_number == 124:
-        adc_scale_mu = 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
-        detector_E_sigma = lambda E: (5631./adc_scale_mu)*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
-
-        #use theoretical zscale
-        clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-        drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
-        zscale = drift_speed/clock_freq
-
-        pad_gain_match_uncertainty = 0.3286
-        other_systematics = 8.876
-
-        ic_threshold = 25
-        h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
-                                        zscale=zscale,
-                                        flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.background_subtract_mode='fixed window'
-        h5file.data_select_mode='near peak'
-        h5file.remove_outliers=True
-        h5file.near_peak_window_width = 50
-        h5file.require_peak_within= (-np.inf, np.inf)
-        h5file.num_background_bins=(160, 250)
-        h5file.zscale = zscale
-
-        shaping_time = 70e-9 #s, from e21062 config file on mac minis
-
-        pad_threshold = 70
-
-
-        pressure = 860.3 #assuming current offset on MFC was present during experiment, and it was set to 800 torr
-
-            
-    rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-    T = 20+273.15 #K
-    get_gas_density = lambda P: rho0*(P/760)*(300./T)
-
-
-
-    pads_to_fit, traces_to_fit = h5file.get_pad_traces(event_num, include_veto_pads=False)
-
+    
     #MCMC priors
     class GaussianVar:
         def __init__(self, mu, sigma):
@@ -72,29 +27,22 @@ if __name__ == '__main__':
 
         def log_likelihood(self, val):
             return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
-
-    max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
-    E_from_ic = measured_counts/adc_scale_mu
-    E_prior = GaussianVar(E_from_ic, detector_E_sigma(E_from_ic))
+        
+    E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
+    E_prior = GaussianVar(E_from_ic, build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic))
+    h5file = build_sim.get_rawh5_object(experiment, run_number)
     x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
     xmin, xmax = np.min(x_real), np.max(x_real)
     ymin, ymax = np.min(y_real), np.max(y_real)
     zmin = 0
     #set zmax to length of trimmed traces
-    temp_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
-    temp_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)
-    zmax = temp_sim.num_trace_bins*zscale
+    temp_sim = build_sim.create_single_particle_sim('e21072', run_number, event_num, particle_type)
+    zmax = temp_sim.num_trace_bins*h5file.zscale
     num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
 
     def get_sim(params):
         E, x, y, z, theta, phi, sigma_xy, sigma_z = params
-        trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
-        trace_sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
-        trace_sim.other_systematics = other_systematics
-        trace_sim.zscale = zscale
-        trace_sim.counts_per_MeV = adc_scale_mu
-        trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=50, trim_pad=10)#match trim threshold used for systematics determination\
-        trace_sim.load_srim_table(particle_type, get_gas_density(pressure))
+        trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
         trace_sim.initial_energy = E
         trace_sim.initial_point = (x,y,z)
         trace_sim.theta = theta
@@ -103,7 +51,6 @@ if __name__ == '__main__':
         trace_sim.sigma_z = sigma_z
         trace_sim.adaptive_stopping_power = False
         trace_sim.num_stopping_power_points = num_stopping_points
-        trace_sim.pad_threshold = pad_threshold
         trace_sim.simulate_event()
         return trace_sim
 
@@ -142,52 +89,25 @@ if __name__ == '__main__':
         return to_return
 
     fit_start_time = time.time()
-    nwalkers = 250
-    clustering_steps = 400
-    times_to_repeat_clustering = 5
-    post_cluster_steps=2000
+    nwalkers = 100
+    clustering_steps = 2000
+    times_to_repeat_clustering = 1
+    post_cluster_steps=0
     ndim = 8
 
 
-    if False:
-        #find global minimum of log posterior
-        print('finding global maximum of liklihood')
-        opt_res = opt.shgo(lambda params: -log_posterior(params, False), 
-                        ((np.max((0, E_prior.mu - E_prior.sigma*4)),E_prior.mu + E_prior.sigma*4),
-                            (xmin, xmax), (ymin, ymax), (zmin, zmax), (0, np.pi), (-np.pi, np.pi), (0.1, 20), (0.1,20), (0.1,1), (0.1,20)))
-        print(opt_res)
-        best_sim = get_sim(opt_res.x)
-        best_sim.plot_simulated_3d_data(threshold=25)
-        best_sim.plot_residuals_3d(threshold=25)
-        best_sim.plot_residuals()
 
-        plt.figure()
-        plt.title('log posterior vs E')
-        dE=0.1
-        Es = np.linspace(opt_res.x[0]-dE, opt_res.x[0]+dE)
-        lls = []
-        for E in Es:
-            params = np.copy(opt_res.x)
-            params[0] = E
-            lls.append(log_posterior(params))
-        plt.scatter(Es, lls)
-
-        plt.show()
-    
-    
-        init_walker_pos = opt_res.x + 1e-4*np.random.randn(nwalkers, ndim)
-    else:
-        init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu,
-                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
-                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                             np.random.uniform(0, 30), np.random.uniform(0,30)) for w in range(nwalkers)]
+    init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu,
+                            np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
+                            np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
+                            np.random.uniform(0, 30), np.random.uniform(0,30)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 
 
-    with multiprocessing.Pool() as pool:
+    with multiprocessing.Pool(nwalkers) as pool:
         for step in range(times_to_repeat_clustering):
             backend_fname = 'clustering_run%d.h5'%step
             backend_file = os.path.join(directory, backend_fname)
@@ -223,7 +143,7 @@ if __name__ == '__main__':
         backend_file = os.path.join(directory, 'final_run.h5')
         backend = emcee.backends.HDFBackend(backend_file)
         backend.reset(nwalkers, ndim)
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool, moves=[(emcee.moves.KDEMove(), 1)],)
         for sample in sampler.sample(init_walker_pos, iterations=post_cluster_steps, progress=True):
             tau = sampler.get_autocorr_time(tol=0)
             print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
