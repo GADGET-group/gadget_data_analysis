@@ -42,7 +42,7 @@ if __name__ == '__main__':
 
     def get_sim(params):
         E, x, y, z, theta, phi, sigma_xy, sigma_z = params
-        trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
+        trace_sim = build_sim.create_single_particle_sim(experiment, run_number, event_num, particle_type)
         trace_sim.initial_energy = E
         trace_sim.initial_point = (x,y,z)
         trace_sim.theta = theta

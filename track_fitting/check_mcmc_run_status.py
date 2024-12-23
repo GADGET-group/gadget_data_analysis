@@ -6,12 +6,16 @@ import corner
 import numpy as np
 import sklearn.cluster as cluster
 
-#from track_fitting import ParticleAndPointDeposition
-#from raw_viewer import raw_h5_file
-def process_h5(filepath, labels, Ea_Ep_labels=None, summary_file=None):
-    base_fname = os.path.splitext(filepath)[0]
-    reader = emcee.backends.HDFBackend(filename=filepath, read_only=True)
+from track_fitting import build_sim
+
+def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_file=None):
+    base_fname = os.path.splitext(mcmc_filepath)[0]
+    reader = emcee.backends.HDFBackend(filename=mcmc_filepath, read_only=True)
     with open(base_fname+'.txt', 'w') as output_text_file:
+        energy_from_ic = build_sim.get_energy_from_ic('e21072', run, event)
+        energy_from_ic_uncertainty = build_sim.get_detector_E_sigma('e21072', run, energy_from_ic)
+        output_text_file.write('Energy from integrated charge = %f +/- %f MeV\n'%(energy_from_ic, energy_from_ic_uncertainty))
+
         samples = reader.get_chain()
         log_prob = reader.get_log_prob()
 
@@ -74,6 +78,8 @@ def process_h5(filepath, labels, Ea_Ep_labels=None, summary_file=None):
 
         #plt.show()
 
+
+
         tau_auto=reader.get_autocorr_time(tol=0)
         output_text_file.write('autocorrelation times: '+str(tau_auto)+'\n')
 
@@ -128,25 +134,27 @@ def process_h5(filepath, labels, Ea_Ep_labels=None, summary_file=None):
 
 
 
-if False: #change this to True for single particle fits
+if True: #change this to True for single particle fits
     run_number= 124
-    steps = 5
+    steps = 1
     filenames = []
-    for event in [17,29,34,43,91, 108]:
+    events = [4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 45, 55, 65, 71, 91, 108]
+    for event in events:
         for step in range(steps):
-            filenames.append('../run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+            filenames.append('./run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None
+    summary_file_path = './run%d_mcmc/summary.txt'%run_number
 else:
     run_number= 124
     steps = 1
     filenames = []
     for event in [68192, 50543,19699,104723]:#[74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]:
         for step in range(steps):
-            filenames.append('../run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
+            filenames.append('./run%d_palpha_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         #filenames.append('../run%d_palpha_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c', 'k']
     theta_index, phi_index = 5,6
@@ -154,8 +162,8 @@ else:
     Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c', 'k']
     summary_file_path = '../run%d_palpha_mcmc/summary.txt'%run_number
 
-for filepath in filenames:
+for filepath, event in zip(filenames, events):
     with open(summary_file_path, 'w') as summary_file:
-        summary_file.write(str(Ea_Ep_labels) + '\n')
-        process_h5(filepath, labels, Ea_Ep_labels, summary_file)
+        summary_file.write(str(labels) + '\n')
+        process_h5(filepath, run_number, event, labels, Ea_Ep_labels, summary_file)
 
