@@ -107,7 +107,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             txt = txt.format(mcmc[1], q[0], q[1], labels[i])
             output_text_file.write('%s\n'%txt)
             if summary_file != None:
-                output_text_file.write('%f +%f/- %f, '%(mcmc[1], q[0], q[1]))
+                summary_file.write('%f +%f/-%f, '%(mcmc[1], q[0], q[1]))
         if summary_file != None:
                 summary_file.write('\n')
            
@@ -137,7 +137,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 if True: #change this to True for single particle fits
     run_number= 124
-    steps = 1
+    steps = 4
     filenames = []
     events = [4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 45, 55, 65, 71, 91, 108]
     for event in events:

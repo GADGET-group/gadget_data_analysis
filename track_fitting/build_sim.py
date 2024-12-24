@@ -172,14 +172,18 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     trace_sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
     return trace_sim
 
-def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1)->SingleParticleEvent:
-    filename='run%d_mcmc/event%d/%s.h5'%(run, event, mcmc_name)
+def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
+    filename='run%d_mcmc/12-23-2024/event%d/%s.h5'%(run, event, mcmc_name)
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     
     samples = reader.get_chain()[step]
     ll = reader.get_log_prob()[step]
-    best_params = samples[np.argmax(ll)]
+
+    if select_model == 'best':
+        best_params = samples[np.argmax(ll)]
+    else:
+        best_params = samples[select_model]
     E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params
 
     trace_sim = create_single_particle_sim('e21072', run, event, particle)

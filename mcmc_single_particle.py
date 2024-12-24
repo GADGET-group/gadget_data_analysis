@@ -90,8 +90,8 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 100
-    clustering_steps = 2000
-    times_to_repeat_clustering = 1
+    clustering_steps = 500
+    times_to_repeat_clustering = 4
     post_cluster_steps=0
     ndim = 8
 
