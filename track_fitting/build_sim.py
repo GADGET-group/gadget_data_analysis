@@ -142,9 +142,7 @@ def set_params_and_simulate(sim, param_dict:dict):
     sim.simulate_event()
 
 def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->ParticleAndPointDeposition:
-    sim = create_pa_sim('e21072', run, event)
     reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
-    #reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc_likelihood_div_by_num_pads/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
     samples = reader.get_chain()[step]
     ll = reader.get_log_prob()[step]
@@ -171,7 +169,32 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
     #trace_sim.pad_gain_match_uncertainty = m
     trace_sim.other_systematics = c
-    sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
+    trace_sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
+    return trace_sim
+
+def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1)->SingleParticleEvent:
+    filename='run%d_mcmc/event%d/%s.h5'%(run, event, mcmc_name)
+    print('loading: ', filename)
+    reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
+    
+    samples = reader.get_chain()[step]
+    ll = reader.get_log_prob()[step]
+    best_params = samples[np.argmax(ll)]
+    E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params
+
+    trace_sim = create_single_particle_sim('e21072', run, event, particle)
+    trace_sim.initial_energy = E
+    trace_sim.initial_point = (x,y,z)
+    trace_sim.sigma_xy = sigma_xy
+    trace_sim.sigma_z = sigma_z
+    trace_sim.theta = theta
+    trace_sim.phi = phi
+    pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
+    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
+    #trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
+    #trace_sim.pad_gain_match_uncertainty = m
+    #trace_sim.other_systematics = c
+    trace_sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
     return trace_sim
 
 def show_results(event:int):

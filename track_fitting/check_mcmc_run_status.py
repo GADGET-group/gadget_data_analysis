@@ -15,6 +15,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
         energy_from_ic = build_sim.get_energy_from_ic('e21072', run, event)
         energy_from_ic_uncertainty = build_sim.get_detector_E_sigma('e21072', run, energy_from_ic)
         output_text_file.write('Energy from integrated charge = %f +/- %f MeV\n'%(energy_from_ic, energy_from_ic_uncertainty))
+        summary_file.write('%f +/- %f,'%(energy_from_ic, energy_from_ic_uncertainty))
 
         samples = reader.get_chain()
         log_prob = reader.get_log_prob()
@@ -102,33 +103,33 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             if labels[i] == 'theta' or labels[i] == 'phi':
                 mcmc = np.degrees(mcmc)
             q = np.diff(mcmc)
-            txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
+            txt = "{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
             txt = txt.format(mcmc[1], q[0], q[1], labels[i])
             output_text_file.write('%s\n'%txt)
-        if True: #make corner plots
-            corner.corner(flat_samples, labels=labels)
-            plt.savefig(base_fname+'_corner_plot.png')
-            if Ea_Ep_labels != None:
-                EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
-                EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
-                EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
-                corner.corner(EaEp_flat, labels=Ea_Ep_labels)
-                plt.savefig(base_fname+'corner_plot_EaEp.png')
+            if summary_file != None:
+                output_text_file.write('%f +%f/- %f, '%(mcmc[1], q[0], q[1]))
+        if summary_file != None:
+                summary_file.write('\n')
+           
+        corner.corner(flat_samples, labels=labels)
+        plt.savefig(base_fname+'_corner_plot.png')
+        if Ea_Ep_labels != None:
+            EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
+            EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
+            EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
+            corner.corner(EaEp_flat, labels=Ea_Ep_labels)
+            plt.savefig(base_fname+'corner_plot_EaEp.png')
 
 
-                ndim = len(labels)
-                for i in range(ndim):
-                    mcmc = np.percentile(EaEp_flat[:, i], [16, 50, 84])
-                    if Ea_Ep_labels[i] == 'theta' or Ea_Ep_labels[i] == 'phi':
-                        mcmc = np.degrees(mcmc)
-                    q = np.diff(mcmc)
-                    txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
-                    txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
-                    output_text_file.write('%s\n'%txt)
-                    if summary_file != None:
-                        summary_file.write('%f + %f - %f, '%(mcmc[1],mcmc[0], mcmc[2]))
-                if summary_file != None:
-                    summary_file.write('\n')
+            ndim = len(labels)
+            for i in range(ndim):
+                mcmc = np.percentile(EaEp_flat[:, i], [16, 50, 84])
+                if Ea_Ep_labels[i] == 'theta' or Ea_Ep_labels[i] == 'phi':
+                    mcmc = np.degrees(mcmc)
+                q = np.diff(mcmc)
+                txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
+                txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
+            
 
         plt.close('all') 
 
@@ -162,8 +163,12 @@ else:
     Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c', 'k']
     summary_file_path = '../run%d_palpha_mcmc/summary.txt'%run_number
 
-for filepath, event in zip(filenames, events):
-    with open(summary_file_path, 'w') as summary_file:
-        summary_file.write(str(labels) + '\n')
+with open(summary_file_path, 'w') as summary_file:
+    summary_file.write('event, energy from IC, ')
+    for label in labels:
+        summary_file.write('%s, '%label)
+    summary_file.write('\n')
+    for filepath, event in zip(filenames, events):
+        summary_file.write('%d, '%event)
         process_h5(filepath, run_number, event, labels, Ea_Ep_labels, summary_file)
 
