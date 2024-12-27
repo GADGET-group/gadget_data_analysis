@@ -3,6 +3,7 @@ File for building sims, that can then be used for MCMC, fitting, or visualizatio
 '''
 import socket
 import configparser
+import pickle
 
 import numpy as np
 import emcee 
@@ -13,6 +14,9 @@ from track_fitting.ParticleAndPointDeposition import ParticleAndPointDeposition
 from track_fitting.SingleParticleEvent import SingleParticleEvent
 from track_fitting.MultiParticleEvent import MultiParticleEvent, ProtonAlphaEvent
 from track_fitting.SimGui import SimGui
+
+read_data_mode = 'unchanged'
+
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
 #########################################################################
@@ -109,7 +113,7 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
     if experiment == 'e21072':
         sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
         sim.zscale = get_zscale(experiment, run)
-        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
+        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         
         sim.adaptive_stopping_power = False
@@ -118,6 +122,13 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
 
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.3286, 8.876
         sim.pad_threshold = 50
+
+        with open('./raw_viewer/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
+            sim.timing_offsets = pickle.load(f)
+        for pad in sim.timing_offsets:
+            if pad != 1:
+                sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
+        sim.timing_offsets[1] = 0
         return sim
 
 def create_pa_sim(experiment:str, run:int, event:int):
@@ -126,7 +137,7 @@ def create_pa_sim(experiment:str, run:int, event:int):
     sims = [proton, alpha]
     to_return =  MultiParticleEvent(sims)
     pads, traces = pads, traces = get_pads_and_traces(experiment, run, event)
-    to_return.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
+    to_return.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
     to_return.pad_threshold = proton.pad_threshold
     to_return.pad_gain_match_uncertainty = proton.pad_gain_match_uncertainty
     to_return.other_systematics = proton.other_systematics
@@ -164,7 +175,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     trace_sim.sims[1].phi = phi_a
     trace_sim = ProtonAlphaEvent(*trace_sim.sims)
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
-    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
+    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
     trace_sim.pad_gain_match_uncertainty, trace_sim.other_systematics = trace_sim.proton.pad_gain_match_uncertainty, trace_sim.proton.other_systematics
     trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
     #trace_sim.pad_gain_match_uncertainty = m
@@ -173,7 +184,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     return trace_sim
 
 def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
-    filename='run%d_mcmc/12-23-2024/event%d/%s.h5'%(run, event, mcmc_name)
+    filename='run%d_mcmc/no_pad_gain_match/event%d/%s.h5'%(run, event, mcmc_name)
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     
@@ -184,7 +195,7 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
         best_params = samples[np.argmax(ll)]
     else:
         best_params = samples[select_model]
-    E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params
+    E, x, y, z, theta, phi, sigma_xy, sigma_z,c = best_params
 
     trace_sim = create_single_particle_sim('e21072', run, event, particle)
     trace_sim.initial_energy = E
@@ -193,8 +204,10 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
     trace_sim.sigma_z = sigma_z
     trace_sim.theta = theta
     trace_sim.phi = phi
+    trace_sim.pad_gain_match_uncertainty = 0
+    trace_sim.other_systematics = c
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
-    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select='adjacent')
+    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
     #trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
     #trace_sim.pad_gain_match_uncertainty = m
     #trace_sim.other_systematics = c

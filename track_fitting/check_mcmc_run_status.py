@@ -138,11 +138,11 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 if True: #change this to True for single particle fits
     run_number= 124
-    steps = 1
+    steps = 4
     filenames = []
     events = [4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 45, 55, 65, 71, 91, 108]
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'c']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None

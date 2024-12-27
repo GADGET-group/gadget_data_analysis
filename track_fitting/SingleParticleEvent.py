@@ -66,6 +66,7 @@ class SingleParticleEvent:
 
         #dictionary containing energy deposition on each pad as a function of z coordinate
         self.traces_to_fit = {} #trace data to try to fit. Populated by calling self.set_real_data
+        self.timing_offsets = None #Optional dictionary of per pad timing offsets to simulate. 
         self.sim_traces = {} #simulated traces.
         self.pads_to_sim = [pad for pad in self.pad_to_xy] #can be set automatically when loading real traces
         self.num_trace_bins = 512 #set to length of trimmed traces when trimmed traces are loaded
@@ -149,17 +150,19 @@ class SingleParticleEvent:
             if val not in erf_dict:
                 erf_dict[val] = scipy.special.erf(val)
             return erf_dict[val]
-
-        def erf_array(vals):
-            to_return = np.zeros(len(vals))
-            for i in range(len(vals)):
-                to_return[i] = erf(vals[i])
-            return to_return
+        
+        erf_array = np.vectorize(erf)
 
         for point, edep in zip(points, energy_deposition):
-            dz = zs - point[2]
-            zfrac = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf_array(dz/np.sqrt(2*self.sigma_z)))
+            if self.timing_offsets == None:
+                dz = zs - point[2]
+                zfrac = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf_array(dz/np.sqrt(2*self.sigma_z)))
             for pad in self.pads_to_sim:
+                if self.timing_offsets != None:
+                    if pad not in self.timing_offsets:
+                        continue #this pad never fired in any event
+                    dz = zs - (point[2] + self.timing_offsets[pad]*self.zscale)
+                    zfrac = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf_array(dz/np.sqrt(2*self.sigma_z)))
                 dx = self.pad_to_xy[pad][0] - point[0]
                 xfrac = 0.5*(erf((dx + self.pad_width/2)/np.sqrt(2*self.sigma_xy)) - \
                              erf((dx - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))

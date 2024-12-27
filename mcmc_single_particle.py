@@ -104,8 +104,8 @@ if __name__ == '__main__':
     init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu,
                             np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
                             np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                            np.random.uniform(0, 30), np.random.uniform(0,30)),
-                            np.random.uniform(0, 100) for w in range(nwalkers)]
+                            np.random.uniform(0, 30), np.random.uniform(0,30),
+                            np.random.uniform(0, 100)) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
