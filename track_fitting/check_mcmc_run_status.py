@@ -78,7 +78,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             plt.savefig(base_fname+'Ea_Ep_ll.png')
 
         #plt.show()
-
+        plt.close('all') 
 
 
         tau_auto=reader.get_autocorr_time(tol=0)
@@ -113,6 +113,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
            
         corner.corner(flat_samples, labels=labels)
         plt.savefig(base_fname+'_corner_plot.png')
+        plt.close('all') 
         if Ea_Ep_labels != None:
             EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
             EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
@@ -137,12 +138,9 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 if True: #change this to True for single particle fits
     run_number= 124
-    steps = 4
+    steps = 1
     filenames = []
     events = [4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 45, 55, 65, 71, 91, 108]
-    for event in events:
-        for step in range(steps):
-            filenames.append('./run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step))
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 4,5
@@ -168,7 +166,9 @@ with open(summary_file_path, 'w') as summary_file:
     for label in labels:
         summary_file.write('%s, '%label)
     summary_file.write('\n')
-    for filepath, event in zip(filenames, events):
-        summary_file.write('%d, '%event)
-        process_h5(filepath, run_number, event, labels, Ea_Ep_labels, summary_file)
+    for event in events:
+        for step in range(steps):
+            filepath = './run%d_mcmc/event%d/clustering_run%d.h5'%(run_number, event, step)
+            summary_file.write('%s, '%filepath)
+            process_h5(filepath, run_number, event, labels, Ea_Ep_labels, summary_file)
 
