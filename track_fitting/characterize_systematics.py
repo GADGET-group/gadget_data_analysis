@@ -21,67 +21,27 @@ import matplotlib.pylab as plt
 import matplotlib as mpl
 import scipy.optimize as opt
 
-from track_fitting import SingleParticleEvent
-from raw_viewer import raw_h5_file
-
+from track_fitting import SingleParticleEvent, build_sim
 
 start_time = time.time()
 
-h5_folder = '../../shared/Run_Data/'
 run_number = 124
-run_h5_path = h5_folder +'run_%04d.h5'%run_number
-pickle_fname = 'run%d_results_objects_m0_c1_neg_data_to_0.dat'%run_number
+experiment = 'e21072'
+pickle_fname = '%s_run%d_results_objects_m0_c1_neg_data_to_0.dat'%(experiment,run_number)
 
-adc_scale_mu = 124673.72676265772 #trying value from fitting 100 757 keV protons
-#old value for adcscalemu: 86431./0.757 #counts/MeV, from fitting events with range 40-43 in run 0368 with p10_default
-detector_E_sigma = lambda E: (5631./(86431./0.757))*np.sqrt(E/0.757) #sigma for above fit, scaled by sqrt energy
-
-#use theoretical zscale
-clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
-zscale = drift_speed/clock_freq
-
-pad_threshold = 70 #from looking at a number of background subtracted events, and not seeing any peaks below this
-
-h5file = raw_h5_file.raw_h5_file(file_path=run_h5_path,
-                                zscale=0.9, #use same zscale as was used for cut
-                                flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-h5file.length_counts_threshold=100
-h5file.ic_counts_threshold = 25
-h5file.background_subtract_mode='fixed window'
-h5file.data_select_mode='near peak'
-h5file.remove_outliers=True
-h5file.near_peak_window_width = 50
-h5file.require_peak_within= (-np.inf, np.inf)
-h5file.num_background_bins=(160, 250)
-h5file.ic_counts_threshold = 25
-
-#assuming current offset on MFC was present during experiment, and it was set to 800 torr
-#which seems to be a good assumtion. See c48097904a89edc1131d7aa2d216ca6d045b5137
-pressure = 860.3 #torr
-
-rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-T = 20+273.15 #K
-get_gas_density = lambda P: rho0*(P/760)*(300./T)
-
+h5file = build_sim.get_rawh5_object('e21072', run_number)
 
 m_guess, c_guess = 0,1 #guesses for pad gain match uncertainty and other systematics
 
-def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, return_key=None, 
+def fit_event(run, event, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
-    trace_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle_type)
-    trace_sim.zscale = zscale
-    trace_sim.counts_per_MeV = adc_scale_mu
-    trace_sim.set_real_data(pads_to_fit, traces_to_fit, trim_threshold=trim_threshold, trim_pad=int(10))
-    #set use trimmed traces going forwards
-    traces_to_fit = [trace_sim.traces_to_fit[pad] for pad in pads_to_fit]
+    trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
     if trace_sim.num_trace_bins > 100:
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
     #want max likilihood to just be least squares for this fit
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
-    trace_sim.pad_threshold = pad_threshold
     #to get initial guess
     #Energy: from integrated charge
     #z: center of track
@@ -89,45 +49,47 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     #     Then find the pixel farthest from there.
     #theta, phi: from guessed decay location to brag peak
     #sigma_xy and sigma_z: just guess
-    sigma_xy_guess = 5
+    sigma_xy_guess = 7
     sigma_z_guess = 10
 
-    Eguess = np.sum(traces_to_fit)/adc_scale_mu
+
     #find guess for Brag peak location
     max_pad, max_val, max_index = 0,0,0
-    for pad, trace in zip(pads_to_fit, traces_to_fit):
+    for pad in trace_sim.traces_to_fit:
+        trace = trace_sim.traces_to_fit[pad]
         this_max_index = np.argmax(trace)
         if trace[this_max_index] > max_val:
             max_pad, max_val, max_index = pad, trace[this_max_index], this_max_index
     brag_x, brag_y = trace_sim.pad_to_xy[max_pad]
-    brag_z = zscale*max_index
+    brag_z = trace_sim.zscale*max_index
     #find pad which fired which is furthest from the brag peak
     x_guess, y_guess = brag_x, brag_y
 
     furthest_dist_sqrd = 0
-    for pad, trace in zip(pads_to_fit, traces_to_fit):
+    for pad in trace_sim.traces_to_fit:
+        trace = trace_sim.traces_to_fit[pad]
         x,y = trace_sim.pad_to_xy[pad]
         dist = (x-brag_x)**2 + (y - brag_y)**2
         if dist > furthest_dist_sqrd:
             furthest_dist_sqrd = dist
             x_guess, y_guess = x,y
-            z_guess = np.argmax(trace)*zscale
+            z_guess = np.argmax(trace)*trace_sim.zscale
             furthest_pad_trace = trace
-    dz = brag_z - np.argmax(furthest_pad_trace)*zscale
+    dz = brag_z - np.argmax(furthest_pad_trace)*trace_sim.zscale
     theta_guess = np.arctan2(np.sqrt(furthest_dist_sqrd), dz)
     phi_guess = np.arctan2(brag_y-y_guess, brag_x-x_guess)
+    Eguess = build_sim.get_energy_from_ic(experiment, run, event)
     if debug_plots:
         print('num pads to simultate: ', len(trace_sim.pads_to_sim))
         print('max pad:', max_pad)
         print('brag x,y:', brag_x, brag_y)
         print('guess:',x_guess, y_guess, z_guess, np.degrees(theta_guess), 
-              np.degrees(phi_guess), Eguess, pressure)
+              np.degrees(phi_guess), Eguess)
         trace_sim.theta, trace_sim.phi = theta_guess, phi_guess
         trace_sim.initial_point = (x_guess,y_guess,z_guess)
         trace_sim.initial_energy = Eguess
         trace_sim.sigma_xy = sigma_xy_guess
         trace_sim.sigma_z = sigma_z_guess
-        trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(pressure))
         trace_sim.simulate_event()
         trace_sim.plot_residuals()
         trace_sim.plot_residuals_3d(threshold=25)
@@ -152,8 +114,6 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
         trace_sim.sigma_xy = sigma_xy
         trace_sim.sigma_z = sigma_z
         trace_sim.initial_energy = E
-        trace_sim.pad_threshold = pad_threshold
-        trace_sim.load_srim_table(particle=particle_type, gas_density=get_gas_density(pressure))
         trace_sim.simulate_event()
         to_return = -trace_sim.log_likelihood()
         if debug_plots:
@@ -180,8 +140,7 @@ def fit_event(pads_to_fit, traces_to_fit, particle_type, trim_threshold=50, retu
     return res
 
 if False: #try fitting one event to make sure it looks ok
-    pads, traces = h5file.get_pad_traces(108, False)
-    fit_event(pads, traces, 'proton', debug_plots=True)
+    fit_event(124,108, 'proton', debug_plots=True)
 
 events_in_catagory = [[],[],[],[]]
 events_per_catagory = 50
@@ -216,12 +175,11 @@ if not load_previous_fit:
                 particle_type = 'alpha'
             else:
                 particle_type = 'proton'
-            pads, traces  = h5file.get_pad_traces(n, include_veto_pads=False)
             if fit_in_parrallel:
-                processes.append(multiprocessing.Process(target=fit_event, args=(pads, traces, particle_type, 50, n, fit_results_dict)))
+                processes.append(multiprocessing.Process(target=fit_event, args=(run_number, n, particle_type, 50, n, fit_results_dict)))
                 processes[-1].start()
             else:
-                fit_event(pads, traces, particle_type, 50, n, fit_results_dict)
+                fit_event(run_number, n, particle_type, 50, n, fit_results_dict)
             events_in_catagory[event_catagory].append(n)
             print([len(x) for x in events_in_catagory])
         n += 1
@@ -276,17 +234,13 @@ ptypes = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
 
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
-    sim=SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), ptypes[i])
+    sim = build_sim.create_single_particle_sim(experiment, run_number, evt)
     sim.initial_energy = Es[i]
     sim.initial_point = (xs[i], ys[i], zs[i])
     sim.theta = thetas[i]
     sim.phi = phis[i]
     sim.sigma_xy = sigma_xys[i]
     sim.sigma_z = sigma_zs[i]
-    sim.zscale = zscale
-    sim.counts_per_MeV = adc_scale_mu
-    pads, traces = h5file.get_pad_traces(evt, False)
-    sim.set_real_data(pads, traces, 50, 10)
     sim.simulate_event()
     sim.plot_simulated_3d_data(threshold=25)
     sim.plot_residuals_3d(threshold=25)
@@ -303,22 +257,18 @@ cats_to_fit = []
 for i in range(len(evts)):
     #if lls[i] <= ll_cutoff[cats[i]]:
     #if i == 127:
-    new_sim = SingleParticleEvent.SingleParticleEvent(get_gas_density(pressure), particle=ptypes[i])
+    new_sim = build_sim.create_single_particle_sim(experiment, run_number, evts[i])
     new_sim.sigma_xy = sigma_xys[i]
     new_sim.sigma_z = sigma_zs[i]
-    new_sim.zscale = zscale
-    new_sim.counts_per_MeV = adc_scale_mu
     new_sim.initial_energy = Es[i]
     new_sim.initial_point = (xs[i], ys[i], zs[i])
     new_sim.theta = thetas[i]
     new_sim.phi = phis[i]
     new_sim.pad_gain_match_uncertainty = m_guess
     new_sim.other_systematics = c_guess
-    new_sim.pad_threshold = pad_threshold
     
-    pads, traces = h5file.get_pad_traces(evts[i], False)
-    new_sim.set_real_data(pads, traces, trim_threshold=50, trim_pad=10,pads_to_sim_select='observed')
     new_sim.simulate_event()
+    pads, traces = h5file.get_pad_traces(evts[i], False)
     max_trace = np.max(traces)
     residuals_dict = new_sim.get_residuals()
     max_residual_percent = 0
@@ -374,7 +324,7 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if False:
+if True:
     systematics_results = opt.minimize(to_minimize, (c_guess, ))
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
