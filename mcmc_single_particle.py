@@ -52,7 +52,7 @@ if __name__ == '__main__':
         trace_sim.adaptive_stopping_power = False
         trace_sim.num_stopping_power_points = num_stopping_points
         trace_sim.simulate_event()
-        trace_sim.pad_gain_match_uncertainty = 0
+        #trace_sim.pad_gain_match_uncertainty = 0
         trace_sim.other_systematics = c
         return trace_sim
 
