@@ -120,7 +120,7 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
         sim.points_per_bin = 5
         sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
 
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.2108, 8.876
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.2108, 2.02115
         sim.pad_threshold = 50
 
         with open('./raw_viewer/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
@@ -204,7 +204,6 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
     trace_sim.sigma_z = sigma_z
     trace_sim.theta = theta
     trace_sim.phi = phi
-    trace_sim.pad_gain_match_uncertainty = 0
     trace_sim.other_systematics = c
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
     trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
