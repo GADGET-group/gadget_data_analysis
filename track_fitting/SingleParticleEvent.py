@@ -333,17 +333,20 @@ class SingleParticleEvent:
                             cov_matrix[i,j] += self.other_systematics**2
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
+                    pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
+                    pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
+                    residuals = np.matrix(residuals)
+                    pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]
                 else: #pad was simulated firing, but did not
-                    #if trace < self.pad_threshold, pad would not have fired. Assume the experimental trace could be
-                    #anything less than this.
-                    residuals = self.sim_traces[pad]
-                    residuals[residuals < self.pad_threshold] = 0
-                    residuals[residuals >= self.pad_threshold] -= self.pad_threshold
-                pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
-                pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
-                residuals = np.matrix(residuals)
-                pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]
+                    #if trace < self.pad_threshold, pad would not have fired. Use probability that time bin at top of simulated peak is less than
+                    #pad threshold
+                    #TODO: should I consider more than just the peak time bin?
+                    sim_peak_height = np.max(self.sim_traces[pad])
+                    peak_sigma = (self.other_systematics**2 + (self.pad_gain_match_uncertainty*sim_peak_height)**2)**0.5
+                    pad_ll = np.log(0.5 + 0.5*scipy.special.erf((self.pad_threshold - sim_peak_height)/2**0.5/peak_sigma))
+
             else: #pad was not simulated
+                assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading
                 pad_ll -= 0.5*self.num_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
                 if pad in self.traces_to_fit: #pad fired, but was not simulated
                     residuals = np.matrix(-self.traces_to_fit[pad])

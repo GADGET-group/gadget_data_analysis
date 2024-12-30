@@ -184,7 +184,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->Pa
     return trace_sim
 
 def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
-    filename='run%d_mcmc/no_pad_gain_match/event%d/%s.h5'%(run, event, mcmc_name)
+    filename='run%d_mcmc/all_pads_w_timing_correction_12-29-2024/event%d/%s.h5'%(run, event, mcmc_name)
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     
