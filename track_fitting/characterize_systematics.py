@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = False
+load_previous_fit = True
 
 import time
 import multiprocessing
@@ -257,7 +257,7 @@ cats_to_fit = []
 for i in range(len(evts)):
     #if lls[i] <= ll_cutoff[cats[i]]:
     #if i == 127:
-    new_sim = build_sim.create_single_particle_sim(experiment, run_number, evts[i])
+    new_sim = build_sim.create_single_particle_sim(experiment, run_number, evts[i], ptypes[i])
     new_sim.sigma_xy = sigma_xys[i]
     new_sim.sigma_z = sigma_zs[i]
     new_sim.initial_energy = Es[i]
