@@ -324,11 +324,11 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if True:
+if False:
     systematics_results = opt.minimize(to_minimize, (c_guess, ))
     pad_gain_match_uncertainty,other_systematics = systematics_results.x
 else:
-    pad_gain_match_uncertainty,other_systematics = 0.3286, 8.876#m_guess, c_guess
+    pad_gain_match_uncertainty,other_systematics = m_guess, c_guess
 
 '''
 Fit with adaptive stopping powers, and doing max likilihood of both pad gain match uncertainty and other systematics

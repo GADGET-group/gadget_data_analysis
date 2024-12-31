@@ -9,8 +9,7 @@ import scipy.optimize as opt
 import sklearn.cluster as cluster
 import multiprocessing
 
-from track_fitting import ParticleAndPointDeposition, build_sim
-from raw_viewer import raw_h5_file
+from track_fitting import build_sim
 
 particle_type = 'proton'
 
@@ -25,7 +24,6 @@ def get_sims_and_param_bounds(experiment, run_number, events):
     sims, bounds, epriors = [],[], []
     for event_num in events:
         new_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
-        new_sim.pad_gain_match_uncertainty = 0
         E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
         xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
         for pad in new_sim.pads_to_sim:
@@ -43,11 +41,14 @@ def get_sims_and_param_bounds(experiment, run_number, events):
         
         
         sims.append(new_sim)
-        bounds.append(((E_from_ic/2, E_from_ic*2), (0,1), 
-                       (xmin, xmax), (ymin, ymax),(zmin, zmax),
+        Esigma = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
+        bounds.append(((E_from_ic-3*Esigma, E_from_ic+3*Esigma), (0,1), 
+                       (xmin - new_sim.pad_width, xmax+new_sim.pad_width), 
+                       (ymin - new_sim.pad_width, ymax+new_sim.pad_width),
+                       (zmin, zmax),
                        (0, np.pi), (0, 2*np.pi), (0, np.pi), (0, 2*np.pi),
                        (2.2, 20), (2.2, 20)))
-        epriors.append(GaussianVar(E_from_ic, build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)))
+        epriors.append(GaussianVar(E_from_ic, Esigma))
     return sims, bounds, epriors
 
 
@@ -71,8 +72,9 @@ def fit_event(sim, bounds, Eprior, fit_results_dict=None, results_key=None, work
         #return np.sum(residuals*residuals)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
     #res =  opt.shgo(to_minimize, bounds, sampling_method='halton', options={'ftol':0.1}, workers=workers)
+    res =  opt.shgo(to_minimize, bounds, options={'ftol':0.1}, workers=workers)
     #res =  opt.direct(to_minimize, bounds)
-    res =  opt.differential_evolution(to_minimize, bounds)
+    #res =  opt.differential_evolution(to_minimize, bounds)
     if fit_results_dict != None:
         fit_results_dict[results_key]=res
         print(results_key, res)
@@ -125,7 +127,7 @@ def get_cnn_events(run_num):
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
 run_num = 124
-if False:
+if True:
     #events_to_fit = get_cnn_events(run_num)
     events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
     res_dict = fit_events('e21072', run_num, events_to_fit, timeout=12*3600)

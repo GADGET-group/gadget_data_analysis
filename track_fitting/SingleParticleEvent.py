@@ -345,7 +345,7 @@ class SingleParticleEvent:
                     peak_sigma = (self.other_systematics**2 + (self.pad_gain_match_uncertainty*sim_peak_height)**2)**0.5
                     pad_ll = np.log(0.5 + 0.5*scipy.special.erf((self.pad_threshold - sim_peak_height)/2**0.5/peak_sigma))
 
-            else: #pad was not simulated
+            elif pad in self.traces_to_fit: #pad was not simulated but did fire
                 assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading
                 pad_ll -= 0.5*self.num_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
                 if pad in self.traces_to_fit: #pad fired, but was not simulated
