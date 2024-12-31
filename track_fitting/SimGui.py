@@ -223,6 +223,8 @@ class SimGui(ttk.Frame):
                 entry.insert(0, v)
             self.load_entries_to_sim()
             to_return = -self.sim.log_likelihood()
+            if np.isnan(to_return):
+                to_return = np.inf
             print(vals, to_return)
             return to_return
 

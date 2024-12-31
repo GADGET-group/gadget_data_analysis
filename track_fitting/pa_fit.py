@@ -20,12 +20,13 @@ class GaussianVar:
     def log_likelihood(self, val):
         return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
 
-def get_sims_and_param_bounds(experiment, run_number, events):
-    sims, bounds, epriors = [],[], []
+def get_sims_and_param_bounds(experiment, run_number, events, flip_angle=False):
+    sims, bounds, epriors, guesses = [],[], [], []
     for event_num in events:
         new_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
         E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
-        xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
+        xmin, xmax, ymin, ymax, biggest_peak = np.inf, -np.inf, np.inf, -np.inf, -np.inf
+        brightest_pad = None
         for pad in new_sim.pads_to_sim:
             x,y = new_sim.pad_to_xy[pad]
             if x < xmin:
@@ -36,24 +37,37 @@ def get_sims_and_param_bounds(experiment, run_number, events):
                 xmax = x
             if y > ymax:
                 ymax = y
+        for pad in new_sim.traces_to_fit:
+            peak_val = np.max(new_sim.traces_to_fit[pad])
+            if peak_val > biggest_peak:
+                brightest_pad = pad
+                biggest_peak = peak_val
         zmin = 0
         zmax = new_sim.num_trace_bins
         
         
         sims.append(new_sim)
         Esigma = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
-        bounds.append(((E_from_ic-3*Esigma, E_from_ic+3*Esigma), (0,1), 
+        bounds.append(((E_from_ic-5*Esigma, E_from_ic+5*Esigma), (0,1), 
                        (xmin - new_sim.pad_width, xmax+new_sim.pad_width), 
                        (ymin - new_sim.pad_width, ymax+new_sim.pad_width),
                        (zmin, zmax),
                        (0, np.pi), (0, 2*np.pi), (0, np.pi), (0, 2*np.pi),
-                       (2.2, 20), (2.2, 20)))
+                       (2.2, 20), (2.2, 20), (0.1,100)))
         epriors.append(GaussianVar(E_from_ic, Esigma))
-    return sims, bounds, epriors
+        
+        #guess decay location is at peak with largest
+        xguess, yguess = new_sim.pad_to_xy[brightest_pad]
+        zguess = new_sim.zscale*np.argmax(new_sim.traces_to_fit[brightest_pad])
+        guesses.append([E_from_ic,0.5, 
+                        xguess, yguess, zguess, 
+                        0,0,0,0,10,10,15])
+        
+    return sims, guesses, bounds, epriors
 
 
 def apply_params(sim, params):
-    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
+    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z, c = params
     sim.sims[0].initial_energy = E*(1-Ea_frac)
     sim.sims[1].initial_energy = E*Ea_frac
     sim.sims[0].initial_point = sim.sims[1].initial_point = (x,y,z)
@@ -61,20 +75,19 @@ def apply_params(sim, params):
     sim.sims[1].theta, sim.sims[1].phi= theta_a, phi_a
     sim.sims[0].sigma_xy = sim.sims[1].sigma_xy =sigma_xy
     sim.sims[0].sigma_z = sim.sims[1].sigma_z = sigma_z
+    sim.other_systematics = c
     sim.simulate_event()
 
-def fit_event(sim, bounds, Eprior, fit_results_dict=None, results_key=None, workers=1):
+def fit_event(sim, guess, bounds, Eprior, fit_results_dict=None, results_key=None, workers=1):
     #tries to maximize posterior of each of the sims passed in subject to the given parameter bounds
     def to_minimize(params):
         apply_params(sim, params)
-        residuals = sim.get_residuals()
-        residuals = np.array([residuals[p] for p in residuals])
-        #return np.sum(residuals*residuals)
         return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
     #res =  opt.shgo(to_minimize, bounds, sampling_method='halton', options={'ftol':0.1}, workers=workers)
-    res =  opt.shgo(to_minimize, bounds, options={'ftol':0.1}, workers=workers)
+    #res =  opt.shgo(to_minimize, bounds, options={'ftol':0.1}, workers=workers)
     #res =  opt.direct(to_minimize, bounds)
     #res =  opt.differential_evolution(to_minimize, bounds)
+    res = opt.minimize(to_minimize, guess, bounds=bounds)
     if fit_results_dict != None:
         fit_results_dict[results_key]=res
         print(results_key, res)
@@ -85,9 +98,9 @@ def fit_events(experiment, run_num, events, timeout=3600):
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()
     processes = []
-    sims, bounds, epriors = get_sims_and_param_bounds(experiment,run_num, events)
+    sims, guesses, bounds, epriors = get_sims_and_param_bounds(experiment,run_num, events)
     for i in range(len(sims)):
-        processes.append(multiprocessing.Process(target=fit_event, args=(sims[i], bounds[i], epriors[i], fit_results_dict, events[i])))
+        processes.append(multiprocessing.Process(target=fit_event, args=(sims[i], guesses[i], bounds[i], epriors[i], fit_results_dict, events[i])))
         processes[-1].start()
     #for p in processes:
     #    p.join()
@@ -131,7 +144,7 @@ if True:
     #events_to_fit = get_cnn_events(run_num)
     events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
     res_dict = fit_events('e21072', run_num, events_to_fit, timeout=12*3600)
-    with open('run_%d_hand_picked.dat'%run_num,'wb') as f:
+    with open('run_%d_hand_picked_events_local_minimizer.dat'%run_num,'wb') as f:
         pickle.dump(res_dict, f)
 else:
     #with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'rb') as f:
