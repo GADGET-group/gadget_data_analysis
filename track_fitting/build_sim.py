@@ -15,7 +15,7 @@ from track_fitting.SingleParticleEvent import SingleParticleEvent
 from track_fitting.MultiParticleEvent import MultiParticleEvent, ProtonAlphaEvent
 from track_fitting.SimGui import SimGui
 
-read_data_mode = 'unchanged'
+read_data_mode = 'adjacent'
 
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
@@ -152,7 +152,7 @@ def set_params_and_simulate(sim, param_dict:dict):
         sim.__dict__[param] = param_dict[param]
     sim.simulate_event()
 
-def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1)->ParticleAndPointDeposition:
+def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
     samples = reader.get_chain()[step]
