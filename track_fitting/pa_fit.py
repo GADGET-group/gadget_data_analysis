@@ -140,7 +140,7 @@ def get_cnn_events(run_num):
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
 run_num = 124
-if True:
+if False:
     #events_to_fit = get_cnn_events(run_num)
     events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
     res_dict = fit_events('e21072', run_num, events_to_fit, timeout=12*3600)
@@ -148,11 +148,12 @@ if True:
         pickle.dump(res_dict, f)
 else:
     #with open('run_%d_cnn_palpha_fits_w_direct.dat'%run_num,'rb') as f:
-    with open('run_%d_hand_picked.dat'%run_num, 'rb') as f:
+    with open('run_%d_hand_picked_events_local_minimizer.dat'%run_num, 'rb') as f:
         res_dict = pickle.load(f)
 Ea = np.array([res_dict[k].x[0]*res_dict[k].x[1] for k in res_dict])
 Ep = np.array([res_dict[k].x[0]*(1-res_dict[k].x[1]) for k in res_dict])
 ll = np.array([res_dict[k].fun for k in res_dict])
+evt_nums = [k for k in res_dict]
 
 filter = ll<1.5e5
 plt.scatter(Ea[filter], Ep[filter], c=ll[filter])
