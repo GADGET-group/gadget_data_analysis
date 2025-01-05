@@ -153,13 +153,14 @@ else:
     run_number= 124
     steps = 2
     filenames = []
-    events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
-    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c', 'k']
+    #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
+    events = [ 19699, 51777, 68192, 10356, 21640, 21662, 26303, 50543, 27067, 25304, 104723, 43833, 52010 ]
+    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c']
     theta_index, phi_index = 5,6
     tau = [2]
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c', 'k']
-    summary_file_path = './run%d_palpha_mcmc/adjacent_pads_pressure_free_ll_fixed/summary.txt'%run_number
-    filepath_template = './run%d_palpha_mcmc/adjacent_pads_pressure_free_ll_fixed/event%d/clustering_run%d.h5'
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c']
+    summary_file_path = './run%d_palpha_mcmc/summary.txt'%run_number
+    filepath_template = './run%d_palpha_mcmc/event%d/clustering_run%d.h5'
 
 with open(summary_file_path, 'w') as summary_file:
     summary_file.write('event, energy from IC, ')
