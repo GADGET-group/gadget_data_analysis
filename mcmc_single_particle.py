@@ -44,7 +44,6 @@ if __name__ == '__main__':
     num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
     track_center, track_direction_vec = h5file.get_track_axis(event_num)
     track_direction_vec = track_direction_vec[0]
-    direction = 1 #will be set to -1 to simulate particles going in opposite direction
 
     def get_sim(params):
         E, x, y, z, theta, phi, sigma_xy, sigma_z, c = params
@@ -70,7 +69,7 @@ if __name__ == '__main__':
         #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
         return to_return/len(trace_sim.pads_to_sim)#trace_sim.num_trace_bins#(2.355*shaping_time*clock_freq)
 
-    def log_priors(params):
+    def log_priors(params, direction):
         E, x, y, z, theta, phi, sigma_xy, sigma_z, c = params
         #uniform priors
         if x**2 + y**2 > 40**2:
@@ -90,8 +89,8 @@ if __name__ == '__main__':
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
 
-    def log_posterior(params, print_out=False):
-        to_return = log_priors(params)
+    def log_posterior(params, direction, print_out=False):
+        to_return = log_priors(params, direction)
         if to_return != -np.inf:
             to_return +=  log_likelihood(params)
         if np.isnan(to_return):
@@ -105,7 +104,7 @@ if __name__ == '__main__':
     steps = 500
     ndim = 9
 
-    def get_init_walker_pos():
+    def get_init_walker_pos(direction):
         #initialize E per priors
         #start walkers in a small ball at far end of the track from where the particle will stop, given selected direction
         d_best, best_point = np.inf, None #distance along track in direction of particle motion. Make as negative as possible
@@ -127,13 +126,20 @@ if __name__ == '__main__':
 
         print('initial_guess:', (E_prior.mu, best_point, theta, phi, sigma_guess, sigma_guess, c_guess))
 
-        return [(E_prior.sigma*np.random.randn() + E_prior.mu,
+        to_return = [(E_prior.sigma*np.random.randn() + E_prior.mu,
                             best_point[0] + np.random.randn()*pos_ball_size,
                             best_point[1] + np.random.randn()*pos_ball_size,
                             best_point[2] + np.random.randn()*pos_ball_size,
-                            theta + np.random.randn()*angle_ball_size, phi + np.random.randn()*angle_ball_size,
+                            min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
+                            min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
                             sigma_guess + np.random.randn()*pos_ball_size, sigma_guess + np.random.randn()*pos_ball_size,
                             c_guess + np.random.randn()*1) for w in range(nwalkers)]
+        # for p in to_return:
+        #     lp = log_posterior(p)
+        #     print(p, lp)
+        #     if not np.isfinite(lp):
+        #         assert False
+        return to_return
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
@@ -141,8 +147,7 @@ if __name__ == '__main__':
 
 
     with multiprocessing.Pool(nwalkers) as pool:
-        for d in [1, -1]:
-            direction = d
+        for direction in [-1, 1]:
             if direction == 1:
                 backend_fname = 'forward.h5'
             else:
@@ -151,11 +156,16 @@ if __name__ == '__main__':
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
 
-            init_walker_pos = get_init_walker_pos()
+            init_walker_pos = get_init_walker_pos(direction)
 
-            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, moves=[(emcee.moves.KDEMove(), 1)],
+            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=[direction],backend=backend, 
+                                             moves=[(emcee.moves.KDEMove(), 1)],
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=steps, progress=True):
                 tau = sampler.get_autocorr_time(tol=0)
                 print(backend_fname, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+                lls = sampler.get_log_prob()[-1]
+                xs = sampler.get_chain()[-1]
+                print(np.percentile(xs, [50], axis=0))
+                print('log prob:',np.percentile(lls, [0,16, 50, 84,100]))
