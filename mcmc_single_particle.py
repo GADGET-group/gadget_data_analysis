@@ -38,7 +38,13 @@ if __name__ == '__main__':
     #set zmax to length of trimmed traces
     temp_sim = build_sim.create_single_particle_sim('e21072', run_number, event_num, particle_type)
     zmax = temp_sim.num_trace_bins*h5file.zscale
+    
+    sigma_min, sigma_max = 0,30
+
     num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
+    track_center, track_direction_vec = h5file.get_track_axis(event_num)
+    track_direction_vec = track_direction_vec[0]
+    direction = 1 #will be set to -1 to simulate particles going in opposite direction
 
     def get_sim(params):
         E, x, y, z, theta, phi, sigma_xy, sigma_z, c = params
@@ -71,13 +77,15 @@ if __name__ == '__main__':
             return -np.inf
         if z < zmin or z >zmax:
             return -np.inf
-        if theta < 0 or theta >= np.pi or phi < -2*np.pi or phi>2*np.pi:
-            return -np.inf 
-        if sigma_xy < 0 or sigma_xy > 20:
+        if sigma_xy < sigma_min or sigma_xy > sigma_max:
             return -np.inf
-        if sigma_z < 0 or sigma_z > 20:
+        if sigma_z < sigma_min or sigma_z > sigma_max:
             return -np.inf
         if c <= 0 or c > 1000:
+            return -np.inf
+        #require particle to be within 90 degrees of track axis
+        vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
+        if np.dot(vhat, direction*track_direction_vec) < 0:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
@@ -94,18 +102,38 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 200
-    clustering_steps = 1000
-    times_to_repeat_clustering = 1
-    post_cluster_steps=0
+    steps = 500
     ndim = 9
 
+    def get_init_walker_pos():
+        #initialize E per priors
+        #start walkers in a small ball at far end of the track from where the particle will stop, given selected direction
+        d_best, best_point = np.inf, None #distance along track in direction of particle motion. Make as negative as possible
+        for x, y, z in zip(x_real, y_real, z_real):
+            delta = np.array([x,y,z]) - track_center
+            dist = np.dot(delta, track_direction_vec*direction)
+            if  dist < d_best:
+                d_best= dist
+                best_point = np.array([x,y,z])
+        #start theta, phi in a small ball around track direction from svd
+        vhat = track_direction_vec*direction
+        theta = np.arctan2( np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
+        phi = np.arctan2(vhat[1], vhat[0])
+        #start sigma_xy, sigma_z, and c in a small ball around an initial guess
+        sigma_guess = 7
+        c_guess = 15
+        pos_ball_size = 1
+        angle_ball_size = 1*np.pi/180
 
+        print('initial_guess:', (E_prior.mu, best_point, theta, phi, sigma_guess, sigma_guess, c_guess))
 
-    init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu,
-                            np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
-                            np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                            np.random.uniform(0, 30), np.random.uniform(0,30),
-                            np.random.uniform(0, 100)) for w in range(nwalkers)]
+        return [(E_prior.sigma*np.random.randn() + E_prior.mu,
+                            best_point[0] + np.random.randn()*pos_ball_size,
+                            best_point[1] + np.random.randn()*pos_ball_size,
+                            best_point[2] + np.random.randn()*pos_ball_size,
+                            theta + np.random.randn()*angle_ball_size, phi + np.random.randn()*angle_ball_size,
+                            sigma_guess + np.random.randn()*pos_ball_size, sigma_guess + np.random.randn()*pos_ball_size,
+                            c_guess + np.random.randn()*1) for w in range(nwalkers)]
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
@@ -113,42 +141,21 @@ if __name__ == '__main__':
 
 
     with multiprocessing.Pool(nwalkers) as pool:
-        for step in range(times_to_repeat_clustering):
-            backend_fname = 'clustering_run%d.h5'%step
+        for d in [1, -1]:
+            direction = d
+            if direction == 1:
+                backend_fname = 'forward.h5'
+            else:
+                backend_fname = 'backward.h5'
             backend_file = os.path.join(directory, backend_fname)
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
+
+            init_walker_pos = get_init_walker_pos()
+
             sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                            #  moves=[
-                                            #          (emcee.moves.DESnookerMove(), 0.2),
-                                            #          (emcee.moves.DEMove(), 0.6),
-                                            #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
-                                            #  ],
                                             pool=pool)
 
-            for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
+            for sample in sampler.sample(init_walker_pos, iterations=steps, progress=True):
                 tau = sampler.get_autocorr_time(tol=0)
                 print(backend_fname, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
-
-            #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
-            ll = sampler.get_log_prob()[-1]
-            ll_to_cluster = ll[np.isfinite(ll)].reshape(-1,1)
-            cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
-            clusters_to_propagate = cluster_object.labels_==np.argmax(cluster_object.cluster_centers_)
-            samples_to_propagate = sampler.get_chain()[-1][np.isfinite(ll)][clusters_to_propagate]
-            new_init_pos = list(samples_to_propagate)
-
-            #randomly select samples to perturb and add to the list until we have the desired number of walkers
-            while len(new_init_pos) < nwalkers:
-                i = np.random.randint(0, len(samples_to_propagate))
-                new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
-            init_walker_pos = new_init_pos
-
-        #restart mcmc
-        backend_file = os.path.join(directory, 'final_run.h5')
-        backend = emcee.backends.HDFBackend(backend_file)
-        backend.reset(nwalkers, ndim)
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool, moves=[(emcee.moves.KDEMove(), 1)],)
-        for sample in sampler.sample(init_walker_pos, iterations=post_cluster_steps, progress=True):
-            tau = sampler.get_autocorr_time(tol=0)
-            print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))

@@ -137,18 +137,18 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 
 
-if False: #change this to True for single particle fits
+if True: #change this to True for single particle fits
     run_number= 124
-    steps = 4
+    steps = ['forward', 'backward']
     filenames = []
-    events = [4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 45, 55, 65, 71, 91, 108]
+    events = [4]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 45, 55, 65, 71, 91, 108]
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'c']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None
     summary_file_path = './run%d_mcmc/summary.txt'%run_number
-    filepath_template = './run%d_mcmc/event%d/clustering_run%d.h5'
+    filepath_template = './run%d_mcmc/event%d/%s.h5'
 else:
     run_number= 124
     steps = 2
@@ -168,8 +168,9 @@ with open(summary_file_path, 'w') as summary_file:
         summary_file.write('%s, '%label)
     summary_file.write('\n')
     for event in events:
-        for step in range(steps):
+        for step in steps:
             filepath = filepath_template%(run_number, event, step)
+            print('processing: %s'%filepath)
             summary_file.write('%s, '%filepath)
             process_h5(filepath, run_number, event, labels, Ea_Ep_labels, summary_file)
 

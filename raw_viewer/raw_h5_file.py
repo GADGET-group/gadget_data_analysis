@@ -11,13 +11,6 @@ import tqdm
 
 import skimage.measure
 
-'''
-Notes for tomorrow:
---make main_gui.py work with recent updates
---background subtraction, outlier removal, PCA, RvE plot
---are some pads more noisy than other? Are they all on one cobo or ASAD board or AGET chip?
-'''
-
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
@@ -286,6 +279,24 @@ class raw_h5_file:
         '''
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
         return x,y, t*self.zscale ,e
+    
+    def get_track_axis(self, event, threshold=None):
+        '''
+        Uses SVD on all points above some threshold to get track direction.
+        Returns point, unit vector in track direction.
+        If threshold==None, uses track length ic threshold.
+        '''
+        if threshold == None:
+            threshold = self.length_counts_threshold
+        x,y,z,e = self.get_xyze(event, threshold, False)
+        points = np.concatenate((x[:, np.newaxis], 
+                       y[:, np.newaxis], 
+                       z[:, np.newaxis]), 
+                      axis=1)
+        points_mean = points.mean(axis=0)
+        uu, dd, vv = np.linalg.svd(points - points_mean)
+        return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
+
     
     def get_event_num_bounds(self):
         #returns first event number, last event number
