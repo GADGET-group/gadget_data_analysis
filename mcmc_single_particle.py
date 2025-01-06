@@ -31,12 +31,12 @@ if __name__ == '__main__':
     E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
     E_prior = GaussianVar(E_from_ic, build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic))
     h5file = build_sim.get_rawh5_object(experiment, run_number)
-    x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
+    temp_sim = build_sim.create_single_particle_sim('e21072', run_number, event_num, particle_type)
+    x_real, y_real, z_real, e_real = temp_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=temp_sim.traces_to_fit)
     xmin, xmax = np.min(x_real), np.max(x_real)
     ymin, ymax = np.min(y_real), np.max(y_real)
     zmin = 0
     #set zmax to length of trimmed traces
-    temp_sim = build_sim.create_single_particle_sim('e21072', run_number, event_num, particle_type)
     zmax = temp_sim.num_trace_bins*h5file.zscale
     
     sigma_min, sigma_max = 0,30
@@ -85,7 +85,7 @@ if __name__ == '__main__':
             return -np.inf
         #require particle to be within 90 degrees of track axis
         vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
-        if np.dot(vhat, direction*track_direction_vec) < 0:
+        if np.dot(vhat, direction*track_direction_vec) < 0 or theta > np.pi or theta < 0 or np.abs(phi)>np.pi:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
@@ -153,7 +153,7 @@ if __name__ == '__main__':
 
             init_walker_pos = get_init_walker_pos()
 
-            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
+            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, moves=[(emcee.moves.KDEMove(), 1)],
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=steps, progress=True):
