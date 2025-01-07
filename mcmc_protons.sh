@@ -7,7 +7,6 @@ python mcmc_single_particle.py proton 124 29 &
 python mcmc_single_particle.py proton 124 31 &
 python mcmc_single_particle.py proton 124 34 &
 python mcmc_single_particle.py proton 124 43 &
-python mcmc_single_particle.py proton 124 44 &
 python mcmc_single_particle.py proton 124 45 &
 python mcmc_single_particle.py proton 124 55 &
 python mcmc_single_particle.py proton 124 65 &

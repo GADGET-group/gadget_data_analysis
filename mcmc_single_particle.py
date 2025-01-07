@@ -41,7 +41,6 @@ if __name__ == '__main__':
     
     sigma_min, sigma_max = 0,30
 
-    num_stopping_points = temp_sim.get_num_stopping_points_for_energy(E_from_ic)
     track_center, track_direction_vec = h5file.get_track_axis(event_num)
     track_direction_vec = track_direction_vec[0]
 
@@ -55,7 +54,6 @@ if __name__ == '__main__':
         trace_sim.sigma_xy = sigma_xy
         trace_sim.sigma_z = sigma_z
         trace_sim.adaptive_stopping_power = False
-        trace_sim.num_stopping_power_points = num_stopping_points
         trace_sim.simulate_event()
         #trace_sim.pad_gain_match_uncertainty = 0
         return trace_sim

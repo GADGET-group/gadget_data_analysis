@@ -48,8 +48,11 @@ if __name__ == '__main__':
     temp_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
+    track_center, track_direction_vec = h5file.get_track_axis(event_num)
+    track_direction_vec = track_direction_vec[0]
+
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z, other_uncert = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
         trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
@@ -64,7 +67,6 @@ if __name__ == '__main__':
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
-        trace_sim.other_systematics = other_uncert #gain match is set in buid_sim
         for sim in trace_sim.sims:
             sim.load_srim_table(sim.particle, rho0)#*rho_scale)
         trace_sim.simulate_event()
@@ -78,8 +80,8 @@ if __name__ == '__main__':
         #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
-    def log_priors(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, other_uncert = params
+    def log_priors(params, direction):
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z = params
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -87,21 +89,20 @@ if __name__ == '__main__':
             return -np.inf
         if z < zmin or z >zmax:
             return -np.inf
-        if theta_p < 0 or theta_p >= np.pi or phi_p < 0 or phi_p>2*np.pi:
-            return -np.inf 
+        vhat = np.array([np.sin(theta_p)*np.cos(phi_p), np.sin(theta_p)*np.sin(phi_p), np.cos(theta_p)])
+        if np.dot(vhat, direction*track_direction_vec) < 0 or theta_p > np.pi or theta_p < 0 or np.abs(phi_p)>np.pi:
+            return -np.inf
         if theta_a < 0 or theta_a >= np.pi or phi_a < 0 or phi_a>2*np.pi:
             return -np.inf 
         if sigma_p_xy < 0 or sigma_p_xy > 40:
             return -np.inf
         if sigma_p_z < 0 or sigma_p_z > 40:
             return -np.inf
-        if other_uncert < 0 or other_uncert > 4000:
-            return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E)  + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p))) #+ density_scale_prior.log_likelihood(rho_scale)
 
-    def log_posterior(params, print_out=False):
-        to_return = log_priors(params)
+    def log_posterior(params, direction, print_out=False):
+        to_return = log_priors(params, direction)
         if to_return != -np.inf:
             to_return +=  log_likelihood(params)
         if np.isnan(to_return):
@@ -112,20 +113,49 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 400
-    clustering_steps = 1000
-    times_to_repeat_clustering = 2
-    post_cluster_steps=0
-    ndim = 12
+    steps = 500
+    ndim = 11
+
+    def get_init_walker_pos(direction):
+        #initialize E per priors
+        #start walkers in a small ball at far end of the track from where the particle will stop, given selected direction
+        d_best, best_point = np.inf, None #distance along track in direction of particle motion. Make as negative as possible
+        for x, y, z in zip(x_real, y_real, z_real):
+            delta = np.array([x,y,z]) - track_center
+            dist = np.dot(delta, track_direction_vec*direction)
+            if  dist < d_best:
+                d_best= dist
+                best_point = np.array([x,y,z])
+        #start theta, phi in a small ball around track direction from svd
+        vhat = track_direction_vec*direction
+        theta = np.arctan2( np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
+        phi = np.arctan2(vhat[1], vhat[0])
+
+        #start sigma_xy, sigma_z, and c in a small ball around an initial guess
+        sigma_guess = 7
+        pos_ball_size = 1
+        angle_ball_size = 1*np.pi/180
+
+        max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
+        track_length = np.sqrt(dxy**2 + dz**2)
+        Ep_guess = temp_sim.sims[0].srim_table.get_energy_w_stopping_distance(track_length - sigma_guess) 
+        Ea_frac_guess = 1-Ep_guess/E_prior.mu
+        assert Ea_frac_guess >0
 
 
+        print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess, sigma_guess))
 
-    init_walker_pos = [(E_prior.sigma*np.random.randn() + E_prior.mu, np.random.uniform(0,1),
-                            np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax), np.random.uniform(zmin, zmax),
-                            np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi), np.random.uniform(0,np.pi), np.random.uniform(-np.pi, np.pi),
-                            np.random.uniform(0, 20), np.random.uniform(0,20),
-                            #np.random.uniform(0, 1),
-                            np.random.uniform(0,400))
-                           for w in range(nwalkers)] #, density_scale_prior.sigma*np.random.randn() + density_scale_prior.mu) 
+        return [(E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
+                            best_point[0] + np.random.randn()*pos_ball_size,
+                            best_point[1] + np.random.randn()*pos_ball_size,
+                            best_point[2] + np.random.randn()*pos_ball_size,
+                            min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
+                            min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
+                            np.random.uniform(0, np.pi), np.random.uniform(-np.pi, np.pi),
+                            sigma_guess + np.random.randn()*pos_ball_size, sigma_guess + np.random.randn()*pos_ball_size,
+                            ) for w in range(nwalkers)]
+
+
     # We'll track how the average autocorrelation time estimate changes
     directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
@@ -133,49 +163,33 @@ if __name__ == '__main__':
 
 
     with multiprocessing.Pool() as pool:
-        for step in range(times_to_repeat_clustering):
-            backend_fname = 'clustering_run%d.h5'%step
+        for direction in [-1, 1]:
+            if direction == 1:
+                backend_fname = 'forward.h5'
+            elif direction == -1:
+                backend_fname = 'backward.h5'
+            else:
+                assert False
+
+            init_walker_pos = get_init_walker_pos(direction)
+
             backend_file = os.path.join(directory, backend_fname)
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
-            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, 
-                                            #  moves=[
-                                            #          (emcee.moves.DESnookerMove(), 0.2),
-                                            #          (emcee.moves.DEMove(), 0.6),
-                                            #          (emcee.moves.DEMove(gamma0=1.0), 0.2)
-                                            #  ],
+            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=[direction],backend=backend, 
                                             moves=[(emcee.moves.KDEMove(), 1)],
-                                                   #,(emcee.moves.StretchMove(), 0.5)],
                                             pool=pool)
 
-            for sample in sampler.sample(init_walker_pos, iterations=clustering_steps, progress=True):
+            for sample in sampler.sample(init_walker_pos, iterations=steps, progress=True):
                 tau = sampler.get_autocorr_time(tol=0)
-                sample = sampler.get_chain()[-1]
-                Ea = sample[:, 0]*sample[:, 1]
-                Ep = sample[:, 0]*(1-sample[:, 1])
+                xs = sampler.get_chain()[-1]
+                Ea = xs[:, 0]*xs[:, 1]
+                Ep = xs[:, 0]*(1-xs[:, 1])
                 print('Ea = ', np.percentile(Ea, [0,16, 50, 84,100]))
                 print('Ep = ', np.percentile(Ep, [0,16, 50, 84,100]))
                 print(backend_fname, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
-
-            #cluster log likelihood into two clusters, and pick out the most recent samples from the best cluster 
-            ll = sampler.get_log_prob()[-1]
-            ll_to_cluster = ll[np.isfinite(ll)].reshape(-1,1)
-            cluster_object = cluster.KMeans(2).fit(ll_to_cluster)
-            clusters_to_propagate = cluster_object.labels_==np.argmax(cluster_object.cluster_centers_)
-            samples_to_propagate = sampler.get_chain()[-1][np.isfinite(ll)][clusters_to_propagate]
-            new_init_pos = list(samples_to_propagate)
-
-            #randomly select samples to perturb and add to the list until we have the desired number of walkers
-            while len(new_init_pos) < nwalkers:
-                i = np.random.randint(0, len(samples_to_propagate))
-                new_init_pos.append(samples_to_propagate[1] + .001*np.random.randn(ndim))
-            init_walker_pos = new_init_pos
-
-        #restart mcmc
-        backend_file = os.path.join(directory, 'final_run.h5')
-        backend = emcee.backends.HDFBackend(backend_file)
-        backend.reset(nwalkers, ndim)
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, backend=backend, pool=pool)
-        for sample in sampler.sample(init_walker_pos, iterations=post_cluster_steps, progress=True):
-            tau = sampler.get_autocorr_time(tol=0)
-            print('after clustering iteration=', sampler.iteration, ', tau=', tau, ', accept fraction=', np.average(sampler.acceptance_fraction))
+                lls = sampler.get_log_prob()[-1]
+                
+                print(np.percentile(xs, [50], axis=0))
+                print('log prob:',np.percentile(lls, [0,16, 50, 84,100]))
+        

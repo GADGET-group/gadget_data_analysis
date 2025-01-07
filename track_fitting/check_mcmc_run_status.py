@@ -141,9 +141,9 @@ if True: #change this to True for single particle fits
     run_number= 124
     steps = ['forward', 'backward']
     filenames = []
-    events = [45, 55, 65, 71, 91, 108]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 
+    events = [4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'c']
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None
@@ -155,10 +155,10 @@ else:
     filenames = []
     #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
     events = [ 19699, 51777, 68192, 10356, 21640, 21662, 26303, 50543, 27067, 25304, 104723, 43833, 52010 ]
-    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c']
+    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
     theta_index, phi_index = 5,6
     tau = [2]
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c']
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
     summary_file_path = './run%d_palpha_mcmc/summary.txt'%run_number
     filepath_template = './run%d_palpha_mcmc/event%d/clustering_run%d.h5'
 
