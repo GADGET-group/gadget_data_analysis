@@ -288,7 +288,7 @@ class SingleParticleEvent:
                     if adj_pad not in self.pads_to_sim:
                         self.pads_to_sim.append(adj_pad)
 
-    def get_residuals(self):
+    def get_residuals(self): #sim - observed
         sim_trace_dict = self.sim_traces
         real_trace_dict = self.traces_to_fit
         residuals_dict = {}
@@ -338,12 +338,11 @@ class SingleParticleEvent:
                     residuals = np.matrix(residuals)
                     pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]
                 else: #pad was simulated firing, but did not
-                    #if trace < self.pad_threshold, pad would not have fired. Use probability that time bin at top of simulated peak is less than
-                    #pad threshold
-                    #TODO: should I consider more than just the peak time bin?
-                    sim_peak_height = np.max(self.sim_traces[pad])
-                    peak_sigma = (self.other_systematics**2 + (self.pad_gain_match_uncertainty*sim_peak_height)**2)**0.5
-                    pad_ll = np.log(0.5 + 0.5*scipy.special.erf((self.pad_threshold - sim_peak_height)/2**0.5/peak_sigma))
+                    #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
+                    #than this value
+                    #TODO: is there a not to expensive way to account for corralations between time bins?
+                    sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
+                    pad_ll = np.sum(np.log(0.5 + 0.5*scipy.special.erf((self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma)))
 
             elif pad in self.traces_to_fit: #pad was not simulated but did fire
                 assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading

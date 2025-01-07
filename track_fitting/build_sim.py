@@ -185,7 +185,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     return trace_sim
 
 def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
-    filename='run%d_mcmc/event%d/%s.h5'%(run, event, mcmc_name)
+    filename='run%d_mcmc/forward_backward_1-6-2025/event%d/%s.h5'%(run, event, mcmc_name)
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     

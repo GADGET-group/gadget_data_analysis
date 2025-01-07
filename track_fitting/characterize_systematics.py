@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = True
+load_previous_fit = False
 
 import time
 import multiprocessing
@@ -27,11 +27,11 @@ start_time = time.time()
 
 run_number = 124
 experiment = 'e21072'
-pickle_fname = '%s_run%d_results_objects_m0_c1_neg_data_to_0.dat'%(experiment,run_number)
+pickle_fname = '%s_run%d_results_objects_m0_c15.dat'%(experiment,run_number)
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
 
-m_guess, c_guess = 0,1 #guesses for pad gain match uncertainty and other systematics
+m_guess, c_guess = 0,15 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(run, event, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):

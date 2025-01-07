@@ -141,7 +141,7 @@ if True: #change this to True for single particle fits
     run_number= 124
     steps = ['forward', 'backward']
     filenames = []
-    events = [4]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 45, 55, 65, 71, 91, 108]
+    events = [45, 55, 65, 71, 91, 108]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 44, 
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'c']
     theta_index, phi_index = 4,5
