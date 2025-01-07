@@ -290,7 +290,7 @@ print('catagories, counts:', np.unique(cats_to_fit, return_counts=True))
 
 peak_residuals_fraction = []
 peak_vals = []
-peak_threshold = 100
+peak_threshold = 400
 for evt, sim in zip(evts_to_fit, trace_sims):
     simulated_traces = sim.sim_traces
     for pad in simulated_traces:
@@ -312,6 +312,15 @@ peak_vals = np.array(peak_vals)
 pad_gain_match_uncertainty = np.std(peak_residuals_fraction)
 print('gain match uncertainty: ', pad_gain_match_uncertainty)
 
+min_trace_peak = np.inf
+for sim in trace_sims:
+    for pad in sim.traces_to_fit:
+        x = np.max(sim.traces_to_fit[pad])
+        if x < min_trace_peak and x > 0:
+            min_trace_peak = x
+print('suggested pad threshold = %f'%min_trace_peak)
+        
+
 def to_minimize(params):
     c = params[0]
     m = pad_gain_match_uncertainty
@@ -331,25 +340,7 @@ else:
     pad_gain_match_uncertainty,other_systematics = m_guess, c_guess
 
 '''
-Fit with adaptive stopping powers, and doing max likilihood of both pad gain match uncertainty and other systematics
-num events to fit: 142
-catagories, counts: (array([0, 1, 2, 3]), array([41, 27, 46, 28]))
-m,c= 0.7308398770265849, 11.94172668946808
-'''
-'''
-Same fit as above, but this time pad gain match from peaks only, and max likelihood for other systematics
-m, c=0.19464779124824114, 11.991125862279635
-
-with pad gain match set to 0: c=17.97
-
-===After adding pad threshold and ===
-Fit with mguess, cguess =0.26, 13
-when including all pads: 1.867, 13.5
-fitting only included pads observed to fire: 1.70585, 13.76306
-And adding in correlated systematics (gain match, uncorrelated correlated): leads to same thing but uncorrelated = 0
-
-gain match uncertainty from peak bins = 0.3286
-best fit c with this m = 8.876
+9bf15dc842c2ef3ec797b1ebdab942e48dc63a7b: used to create e21072_run124_results_objects_m0_c15. Gives m = 0.10459277119010803, c=24.99114302506084
 '''
 
 plt.figure()

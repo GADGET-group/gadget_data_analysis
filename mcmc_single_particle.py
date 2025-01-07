@@ -46,7 +46,7 @@ if __name__ == '__main__':
     track_direction_vec = track_direction_vec[0]
 
     def get_sim(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z, c = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
         trace_sim = build_sim.create_single_particle_sim(experiment, run_number, event_num, particle_type)
         trace_sim.initial_energy = E
         trace_sim.initial_point = (x,y,z)
@@ -58,7 +58,6 @@ if __name__ == '__main__':
         trace_sim.num_stopping_power_points = num_stopping_points
         trace_sim.simulate_event()
         #trace_sim.pad_gain_match_uncertainty = 0
-        trace_sim.other_systematics = c
         return trace_sim
 
     def log_likelihood(params, print_out=False):
@@ -70,7 +69,7 @@ if __name__ == '__main__':
         return to_return/len(trace_sim.pads_to_sim)#trace_sim.num_trace_bins#(2.355*shaping_time*clock_freq)
 
     def log_priors(params, direction):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z, c = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
         #uniform priors
         if x**2 + y**2 > 40**2:
             return -np.inf
@@ -79,8 +78,6 @@ if __name__ == '__main__':
         if sigma_xy < sigma_min or sigma_xy > sigma_max:
             return -np.inf
         if sigma_z < sigma_min or sigma_z > sigma_max:
-            return -np.inf
-        if c <= 0 or c > 1000:
             return -np.inf
         #require particle to be within 90 degrees of track axis
         vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
@@ -102,7 +99,7 @@ if __name__ == '__main__':
     fit_start_time = time.time()
     nwalkers = 200
     steps = 500
-    ndim = 9
+    ndim = 8
 
     def get_init_walker_pos(direction):
         #initialize E per priors
@@ -120,11 +117,10 @@ if __name__ == '__main__':
         phi = np.arctan2(vhat[1], vhat[0])
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
         sigma_guess = 7
-        c_guess = 15
         pos_ball_size = 1
         angle_ball_size = 1*np.pi/180
 
-        print('initial_guess:', (E_prior.mu, best_point, theta, phi, sigma_guess, sigma_guess, c_guess))
+        print('initial_guess:', (E_prior.mu, best_point, theta, phi, sigma_guess, sigma_guess))
 
         to_return = [(E_prior.sigma*np.random.randn() + E_prior.mu,
                             best_point[0] + np.random.randn()*pos_ball_size,
@@ -133,7 +129,7 @@ if __name__ == '__main__':
                             min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
                             min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
                             sigma_guess + np.random.randn()*pos_ball_size, sigma_guess + np.random.randn()*pos_ball_size,
-                            c_guess + np.random.randn()*1) for w in range(nwalkers)]
+                            ) for w in range(nwalkers)]
         # for p in to_return:
         #     lp = log_posterior(p)
         #     print(p, lp)

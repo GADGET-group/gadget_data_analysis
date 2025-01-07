@@ -120,8 +120,8 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
         sim.points_per_bin = 5
         sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
 
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.2108, 14
-        sim.pad_threshold = 64
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.1046, 24.99
+        sim.pad_threshold = 50.4
 
         with open('./raw_viewer/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
             sim.timing_offsets = pickle.load(f)
@@ -185,7 +185,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     return trace_sim
 
 def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
-    filename='run%d_mcmc/forward_backward_1-6-2025/event%d/%s.h5'%(run, event, mcmc_name)
+    filename='run%d_mcmc/event%d/%s.h5'%(run, event, mcmc_name)
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     
@@ -196,7 +196,7 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
         best_params = samples[np.argmax(ll)]
     else:
         best_params = samples[select_model]
-    E, x, y, z, theta, phi, sigma_xy, sigma_z,c = best_params
+    E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params
 
     trace_sim = create_single_particle_sim('e21072', run, event, particle)
     trace_sim.initial_energy = E
@@ -205,7 +205,7 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
     trace_sim.sigma_z = sigma_z
     trace_sim.theta = theta
     trace_sim.phi = phi
-    trace_sim.other_systematics = c
+    #trace_sim.other_systematics = c
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
     trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
     #trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
