@@ -124,7 +124,7 @@ def fit_event(run, event, particle_type, trim_threshold=50, return_key=None,
     
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
     #if method == 'Nelder-Mead':
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True})#, 'maxfev':5000, 'maxiter':5000})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
     if return_dict != None:
