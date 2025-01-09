@@ -49,8 +49,8 @@ def fit_event(run, event, particle_type, trim_threshold=50, return_key=None,
     #     Then find the pixel farthest from there.
     #theta, phi: from guessed decay location to brag peak
     #sigma_xy and sigma_z: just guess
-    sigma_xy_guess = 7
-    sigma_z_guess = 10
+    sigma_xy_guess = 4
+    sigma_z_guess = 4
 
 
     #find guess for Brag peak location
