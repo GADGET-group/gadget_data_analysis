@@ -13,8 +13,8 @@ import time
 import multiprocessing
 import pickle
 import os
-if not load_previous_fit:
-    os.environ["OMP_NUM_THREADS"] = "1"
+# if not load_previous_fit:
+#     os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
 import matplotlib.pylab as plt
@@ -25,13 +25,13 @@ from track_fitting import SingleParticleEvent, build_sim
 
 start_time = time.time()
 
+m_guess, c_guess = 0,25 #guesses for pad gain match uncertainty and other systematics
+
 run_number = 124
 experiment = 'e21072'
-pickle_fname = '%s_run%d_results_objects_m0_c15.dat'%(experiment,run_number)
+pickle_fname = '%s_run%d_results_objects_m%d_c%d.dat'%(experiment,run_number, m_guess, c_guess)
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
-
-m_guess, c_guess = 0,15 #guesses for pad gain match uncertainty and other systematics
 
 def fit_event(run, event, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
@@ -118,15 +118,17 @@ def fit_event(run, event, particle_type, trim_threshold=50, return_key=None,
         to_return = -trace_sim.log_likelihood()
         if debug_plots:
             print('%e'%to_return, params)
+        if np.isnan(to_return):
+            to_return = np.inf
         return to_return
     
     init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
     
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS', options={'gtol':1000})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS')
     #if method == 'Nelder-Mead':
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.01})
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.001})
     if return_dict != None:
         return_dict[return_key] = res
         print(return_key, res)
@@ -210,8 +212,8 @@ for cat in range(len(events_in_catagory)):
             print('evt %d (cat %d)not in results dict'%(evt, cat))
             continue
         res = fit_results_dict[evt]
-        if not res.success:
-            print('evt %d (cat %d)not succesfully fit'%(evt, cat))
+        if not res.success and res.message != 'Desired error not necessarily achieved due to precision loss.':
+            print('evt %d (cat %d)not succesfully fit: %s'%(evt, cat, res.message))
             continue
         thetas.append(res.x[0])
         phis.append(res.x[1])
