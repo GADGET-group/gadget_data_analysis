@@ -165,14 +165,14 @@ class SingleParticleEvent:
                         continue #this pad never fired in any event
                     if self.timing_offsets[pad] not in zfrac_dict:
                         dz = zs - (point[2] + self.timing_offsets[pad]*self.zscale)
-                        zfrac_dict[self.timing_offsets[pad]] = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf_array(dz/np.sqrt(2*self.sigma_z)))
+                        zfrac_dict[self.timing_offsets[pad]] = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2)/self.sigma_z) - erf_array(dz/np.sqrt(2)/self.sigma_z))
                     zfrac = zfrac_dict[self.timing_offsets[pad]]
                 dx = self.pad_to_xy[pad][0] - point[0]
-                xfrac = 0.5*(erf((dx + self.pad_width/2)/np.sqrt(2*self.sigma_xy)) - \
-                             erf((dx - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))
+                xfrac = 0.5*(erf((dx + self.pad_width/2)/np.sqrt(2)/self.sigma_xy) - \
+                             erf((dx - self.pad_width/2)/np.sqrt(2)/self.sigma_xy))
                 dy = self.pad_to_xy[pad][1] - point[1]
-                yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2*self.sigma_xy)) - \
-                             erf((dy - self.pad_width/2)/np.sqrt(2*self.sigma_xy)))
+                yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2)/self.sigma_xy) - \
+                             erf((dy - self.pad_width/2)/np.sqrt(2)/self.sigma_xy))
                 self.sim_traces[pad] += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
             #adc_correction_factor = 1+1.558e-1 - 2.968e-5*trace
         for pad in self.pads_to_sim:

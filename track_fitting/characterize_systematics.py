@@ -333,14 +333,14 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if False:
+if True:
     systematics_results = opt.minimize(to_minimize, (c_guess, ))
-    pad_gain_match_uncertainty,other_systematics = systematics_results.x
+    other_systematics = systematics_results.x[0]
 else:
-    pad_gain_match_uncertainty,other_systematics = m_guess, c_guess
+    pad_gain_match_uncertainty,other_systematics = pad_gain_match_uncertainty, c_guess
 
 '''
-9bf15dc842c2ef3ec797b1ebdab942e48dc63a7b: used to create e21072_run124_results_objects_m0_c15. Gives m = 0.10459277119010803, c=24.99114302506084
+9bf15dc842c2ef3ec797b1ebdab942e48dc63a7b: After ll update, but with old pad threshold of 64. Gives m = 0.10459277119010803, c=24.99114302506084
 '''
 
 plt.figure()
