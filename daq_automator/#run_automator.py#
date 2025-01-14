@@ -1,0 +1,45 @@
+import datetime
+import time
+from apscheduler.scheduler import Scheduler
+from pynput import mouse
+from pynput.mouse import Button, Controller
+
+# Choose stop and start locations
+x_stop = 0
+y_stop = 0
+x_start = 0
+y_start = 0
+
+# Start the scheduler
+sched = Scheduler()
+sched.daemonic = False
+sched.start()
+
+# Control of the auto clicker
+mouse_controller = mouse.Controller() 
+
+def job_function_xia():
+    time.sleep(10) # wait 10 seconds after GET stops
+    mouse_controller.position(x_stop,y_stop) # move mouse to stop button
+    mouse_controller.press(Button.left)
+    mouse_controller.release(Button.left)
+    print("XIA DAQ Stopped: ",datetime.datetime.now())
+    time.sleep(3) # wait for the DAQ to properly reset (3 seconds)
+    mouse_controller.position(x_start,y_start) # move mouse to start button
+    mouse_controller.press(Button.left)
+    mouse_controller.release(Button.left)
+    print("XIA DAQ Started: ",datetime.datetime.now())
+
+def job_function_get():
+    mouse_controller.position(x_stop,y_stop) # move mouse to stop button
+    mouse_controller.press(Button.left)
+    mouse_controller.release(Button.left)
+    print("GET DAQ Stopped: ",datetime.datetime.now())
+    time.sleep(15) # wait for xia daq to stop and start again, then begin GET DAQ 2 seconds after XIA begins
+    mouse_controller.position(x_start,y_start) # move mouse to start button
+    mouse_controller.press(Button.left)
+    mouse_controller.release(Button.left)
+    print("GET DAQ Started: ",datetime.datetime.now())
+
+# Schedules job_function to be run once every 4 hours, starting from the minimum
+sched.add_cron_job(job_function,  hour='*/4')
