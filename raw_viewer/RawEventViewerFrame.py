@@ -27,7 +27,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir='/mnt/daqtesting/protondet2024/h5', title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
@@ -49,6 +49,7 @@ class RawEventViewerFrame(ttk.Frame):
         settings_frame = ttk.LabelFrame(self, text='settings files and data export')
         ttk.Label(settings_frame, text='settings file:').grid(row=0, column=0)
         self.settings_file_entry = ttk.Entry(settings_frame)
+        self.settings_file_entry.insert(0, '/mnt/projects/e21072/OfflineAnalysis/analysis_scripts/joe/gadget_analysis/raw_viewer/gui_configs/p10_2000torr.gui_ini')
         self.settings_file_entry.grid(row=0, column=1)
         ttk.Button(settings_frame, text='Browse', command=self.browse_for_settings_file).grid(row=0, column=2)
         ttk.Button(settings_frame, text='Load', command=self.load_settings_file).grid(row=0, column=3)
@@ -241,6 +242,23 @@ class RawEventViewerFrame(ttk.Frame):
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
+        # Perform Search for Events of Interest
+        directory_path, h5_fname = os.path.split(self.data.file_path)
+        evt_search_frame = ttk.LabelFrame(self, text='Events of Interest Search')
+        ttk.Label(evt_search_frame, text='Run to look at: ').grid(row=0, column=0)
+        self.run_entry = ttk.Entry(evt_search_frame)
+        self.run_entry.grid(row=0, column=1)
+        self.run_entry.bind('<FocusOut>', self.entry_changed)
+        self.run_entry.insert(0,h5_fname.split('_')[1].lstrip().split('.')[0])
+        # self.run_stop_entry = ttk.Entry(evt_search_frame)
+        # self.run_stop_entry.grid(row=0, column=2)
+        # self.run_stop_entry.bind('<FocusOut>', self.entry_changed)
+        # self.run_stop_entry.insert(0, '0')
+
+        ttk.Button(evt_search_frame, text='print events of interest', command=self.search_for_double_alpha).grid(row=1, column=0)
+
+        evt_search_frame.grid()
+
         #sync setting with GUI
         self.entry_changed(None) 
         self.check_state_changed()
@@ -310,7 +328,7 @@ class RawEventViewerFrame(ttk.Frame):
                 return
         else:
             os.mkdir(directory_path)
-
+        print('Processing run: %s'%h5_fname)
         self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
         #save git version info and modified files
         with open(os.path.join(directory_path, 'git_info.txt'), 'w') as f:
@@ -590,3 +608,35 @@ class RawEventViewerFrame(ttk.Frame):
         event_num = int(self.event_number_entry.get())
         self.data.show_traces_w_baseline_estimate(event_num, block=False)
 
+    def search_for_double_alpha(self):
+        production_runs = [5,6,7,8,10,11,12,13,14,15,16,17,31,32,33,34,35,36,37,38,39,40,41,42,43,44,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,73,74,75,76,77,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,108,126,127,129,133,134,150,151,152,153,154,155,156,157,158,159,160,161,162,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,245,246,247,248,249,250,251,252,253,254,255,256,257,258,259,260,261,262,263,264,265,266,267,268,269,270,271,272,273,274,275,276,278,279,280,281,282,283,284,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,333,334,335,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360,361,362,363,364,365,366,367,368,369,370,371,372,373,374,375,376,377,378,379,380,381,382,383,384,385,386,387,388,389,390,391,392,393,394,395,396,397,398,399,400,401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,416,417,418,419,420,421,422,423,424,425,426,427,428,429,430,431,432,433,434,435,436,437,438,439,440,441,442,443,444,445,446,447,448,449,450,451,452,453,454,455,456,457,458,459,460,461,462,463,464,465,466,467,468,469,470,471,472,473,474,475,476,477,478,479,480,481,482,483,484,485,486,487,488,489,490,491,492,493,494,495,496,497,498,499,500,501,502,503,504,505,506,507,508,509,510,511,512,513,514,515,516,517,518,519,520,521,522,523,524,527,528,529,530,531,532,533,534,535,536,537,538,539,540,541,542,543,544,545,546,547,548,549,550,551,552,553,554,555]
+        run_start = int(self.run_entry.get())
+        # run_stop = int(self.run_stop_entry.get())
+        run_stop = int(self.run_entry.get())
+        counts = []
+        length = []
+        ranges = []
+        angles = []
+        zscale = 0.65
+        for run in production_runs:
+            if run >= run_start and run <= run_stop:
+                counts = np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/counts.npy'%(run,run))
+                angles = np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/angles.npy'%(run,run))
+                dxy = np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/dxy.npy'%(run,run))
+                dt = np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/dt.npy'%(run,run))
+                for event in range(len(dxy)):
+                    length.append((dxy[event]**2 + zscale*dt[event]**2)**0.5)
+                ranges = length
+                i = 0
+                for e, r in zip(counts, ranges):
+                    if e > 8.65e5:
+                        # here we do a check to see if the high charge producing event is noise or not
+                        # because of the way the trigger is set up, the first event should be triggered at around time bin 160
+                        # if there is a lot of charge showing up in the time bin range 20-80, then it comes from noisy capacitor switching
+                        is_noise = self.data.check_if_event_is_noise(event_num = i)
+                        if not is_noise:
+                            print('%d %d'%(run,i))
+                        if is_noise:
+                            print('%d %d flagged'%(run,i))
+                    i = i+1
+        print("Finished Search")

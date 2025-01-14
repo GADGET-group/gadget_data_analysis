@@ -11,6 +11,8 @@ import tqdm
 
 from numba import njit
 import skimage.measure
+from skspatial.objects import Line
+from sklearn.decomposition import PCA
 
 '''
 Notes for tomorrow:
@@ -159,7 +161,7 @@ class raw_h5_file:
                 pad = self.chnls_to_pad[chnl_info]
                 if (self.cobos == 'all' or cobo in self.cobos) and \
                         (self.asads == 'all' or asad in self.asads) and \
-                        (self.pads == 'all' or pad in self.pads):
+                        (self.pads == 'all' or np.isin(pad,self.pads)):
                     to_copy.append(i)
             data = np.array(data[to_copy], dtype=float)
 
@@ -220,7 +222,7 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
         elif self.mode == 'fft':
             # baseline_window_scale = 20.0 is the default value given in the config.py file for Spyral
-            data = preprocess_traces(data,20.0)
+            # data = preprocess_traces(data,20.0)
             print(data.shape)
         
         return data
@@ -320,38 +322,56 @@ class raw_h5_file:
         return len(event)
     
     def get_track_length_angle(self, event_number):
-        '''
-        1. Remove all points which are less than threshold sigma above background
-        2. Find max distance between any of the two remaining points.
-        Should replace this with something more robust in the future. This will NOT
-        well work if outlier removal and background subtraction haven't been performed.
-
-        Returns: length, angle from z-axis in radians
-        '''
+        """
+        Uses PCA to find the length of a track
+        
+        returns dxy, dz, angle
+        """
         xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
-        if len(xs) == 0:
-            return 0, 0, 0
-        points = np.vstack((xs, ys, zs)).T
-        #print(points)
-        #find max distance using this algorithm
-        #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
-        try:
-            hull = scipy.spatial.ConvexHull(points)
-            points = points[hull.vertices,:]
-        except: #qhull will fail on colinear points, so just brute force if that's the case
-            pass
-        #find the two most distant points
-        hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
-        indices = np.unravel_index(np.argmax(hdist, axis=None), hdist.shape)
-        p1 = points[indices[0]]
-        p2 = points[indices[1]]
-        #print(p1, p2)
-        dist = hdist[indices]
-        dr = p1-p2
-        if dr[2] != 0:
-            angle = np.abs(np.arctan(np.sqrt(dr[0]**2 + dr[1]**2)/dr[2]))
-        else:
-            angle = np.radians(90)
+        if len(xs) < 2:
+            return 0,0,0
+        data = np.concatenate((xs[:, np.newaxis],
+                               ys[:, np.newaxis],
+                               zs[:, np.newaxis]),
+                               axis=1)
+
+        # Use PCA to find track length
+        pca = PCA(n_components=2)
+        principalComponents = pca.fit(data)
+        principalComponents = pca.transform(data)
+        calibration_factor = 1.4 
+
+        # Calculate angle of the track
+        # Fit regression line
+        line_fit = Line.best_fit(data)
+
+        # Find angle between the vector of the fit line and a vector normal to the xy-plane (pad plane)
+        v = np.array([line_fit.vector]).T   # fit line vector
+        n = np.array(([[0, 0, 1]])).T       # Vector normal to xy-plane
+        dot = np.dot(n.T, v)[0][0]          # Note that both vectors already have a magnitude of 1
+
+        # Clamp the dot variable to be within the valid range
+        dot = max(-1.0, min(1.0, dot))
+
+        theta = np.arccos(dot)
+        track_angle_rad = (np.pi/2 - theta) 
+        track_angle_deg = track_angle_rad * (180 / np.pi)
+
+        # Angle should always be less than 90 deg
+        if track_angle_deg < 0:
+            track_angle_deg = 180 + track_angle_deg 
+        if track_angle_deg > 90:
+            track_angle_deg = 180 - track_angle_deg
+
+        # Apply the scale factor to the track length
+        # track_len = scale_factor * calibration_factor * 2.35 * principalDf.std()[0]
+        track_len = calibration_factor * 2.35 * np.std(principalComponents[:,0])
+
+        dxy = track_len*np.cos(track_angle_rad)
+        dz = track_len*np.sin(track_angle_rad)
+
+        return dxy, dz, track_angle_deg
+
         return np.sqrt(dr[0]**2 + dr[1]**2), dr[2], angle
 
     
@@ -560,14 +580,28 @@ class raw_h5_file:
         plt.clf()
         should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
         length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
         plt.subplot(2,1,1)
+        # plt.title('event %d, \n total counts=%d, length=%f mm,\n angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
+        plt.title('event %d, \n total counts=%d, length=%f mm'%(event_number, energy, length))
         plt.imshow(image, norm=colors.LogNorm())
         plt.colorbar()
         plt.subplot(2,1,2)
         plt.plot(trace)
         plt.show(block=block)
 
+    def check_if_event_is_noise(self, event_num):
+        # here we do a check to see if the high charge producing event is noise or not
+        # because of the way the trigger is set up, the first event should be triggered at around time bin 160
+        # if there is a lot of charge showing up in the time bin range 20-80, then it comes from noisy capacitor switching
+        data = self.get_data(event_num)
+        trace = np.sum(data[:,6:],0)
+        is_noise = False
+        for j in range(80-20):
+            if trace[j+19] > 10000:
+                is_noise = True
+                break                
+        return is_noise
+    
     def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
         '''
         plots traces without background subtraction, with backgrounds shown as ... lines
