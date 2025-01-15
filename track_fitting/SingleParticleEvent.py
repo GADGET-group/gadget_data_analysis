@@ -95,9 +95,9 @@ class SingleParticleEvent:
         self.particle = particle
         self.gas_density = gas_density
         if particle.lower() == 'proton':
-            self.srim_table = srim_interface.SRIM_Table('track_fitting/H_in_P10.txt', gas_density)
+            self.srim_table = srim_interface.SRIM_Table('track_fitting/H_in_P10.txt', gas_density, 'track_fitting/H_in_P10_ionization.csv')
         elif particle.lower() == 'alpha':
-            self.srim_table = srim_interface.SRIM_Table('track_fitting/He_in_P10.txt', gas_density)
+            self.srim_table = srim_interface.SRIM_Table('track_fitting/He_in_P10.txt', gas_density, 'track_fitting/4He_in_P10_ionization.csv')
         else:
             assert False
 
@@ -121,7 +121,8 @@ class SingleParticleEvent:
             self.num_stopping_power_points = self.get_num_stopping_points_for_energy(self.initial_energy)
         distances = np.linspace(0, stopping_distance, self.num_stopping_power_points+1)
         energy_remaining = self.srim_table.get_energy_w_stopping_distance(stopping_distance - distances)
-        energy_deposition = energy_remaining[0:-1] - energy_remaining[1:]
+        ionization_remaining = self.srim_table.get_energy_as_ionization(energy_remaining) #energy yet to be deposited as ionization
+        energy_deposition = ionization_remaining[0:-1] - ionization_remaining[1:]
         distances = (distances[0:-1] + distances[1:])/2
         return distances, energy_deposition
 
@@ -336,7 +337,7 @@ class SingleParticleEvent:
                     pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
                     pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
                     residuals = np.matrix(residuals)
-                    pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0]
+                    pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0,0]
                 else: #pad was simulated firing, but did not
                     #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
                     #than this value
@@ -355,7 +356,7 @@ class SingleParticleEvent:
 
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
-        return to_return[0,0]
+        return to_return
     
     #######################
     # Visualization Tools #
