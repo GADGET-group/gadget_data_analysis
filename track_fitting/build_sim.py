@@ -130,6 +130,14 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
                 sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
         sim.timing_offsets[1] = 0
         return sim
+    
+def create_particle_and_point_sim(experiment:str, run:int, event:int, particle_type:str):
+    single_particle_sim = create_single_particle_sim(experiment, run, event, particle_type)
+    to_return = ParticleAndPointDeposition(single_particle_sim.gas_density, particle_type)
+    #use all the same setting that would be used for single particle sim
+    for i in single_particle_sim.__dict__:
+        to_return.__dict__[i] = single_particle_sim.__dict__[i]
+    return to_return
 
 def create_pa_sim(experiment:str, run:int, event:int):
     proton = create_single_particle_sim(experiment, run, event, 'proton')

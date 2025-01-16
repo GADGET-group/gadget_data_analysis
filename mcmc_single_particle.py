@@ -118,7 +118,11 @@ if __name__ == '__main__':
         pos_ball_size = 1
         angle_ball_size = 1*np.pi/180
 
+        x_guess = (E_prior)
         print('initial_guess:', (E_prior.mu, best_point, theta, phi, sigma_guess, sigma_guess))
+        print('starting likelihood maximization')
+        after_optimization = opt.minimize(lambda x: -log_posterior(x), x_guess, args=(direction,True))
+
 
         to_return = [(E_prior.sigma*np.random.randn() + E_prior.mu,
                             best_point[0] + np.random.randn()*pos_ball_size,

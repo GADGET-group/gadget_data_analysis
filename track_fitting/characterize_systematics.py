@@ -8,6 +8,7 @@
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
 load_previous_fit = False
+include_recoil = True
 
 import time
 import multiprocessing
@@ -29,13 +30,19 @@ m_guess, c_guess = 0,25 #guesses for pad gain match uncertainty and other system
 
 run_number = 124
 experiment = 'e21072'
-pickle_fname = '%s_run%d_results_objects_m%d_c%d.dat'%(experiment,run_number, m_guess, c_guess)
+if include_recoil:
+    pickle_fname = '%s_run%d_results_objects_m%d_c%d_w_recoil.dat'%(experiment,run_number, m_guess, c_guess)
+else:
+    pickle_fname = '%s_run%d_results_objects_m%d_c%d.dat'%(experiment,run_number, m_guess, c_guess)
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
 
 def fit_event(run, event, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
-    trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
+    if include_recoil:
+        trace_sim = build_sim.create_particle_and_point_sim(experiment, run, event, particle_type)
+    else:
+        trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
     if trace_sim.num_trace_bins > 100:
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
@@ -49,8 +56,8 @@ def fit_event(run, event, particle_type, trim_threshold=50, return_key=None,
     #     Then find the pixel farthest from there.
     #theta, phi: from guessed decay location to brag peak
     #sigma_xy and sigma_z: just guess
-    sigma_xy_guess = 4
-    sigma_z_guess = 4
+    sigma_xy_guess = 3
+    sigma_z_guess = 3
 
 
     #find guess for Brag peak location
@@ -97,11 +104,14 @@ def fit_event(run, event, particle_type, trim_threshold=50, return_key=None,
         plt.show(block=True)
 
     def neg_log_likelihood(params):
-        theta, phi, x,y,z, E, sigma_xy, sigma_z = params
-        theta, phi = theta, phi
-        x,y,z = x, y, z
-        E = E
-        if z > 400 or z<10:
+        if include_recoil:
+            theta, phi, x,y,z, E, Erecoil,sigma_xy, sigma_z = params
+            trace_sim.point_energy_deposition = Erecoil
+            if Erecoil < 0 or Erecoil > E:
+                return np.inf
+        else:
+            theta, phi, x,y,z, E, sigma_xy, sigma_z = params
+        if z > trace_sim.num_trace_bins*trace_sim.zscale or z<0:
             return np.inf
         if x**2 + y**2 > 40**2:
             return np.inf
@@ -122,11 +132,14 @@ def fit_event(run, event, particle_type, trim_threshold=50, return_key=None,
             to_return = np.inf
         return to_return
     
-    init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
+    if include_recoil:
+        init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, 0.001, sigma_xy_guess, sigma_z_guess)
+    else:
+        init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
     
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS')
+    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS')
     #if method == 'Nelder-Mead':
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
+    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.001})
     if return_dict != None:
@@ -236,7 +249,7 @@ ptypes = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
 
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
-    sim = build_sim.create_single_particle_sim(experiment, run_number, evt)
+    sim = build_sim.create_single_particle_sim(experiment, run_number, evt, ptypes[i])
     sim.initial_energy = Es[i]
     sim.initial_point = (xs[i], ys[i], zs[i])
     sim.theta = thetas[i]
@@ -343,6 +356,13 @@ else:
 
 '''
 9bf15dc842c2ef3ec797b1ebdab942e48dc63a7b: After ll update, but with old pad threshold of 64. Gives m = 0.10459277119010803, c=24.99114302506084
+
+d9834e5947339584baade2487fd0156016b76362
+m,c guesses=0,25
+gain match uncertainty:  0.22377808331195365
+suggested pad threshold = 47.611111
+other_systematics = 
+
 '''
 
 plt.figure()
