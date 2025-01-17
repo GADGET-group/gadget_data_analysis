@@ -235,6 +235,36 @@ class raw_h5_file:
         #in the case of none, just return an array of 0s
         elif self.background_subtract_mode == 'none':
             return np.zeros(len(trace))
+        elif self.background_subtract_mode == 'smart':
+            peak_index = np.argmax(trace)
+            #find  start of the peak, defined as where the a bin near_peak_window_width away
+            #is no longer at least ic_counts_threshold below the current bin
+            i = peak_index
+            while i>0:
+                j = max(0, i - self.near_peak_window_width)
+                if trace[i] < trace[j] + self.ic_counts_threshold:
+                    break
+                i -= 1
+            peak_start = i
+            #find end
+            i = peak_index
+            while i < len(trace) - 1:
+                j = min(len(trace) - 1, i + self.near_peak_window_width)
+                if trace[i] < trace[j] + self.ic_counts_threshold:
+                    break
+                i += 1
+            peak_end = i
+            #fit a line through the points just outside the peak region
+            xs = np.concatenate([np.arange(max(0, peak_start - self.near_peak_window_width), peak_start),
+                                           np.arange(peak_end, min(peak_end + self.near_peak_window_width, len(trace)))])
+            ys = trace[xs]
+            slope, offset = np.polyfit(xs, ys, 1)
+            #baseline will be the trace except in the peak region,
+            #so that everything away from the peak is zero'd out
+            baseline = np.array(trace, copy=True)
+            for i in range(peak_start, peak_end+1):
+                baseline[i] = slope*i + offset
+            return baseline
         assert False #invalid mode
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
