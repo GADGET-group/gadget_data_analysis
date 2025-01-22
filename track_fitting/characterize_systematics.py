@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = False
+load_previous_fit = True
 include_recoil = True
 
 import time
@@ -218,7 +218,7 @@ else:
         event_catagory = classify(l, counts)
         events_in_catagory[event_catagory].append(evt)
 
-evts, thetas, phis,xs,ys,zs, lls, cats, Es, nfev, sigma_xys, sigma_zs = [], [],[],[],[],[],[],[],[],[],[],[]
+evts, thetas, phis,xs,ys,zs, lls, cats, Es, Erecs, nfev, sigma_xys, sigma_zs = [], [],[],[],[],[],[],[],[],[],[],[],[]
 for cat in range(len(events_in_catagory)):
     for evt in events_in_catagory[cat]:
         if evt not in fit_results_dict:
@@ -234,13 +234,18 @@ for cat in range(len(events_in_catagory)):
         ys.append(res.x[3])
         zs.append(res.x[4])
         Es.append(res.x[5])
-        sigma_xys.append(res.x[6])
-        sigma_zs.append(res.x[7])
+        if include_recoil:
+            offset = 6
+            Erecs.append(res.x[offset])
+        else:
+            offset = 5
+        sigma_xys.append(res.x[offset+1])
+        sigma_zs.append(res.x[offset+2])
         lls.append(res.fun)
         cats.append(cat)
         evts.append(evt)
         nfev.append(res.nfev)
-
+Es = np.array(Es)
 lls = np.array(lls)
 evts = np.array(evts)
 cats = np.array(cats)
@@ -272,7 +277,11 @@ cats_to_fit = []
 for i in range(len(evts)):
     #if lls[i] <= ll_cutoff[cats[i]]:
     #if i == 127:
-    new_sim = build_sim.create_single_particle_sim(experiment, run_number, evts[i], ptypes[i])
+    if include_recoil:
+        new_sim = build_sim.create_particle_and_point_sim(experiment, run_number, evts[i], ptypes[i])
+        new_sim.point_energy_deposition = Erecs[i]
+    else:
+        new_sim = build_sim.create_single_particle_sim(experiment, run_number, evts[i], ptypes[i])
     new_sim.sigma_xy = sigma_xys[i]
     new_sim.sigma_z = sigma_zs[i]
     new_sim.initial_energy = Es[i]

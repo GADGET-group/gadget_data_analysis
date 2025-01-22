@@ -24,7 +24,7 @@ read_data_mode = 'adjacent'
 #list of 2 point calibrations, inexed by experiment and then run number.
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
 calibration_points = {'e21072': #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
-                        {124:((183193, 86431),(1.623, 0.779))}}
+                        {124:((90625 , 192102 ),(0.7856, 1.633))}}
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
     adc_counts, MeV = calibration_points[experiment][run]
@@ -69,11 +69,13 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
                                     zscale=get_zscale(experiment, run),
                                     flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.background_subtract_mode='fixed window'
-        h5file.data_select_mode='near peak'
+        h5file.data_select_mode='smart'
         h5file.remove_outliers=True
         h5file.near_peak_window_width = 50
         h5file.require_peak_within= (-np.inf, np.inf)
-        h5file.num_background_bins=(160, 250)#(40,50)#
+        h5file.ic_counts_threshold = 9
+        h5file.length_counts_threshold = 100
+        h5file.num_background_bins=(160, 250) #not used for "smart" background subtraction
         h5file.zscale = get_zscale(experiment, run)
         return h5file
     assert False

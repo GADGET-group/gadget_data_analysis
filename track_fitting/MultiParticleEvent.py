@@ -20,6 +20,11 @@ class MultiParticleEvent(SingleParticleEvent):
             for pad in self.pads_to_sim:
                 self.sim_traces[pad] += sim.sim_traces[pad]
 
+class MultiparticleDecay(MultiParticleEvent):
+    '''
+    Decay with multible particles emmitted and a recoiling nucleus which is treated as a point energy deposition.
+    '''
+
 class ProtonAlphaEvent(MultiParticleEvent):
     '''
     class for compatibility with sim_gui
