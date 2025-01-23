@@ -147,6 +147,11 @@ class SimGui(ttk.Frame):
         self.sim.update_configuration()
         self.sim.simulate_event()
 
+    def update_entries_to_reflect_sim(self):
+        for name, entry in zip(self.param_names, self.param_entries):
+            entry.delete(0, tk.END)
+            entry.insert(0, str(self.sim.__dict__[name]))
+
     def sim_button_clicked(self):
         self.load_entries_to_sim()
         #make plots
@@ -157,6 +162,7 @@ class SimGui(ttk.Frame):
         plt.show(block=False)
 
         self.likelihood_label['text'] = '%e'%self.sim.log_likelihood()
+        self.update_entries_to_reflect_sim()
 
     def ll_plot_clicked(self):
         self.load_entries_to_sim() #make sure sim is up to date with entries
@@ -230,3 +236,4 @@ class SimGui(ttk.Frame):
 
         starting_guess = [float(entry.get()) for entry in entries_to_fit]
         print(opt.minimize(to_minimize, starting_guess, options={'maxiter':float(self.max_iter_entry.get())}))
+        self.update_entries_to_reflect_sim()

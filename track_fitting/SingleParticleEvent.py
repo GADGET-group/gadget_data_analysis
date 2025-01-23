@@ -46,22 +46,17 @@ class SingleParticleEvent(SimulatedEvent):
     def update_configuration(self):
         self.load_srim_table(self.particle, self.gas_density)
         
-    def load_srim_table(self, particle:str, gas_density:float):
+    def load_srim_table(self, particle:str, material:str, gas_density:float):
         '''
         Reload SRIM table
-        particle: proton or alpha
         gas density: mg/cm^3
         '''
         self.particle = particle
+        self.material = material
         self.gas_density = gas_density
-        if particle.lower() == 'proton':
-            self.srim_table = srim_interface.SRIM_Table('track_fitting/stopping_powers/1H_in_P10.txt', gas_density, 'track_fitting/ionization_fractions/1H_in_P10_ionization.csv')
-        elif particle.lower() == 'alpha':
-            self.srim_table = srim_interface.SRIM_Table('track_fitting/stopping_powers/4He_in_P10.txt', gas_density, 'track_fitting/ionization_fractions/4He_in_P10_ionization.csv')
-        else:
-            assert False
-
-    
+        stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%(particle, material)
+        ionization_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%(particle, material)
+        self.srim_table = srim_interface.SRIM_Table(stopping_power_path, gas_density, ionization_path)
 
     def get_energy_deposition(self):
         '''
