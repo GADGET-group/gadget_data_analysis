@@ -203,7 +203,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_entry_map['moving_average_exclude_width']=self.exclude_width_entry
 
         self.background_mode_var = tk.StringVar() #traced added later, after all entries are created
-        ttk.OptionMenu(settings_frame, self.background_mode_var, 'none', 'none', 'fixed window', 'convolution').grid(row=2, column=0)
+        ttk.OptionMenu(settings_frame, self.background_mode_var, 'none', 'none', 'fixed window', 'convolution', 'smart').grid(row=2, column=0)
         self.settings_optionmenu_map['background_mode']=self.background_mode_var
         self.remove_outlier_var = tk.IntVar()
         remove_outliers_check = ttk.Checkbutton(settings_frame, text='remove outlier pads', variable=self.remove_outlier_var, 
