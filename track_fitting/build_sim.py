@@ -144,13 +144,9 @@ def create_particle_and_point_sim(experiment:str, run:int, event:int, particle_t
 def create_pa_sim(experiment:str, run:int, event:int):
     proton = create_single_particle_sim(experiment, run, event, 'proton')
     alpha = create_single_particle_sim(experiment, run, event, 'alpha')
-    sims = [proton, alpha]
-    to_return =  MultiParticleEvent(sims)
+    to_return =  ProtonAlphaEvent(proton, alpha)
     pads, traces = pads, traces = get_pads_and_traces(experiment, run, event)
-    to_return.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-    to_return.pad_threshold = proton.pad_threshold
-    to_return.pad_gain_match_uncertainty = proton.pad_gain_match_uncertainty
-    to_return.other_systematics = proton.other_systematics
+    to_return.set_real_data(pads, traces, trim_threshold=100, trim_pad=3, pads_to_sim_select=read_data_mode)
     return to_return
     
 

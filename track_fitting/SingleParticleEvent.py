@@ -9,7 +9,6 @@ import numpy as np
 from track_fitting import srim_interface
 from track_fitting.SimulatedEvent import SimulatedEvent
 
-
 class SingleParticleEvent(SimulatedEvent):
     '''
     Class for simulating detector response to a single charged particle.
@@ -43,6 +42,9 @@ class SingleParticleEvent(SimulatedEvent):
         if to_return < self.points_per_bin:
             return self.points_per_bin
         return to_return
+    
+    def update_configuration(self):
+        self.load_srim_table(self.particle, self.gas_density)
         
     def load_srim_table(self, particle:str, gas_density:float):
         '''
@@ -91,34 +93,7 @@ class SingleParticleEvent(SimulatedEvent):
         return points, energy_deposition
 
 
-    def get_xyze(self, threshold=-np.inf, traces=None):
-        '''
-        returns x,y,z,e arrays, similar to the same method in raw_h5_file
-        
-        source: can be 'energy grid', 'pad map', or 'aligned'
-        threshold: only bins with more than this much energy deposition (in MeV) will be returned
-        traces: If none, use simulated traces dictionary. Otherwise, use passed in trace dict.
-        '''
-        if traces == None:
-            traces = self.sim_traces
-        xs, ys, es = [],[],[]
-        for pad in traces:
-            x,y = self.pad_to_xy[pad]
-            xs.append(x)
-            ys.append(y)
-            es.append(traces[pad])
-        num_z_bins = self.num_trace_bins
-        xs = np.repeat(xs, num_z_bins)
-        ys = np.repeat(ys, num_z_bins)
-        es = np.array(es).flatten()
-        z_axis = np.arange(self.num_trace_bins)*self.zscale
-        zs = np.tile(z_axis, int(len(xs)/len(z_axis)))
-        if threshold != -np.inf:
-            xs = xs[es>threshold]
-            ys = ys[es>threshold]
-            zs = zs[es>threshold]
-            es = es[es>threshold]
-        return xs, ys, zs, es
+    
     
     
 

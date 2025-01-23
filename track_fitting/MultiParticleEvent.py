@@ -1,40 +1,45 @@
 import numpy as np
 
 from track_fitting.SingleParticleEvent import SingleParticleEvent
+from track_fitting.SimulatedEvent import SimulatedEvent
 
-class MultiParticleEvent(SingleParticleEvent):
-    def __init__(self, sims:SingleParticleEvent):
-        super().__init__(1, 'proton')#this class won't use it's own SRIM table, so particle and density chosen don't matter
+class MultiParticleEvent(SimulatedEvent):
+    def __init__(self, sims):
+        super().__init__()#this class won't use it's own SRIM table, so particle and density chosen don't matter
         self.sims = sims
+        self.gas_density = 1.
+        self.update_configuration()
 
-    def set_real_data(self, pads, traces, trim_threshold, trim_pad=5, pads_to_sim_select='adjacent'):
-        super().set_real_data(pads, traces, trim_threshold, trim_pad, pads_to_sim_select)
+    def update_configuration(self):
         for sim in self.sims:
-            sim.set_real_data(pads, traces, trim_threshold, trim_pad, pads_to_sim_select)
+            sim.load_srim_table(sim.particle, self.gas_density)
 
-
-    def simulate_event(self):
-        self.sim_traces = {pad:np.zeros(self.num_trace_bins) for pad in self.pads_to_sim}
+    def get_energy_deposition(self):
+        points, edeps = [],[]
         for sim in self.sims:
-            sim.simulate_event()
-            for pad in self.pads_to_sim:
-                self.sim_traces[pad] += sim.sim_traces[pad]
+            p,e = sim.get_energy_deposition()
+            points.append(p)
+            edeps.append(e)
+        return np.concatenate(points), np.concatenate(edeps)
+
 
 class MultiparticleDecay(MultiParticleEvent):
     '''
     Decay with multible particles emmitted and a recoiling nucleus which is treated as a point energy deposition.
     '''
+    pass
 
 class ProtonAlphaEvent(MultiParticleEvent):
     '''
     class for compatibility with sim_gui
     '''
-    def __init__(self, proton, alpha):
+    def __init__(self, proton:SingleParticleEvent, alpha:SingleParticleEvent):
         super().__init__([proton, alpha])
         self.proton = proton
         self.alpha = alpha
-        self.per_particle_params = ['initial_energy', 'theta', 'phi']
-        self.shared_params = ['initial_point', 'sigma_xy', 'sigma_z', 'pad_threshold', 'adaptive_stopping_power', 'num_stopping_power_points']
+        self.per_particle_params = ['initial_energy', 'theta', 'phi', 'adaptive_stopping_power', 'num_stopping_power_points']
+        self.shared_params = ['initial_point', 'sigma_xy', 'sigma_z', 'pad_threshold', 
+                              'counts_per_MeV', 'other_systematics', 'pad_gain_match_uncertainty'] 
         for param in self.per_particle_params:
             self.__dict__['alpha_' + param] = alpha.__dict__[param]
             self.__dict__['proton_' + param] = proton.__dict__[param]

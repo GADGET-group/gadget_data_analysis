@@ -144,7 +144,7 @@ class SimGui(ttk.Frame):
             entries = self.array_entries[array_name]
             self.sim.__dict__[array_name]= [array_type(entries[i].get()) for i in range(len(entries))]
         #reload srim table to match values set through gui, and then resimulate event
-        self.sim.load_srim_table(self.sim.particle, self.sim.gas_density)
+        self.sim.update_configuration()
         self.sim.simulate_event()
 
     def sim_button_clicked(self):
