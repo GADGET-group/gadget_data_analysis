@@ -69,6 +69,7 @@ def get_zscale(experiment:str, run:int):
         return drift_speed/clock_freq
     
     if experiment == 'e24joe':
+        return 0.65 #TODO: use correct value
         clock_freq = 50e6 #Hz, from e24joe config file on mac minis
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
         return drift_speed/clock_freq
@@ -107,8 +108,9 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run),
                                     zscale=get_zscale(experiment, run),
                                     flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
-        h5file.background_subtract_mode='fixed window'
-        h5file.data_select_mode='near peak'
+        h5file.background_subtract_mode='all data'
+        h5file.data_select_mode='smart'
+        h5file.ic_counts_threshold = 9
         h5file.remove_outliers=True
         h5file.near_peak_window_width = 50
         h5file.require_peak_within= (-np.inf, np.inf)

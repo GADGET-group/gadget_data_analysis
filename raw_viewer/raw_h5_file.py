@@ -211,10 +211,10 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        elif self.mode == 'fft':
-            # baseline_window_scale = 20.0 is the default value given in the config.py file for Spyral
-            data = preprocess_traces(data,20.0)
-            print(data.shape)
+        # elif self.mode == 'fft':
+        #     # baseline_window_scale = 20.0 is the default value given in the config.py file for Spyral
+        #     data = preprocess_traces(data,20.0)
+        #     print(data.shape)
         
         return data
 
