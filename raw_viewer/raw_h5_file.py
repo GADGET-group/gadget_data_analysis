@@ -9,6 +9,7 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
+from numba import njit
 import skimage.measure
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
@@ -210,9 +211,11 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        # To save with a delimiter (e.g., comma)
-        np.savetxt('data_comma.txt', data, delimiter=',')
-
+        elif self.mode == 'fft':
+            # baseline_window_scale = 20.0 is the default value given in the config.py file for Spyral
+            data = preprocess_traces(data,20.0)
+            print(data.shape)
+        
         return data
 
     def calculate_background(self, trace):
@@ -455,6 +458,27 @@ class raw_h5_file:
                 pads_railed.append(pad)
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
+
+    def show_tve_histogram(self, num_e_bins, num_time_bins, fig_name=None, block=True):
+        ranges, counts, angles = self.get_histogram_arrays()
+        timestamps = self.get_timestamp_array()
+
+        #TODO: make generic, these are P10 values
+        calib_point_1 = (0.806, 156745)
+        calib_point_2 = (1.679, 320842)
+        energy_1, channel_1 = calib_point_1
+        energy_2, channel_2 = calib_point_2
+        energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
+        energy_offset = energy_1 - energy_scale_factor * channel_1
+        counts = energy_scale_factor*counts + energy_offset
+
+        plt.figure(fig_name)
+        plt.hist2d(counts, timestamps, 
+                   bins=(num_e_bins, num_time_bins), norm=colors.LogNorm())
+        plt.xlabel('energy (MeV)')
+        plt.ylabel('time (ns)')
+        plt.colorbar()
+        plt.show(block=block)
 
     def show_pad_backgrounds(self, fig_name=None, block=True):
         ave_image = np.zeros(np.shape(self.pad_plane))
