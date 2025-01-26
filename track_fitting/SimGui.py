@@ -6,10 +6,11 @@ import  numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
 
-from track_fitting.SingleParticleEvent import SingleParticleEvent
+from track_fitting.SimulatedEvent import SimulatedEvent
+from track_fitting. MultiParticleEvent import MultiParticleEvent
 
 class SimGui(ttk.Frame):
-    def __init__(self, parent, sim:SingleParticleEvent, expose_arrays={'initial_point':float}):
+    def __init__(self, parent, sim:SimulatedEvent, expose_arrays={'initial_point':float}):
         '''
         sim: Simulation to adjust parameters of
         expose_arrays: Dict of arrays which should be visbible in the gui. Keys are variable name, and index the 
@@ -18,6 +19,7 @@ class SimGui(ttk.Frame):
         '''
         super().__init__(parent)
         self.sim = sim
+        sim.gui_after_sim()
 
         param_frame = ttk.LabelFrame(self, text='simulation parameters')
         row = 0
@@ -144,10 +146,12 @@ class SimGui(ttk.Frame):
             entries = self.array_entries[array_name]
             self.sim.__dict__[array_name]= [array_type(entries[i].get()) for i in range(len(entries))]
         #reload srim table to match values set through gui, and then resimulate event
-        self.sim.update_configuration()
+        self.sim.gui_before_sim()
         self.sim.simulate_event()
+        self.sim.gui_after_sim()
 
     def update_entries_to_reflect_sim(self):
+        self.sim.gui_after_sim()
         for name, entry in zip(self.param_names, self.param_entries):
             entry.delete(0, tk.END)
             entry.insert(0, str(self.sim.__dict__[name]))

@@ -14,16 +14,17 @@ class SingleParticleEvent(SimulatedEvent):
     Class for simulating detector response to a single charged particle.
     '''
 
-    def __init__(self, gas_density, particle):
+    def __init__(self, gas_density:float, particle:str, material:str):
         '''
         gas_density: density in mg/cm^3
         '''
         super().__init__()
         self.particle = particle #this variable should only be changed using the load_srim_table function
+        self.material = material
         self.gas_density = gas_density  #this variable should only be changed using the load_srim_table function
         
         #load SRIM table for particle. These need to be reloaded if gas desnity is changed.
-        self.load_srim_table(particle, gas_density)
+        self.load_srim_table(particle, material, gas_density)
         
         #parameters for grid size and other numerics
         self.points_per_bin = 1
@@ -43,8 +44,8 @@ class SingleParticleEvent(SimulatedEvent):
             return self.points_per_bin
         return to_return
     
-    def update_configuration(self):
-        self.load_srim_table(self.particle, self.gas_density)
+    def gui_before_sim(self):
+        self.load_srim_table(self.particle, self.material, self.gas_density)
         
     def load_srim_table(self, particle:str, material:str, gas_density:float):
         '''
@@ -55,7 +56,7 @@ class SingleParticleEvent(SimulatedEvent):
         self.material = material
         self.gas_density = gas_density
         stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%(particle, material)
-        ionization_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%(particle, material)
+        ionization_path = 'track_fitting/ionization_fractions/%s_in_%s_ionization.csv'%(particle, material)
         self.srim_table = srim_interface.SRIM_Table(stopping_power_path, gas_density, ionization_path)
 
     def get_energy_deposition(self):

@@ -10,9 +10,9 @@ import emcee
 import matplotlib.pylab as plt
 
 from raw_viewer.raw_h5_file import raw_h5_file
-from track_fitting.ParticleAndPointDeposition import ParticleAndPointDeposition
+from track_fitting.SimulatedEvent import SimulatedEvent
 from track_fitting.SingleParticleEvent import SingleParticleEvent
-from track_fitting.MultiParticleEvent import MultiParticleEvent, ProtonAlphaEvent
+from track_fitting.MultiParticleEvent import MultiParticleEvent, MultiParticleDecay
 from track_fitting.SimGui import SimGui
 
 read_data_mode = 'adjacent'
@@ -39,6 +39,10 @@ def get_detector_E_sigma(experiment:str, run:int, MeV):
         #assume energy calibraiton goes as sqrt energy, and use 770 keV protons
         if run == 124:
             return (5631/86431)*0.779*(MeV/0.779)**0.5
+
+def get_stopping_material(experiment:str, run:int):
+    if experiment == 'e21072':
+        return 'P10'
 
 def get_gas_density(experiment:str, run:int)->float:
     if experiment == 'e21072':
@@ -103,50 +107,54 @@ def get_energy_from_ic(experiment, run, event):
 ########################################################
 # Functions to creating and manipulating sim objects
 ########################################################
-
-def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str):
+def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:int):
     '''
-    sim_constructor: assumed to take the same parameters as single particle event
+    Load data from h5 file, and set sim variables
     '''
-    
-    pads, traces = get_pads_and_traces(experiment, run, event)
-    E_from_ic = get_energy_from_ic(experiment, run, event)
-
     if experiment == 'e21072':
-        sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
         sim.zscale = get_zscale(experiment, run)
-        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
         sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
-        
-        sim.adaptive_stopping_power = False
-        sim.points_per_bin = 5
-        sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
-
+        pads, traces = get_pads_and_traces(experiment, run, event)
+        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.1046, 24.99
         sim.pad_threshold = 50.4
-
+        
         with open('./raw_viewer/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
             sim.timing_offsets = pickle.load(f)
         for pad in sim.timing_offsets:
             if pad != 1:
                 sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
         sim.timing_offsets[1] = 0
-        return sim
-    
-def create_particle_and_point_sim(experiment:str, run:int, event:int, particle_type:str):
-    single_particle_sim = create_single_particle_sim(experiment, run, event, particle_type)
-    to_return = ParticleAndPointDeposition(single_particle_sim.gas_density, particle_type)
-    #use all the same setting that would be used for single particle sim
-    for i in single_particle_sim.__dict__:
-        to_return.__dict__[i] = single_particle_sim.__dict__[i]
+
+
+def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str, load_data=True)->SingleParticleEvent:
+    '''
+    load_data:
+    '''
+    E_from_ic = get_energy_from_ic(experiment, run, event)
+    sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type, get_stopping_material(experiment, run))
+    adaptive_stopping_power = False
+    sim.points_per_bin = 5
+    sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
+    sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
+    if load_data:
+        configure_sim_for_event(sim, experiment, run, event)
+    return sim
+
+def create_multi_particle_event(experiment:str, run:int, event:int, particle_types:str, load_data=True)->MultiParticleEvent:
+    individual_sims = [create_single_particle_sim(experiment, run, event, ptype, False) for ptype in particle_types]
+    to_return = MultiParticleEvent(individual_sims)
+    if load_data:
+        configure_sim_for_event(to_return, experiment, run, event)
     return to_return
 
-def create_pa_sim(experiment:str, run:int, event:int):
-    proton = create_single_particle_sim(experiment, run, event, 'proton')
-    alpha = create_single_particle_sim(experiment, run, event, 'alpha')
-    to_return =  ProtonAlphaEvent(proton, alpha)
-    pads, traces = pads, traces = get_pads_and_traces(experiment, run, event)
-    to_return.set_real_data(pads, traces, trim_threshold=100, trim_pad=3, pads_to_sim_select=read_data_mode)
+def create_multi_particle_decay(experiment:str, run:int, event:int, product_names:list[str], prodcut_masses:float, 
+                                recoil_name:str, recoil_mass:float, load_data=True)->MultiParticleDecay:
+    product_sims = [create_single_particle_sim(experiment, run, event, ptype, False) for ptype in product_names]
+    recoil_sim = create_single_particle_sim(experiment, run, event, recoil_name, False)
+    to_return = MultiParticleDecay(product_sims, prodcut_masses, recoil_sim, recoil_mass)
+    if load_data:
+        configure_sim_for_event(to_return, experiment, run, event)
     return to_return
     
 
