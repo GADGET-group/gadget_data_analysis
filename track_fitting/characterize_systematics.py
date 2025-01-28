@@ -8,7 +8,6 @@
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
 load_previous_fit = True
-include_recoil = True
 
 import time
 import multiprocessing
@@ -26,124 +25,115 @@ from track_fitting import SingleParticleEvent, build_sim
 
 start_time = time.time()
 
-m_guess, c_guess = 0,25 #guesses for pad gain match uncertainty and other systematics
 
 run_number = 124
 experiment = 'e21072'
-if include_recoil:
-    pickle_fname = '%s_run%d_results_objects_m%d_c%d_w_recoil.dat'%(experiment,run_number, m_guess, c_guess)
-else:
-    pickle_fname = '%s_run%d_results_objects_m%d_c%d.dat'%(experiment,run_number, m_guess, c_guess)
+pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
 
-def fit_event(run, event, particle_type, trim_threshold=50, return_key=None, 
+def fit_event(run, event, particle_type, include_recoil, direction, return_key=None, 
               return_dict=None, debug_plots=False):
     if include_recoil:
-        trace_sim = build_sim.create_particle_and_point_sim(experiment, run, event, particle_type)
+        if particle_type == '1H': 
+            recoil_name, recoil_mass, product_mass = '19Ne', 19, 1
+        elif particle_type == '4He':
+            recoil_name, recoil_mass, product_mass = '16O', 19, 1
+        trace_sim = build_sim.create_multi_particle_decay(experiment, run, event, [particle_type], [product_mass], recoil_name, recoil_mass)
+        particle = trace_sim.sims[0]
     else:
         trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
+        particle = trace_sim
     if trace_sim.num_trace_bins > 100:
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
-    #want max likilihood to just be least squares for this fit
-    trace_sim.pad_gain_match_uncertainty = m_guess
-    trace_sim.other_systematics = c_guess
-    #to get initial guess
-    #Energy: from integrated charge
-    #z: center of track
-    #x,y,z: Find the pixel where the brag peak occured by finding the brightest pixel.
-    #     Then find the pixel farthest from there.
-    #theta, phi: from guessed decay location to brag peak
-    #sigma_xy and sigma_z: just guess
-    sigma_xy_guess = 3
-    sigma_z_guess = 3
 
+    x_real, y_real, z_real, e_real = trace_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=trace_sim.traces_to_fit)
+    zmin = 0
+    #set zmax to length of trimmed traces
+    zmax = trace_sim.num_trace_bins*trace_sim.zscale
 
-    #find guess for Brag peak location
-    max_pad, max_val, max_index = 0,0,0
-    for pad in trace_sim.traces_to_fit:
-        trace = trace_sim.traces_to_fit[pad]
-        this_max_index = np.argmax(trace)
-        if trace[this_max_index] > max_val:
-            max_pad, max_val, max_index = pad, trace[this_max_index], this_max_index
-    brag_x, brag_y = trace_sim.pad_to_xy[max_pad]
-    brag_z = trace_sim.zscale*max_index
-    #find pad which fired which is furthest from the brag peak
-    x_guess, y_guess = brag_x, brag_y
+    track_center, track_direction_vec = h5file.get_track_axis(event)
+    track_direction_vec = track_direction_vec[0]
 
-    furthest_dist_sqrd = 0
-    for pad in trace_sim.traces_to_fit:
-        trace = trace_sim.traces_to_fit[pad]
-        x,y = trace_sim.pad_to_xy[pad]
-        dist = (x-brag_x)**2 + (y - brag_y)**2
-        if dist > furthest_dist_sqrd:
-            furthest_dist_sqrd = dist
-            x_guess, y_guess = x,y
-            z_guess = np.argmax(trace)*trace_sim.zscale
-            furthest_pad_trace = trace
-    dz = brag_z - np.argmax(furthest_pad_trace)*trace_sim.zscale
-    theta_guess = np.arctan2(np.sqrt(furthest_dist_sqrd), dz)
-    phi_guess = np.arctan2(brag_y-y_guess, brag_x-x_guess)
+    d_best, best_point = np.inf, None #distance along track in direction of particle motion. Make as negative as possible
+    for x, y, z in zip(x_real, y_real, z_real):
+        delta = np.array([x,y,z]) - track_center
+        dist = np.dot(delta, track_direction_vec*direction)
+        if  dist < d_best:
+            d_best= dist
+            best_point = np.array([x,y,z])
+    #start theta, phi in a small ball around track direction from svd
+    vhat = track_direction_vec*direction
+    theta_guess = np.arctan2( np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
+    phi_guess = np.arctan2(vhat[1], vhat[0])
+
+    #start sigma_xy, sigma_z, and c in a small ball around an initial guess
+    sigma_guess = 7
+    pos_ball_size = 1
+    angle_ball_size = 1*np.pi/180
+
     Eguess = build_sim.get_energy_from_ic(experiment, run, event)
+    if include_recoil:
+        Eguess *= recoil_mass/(recoil_mass+product_mass)
+    
+    init_guess = (theta_guess, phi_guess, *best_point, Eguess, sigma_guess, sigma_guess)
+
     if debug_plots:
-        print('num pads to simultate: ', len(trace_sim.pads_to_sim))
-        print('max pad:', max_pad)
-        print('brag x,y:', brag_x, brag_y)
-        print('guess:',x_guess, y_guess, z_guess, np.degrees(theta_guess), 
-              np.degrees(phi_guess), Eguess)
-        trace_sim.theta, trace_sim.phi = theta_guess, phi_guess
-        trace_sim.initial_point = (x_guess,y_guess,z_guess)
-        trace_sim.initial_energy = Eguess
-        trace_sim.sigma_xy = sigma_xy_guess
-        trace_sim.sigma_z = sigma_z_guess
+        print('guess:', init_guess)
+        particle.theta, trace_sim.phi = theta_guess, phi_guess
+        particle.initial_point = best_point
+        particle.initial_energy = Eguess
+        trace_sim.sigma_xy = sigma_guess
+        trace_sim.sigma_z = sigma_guess
+        if include_recoil:
+            trace_sim.sims[1].initial_point = particle.initial_point
         trace_sim.simulate_event()
         trace_sim.plot_residuals()
         trace_sim.plot_residuals_3d(threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
 
-    def neg_log_likelihood(params):
-        if include_recoil:
-            theta, phi, x,y,z, E, Erecoil,sigma_xy, sigma_z = params
-            trace_sim.point_energy_deposition = Erecoil
-            if Erecoil < 0 or Erecoil > E:
-                return np.inf
-        else:
-            theta, phi, x,y,z, E, sigma_xy, sigma_z = params
+    def sum_of_residuals_squared(params):
+        theta, phi, x,y,z, E, sigma_xy, sigma_z = params
+
+        #enforce particle direction
+        vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
+        if np.dot(vhat, direction*track_direction_vec) < 0:
+            return np.inf
+
         if z > trace_sim.num_trace_bins*trace_sim.zscale or z<0:
             return np.inf
         if x**2 + y**2 > 40**2:
             return np.inf
         if E < 0 or E > 10: #stopping power tables currently only go to 10 MeV
             return np.inf
-        if particle_type == 'proton' and E > 6:
-            return np.inf #greater than 6 MeV protons always escape the detector at these pressures
-        trace_sim.theta, trace_sim.phi = theta, phi
-        trace_sim.initial_point = (x,y,z)
-        trace_sim.sigma_xy = sigma_xy
-        trace_sim.sigma_z = sigma_z
-        trace_sim.initial_energy = E
+        
+        particle.theta, trace_sim.phi = theta, phi
+        particle.initial_point = (x,y,z)
+        particle.sigma_xy = sigma_xy
+        particle.sigma_z = sigma_z
+        particle.initial_energy = E
+        if include_recoil:
+            trace_sim.sims[1].initial_point = particle.initial_point
         trace_sim.simulate_event()
-        to_return = -trace_sim.log_likelihood()
+        residuals_dict = trace_sim.get_residuals()
+        residuals = np.array([residuals_dict[p] for p in residuals_dict])
+        to_return  = np.sum(residuals*residuals)
         if debug_plots:
             print('%e'%to_return, params)
         if np.isnan(to_return):
             to_return = np.inf
         return to_return
     
-    if include_recoil:
-        init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, 0.001, sigma_xy_guess, sigma_z_guess)
-    else:
-        init_guess = (theta_guess, phi_guess, x_guess, y_guess, z_guess, Eguess, sigma_xy_guess, sigma_z_guess)
-    
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS')
     #if method == 'Nelder-Mead':
-    res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
+    res = opt.minimize(fun=sum_of_residuals_squared, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
     #elif method == 'Powell':
     #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.001})
     if return_dict != None:
-        return_dict[return_key] = res
+        sum_of_residuals_squared(res.x) #make sure sim is updated with best params
+        return_dict[return_key] = (res, trace_sim)
         print(return_key, res)
         print('total completed:', len(return_dict.keys()))
     if debug_plots:
@@ -154,23 +144,56 @@ def fit_event(run, event, particle_type, trim_threshold=50, return_key=None,
         plt.show()
     return res
 
-if False: #try fitting one event to make sure it looks ok
-    fit_event(124,108, 'proton', debug_plots=True)
+if True: #try fitting one event to make sure it looks ok
+    #fit_event(124,108, '1H', debug_plots=True)
+    fit_event(124,145, '4He', True, direction=1, debug_plots=True)
+    fit_event(124,145, '4He', True, direction=-1, debug_plots=True)
 
-events_in_catagory = [[],[],[],[]]
-events_per_catagory = 50
+events_in_catagory = [[]]*8
+events_per_catagory = 1
 processes = []
 
+'''
+| cat # | description                                    |
+|   0   | 770 keV p + 19Ne from 20 Mg                    |
+|   1   | ~1600 keV p + 19Ne from 20Mg                   |
+|   2   | 538 keV 16O recoil from 20Na decay at cathode  |
+|   3   | 1108 keV 16O recoil from 20Na decay at cathode |
+|   4   | 2153 keV alpha + 538 keV 16O recoil            |
+|   5   | 2153 keV alpha w/o recoil from cathode         |
+|   6   | 4434 keV alpha + 1108 16O recoil               |
+|   7   | 4434 keV alpha w/o recoil from cathode         |
+
+'''
 def classify(range, counts):
-    if counts > 2e5 and counts < 4e5 and range < 25 and range > 15:
-        return 0 #low energy alpha
-    if counts > 4e5 and counts < 1e6 and range >20 and range < 100:
-        return 1 #high energy alpha
-    if counts > 7e4 and counts < 1e5 and range > 13 and range < 22:
-        return 2 #757 keV proton
-    if counts > 1.54e5 and counts < 2.1e5 and range > 34 and range < 55:
-        return 3 #higher energy proton
+    if counts > 8.33e4 and  range > 16.93 and counts < 9.45e4 and range < 22.95:
+        return 0
+    elif counts > 1.738e5 and range>34.08 and counts < 2.032e5 and range < 59.33:
+        return 1
+    elif counts > 4.16e4 and range > 11.56e4 and counts < 5.37e4 and range < 13.12:
+        return 2
+    elif counts > 1.061e5 and range < 15.75 and counts < 1.188e5 and range > 13.99:
+        return 3
+    elif counts > 2.912e5 and range < 23.29 and counts < 3.365e5 and range < 18.03:
+        return 4
+    elif counts > 2.335e5 and range > 16.97 and counts < 2.721e5 and range < 21.64:
+        return 5
+    elif counts  > 5.91e5 and range < 46.8 and counts < 7.3e5 and range > 31:
+        return 6
+    elif counts > 4.7e5 and range > 24.1 and counts < 5.52e5 and range < 40.5:
+        return 7
     return -1 
+
+ptype_and_recoil_dict = {
+    0:('1H', True),
+    1:('1H', True),
+    2:('16O', False),
+    3:('16O', False),
+    4:('4He', True),
+    5:('4He', False),
+    6:('4He', True),
+    7:('4He', False)
+}
 
 veto_threshold = 300
 
@@ -180,18 +203,15 @@ if not load_previous_fit:
     n = h5file.get_event_num_bounds()[0]
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()
-    while np.min([len(x) for x in events_in_catagory]) < events_per_catagory:
+    while np.min([len(x) for x in events_in_catagory]) < events_per_catagory and n < h5file.get_event_num_bounds()[1]:
         max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
         l = np.sqrt(dxy**2 + dz**2)
         event_catagory = classify(l, counts)
         #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
         if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
-            if event_catagory in [0, 1]:
-                particle_type = 'alpha'
-            else:
-                particle_type = 'proton'
+            particle_type, include_recoil = ptype_and_recoil_dict[event_catagory]
             if fit_in_parrallel:
-                processes.append(multiprocessing.Process(target=fit_event, args=(run_number, n, particle_type, 50, n, fit_results_dict)))
+                processes.append(multiprocessing.Process(target=fit_event, args=(run_number, n, particle_type, include_recoil, n, fit_results_dict)))
                 processes[-1].start()
             else:
                 fit_event(run_number, n, particle_type, 50, n, fit_results_dict)
@@ -219,12 +239,14 @@ else:
         events_in_catagory[event_catagory].append(evt)
 
 evts, thetas, phis,xs,ys,zs, lls, cats, Es, Erecs, nfev, sigma_xys, sigma_zs = [], [],[],[],[],[],[],[],[],[],[],[],[]
+trace_sims = []
 for cat in range(len(events_in_catagory)):
     for evt in events_in_catagory[cat]:
         if evt not in fit_results_dict:
             print('evt %d (cat %d)not in results dict'%(evt, cat))
             continue
-        res = fit_results_dict[evt]
+        res, sim = fit_results_dict[evt]
+        sims.append(sim)
         if not res.success and res.message != 'Desired error not necessarily achieved due to precision loss.':
             print('evt %d (cat %d)not succesfully fit: %s'%(evt, cat, res.message))
             continue
@@ -234,13 +256,8 @@ for cat in range(len(events_in_catagory)):
         ys.append(res.x[3])
         zs.append(res.x[4])
         Es.append(res.x[5])
-        if include_recoil:
-            offset = 6
-            Erecs.append(res.x[offset])
-        else:
-            offset = 5
-        sigma_xys.append(res.x[offset+1])
-        sigma_zs.append(res.x[offset+2])
+        sigma_xys.append(res.x[6])
+        sigma_zs.append(res.x[7])
         lls.append(res.fun)
         cats.append(cat)
         evts.append(evt)
@@ -272,39 +289,24 @@ def show_fit(evt):
 ll_thresh = [2*np.median(lls[cats==cat]) for cat in range(4)]
 
 evts_to_fit = []
-trace_sims = []
 cats_to_fit = []
 for i in range(len(evts)):
     #if lls[i] <= ll_cutoff[cats[i]]:
     #if i == 127:
-    if include_recoil:
-        new_sim = build_sim.create_particle_and_point_sim(experiment, run_number, evts[i], ptypes[i])
-        new_sim.point_energy_deposition = Erecs[i]
-    else:
-        new_sim = build_sim.create_single_particle_sim(experiment, run_number, evts[i], ptypes[i])
-    new_sim.sigma_xy = sigma_xys[i]
-    new_sim.sigma_z = sigma_zs[i]
-    new_sim.initial_energy = Es[i]
-    new_sim.initial_point = (xs[i], ys[i], zs[i])
-    new_sim.theta = thetas[i]
-    new_sim.phi = phis[i]
-    new_sim.pad_gain_match_uncertainty = m_guess
-    new_sim.other_systematics = c_guess
-    
-    new_sim.simulate_event()
     pads, traces = h5file.get_pad_traces(evts[i], False)
+    sim = trace_sims[i]
     max_trace = np.max(traces)
-    residuals_dict = new_sim.get_residuals()
-    max_residual_percent = 0
+    residuals_dict = trace_sims.get_residuals()
+    max_residual_fraction = 0
     for pad in residuals_dict:
         val = np.max(np.abs(residuals_dict[pad]))/max_trace
-        if  val > max_residual_percent:
-            max_residual_percent = val
-    print(evts[i], max_residual_percent)
+        if  val > max_residual_fraction:
+            max_residual_fraction = val
+    print(evts[i], max_residual_fraction)
     #only fit events with residuals no more than 40% of traces
     #and no more than 2x the median for the catagory
-    if  new_sim.log_likelihood() < ll_thresh[cats[i]]:#higher energy proton #: 
-        trace_sims.append(new_sim)
+    if  max_residual_fraction < 0.4:#higher energy proton #: 
+        trace_sims.append(sim)
         evts_to_fit.append(evts[i])
         cats_to_fit.append(cats[i])
         #normalizations[evts[i]] = new_sim.log_likelihood()

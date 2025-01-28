@@ -40,13 +40,14 @@ if __name__ == '__main__':
     density_scale_prior = GaussianVar(1, 0.1)#TODO: decid on density range
 
     h5file = build_sim.get_rawh5_object(experiment, run_number)
-    x_real, y_real, z_real, e_real = h5file.get_xyze(event_number=event_num)
-    xmin, xmax = np.min(x_real), np.max(x_real)
-    ymin, ymax = np.min(y_real), np.max(y_real)
-    zmin = 0
     #set zmax to length of trimmed traces
     temp_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
+
+    x_real, y_real, z_real, e_real = temp_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=temp_sim.traces_to_fit)
+    xmin, xmax = np.min(x_real), np.max(x_real)
+    ymin, ymax = np.min(y_real), np.max(y_real)
+    zmin = 0
 
     track_center, track_direction_vec = h5file.get_track_axis(event_num)
     track_direction_vec = track_direction_vec[0]
