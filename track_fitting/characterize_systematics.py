@@ -30,7 +30,7 @@ run_number = 124
 experiment = 'e21072'
 
 m_guess, c_guess = 0.1004, 22.5
-use_likelihood = True #if false, uses least squares
+use_likelihood = False #if false, uses least squares
 if use_likelihood:
     pickle_fname = '%s_run%d_m%f_c%f_results_objects.dat'%(experiment,run_number, m_guess, c_guess)
 else:
@@ -57,7 +57,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
     
-    trace_sim.counts_per_MeV *= 1.058
+    #trace_sim.counts_per_MeV *= 1.058
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
 
@@ -144,7 +144,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
 
     if return_dict != None:
-        to_minimize(res.x) #make sure sim is updated with best params
+        to_minimize(res.x, use_likelihood) #make sure sim is updated with best params
         return_dict[return_key] = (res, trace_sim)
         print(return_key, res)
         print('total completed in direction %d:'%direction, len(return_dict.keys()))
@@ -156,13 +156,13 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         plt.show()
     return res
 
-if True: #try fitting one event to make sure it looks ok
+if False: #try fitting one event to make sure it looks ok
     #fit_event(124,108, '1H', debug_plots=True)
     #fit_event(124,145, '4He', True, direction=1, debug_plots=True)
     fit_event(124,145, '4He', True, direction=-1, debug_plots=True)
 
 events_in_catagory = [[] for i in range(8)]
-events_per_catagory = 5
+events_per_catagory = 20
 processes = []
 
 '''
