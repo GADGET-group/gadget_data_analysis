@@ -143,7 +143,11 @@ class HistogramFitFrame(ttk.Frame):
         self.update_hist()
         
 
-
+def open_gui(data):
+    root = tk.Tk()
+    frame = HistogramFitFrame(root, data)#, weights)
+    frame.grid()
+    root.mainloop()
 
 if __name__ == '__main__':
     import numpy.random as random

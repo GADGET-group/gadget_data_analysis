@@ -49,6 +49,8 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
     
+    trace_sim.counts_per_MeV *= 1.058
+
     x_real, y_real, z_real, e_real = trace_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=trace_sim.traces_to_fit)
     zmin = 0
     #set zmax to length of trimmed traces
@@ -160,7 +162,7 @@ if False: #try fitting one event to make sure it looks ok
     fit_event(124,145, '4He', True, direction=-1, debug_plots=True)
 
 events_in_catagory = [[] for i in range(8)]
-events_per_catagory = 50
+events_per_catagory = 5
 processes = []
 
 '''
@@ -383,6 +385,8 @@ else:
 
 '''
 9bf15dc842c2ef3ec797b1ebdab942e48dc63a7b: After ll update, but with old pad threshold of 64. Gives m = 0.10459277119010803, c=24.99114302506084
+after implementing recoil 511bf225e555cbf12b7822d66cf9ef8cfc11e980: m, c = 0.1139420437006866 27.681280004246286
+pad threshold: 50.011
 
 d9834e5947339584baade2487fd0156016b76362
 m,c guesses=0,25
