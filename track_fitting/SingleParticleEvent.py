@@ -76,7 +76,7 @@ class SingleParticleEvent(SimulatedEvent):
         distances = (distances[0:-1] + distances[1:])/2
 
         
-        self.distances, energy_deposition = distances, energy_deposition
+        self.distances,  self.energy_deposition = distances, energy_deposition
         # Compute the points where energy is evaluated
         direction_vector = np.array((np.sin(self.theta) * np.cos(self.phi), 
                                               np.sin(self.theta) * np.sin(self.phi), 

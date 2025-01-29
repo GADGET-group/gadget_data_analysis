@@ -32,22 +32,24 @@ pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
 
+
 def fit_event(run, event, particle_type, include_recoil, direction, return_key=None, 
               return_dict=None, debug_plots=False):
     if include_recoil:
         if particle_type == '1H': 
             recoil_name, recoil_mass, product_mass = '19Ne', 19, 1
         elif particle_type == '4He':
-            recoil_name, recoil_mass, product_mass = '16O', 19, 1
+            recoil_name, recoil_mass, product_mass = '16O', 16, 4
         trace_sim = build_sim.create_multi_particle_decay(experiment, run, event, [particle_type], [product_mass], recoil_name, recoil_mass)
         particle = trace_sim.sims[0]
+        print('including recoil')
     else:
         trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
         particle = trace_sim
     if trace_sim.num_trace_bins > 100:
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
-
+    
     x_real, y_real, z_real, e_real = trace_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=trace_sim.traces_to_fit)
     zmin = 0
     #set zmax to length of trimmed traces
@@ -65,36 +67,34 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
             best_point = np.array([x,y,z])
     #start theta, phi in a small ball around track direction from svd
     vhat = track_direction_vec*direction
-    theta_guess = np.arctan2( np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
+    print('vhat:',vhat)
+    theta_guess = np.arctan2(np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
     phi_guess = np.arctan2(vhat[1], vhat[0])
 
     #start sigma_xy, sigma_z, and c in a small ball around an initial guess
-    sigma_guess = 7
-    pos_ball_size = 1
-    angle_ball_size = 1*np.pi/180
+    sigma_guess = 3
 
     Eguess = build_sim.get_energy_from_ic(experiment, run, event)
     if include_recoil:
         Eguess *= recoil_mass/(recoil_mass+product_mass)
     
-    init_guess = (theta_guess, phi_guess, *best_point, Eguess, sigma_guess, sigma_guess)
+    init_guess = np.array((theta_guess, phi_guess, *best_point, Eguess, sigma_guess, sigma_guess))
 
     if debug_plots:
         print('guess:', init_guess)
-        particle.theta, trace_sim.phi = theta_guess, phi_guess
-        particle.initial_point = best_point
+        particle.theta, particle.phi = theta_guess, phi_guess
+        trace_sim.initial_point = best_point
         particle.initial_energy = Eguess
         trace_sim.sigma_xy = sigma_guess
         trace_sim.sigma_z = sigma_guess
-        if include_recoil:
-            trace_sim.sims[1].initial_point = particle.initial_point
         trace_sim.simulate_event()
+        #print('recoil E, point, theta, phi:', trace_sim.recoil.initial_energy, trace_sim.recoil.initial_point, trace_sim.recoil.theta, trace_sim.recoil.phi)
         trace_sim.plot_residuals()
         trace_sim.plot_residuals_3d(threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
 
-    def sum_of_residuals_squared(params):
+    def to_minimize(params):
         theta, phi, x,y,z, E, sigma_xy, sigma_z = params
 
         #enforce particle direction
@@ -109,30 +109,41 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         if E < 0 or E > 10: #stopping power tables currently only go to 10 MeV
             return np.inf
         
-        particle.theta, trace_sim.phi = theta, phi
-        particle.initial_point = (x,y,z)
-        particle.sigma_xy = sigma_xy
-        particle.sigma_z = sigma_z
+        particle.theta, particle.phi = theta, phi
+        trace_sim.initial_point = (x,y,z)
+        trace_sim.sigma_xy = sigma_xy
+        trace_sim.sigma_z = sigma_z
         particle.initial_energy = E
-        if include_recoil:
-            trace_sim.sims[1].initial_point = particle.initial_point
         trace_sim.simulate_event()
         residuals_dict = trace_sim.get_residuals()
         residuals = np.array([residuals_dict[p] for p in residuals_dict])
         to_return  = np.sum(residuals*residuals)
+        #to_return = -trace_sim.log_likelihood()
         if debug_plots:
-            print('%e'%to_return, params)
+            print('%e'%np.sqrt(to_return), params)
         if np.isnan(to_return):
             to_return = np.inf
         return to_return
     
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method='BFGS')
+    #res = opt.minimize(fun=sum_of_residuals_squared, x0=init_guess, method='BFGS')
     #if method == 'Nelder-Mead':
-    res = opt.minimize(fun=sum_of_residuals_squared, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
-    #elif method == 'Powell':
-    #res = opt.minimize(fun=neg_log_likelihood, x0=init_guess, method="Powell")#, options={'ftol':0.001, 'xtol':0.001})
+    #res = opt.minimize(fun=sum_of_residuals_squared, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
+    bounds = ((0, np.pi), (-np.pi, np.pi), 
+              (np.min(x_real), np.max(x_real)), (np.min(y_real), np.max(y_real)), (zmin, zmax),
+              (Eguess/1.5, Eguess*1.5), (1,10), (1,10))
+    #res = opt.shgo(func=sum_of_residuals_squared, bounds=bounds, sampling_method='halton', n=200)
+    #first try fitting angle, then free all other parameters
+    # res = opt.minimize(lambda x: to_minimize([*x, *init_guess[2:]]), init_guess[0:2],)
+    # init_guess[0], init_guess[1] = res.x
+    # if debug_plots:
+    #     print(res)
+    #     trace_sim.plot_residuals_3d(title=str(return_key)+particle_type, threshold=20)
+    #     trace_sim.plot_simulated_3d_data(title=str(return_key)+particle_type, threshold=20)
+    #     trace_sim.plot_residuals()
+    #     plt.show()
+    res = opt.minimize(fun=to_minimize, x0=init_guess)
     if return_dict != None:
-        sum_of_residuals_squared(res.x) #make sure sim is updated with best params
+        to_minimize(res.x) #make sure sim is updated with best params
         return_dict[return_key] = (res, trace_sim)
         print(return_key, res)
         print('total completed:', len(return_dict.keys()))
@@ -197,12 +208,11 @@ ptype_and_recoil_dict = {
 
 veto_threshold = 300
 
-fit_in_parrallel = True
-
 if not load_previous_fit:
     n = h5file.get_event_num_bounds()[0]
     manager = multiprocessing.Manager()
-    fit_results_dict = manager.dict()
+    forward_fit_results_dict = manager.dict()
+    backward_fit_results_dict = manager.dict()
     while np.min([len(x) for x in events_in_catagory]) < events_per_catagory and n < h5file.get_event_num_bounds()[1]:
         max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
         l = np.sqrt(dxy**2 + dz**2)
@@ -210,11 +220,14 @@ if not load_previous_fit:
         #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
         if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
             particle_type, include_recoil = ptype_and_recoil_dict[event_catagory]
-            if fit_in_parrallel:
-                processes.append(multiprocessing.Process(target=fit_event, args=(run_number, n, particle_type, include_recoil, n, fit_results_dict)))
-                processes[-1].start()
-            else:
-                fit_event(run_number, n, particle_type, 50, n, fit_results_dict)
+            processes.append(multiprocessing.Process(target=fit_event, 
+                                                        args=(run_number, n, particle_type, include_recoil, 1,
+                                                            n, forward_fit_results_dict)))
+            processes[-1].start()
+            processes.append(multiprocessing.Process(target=fit_event, 
+                                                        args=(run_number, n, particle_type, include_recoil, -1,
+                                                        n, backward_fit_results_dict)))
+            processes[-1].start()
             events_in_catagory[event_catagory].append(n)
             print([len(x) for x in events_in_catagory])
         n += 1

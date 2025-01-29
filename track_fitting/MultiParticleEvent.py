@@ -36,14 +36,14 @@ class MultiParticleEvent(SimulatedEvent):
                 self.__dict__[prefix + '_' + param] = sim.__dict__[param]
         
         for sim in self.sims:
-            sim.gui_before_sim()
+            sim.gui_after_sim()
 
     def gui_before_sim(self):
         '''
         Calling this function will update the individual sims to reflect the gui parameters
         '''
         for sim in self.sims:
-            sim.gui_after_sim()
+            sim.gui_before_sim()
         for prefix,sim in zip(self.sim_names, self.sims):
             for param in self.per_particle_params:
                 sim.__dict__[param] = self.__dict__[prefix + '_' + param] 
@@ -74,13 +74,16 @@ class MultiParticleDecay(MultiParticleEvent):
         super().__init__(sims)
         self.products, self.product_masses = products, product_masses
         self.recoil, self.recoil_mass = recoil, recoil_mass
+        self.initial_point = [0.,0.,0.] #this will always be loaded to children when get_energy_deposition is called
 
     def get_energy_deposition(self):
         #calculate sqrt(recoil energy)*recoil_direction_vector, and use this to update recoil theta, phi, and energy
         v = np.zeros(3)
         for p, m_p in zip(self.products, self.product_masses):
+            p.initial_point = self.initial_point
             vhat = np.array([np.sin(p.theta)*np.cos(p.phi), np.sin(p.theta)*np.sin(p.phi), np.cos(p.theta)])
             v -= vhat*np.sqrt(p.initial_energy*m_p/self.recoil_mass)
+        self.recoil.initial_point = self.initial_point
         self.recoil.initial_energy = np.dot(v,v)
         self.recoil.theta = np.arctan2( np.sqrt(v[0]**2 + v[1]**2), v[2])
         self.recoil.phi = np.arctan2(v[1], v[0])
