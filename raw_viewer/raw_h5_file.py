@@ -75,7 +75,7 @@ class raw_h5_file:
         #                 (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
-        self.background_subtract_mode = 'none' #none, fixed window, or convolution
+        self.background_subtract_mode = 'none' #none, fixed window, smart, or convolution
         self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction

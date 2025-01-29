@@ -15,7 +15,7 @@ from track_fitting.SingleParticleEvent import SingleParticleEvent
 from track_fitting.MultiParticleEvent import MultiParticleEvent, MultiParticleDecay
 from track_fitting.SimGui import SimGui
 
-read_data_mode = 'unchanged'#'adjacent'
+read_data_mode = 'adjacent'
 
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
@@ -23,7 +23,7 @@ read_data_mode = 'unchanged'#'adjacent'
 #detector settings
 #list of 2 point calibrations, inexed by experiment and then run number.
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
-calibration_points = {'e21072': #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
+calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
                         {124:((90625 , 192102 ),(0.7856, 1.633))}}
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
@@ -72,8 +72,8 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run),
                                     zscale=get_zscale(experiment, run),
                                     flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.background_subtract_mode='fixed window'
-        h5file.data_select_mode='smart'
+        h5file.background_subtract_mode='smart'
+        h5file.data_select_mode='all data' 
         h5file.remove_outliers=True
         h5file.near_peak_window_width = 50
         h5file.require_peak_within= (-np.inf, np.inf)

@@ -22,18 +22,22 @@ experiment = 'e21072'
 
 m_guess, c_guess = 0.1004, 22.5
 use_likelihood = False #if false, uses least squares
+enforce_energy = False #use known energy rather than fitting it as a free parameter
 if use_likelihood:
     pickle_fname = '%s_run%d_m%f_c%f_results_objects.dat'%(experiment,run_number, m_guess, c_guess)
 else:
-    #pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
-    pickle_fname = '%s_run%d_all_pads.dat'%(experiment,run_number)
+    if enforce_energy:
+        pickle_fname = '%s_run%d_E_fixed.dat'%(experiment,run_number)
+    else:
+        pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
+    
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
 
 
 
 
-def fit_event(run, event, particle_type, include_recoil, direction, return_key=None, 
+def fit_event(run, event, particle_type, include_recoil, direction, Eknown, return_key=None, 
               return_dict=None, debug_plots=False):
     if include_recoil:
         if particle_type == '1H': 
@@ -99,6 +103,8 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
 
     def to_minimize(params, least_squares):
         theta, phi, x,y,z, E, sigma_xy, sigma_z = params
+        if enforce_energy:
+            E = Eknown
 
         #enforce particle direction
         vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
@@ -189,14 +195,14 @@ def classify(range, counts):
     return -1 
 
 ptype_and_recoil_dict = {
-    0:('1H', True),
-    1:('1H', True),
-    2:('16O', False),
-    3:('16O', False),
-    4:('4He', True),
-    5:('4He', False),
-    6:('4He', True),
-    7:('4He', False)
+    0:('1H', True, 0.770),
+    1:('1H', True, 1.590),
+    2:('16O', False, 0.5384),
+    3:('16O', False, 1.1087),
+    4:('4He', True,2.1536),
+    5:('4He', False, 2.1536),
+    6:('4He', True, 4.4347),
+    7:('4He', False, 4.4347)
 }
 
 veto_threshold = 300
@@ -212,13 +218,13 @@ if not load_previous_fit:
         event_catagory = classify(l, counts)
         #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
         if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
-            particle_type, include_recoil = ptype_and_recoil_dict[event_catagory]
+            particle_type, include_recoil, E = ptype_and_recoil_dict[event_catagory]
             processes.append(multiprocessing.Process(target=fit_event, 
-                                                        args=(run_number, n, particle_type, include_recoil, 1,
+                                                        args=(run_number, n, particle_type, include_recoil, 1, E,
                                                             n, forward_fit_results_dict)))
             processes[-1].start()
             processes.append(multiprocessing.Process(target=fit_event, 
-                                                        args=(run_number, n, particle_type, include_recoil, -1,
+                                                        args=(run_number, n, particle_type, include_recoil, -1, E,
                                                         n, backward_fit_results_dict)))
             processes[-1].start()
             events_in_catagory[event_catagory].append(n)
