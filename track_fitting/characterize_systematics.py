@@ -7,7 +7,7 @@
 3. Print mean and standard deviation of presssure and charge spreading?
 4. MCMC charge spreading, pressure, gain match, and other systematics
 '''
-load_previous_fit = True
+load_previous_fit = False
 
 import time
 import multiprocessing
@@ -42,7 +42,6 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
             recoil_name, recoil_mass, product_mass = '16O', 16, 4
         trace_sim = build_sim.create_multi_particle_decay(experiment, run, event, [particle_type], [product_mass], recoil_name, recoil_mass)
         particle = trace_sim.sims[0]
-        print('including recoil')
     else:
         trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
         particle = trace_sim
@@ -67,7 +66,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
             best_point = np.array([x,y,z])
     #start theta, phi in a small ball around track direction from svd
     vhat = track_direction_vec*direction
-    print('vhat:',vhat)
+    #print('vhat:',vhat)
     theta_guess = np.arctan2(np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
     phi_guess = np.arctan2(vhat[1], vhat[0])
 
@@ -146,7 +145,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         to_minimize(res.x) #make sure sim is updated with best params
         return_dict[return_key] = (res, trace_sim)
         print(return_key, res)
-        print('total completed:', len(return_dict.keys()))
+        print('total completed in direction %d:'%direction, len(return_dict.keys()))
     if debug_plots:
         print(res)
         trace_sim.plot_residuals_3d(title=str(return_key)+particle_type, threshold=20)
@@ -155,13 +154,13 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         plt.show()
     return res
 
-if True: #try fitting one event to make sure it looks ok
+if False: #try fitting one event to make sure it looks ok
     #fit_event(124,108, '1H', debug_plots=True)
     fit_event(124,145, '4He', True, direction=1, debug_plots=True)
     fit_event(124,145, '4He', True, direction=-1, debug_plots=True)
 
-events_in_catagory = [[]]*8
-events_per_catagory = 1
+events_in_catagory = [[] for i in range(8)]
+events_per_catagory = 50
 processes = []
 
 '''
@@ -181,7 +180,7 @@ def classify(range, counts):
         return 0
     elif counts > 1.738e5 and range>34.08 and counts < 2.032e5 and range < 59.33:
         return 1
-    elif counts > 4.16e4 and range > 11.56e4 and counts < 5.37e4 and range < 13.12:
+    elif counts > 4.16e4 and range > 11.56 and counts < 5.37e4 and range < 13.12:
         return 2
     elif counts > 1.061e5 and range < 15.75 and counts < 1.188e5 and range > 13.99:
         return 3
@@ -229,7 +228,7 @@ if not load_previous_fit:
                                                         n, backward_fit_results_dict)))
             processes[-1].start()
             events_in_catagory[event_catagory].append(n)
-            print([len(x) for x in events_in_catagory])
+            print(n, event_catagory, [len(x) for x in events_in_catagory])
         n += 1
     #wait for all processes to end
     for p in processes:
@@ -237,14 +236,17 @@ if not load_previous_fit:
     
     print('fitting took %f s'%(time.time() - start_time))
 
-    #save results objects
-    fit_results_dict = {k:fit_results_dict[k] for k in fit_results_dict}
+    #pick the best of each direction, and save it
+    fit_results_dict = {k:forward_fit_results_dict[k] for k in forward_fit_results_dict}
+    for k in backward_fit_results_dict:
+        if (k in fit_results_dict and backward_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+            fit_results_dict[k] = backward_fit_results_dict[k]
     with open(pickle_fname, 'wb') as f:
         pickle.dump(fit_results_dict, f)
 else:
     with open(pickle_fname, 'rb') as f:
         fit_results_dict = pickle.load(f)
-    events_in_catagory = [[],[],[],[]]
+    events_in_catagory =  [[] for i in range(8)]
     for evt in fit_results_dict:
         max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(evt)
         l = np.sqrt(dxy**2 + dz**2)
@@ -259,7 +261,7 @@ for cat in range(len(events_in_catagory)):
             print('evt %d (cat %d)not in results dict'%(evt, cat))
             continue
         res, sim = fit_results_dict[evt]
-        sims.append(sim)
+        trace_sims.append(sim)
         if not res.success and res.message != 'Desired error not necessarily achieved due to precision loss.':
             print('evt %d (cat %d)not succesfully fit: %s'%(evt, cat, res.message))
             continue
@@ -309,7 +311,7 @@ for i in range(len(evts)):
     pads, traces = h5file.get_pad_traces(evts[i], False)
     sim = trace_sims[i]
     max_trace = np.max(traces)
-    residuals_dict = trace_sims.get_residuals()
+    residuals_dict = trace_sims[i].get_residuals()
     max_residual_fraction = 0
     for pad in residuals_dict:
         val = np.max(np.abs(residuals_dict[pad]))/max_trace
@@ -373,6 +375,7 @@ def to_minimize(params):
     return to_return
 
 if True:
+    c_guess = 20
     systematics_results = opt.minimize(to_minimize, (c_guess, ))
     other_systematics = systematics_results.x[0]
 else:
