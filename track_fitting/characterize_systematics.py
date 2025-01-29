@@ -184,7 +184,7 @@ def classify(range, counts):
         return 2
     elif counts > 1.061e5 and range < 15.75 and counts < 1.188e5 and range > 13.99:
         return 3
-    elif counts > 2.912e5 and range < 23.29 and counts < 3.365e5 and range < 18.03:
+    elif counts > 2.912e5 and range < 23.29 and counts < 3.365e5 and range > 18.03:
         return 4
     elif counts > 2.335e5 and range > 16.97 and counts < 2.721e5 and range < 21.64:
         return 5
