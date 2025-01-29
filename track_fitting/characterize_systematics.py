@@ -28,9 +28,17 @@ start_time = time.time()
 
 run_number = 124
 experiment = 'e21072'
-pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
+
+m_guess, c_guess = 0.1004, 22.5
+use_likelihood = True #if false, uses least squares
+if use_likelihood:
+    pickle_fname = '%s_run%d_m%f_c%f_results_objects.dat'%(experiment,run_number, m_guess, c_guess)
+else:
+    pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
+
+
 
 
 def fit_event(run, event, particle_type, include_recoil, direction, return_key=None, 
@@ -50,6 +58,8 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         return 
     
     trace_sim.counts_per_MeV *= 1.058
+    trace_sim.pad_gain_match_uncertainty = m_guess
+    trace_sim.other_systematics = c_guess
 
     x_real, y_real, z_real, e_real = trace_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=trace_sim.traces_to_fit)
     zmin = 0
@@ -95,7 +105,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
 
-    def to_minimize(params):
+    def to_minimize(params, least_squares):
         theta, phi, x,y,z, E, sigma_xy, sigma_z = params
 
         #enforce particle direction
@@ -116,33 +126,23 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         trace_sim.sigma_z = sigma_z
         particle.initial_energy = E
         trace_sim.simulate_event()
-        residuals_dict = trace_sim.get_residuals()
-        residuals = np.array([residuals_dict[p] for p in residuals_dict])
-        to_return  = np.sum(residuals*residuals)
+        if least_squares:
+            residuals_dict = trace_sim.get_residuals()
+            residuals = np.array([residuals_dict[p] for p in residuals_dict])
+            to_return  = np.sum(residuals*residuals)
+        else:
+            to_return = -trace_sim.log_likelihood()
         #to_return = -trace_sim.log_likelihood()
         if debug_plots:
-            print('%e'%np.sqrt(to_return), params)
+            print('%e'%to_return, params)
         if np.isnan(to_return):
             to_return = np.inf
         return to_return
     
-    #res = opt.minimize(fun=sum_of_residuals_squared, x0=init_guess, method='BFGS')
-    #if method == 'Nelder-Mead':
-    #res = opt.minimize(fun=sum_of_residuals_squared, x0=init_guess, method="Nelder-Mead", options={'adaptive': True, 'maxfev':5000, 'maxiter':5000})
-    bounds = ((0, np.pi), (-np.pi, np.pi), 
-              (np.min(x_real), np.max(x_real)), (np.min(y_real), np.max(y_real)), (zmin, zmax),
-              (Eguess/1.5, Eguess*1.5), (1,10), (1,10))
-    #res = opt.shgo(func=sum_of_residuals_squared, bounds=bounds, sampling_method='halton', n=200)
-    #first try fitting angle, then free all other parameters
-    # res = opt.minimize(lambda x: to_minimize([*x, *init_guess[2:]]), init_guess[0:2],)
-    # init_guess[0], init_guess[1] = res.x
-    # if debug_plots:
-    #     print(res)
-    #     trace_sim.plot_residuals_3d(title=str(return_key)+particle_type, threshold=20)
-    #     trace_sim.plot_simulated_3d_data(title=str(return_key)+particle_type, threshold=20)
-    #     trace_sim.plot_residuals()
-    #     plt.show()
-    res = opt.minimize(fun=to_minimize, x0=init_guess)
+    res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,))
+    if use_likelihood:
+        res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
+
     if return_dict != None:
         to_minimize(res.x) #make sure sim is updated with best params
         return_dict[return_key] = (res, trace_sim)
@@ -156,9 +156,9 @@ def fit_event(run, event, particle_type, include_recoil, direction, return_key=N
         plt.show()
     return res
 
-if False: #try fitting one event to make sure it looks ok
+if True: #try fitting one event to make sure it looks ok
     #fit_event(124,108, '1H', debug_plots=True)
-    fit_event(124,145, '4He', True, direction=1, debug_plots=True)
+    #fit_event(124,145, '4He', True, direction=1, debug_plots=True)
     fit_event(124,145, '4He', True, direction=-1, debug_plots=True)
 
 events_in_catagory = [[] for i in range(8)]
@@ -288,14 +288,7 @@ ptypes = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
 
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
-    sim = build_sim.create_single_particle_sim(experiment, run_number, evt, ptypes[i])
-    sim.initial_energy = Es[i]
-    sim.initial_point = (xs[i], ys[i], zs[i])
-    sim.theta = thetas[i]
-    sim.phi = phis[i]
-    sim.sigma_xy = sigma_xys[i]
-    sim.sigma_z = sigma_zs[i]
-    sim.simulate_event()
+    sim = trace_sims[i]
     sim.plot_simulated_3d_data(threshold=25)
     sim.plot_residuals_3d(threshold=25)
     sim.plot_residuals()
@@ -387,6 +380,11 @@ else:
 9bf15dc842c2ef3ec797b1ebdab942e48dc63a7b: After ll update, but with old pad threshold of 64. Gives m = 0.10459277119010803, c=24.99114302506084
 after implementing recoil 511bf225e555cbf12b7822d66cf9ef8cfc11e980: m, c = 0.1139420437006866 27.681280004246286
 pad threshold: 50.011
+
+adjusted afc gain by 5.8% b/c of residual frac
+gain match uncertainty:  0.10038930590911611
+suggested pad threshold = 50.011111
+
 
 d9834e5947339584baade2487fd0156016b76362
 m,c guesses=0,25
