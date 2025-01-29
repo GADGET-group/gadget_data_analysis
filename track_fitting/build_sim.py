@@ -15,7 +15,7 @@ from track_fitting.SingleParticleEvent import SingleParticleEvent
 from track_fitting.MultiParticleEvent import MultiParticleEvent, MultiParticleDecay
 from track_fitting.SimGui import SimGui
 
-read_data_mode = 'adjacent'
+read_data_mode = 'unchanged'#'adjacent'
 
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #

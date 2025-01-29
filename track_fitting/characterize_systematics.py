@@ -1,12 +1,3 @@
-'''
-1. Find events to fit in different catagories
-2. Do a least squares fit on the events, with the following free parameters:
-    a. charge spreading
-    b. x, y, z, E, theta, phi
-    c. Pressure
-3. Print mean and standard deviation of presssure and charge spreading?
-4. MCMC charge spreading, pressure, gain match, and other systematics
-'''
 load_previous_fit = False
 
 import time
@@ -34,7 +25,8 @@ use_likelihood = False #if false, uses least squares
 if use_likelihood:
     pickle_fname = '%s_run%d_m%f_c%f_results_objects.dat'%(experiment,run_number, m_guess, c_guess)
 else:
-    pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
+    #pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
+    pickle_fname = '%s_run%d_all_pads.dat'%(experiment,run_number)
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
 
@@ -284,8 +276,6 @@ lls = np.array(lls)
 evts = np.array(evts)
 cats = np.array(cats)
 
-ptypes = ['proton' if cat in [2,3] else 'alpha' for cat in cats]
-
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
     sim = trace_sims[i]
@@ -369,7 +359,7 @@ def to_minimize(params):
     print('==================',to_return, m, c, '===================')
     return to_return
 
-if True:
+if False:
     c_guess = 20
     systematics_results = opt.minimize(to_minimize, (c_guess, ))
     other_systematics = systematics_results.x[0]
