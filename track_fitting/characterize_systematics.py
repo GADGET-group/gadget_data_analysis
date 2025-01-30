@@ -22,12 +22,13 @@ experiment = 'e21072'
 
 m_guess, c_guess = 0.1004, 22.5
 use_likelihood = False #if false, uses least squares
-enforce_energy = False #use known energy rather than fitting it as a free parameter
+fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
+fix_energy = True
 if use_likelihood:
     pickle_fname = '%s_run%d_m%f_c%f_results_objects.dat'%(experiment,run_number, m_guess, c_guess)
 else:
-    if enforce_energy:
-        pickle_fname = '%s_run%d_E_fixed.dat'%(experiment,run_number)
+    if fit_adc_count_per_MeV:
+        pickle_fname = '%s_run%d_adc_counts_free.dat'%(experiment,run_number)
     else:
         pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
     
@@ -80,31 +81,24 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
 
     #start sigma_xy, sigma_z, and c in a small ball around an initial guess
     sigma_guess = 3
-
-    Eguess = build_sim.get_energy_from_ic(experiment, run, event)
-    if include_recoil:
-        Eguess *= recoil_mass/(recoil_mass+product_mass)
     
-    init_guess = np.array((theta_guess, phi_guess, *best_point, Eguess, sigma_guess, sigma_guess))
-
-    if debug_plots:
-        print('guess:', init_guess)
-        particle.theta, particle.phi = theta_guess, phi_guess
-        trace_sim.initial_point = best_point
-        particle.initial_energy = Eguess
-        trace_sim.sigma_xy = sigma_guess
-        trace_sim.sigma_z = sigma_guess
-        trace_sim.simulate_event()
-        #print('recoil E, point, theta, phi:', trace_sim.recoil.initial_energy, trace_sim.recoil.initial_point, trace_sim.recoil.theta, trace_sim.recoil.phi)
-        trace_sim.plot_residuals()
-        trace_sim.plot_residuals_3d(threshold=25)
-        trace_sim.plot_simulated_3d_data(threshold=25)
-        plt.show(block=True)
+    if fit_adc_count_per_MeV:
+        init_guess = np.array((theta_guess, phi_guess, *best_point, trace_sim.counts_per_MeV, sigma_guess, sigma_guess))
+    else:
+        init_guess = np.array((theta_guess, phi_guess, *best_point, Eknown, sigma_guess, sigma_guess))
 
     def to_minimize(params, least_squares):
-        theta, phi, x,y,z, E, sigma_xy, sigma_z = params
-        if enforce_energy:
-            E = Eknown
+        theta, phi, x,y,z, E_or_m, sigma_xy, sigma_z = params
+        if fit_adc_count_per_MeV:
+            trace_sim.counts_per_MeV = E_or_m
+            particle.initial_energy = Eknown
+        else:
+            if fix_energy:
+                particle.initial_energy = Eknown
+            else:
+                particle.initial_energy = E_or_m
+            trace_sim.counts_per_MeV = 130004. #using mean value fit when this was a free parameter
+        
 
         #enforce particle direction
         vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
@@ -115,17 +109,22 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
             return np.inf
         if x**2 + y**2 > 40**2:
             return np.inf
-        if E < 0 or E > 10: #stopping power tables currently only go to 10 MeV
+        if particle.initial_energy < 0 or particle.initial_energy  > 10: #stopping power tables currently only go to 10 MeV
             return np.inf
         
         particle.theta, particle.phi = theta, phi
         trace_sim.initial_point = (x,y,z)
         trace_sim.sigma_xy = sigma_xy
         trace_sim.sigma_z = sigma_z
-        particle.initial_energy = E
+        
         trace_sim.simulate_event()
         if least_squares:
             residuals_dict = trace_sim.get_residuals()
+            for pad in residuals_dict:
+                #don't penalize for traces which don't go above threshold if pad didnt fire
+                if pad not in trace_sim.traces_to_fit and np.max(trace_sim.sim_traces[pad] < trace_sim.pad_threshold): 
+                    residuals_dict[pad] = residuals_dict[pad] - trace_sim.pad_threshold
+                    residuals_dict[pad][residuals_dict[pad] < 0] = 0
             residuals = np.array([residuals_dict[p] for p in residuals_dict])
             to_return  = np.sum(residuals*residuals)
         else:
@@ -137,6 +136,16 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
             to_return = np.inf
         return to_return
     
+
+    if debug_plots:
+        print('guess:', init_guess)
+        to_minimize(init_guess, True)
+        #print('recoil E, point, theta, phi:', trace_sim.recoil.initial_energy, trace_sim.recoil.initial_point, trace_sim.recoil.theta, trace_sim.recoil.phi)
+        trace_sim.plot_residuals()
+        trace_sim.plot_residuals_3d(threshold=25)
+        trace_sim.plot_simulated_3d_data(threshold=25)
+        plt.show(block=True)
+
     res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,))
     if use_likelihood:
         res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
@@ -157,7 +166,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
 if False: #try fitting one event to make sure it looks ok
     #fit_event(124,108, '1H', debug_plots=True)
     #fit_event(124,145, '4He', True, direction=1, debug_plots=True)
-    fit_event(124,145, '4He', True, direction=-1, debug_plots=True)
+    fit_event(124,145, '4He', True, Eknown=4.434,direction=-1, debug_plots=True)
 
 events_in_catagory = [[] for i in range(8)]
 events_per_catagory = 20
@@ -173,6 +182,8 @@ processes = []
 |   5   | 2153 keV alpha w/o recoil from cathode         |
 |   6   | 4434 keV alpha + 1108 16O recoil               |
 |   7   | 4434 keV alpha w/o recoil from cathode         |
+
+For now, will exclude cats 
 
 '''
 def classify(range, counts):
@@ -373,20 +384,8 @@ else:
     pad_gain_match_uncertainty,other_systematics = pad_gain_match_uncertainty, c_guess
 
 '''
-9bf15dc842c2ef3ec797b1ebdab942e48dc63a7b: After ll update, but with old pad threshold of 64. Gives m = 0.10459277119010803, c=24.99114302506084
-after implementing recoil 511bf225e555cbf12b7822d66cf9ef8cfc11e980: m, c = 0.1139420437006866 27.681280004246286
-pad threshold: 50.011
-
-adjusted afc gain by 5.8% b/c of residual frac
-gain match uncertainty:  0.10038930590911611
-suggested pad threshold = 50.011111
-
-
-d9834e5947339584baade2487fd0156016b76362
-m,c guesses=0,25
-gain match uncertainty:  0.22377808331195365
-suggested pad threshold = 47.611111
-other_systematics = 
+gain match uncertainty:  0.13556424920824328
+suggested pad threshold = 54.863968
 
 '''
 
