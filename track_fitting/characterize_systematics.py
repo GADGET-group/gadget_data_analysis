@@ -23,14 +23,17 @@ experiment = 'e21072'
 m_guess, c_guess = 0.1004, 22.5
 use_likelihood = False #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
-fix_energy = True
+fix_energy = False
 if use_likelihood:
     pickle_fname = '%s_run%d_m%f_c%f_results_objects.dat'%(experiment,run_number, m_guess, c_guess)
 else:
     if fit_adc_count_per_MeV:
         pickle_fname = '%s_run%d_adc_counts_free.dat'%(experiment,run_number)
     else:
-        pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
+        if fix_energy:
+            pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
+        else:
+            pickle_fname = '%s_run%d_energy_free.dat'%(experiment,run_number)
     
 
 h5file = build_sim.get_rawh5_object('e21072', run_number)
@@ -97,7 +100,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
                 particle.initial_energy = Eknown
             else:
                 particle.initial_energy = E_or_m
-            trace_sim.counts_per_MeV = 130004. #using mean value fit when this was a free parameter
+            trace_sim.counts_per_MeV = 129600. #using mean value fit when this was a free parameter
         
 
         #enforce particle direction
@@ -183,7 +186,7 @@ processes = []
 |   6   | 4434 keV alpha + 1108 16O recoil               |
 |   7   | 4434 keV alpha w/o recoil from cathode         |
 
-For now, will exclude cats 
+TODO: do a better job of outlier removal for adc gain fit
 
 '''
 def classify(range, counts):
@@ -384,7 +387,7 @@ else:
     pad_gain_match_uncertainty,other_systematics = pad_gain_match_uncertainty, c_guess
 
 '''
-gain match uncertainty:  0.13556424920824328
+0.1749208523362717 38.38687105327825
 suggested pad threshold = 54.863968
 
 '''

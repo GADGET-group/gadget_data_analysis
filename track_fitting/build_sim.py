@@ -113,12 +113,13 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
     '''
     if experiment == 'e21072':
         sim.zscale = get_zscale(experiment, run)
-        sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
         pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.1046, 24.99
-        sim.pad_threshold = 50.4
-        
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.0706, 4.77
+        sim.pad_threshold = 54.8
+        if run == 124:
+            sim.counts_per_MeV = 129600.
+
         with open('./raw_viewer/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
             sim.timing_offsets = pickle.load(f)
         for pad in sim.timing_offsets:
@@ -135,7 +136,6 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
     sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type, get_stopping_material(experiment, run))
     adaptive_stopping_power = False
     sim.points_per_bin = 5
-    sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
     sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
     if load_data:
         configure_sim_for_event(sim, experiment, run, event)
