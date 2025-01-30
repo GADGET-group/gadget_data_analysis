@@ -18,6 +18,14 @@ if __name__ == '__main__':
     run_number = int(run_number)
     event_num = int(event_num)
     experiment = 'e21072'
+    if particle_type == '1H':
+        particle_mass = 1
+        recoil_mass = 19
+        recoil_nuclues = '19Ne'
+    elif particle_type == '4He':
+        particle_mass = 4
+        recoil_mass = 16
+        recoil_nuclues = '16O'
 
     
     #MCMC priors
@@ -46,14 +54,15 @@ if __name__ == '__main__':
 
     def get_sim(params):
         E, x, y, z, theta, phi, sigma_xy, sigma_z = params
-        trace_sim = build_sim.create_single_particle_sim(experiment, run_number, event_num, particle_type)
-        trace_sim.initial_energy = E
+        trace_sim = build_sim.create_multi_particle_decay(experiment, run_number, event_num, 
+                                                          [particle_type], [particle_mass],
+                                                          recoil_nuclues, recoil_mass)
+        trace_sim.products[0].initial_energy = E
         trace_sim.initial_point = (x,y,z)
-        trace_sim.theta = theta
-        trace_sim.phi = phi
+        trace_sim.products[0].theta = theta
+        trace_sim.products[0].phi = phi
         trace_sim.sigma_xy = sigma_xy
         trace_sim.sigma_z = sigma_z
-        trace_sim.adaptive_stopping_power = False
         trace_sim.simulate_event()
         #trace_sim.pad_gain_match_uncertainty = 0
         return trace_sim
@@ -120,8 +129,8 @@ if __name__ == '__main__':
 
         x_guess = (E_prior)
         print('initial_guess:', (E_prior.mu, best_point, theta, phi, sigma_guess, sigma_guess))
-        print('starting likelihood maximization')
-        after_optimization = opt.minimize(lambda x: -log_posterior(x), x_guess, args=(direction,True))
+        #print('starting likelihood maximization')
+        #after_optimization = opt.minimize(lambda x: -log_posterior(x), x_guess, args=(direction,True))
 
 
         to_return = [(E_prior.sigma*np.random.randn() + E_prior.mu,

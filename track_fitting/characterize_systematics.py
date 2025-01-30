@@ -418,6 +418,17 @@ for c in counts:
     median_res_frac.append(np.median(peak_residuals_fraction[filter]))
     std_res_frac.append(np.std(peak_residuals_fraction[filter]))
 
+temp = h5file.background_subtract_mode
+h5file.background_subtract_mode='none'
+stds = []
+for evt in evts:
+    pads, traces = h5file.get_pad_traces(evt)
+    for trace in traces:
+        stds.append(np.std(trace[400: 450]))
+h5file.background_subtract_mode = temp
+print('median noise:' np.median(stds))
+print('mean noise:' np.mean(stds))
+
 plt.figure()
 plt.scatter(counts, mean_res, label='mean residuals')
 plt.scatter(counts, median_res, label='median residuals')
