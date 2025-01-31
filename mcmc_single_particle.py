@@ -38,6 +38,9 @@ if __name__ == '__main__':
         
     E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
     E_prior = GaussianVar(E_from_ic, build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic))
+    density_rescale_prior = GaussianVar(1, 0.05)
+    nominal_gas_density = build_sim.get_gas_density(experiment, run_number)
+
     h5file = build_sim.get_rawh5_object(experiment, run_number)
     temp_sim = build_sim.create_single_particle_sim('e21072', run_number, event_num, particle_type)
     x_real, y_real, z_real, e_real = temp_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=temp_sim.traces_to_fit)
@@ -53,10 +56,12 @@ if __name__ == '__main__':
     track_direction_vec = track_direction_vec[0]
 
     def get_sim(params):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale = params
         trace_sim = build_sim.create_multi_particle_decay(experiment, run_number, event_num, 
                                                           [particle_type], [particle_mass],
                                                           recoil_nuclues, recoil_mass)
+        for sim in trace_sim.sims:
+            sim.load_srim_table(sim.particle, sim.material, nominal_gas_density*density_scale)
         trace_sim.products[0].initial_energy = E
         trace_sim.initial_point = (x,y,z)
         trace_sim.products[0].theta = theta
@@ -76,7 +81,7 @@ if __name__ == '__main__':
         return to_return/len(trace_sim.pads_to_sim)#trace_sim.num_trace_bins#(2.355*shaping_time*clock_freq)
 
     def log_priors(params, direction):
-        E, x, y, z, theta, phi, sigma_xy, sigma_z = params
+        E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale = params
         #uniform priors
         if x**2 + y**2 > 40**2:
             return -np.inf
@@ -86,12 +91,14 @@ if __name__ == '__main__':
             return -np.inf
         if sigma_z < sigma_min or sigma_z > sigma_max:
             return -np.inf
+        if density_scale < 0:
+            return -np.inf
         #require particle to be within 90 degrees of track axis
         vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
         if np.dot(vhat, direction*track_direction_vec) < 0 or theta > np.pi or theta < 0 or np.abs(phi)>np.pi:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
-        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta)))
+        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta))) + density_rescale_prior.log_likelihood(density_scale)
 
     def log_posterior(params, direction, print_out=False):
         to_return = log_priors(params, direction)
@@ -106,7 +113,7 @@ if __name__ == '__main__':
     fit_start_time = time.time()
     nwalkers = 200
     steps = 500
-    ndim = 8
+    ndim = 9
 
     def get_init_walker_pos(direction):
         #initialize E per priors
@@ -140,6 +147,7 @@ if __name__ == '__main__':
                             min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
                             min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
                             sigma_guess + np.random.randn()*pos_ball_size, sigma_guess + np.random.randn()*pos_ball_size,
+                            density_rescale_prior.mu + np.random.randn()*density_rescale_prior.sigma
                             ) for w in range(nwalkers)]
         # for p in to_return:
         #     lp = log_posterior(p)
