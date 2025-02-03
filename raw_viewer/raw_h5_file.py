@@ -370,7 +370,7 @@ class raw_h5_file:
             return 0, 0, 0
         track_center, vv = self.get_track_axis(event_number)
         track_direction = vv[0]/np.sqrt(np.sum(vv[0]*vv[0]))
-        angle = np.arctan(np.sqrt(track_direction[0]**2 + track_direction[1]**2)/np.abs(track_direction[2]))
+        angle = np.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),np.abs(track_direction[2]))
 
         first_point, last_point, rdotv_small, rdotv_big = None, None, np.inf, -np.inf
         for x,y,z in zip(xs, ys, zs):
