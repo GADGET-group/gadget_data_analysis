@@ -1,4 +1,4 @@
-load_previous_fit = False
+load_previous_fit = True
 
 import time
 import multiprocessing
@@ -426,8 +426,8 @@ for evt in evts:
     for trace in traces:
         stds.append(np.std(trace[400: 450]))
 h5file.background_subtract_mode = temp
-print('median noise:' np.median(stds))
-print('mean noise:' np.mean(stds))
+print('median noise:', np.median(stds))
+print('mean noise:', np.mean(stds))
 
 plt.figure()
 plt.scatter(counts, mean_res, label='mean residuals')

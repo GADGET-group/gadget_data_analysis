@@ -210,11 +210,18 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
         best_params = samples[np.argmax(ll)]
     else:
         best_params = samples[select_model]
-    E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params
+    E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale = best_params
 
-    trace_sim = create_single_particle_sim('e21072', run, event, particle)
-    trace_sim.initial_energy = E
-    trace_sim.initial_point = (x,y,z)
+    if particle == '1H':
+        recoil_name = '19Ne'
+        recoil_mass = 19
+        product_mass = 1
+
+    trace_sim = create_multi_particle_decay('e21072', run, event, [particle], [product_mass], recoil_name, recoil_mass)
+    for sim in trace_sim.sims:
+        sim.load_srim_table(sim.particle, sim.material, sim.gas_density*density_scale)
+    trace_sim.products[0].initial_energy = E
+    trace_sim.initial_point = trace_sim.products[0].initial_point = (x,y,z)
     trace_sim.sigma_xy = sigma_xy
     trace_sim.sigma_z = sigma_z
     trace_sim.theta = theta
