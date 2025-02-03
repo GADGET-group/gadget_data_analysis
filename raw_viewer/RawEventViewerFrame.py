@@ -396,6 +396,8 @@ class RawEventViewerFrame(ttk.Frame):
     def get_processed_event_mask(self):
         '''
         Returns a mask that can be used to select events in the processed data set
+
+        TODO: calculate angles from dz and dxy
         '''
         veto_maxs = self.max_veto_counts
 

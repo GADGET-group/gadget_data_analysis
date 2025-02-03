@@ -360,96 +360,35 @@ class raw_h5_file:
     
     def get_track_length_angle(self, event_number):
         '''
-        1. Remove all points which are less than threshold sigma above background
-        2. Find max distance between any of the two remaining points.
-        Should replace this with something more robust in the future. This will NOT
-        well work if outlier removal and background subtraction haven't been performed.
+        1. Determin track principle axis, and use this to get azimuthal angle
+        2. Find point furthest along this axis, in each direction
 
         Returns: length, angle from z-axis in radians
         '''
         xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
-        if len(xs) == 0:
+        if len(xs) < 2:
             return 0, 0, 0
-        points = np.vstack((xs, ys, zs)).T
-        #print(points)
-        #find max distance using this algorithm
-        #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
-        try:
-            hull = scipy.spatial.ConvexHull(points)
-            points = points[hull.vertices,:]
-        except: #qhull will fail on colinear points, so just brute force if that's the case
-            pass
-        #find the two most distant points
-        hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
-        indices = np.unravel_index(np.argmax(hdist, axis=None), hdist.shape)
-        p1 = points[indices[0]]
-        p2 = points[indices[1]]
-        #print(p1, p2)
-        dist = hdist[indices]
-        dr = p1-p2
-        if dr[2] != 0:
-            angle = np.abs(np.arctan(np.sqrt(dr[0]**2 + dr[1]**2)/dr[2]))
-        else:
-            angle = np.radians(90)
+        track_center, vv = self.get_track_axis(event_number)
+        track_direction = vv[0]/np.sqrt(np.sum(vv[0]*vv[0]))
+        angle = np.arctan(np.sqrt(track_direction[0]**2 + track_direction[1]**2)/np.abs(track_direction[2]))
+
+        first_point, last_point, rdotv_small, rdotv_big = None, None, np.inf, -np.inf
+        for x,y,z in zip(xs, ys, zs):
+            xyz = np.array([x,y,z])
+            rbar = xyz - track_center
+            rdotv = np.dot(rbar, track_direction)
+            if rdotv < rdotv_small:
+                rdotv_small = rdotv
+                first_point = xyz
+            if rdotv > rdotv_big:
+                rdotv_big = rdotv
+                last_point  = xyz
+        
+        dr = last_point - first_point
         return np.sqrt(dr[0]**2 + dr[1]**2), dr[2], angle
 
     
-    def determine_pad_backgrounds(self, num_background_bins=200, mode='background'):
-        '''
-        Assume the first num_background_bins of each pad's data only include background.
-        Determine average value of this pad and stddev across all events in which the pad fired.
-        Store this information in a dictionairy member variable.
-
-        Pad background will be stored in self.pad_backgrounds, which is a dictionairy indexed by pad
-        number which stores (background average, background standard deviation) pairs.
-        
-        Mode = background: determine average number of counts in background region
-        Mode = average: determine average number of counts above background (if background subtraction is turned on)
-        '''
-        first, last = self.get_event_num_bounds()
-
-        #compute average
-        running_averages = {}
-        for event_num in range(first, last+1):
-            if mode == 'background':
-                self.h5_file['get']['evt%d_data'%event_num]
-            elif mode == 'average':
-                event_data = self.get_data(event_num)#
-            for line in event_data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
-                if pad not in running_averages:
-                    running_averages[pad] = (0,0) #running everage, events processed
-                if mode == 'background':
-                    ave_this = np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:self.num_background_bins[1]+FIRST_DATA_BIN])
-                elif mode == 'average':
-                    ave_this = np.average(line[FIRST_DATA_BIN:511+FIRST_DATA_BIN])
-                ave_last, n = running_averages[pad]
-                running_averages[pad] = ((n*ave_last + ave_this)/(n+1), n+1)
-        #compute standard deviation
-        running_stddev = {}
-        for event_num in range(first, last+1):
-            event_data = self.h5_file['get']['evt%d_data'%event_num]
-            for line in event_data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
-                if pad not in running_stddev:
-                    running_stddev[pad] = (0,0)
-                std_this = np.std(line[FIRST_DATA_BIN:num_background_bins+FIRST_DATA_BIN])
-                std_last, n = running_stddev[pad]
-                running_stddev[pad] = ((n*std_last + std_this)/(n+1), n+1)
-        self.pad_backgrounds = {}
-        for pad in running_averages:
-            self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
-    
+   
     def get_histogram_arrays(self):
         max_veto_counts_list, pads_railed_list, angle_hist, counts_hist, dxy_hist, dz_hist = [], [], [], [], [], []
         first, last = self.get_event_num_bounds()
