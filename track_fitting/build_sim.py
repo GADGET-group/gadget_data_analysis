@@ -198,8 +198,8 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     trace_sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
     return trace_sim
 
-def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
-    filename='run%d_mcmc/event%d/%s.h5'%(run, event, mcmc_name)
+def load_single_particle_mcmc_result(run:int, event:int, particle='1H', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
+    filename='run%d_mcmc/m0.07_c4.77/event%d/%s.h5'%(run, event, mcmc_name)
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     
@@ -210,7 +210,8 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
         best_params = samples[np.argmax(ll)]
     else:
         best_params = samples[select_model]
-    E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale = best_params
+    E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params #,density_scale
+    density_scale = 1
 
     if particle == '1H':
         recoil_name = '19Ne'
@@ -224,8 +225,8 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
     trace_sim.initial_point = trace_sim.products[0].initial_point = (x,y,z)
     trace_sim.sigma_xy = sigma_xy
     trace_sim.sigma_z = sigma_z
-    trace_sim.theta = theta
-    trace_sim.phi = phi
+    trace_sim.products[0].theta = theta
+    trace_sim.products[0].phi = phi
     #trace_sim.other_systematics = c
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
     trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)

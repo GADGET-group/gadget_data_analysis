@@ -151,7 +151,7 @@ class SimGui(ttk.Frame):
         self.sim.gui_after_sim()
 
     def update_entries_to_reflect_sim(self):
-        self.sim.gui_after_sim()
+        #self.sim.gui_after_sim()
         for name, entry in zip(self.param_names, self.param_entries):
             entry.delete(0, tk.END)
             entry.insert(0, str(self.sim.__dict__[name]))
