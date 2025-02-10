@@ -222,7 +222,10 @@ class SimGui(ttk.Frame):
                 entry.delete(0, tk.END)
                 entry.insert(0, v)
             self.load_entries_to_sim()
-            to_return = -self.sim.log_likelihood()
+            residuals = self.sim.get_residuals()
+            residuals = np.array([residuals[p] for p in residuals])
+            to_return = np.sum(residuals*residuals)            
+            # to_return = -self.sim.log_likelihood()
             if np.isnan(to_return):
                 to_return = np.inf
             print(vals, to_return)
