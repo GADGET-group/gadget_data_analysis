@@ -22,7 +22,7 @@ if __name__ == '__main__':
     event_num = int(event_num)
     #folder = '/mnt/analysis/e21072/gastest_h5_files/'
     #folder = '../../shared/Run_Data/'
-    folder = '/mnt/daqtesting/protondet2024/'
+    folder = '/egr/research-tpc/dopferjo/'
 
     experiment = 'e24joe'
 
@@ -158,7 +158,7 @@ if __name__ == '__main__':
 
 
     # We'll track how the average autocorrelation time estimate changes
-    directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
+    directory = 'run%d_dalpha_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 

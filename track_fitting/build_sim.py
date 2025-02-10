@@ -23,10 +23,14 @@ read_data_mode = 'adjacent'
 #detector settings
 #list of 2 point calibrations, inexed by experiment and then run number.
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
-calibration_points = {'e21072': #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
-                        {124:((183193, 86431),(1.623, 0.779))},
-                    'e24joe':
-                        {124:((5.4e5, 6.9e5),(6.288, 8.7849))}
+calibration_points = {
+                    'e21072':{ #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
+                        124:((183193, 86431),(1.623, 0.779))
+                        },
+                    'e24joe':{
+                        342:((4.8e5, 6.3e5),(6.288, 8.7849)),
+                        124:((4.8e5, 6.3e5),(6.288, 8.7849))
+                        }
                     }
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
@@ -45,7 +49,7 @@ def get_detector_E_sigma(experiment:str, run:int, MeV):
         
     if experiment == 'e24joe':
         #using same process as e21072 for now
-        #TODO change this to better reflect the likely larger sigma in e24joe
+        #TODO: change this to better reflect the likely larger sigma in e24joe
         # if run == 124:
         return (5631/86431)*0.779*(MeV/0.779)**0.5
 
@@ -71,7 +75,7 @@ def get_zscale(experiment:str, run:int):
     if experiment == 'e24joe':
         return 0.65 #TODO: use correct value
         clock_freq = 50e6 #Hz, from e24joe config file on mac minis
-        drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+        drift_speed = 60.9*1e6 #mm/s, taken from chart from CERN 84-08 'Drift and Diffusion of Electrons in Gases: A Compilation' although it underpredicts the drift speed of electrons in P10 at 860 torr compared to what Ruchi finds in her paper
         return drift_speed/clock_freq
 
 #raw h5 data location and processing settings
@@ -84,7 +88,10 @@ def get_raw_h5_path(experiment:str, run:int):
             return "/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447.h5"
             return "/mnt/daqtesting/protondet2024/h5/" + ('run_%04d.h5'%run)
         if socket.gethostname() == 'tpcgpu':
-            return '/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5'
+            if run == 0 or run ==124: #TODO: Fix the earlierst MCMC run so that it isn't associated with run 124 arbitrarily
+                return '/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5'
+            else:
+                return '/egr/research-tpc/dopferjo/' + ('run_%04d.h5'%run)
 
 def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
     '''
@@ -107,8 +114,8 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run),
                                     zscale=get_zscale(experiment, run),
                                     flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
-        h5file.background_subtract_mode='all data'
-        h5file.data_select_mode='smart'
+        h5file.background_subtract_mode='smart'
+        h5file.data_select_mode='all data'
         h5file.ic_counts_threshold = 9
         h5file.remove_outliers=True
         h5file.near_peak_window_width = 50
@@ -212,6 +219,8 @@ def create_da_sim(experiment:str, run:int, event:int):
     to_return.pad_threshold = alpha1.pad_threshold
     to_return.pad_gain_match_uncertainty = alpha1.pad_gain_match_uncertainty
     to_return.other_systematics = alpha1.other_systematics
+    to_return.zscale = alpha1.zscale
+    to_return.gas_density = get_gas_density('e24joe',124)
     return to_return
     
 

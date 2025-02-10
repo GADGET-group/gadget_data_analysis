@@ -28,14 +28,14 @@ start_time = time.time()
 m_guess, c_guess = 0,25 #guesses for pad gain match uncertainty and other systematics
 
 run_number = 124
-experiment = 'e21072'
+experiment = 'e24joe'
 pickle_fname = '%s_run%d_results_objects_m%d_c%d.dat'%(experiment,run_number, m_guess, c_guess)
 
-h5file = build_sim.get_rawh5_object('e21072', run_number)
+h5file = build_sim.get_rawh5_object(experiment, run_number)
 
 def fit_event(run, event, particle_type, trim_threshold=50, return_key=None, 
               return_dict=None, debug_plots=False):
-    trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
+    trace_sim = build_sim.create_single_particle_sim(experiment, run, event, particle_type)
     if trace_sim.num_trace_bins > 100:
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
         return 
