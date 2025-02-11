@@ -35,10 +35,12 @@ class raw_h5_file:
         self.chnls_to_pad = {} #maps tuples of (asad, aget, channel) to pad number
         self.chnls_to_xy_coord = {} #maps tuples of (asad, aget, channel) to (x,y) coordinates in mm
         self.chnls_to_xy_index = {}
+        self.pad_to_chnl = {}
         for line in self.flat_lookup:
             chnls = tuple(line[0:4])
             pad = line[4]
             self.chnls_to_pad[chnls] = pad
+            self.pad_to_chnl[pad] = chnls
             self.chnls_to_xy_coord[chnls] = self.padxy[pad]
             self.chnls_to_xy_index[chnls] = self.pad_to_xy_index[pad]
         #round xy to nearest 10nths place to avoid issues with different floating point formats
@@ -531,11 +533,11 @@ class raw_h5_file:
         def onclick(event):
             x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
             pad = self.xy_index_to_pad[(x,y)]
-            print('x,y,pad:', x,y,pad)
-            plt.figure()
-            plt.title('pad %d'%pad)
-            plt.plot(trace_dict[pad])
-            plt.show(block=False)
+            if pad in trace_dict:
+                plt.figure()
+                plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
+                plt.plot(trace_dict[pad])
+                plt.show(block=False)
 
         fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
