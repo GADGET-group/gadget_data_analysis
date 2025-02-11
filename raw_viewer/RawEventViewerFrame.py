@@ -241,6 +241,11 @@ class RawEventViewerFrame(ttk.Frame):
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
+        misc_tools_frame = ttk.LabelFrame(self, text='Miscellaneous Tools')
+        std_noise_button = ttk.Button(misc_tools_frame, text='background stddev', command=self.show_noise_stddev)
+        std_noise_button.grid()
+        misc_tools_frame.grid()
+
         #sync setting with GUI
         self.entry_changed(None) 
         self.check_state_changed()
@@ -392,6 +397,9 @@ class RawEventViewerFrame(ttk.Frame):
     def show_xy_proj(self):
         event_number = int(self.event_number_entry.get())
         self.data.show_2d_projection(event_number, False)
+
+    def show_noise_stddev(self):
+        pass
     
     def get_processed_event_mask(self):
         '''

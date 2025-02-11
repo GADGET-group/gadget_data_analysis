@@ -444,6 +444,23 @@ plt.legend()
 plt.show()
 
 
+plt.figure()
+bins=np.linspace(3,6,30)
+e_from_ic = np.array([build_sim.get_energy_from_ic('e21072', 124,e) for e in evts])  
+plt.hist(e_from_ic[cats==6], bins=bins, label='4434 keV alpha + 1108 16O recoil', alpha=0.5)
+plt.hist(e_from_ic[cats==7], bins=bins, label='4434 keV alpha w/o recoil from cathode', alpha=0.5)
+plt.legend()
+plt.xlabel('energy from IC (MeV)')
+plt.figure()
+e_from_ic = np.array([build_sim.get_energy_from_ic('e21072', 124,e) for e in evts])  
+plt.hist(Es[cats==6], bins=bins, label='4434 keV alpha + 1108 16O recoil', alpha=0.5)
+plt.hist(Es[cats==7], bins=bins, label='4434 keV alpha w/o recoil from cathode', alpha=0.5)
+plt.legend()
+plt.xlabel('alpha energy from fit (MeV)')
+plt.show()
+
+
+
 for sim in trace_sims:
     sim.pad_gain_match_uncertainty = pad_gain_match_uncertainty
     sim.other_systematics = other_systematics
