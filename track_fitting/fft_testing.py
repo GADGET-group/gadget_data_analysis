@@ -13,7 +13,7 @@ import srim_interface
 
 
 #configure h5 file interface
-if False:
+if True:
     raw_file = raw_h5_file.raw_h5_file(file_path='/mnt/analysis/e21072/gastest_h5_files/run_0368.h5',
                                         zscale=0.78125,
                                         flat_lookup_csv='../raw_viewer/channel_mappings/flatlookup2cobos.csv')

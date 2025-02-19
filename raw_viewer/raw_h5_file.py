@@ -9,6 +9,11 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
+import cupy as cp
+import cupyx.scipy.special as cpspecial
+
+
+
 import skimage.measure
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
@@ -313,21 +318,30 @@ class raw_h5_file:
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
         return x,y, t*self.zscale ,e
     
-    def get_track_axis(self, event, threshold=None, return_all_svd_results=False):
+    def get_track_axis(self, event=None, threshold=None, return_all_svd_results=False, xyze=None, return_np=True):
         '''
         Uses SVD on all points above some threshold to get track direction.
         Returns point, unit vector in track direction.
         If threshold==None, uses track length ic threshold.
+        
+        Either event number must be passed, or xyze which contans tuple of cupy arrays of 
+        xyze points. This can be useful to avoid transfering data to GPU twice
+
+        return_np specifies if data should be moved back to cpu from gpu 
         '''
         if threshold == None:
             threshold = self.length_counts_threshold
-        x,y,z,e = self.get_xyze(event, threshold, False)
-        points = np.concatenate((x[:, np.newaxis], 
-                       y[:, np.newaxis], 
-                       z[:, np.newaxis]), 
-                      axis=1)
+        if type(event) != type(None):
+            x,y,z,e = self.get_xyze(event, threshold, False)
+            x, y,z,e = cp.array(x), cp.array(y), cp.array(z), cp.array(e)
+        else:
+            x, y, z, e = xyze
+        points = cp.concatenate((x[:, cp.newaxis], y[:, cp.newaxis], z[:, cp.newaxis]), axis=1)
         points_mean = points.mean(axis=0)
-        uu, dd, vv = np.linalg.svd(points - points_mean)
+        uu, dd, vv = cp.linalg.svd(points - points_mean)
+        if return_np:
+            points_mean = cp.asnumpy(points_mean)
+            uu, dd, vv = cp.asnumpy(uu), cp.asnumpy(dd), cp.asnumpy(vv)
         if return_all_svd_results:
             return points_mean, uu, dd, vv
         else:
@@ -364,7 +378,7 @@ class raw_h5_file:
         event = self.get_data(event_number)
         return len(event)
     
-    def get_track_length_angle(self, event_number):
+    def get_track_length_angle(self, event_number, return_np=True):
         '''
         1. Determin track principle axis, and use this to get azimuthal angle
         2. Find point furthest along this axis, in each direction
@@ -374,25 +388,25 @@ class raw_h5_file:
         xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
         if len(xs) < 2:
             return 0, 0, 0
-        track_center, vv = self.get_track_axis(event_number)
-        track_direction = vv[0]/np.sqrt(np.sum(vv[0]*vv[0]))
-        angle = np.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),np.abs(track_direction[2]))
+        #move points to GPU
+        xs, ys, zs, es = cp.array(xs), cp.array(ys), cp.array(zs), cp.array(es)
+        track_center, vv = self.get_track_axis(xyze=(xs, ys, zs, es), return_np=False)
+        track_direction = vv[0]/cp.sqrt(np.sum(vv[0]*vv[0]))
+        angle = cp.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),cp.abs(track_direction[2]))
 
-        first_point, last_point, rdotv_small, rdotv_big = None, None, np.inf, -np.inf
-        for x,y,z in zip(xs, ys, zs):
-            xyz = np.array([x,y,z])
-            rbar = xyz - track_center
-            rdotv = np.dot(rbar, track_direction)
-            if rdotv < rdotv_small:
-                rdotv_small = rdotv
-                first_point = xyz
-            if rdotv > rdotv_big:
-                rdotv_big = rdotv
-                last_point  = xyz
-        
+        points = cp.concatenate((xs[:, cp.newaxis], 
+                       ys[:, cp.newaxis], 
+                       zs[:, cp.newaxis]), 
+                      axis=1)
+        rbar = points - track_center
+        rdotv = cp.dot(rbar, track_direction)
+        first_point = points[cp.argmin(rdotv)]
+        last_point = points[cp.argmax(rdotv)]
         dr = last_point - first_point
-        return np.sqrt(dr[0]**2 + dr[1]**2), dr[2], angle
-
+        dxy, dz = cp.sqrt(dr[0]**2 + dr[1]**2), dr[2]
+        if return_np:
+            dxy, dz, angle = cp.asnumpy(dxy), cp.asnumpy(dz), cp.asnumpy(angle)
+        return dxy, dz, angle
     
    
     def get_histogram_arrays(self):

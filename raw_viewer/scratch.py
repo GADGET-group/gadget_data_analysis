@@ -7,7 +7,7 @@ from tqdm import tqdm
 from track_fitting import build_sim
 
 run_number = 124
-processed_directory = '/egr/research-tpc/shared/Run_Data/run_0124_raw_viewer/run_0124smart_20_length_thresh'
+
 h5file = build_sim.get_rawh5_object('e21072', run_number)
 zscale = h5file.zscale
 
@@ -22,18 +22,22 @@ dzs = dts*zscale
 ranges = np.sqrt(dzs**2 + dxys**2)
 angles = np.arctan2(dzs, dxys)
 
-#1500 keV protons
-if False:
-    selected_event_mask = (ranges > 35) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
-    range_histogram_bins = np.linspace(35,65,10)
-#4.4 MeV alpha from cathode
-if False:
-    selected_event_mask = (ranges > 25) & (ranges < 50) & (counts > 4.5e5) & (counts < 5.8e5)
-    range_histogram_bins = np.linspace(25,45,10)
-#4.4 MeV alpha NOT from cathode
-if True:
-    selected_event_mask = (ranges > 30) & (ranges < 55) & (counts > 5.9e5) & (counts < 7e5)
-    range_histogram_bins = np.linspace(30,55,10)
+if run_number == 124:
+    processed_directory = '/egr/research-tpc/shared/Run_Data/run_0124_raw_viewer/run_0124smart_20_length_thresh'
+    #1500 keV protons
+    if False:
+        selected_event_mask = (ranges > 35) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
+        range_histogram_bins = np.linspace(35,65,10)
+    #4.4 MeV alpha from cathode
+    if False:
+        selected_event_mask = (ranges > 25) & (ranges < 50) & (counts > 4.5e5) & (counts < 5.8e5)
+        range_histogram_bins = np.linspace(25,45,10)
+    #4.4 MeV alpha NOT from cathode
+    if True:
+        selected_event_mask = (ranges > 30) & (ranges < 55) & (counts > 5.9e5) & (counts < 7e5)
+        range_histogram_bins = np.linspace(30,55,10)
+elif run_number == 212:
+    processed_directory = '/egr/research-tpc/shared/Run_Data/run_0212_raw_viewer/run_0212smart'
 
 first_event, last_event = h5file.get_event_num_bounds()
 selected_events =  np.nonzero(selected_event_mask)[0] + first_event
