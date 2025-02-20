@@ -9,23 +9,15 @@ import sys
 #import raw_h5_file
 
 import srim_interface
-
+from track_fitting import build_sim
 
 
 #configure h5 file interface
 if True:
-    raw_file = raw_h5_file.raw_h5_file(file_path='/mnt/analysis/e21072/gastest_h5_files/run_0368.h5',
-                                        zscale=0.78125,
-                                        flat_lookup_csv='../raw_viewer/channel_mappings/flatlookup2cobos.csv')
-    raw_file.background_subtract_mode='fixed window'
-    raw_file.num_background_bins = (400, 500)
-    raw_file.remove_outliers = True
-    raw_file.data_select_mode = 'near peak'
-    raw_file.near_peak_window_width = 50
-    raw_file.require_peak_within = (-np.inf, np.inf)
+    raw_file = build_sim.get_rawh5_object('e21072', 124)
 
     #show event in euclidian space
-    image = raw_file.get_2d_image(5)
+    image = raw_file.get_2d_image(108)
     plt.figure()
     plt.imshow(image)
 
