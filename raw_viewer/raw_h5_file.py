@@ -211,7 +211,7 @@ class raw_h5_file:
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
         # To save with a delimiter (e.g., comma)
-        np.savetxt('data_comma.txt', data, delimiter=',')
+        # np.savetxt('data_comma.txt', data, delimiter=',')
 
         return data
 
