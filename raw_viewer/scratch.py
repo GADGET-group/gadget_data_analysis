@@ -3,11 +3,12 @@ import os
 import numpy as np
 import cupy as cp
 import matplotlib.pylab as plt
+import matplotlib.colors
 from tqdm import tqdm
 
 from track_fitting import build_sim
 
-run_number = 124
+run_number = 212
 if run_number == 124:
     processed_directory = '/egr/research-tpc/shared/Run_Data/run_0124_raw_viewer/run_0124smart'
 elif run_number == 212:
@@ -33,7 +34,7 @@ if run_number == 124:
     #1500 keV protons
     if True:
         selected_event_mask = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
-        range_histogram_bins = np.linspace(35,65,20)
+        range_histogram_bins = np.linspace(31,70,25)
     #4.4 MeV alpha from cathode
     if False:
         selected_event_mask = (ranges > 25) & (ranges < 50) & (counts > 4.5e5) & (counts < 5.8e5)
@@ -46,12 +47,14 @@ elif run_number == 212:
     #1500 keV protons
     if True:
         selected_event_mask = (ranges > 31) & (ranges < 70) & (counts > 3e5) & (counts < 3.6e5)
-        range_histogram_bins = np.linspace(35,65,20)
+        range_histogram_bins = np.linspace(31,70,25)
 
 
 first_event, last_event = h5file.get_event_num_bounds()
 selected_events =  np.nonzero(selected_event_mask)[0] + first_event
 
+
+all_ranges = np.array(ranges, copy=True)
 ranges = ranges[selected_event_mask]
 
 track_centers, principle_axes, variances_along_axes = [], [], []
@@ -147,5 +150,34 @@ tslice = 0.025
 for t in np.arange(tslice, 0.101, tslice):     
     plt.hist(ranges[theta_mask & (tsfew<t)&(tsfew > t-tslice)], label='%d - %d ms'%(int((t-tslice)*1000), int(t*1000)), bins=range_histogram_bins, alpha=(0.5+0.5*(0.1-t)/0.1))
 plt.legend()
+
+plt.figure()
+plt.hist2d(tsfew[tsfew>0], counts[selected_event_mask][tsfew>0], bins=30)
+plt.xlabel('time since first event in decay window (s)')
+plt.ylabel('adc counts')
+plt.colorbar()
+
+plt.figure()
+plt.title('events >70 ms after first event in decay window')
+hist_mask = (times_since_start_of_window>0.07) & (all_ranges > 0) & (all_ranges<150) 
+plt.hist2d(counts[hist_mask], all_ranges[hist_mask], bins=200, norm=matplotlib.colors.LogNorm())
+plt.ylabel('range (mm)')
+plt.xlabel('adc counts')
+plt.colorbar()
+
+plt.figure()
+plt.title('all selected events (no theta filter)')
+plt.hist2d(tsfew[tsfew>0], np.sqrt(variances_along_axes[:,1][tsfew>0]), bins=100)
+plt.colorbar()
+plt.ylabel('track z width from pca')
+plt.xlabel('time since first event in decay window (s)')
+
+plt.figure()
+#selected events centroid vs time
+rs = np.sqrt(track_centers[:,0]**2 + track_centers[:, 1]**2)
+plt.hist2d(rs[tsfew>0], tsfew[tsfew>0], bins=20)
+plt.colorbar()
+plt.xlabel('track centroid distance from beam axis (mm)')
+plt.ylabel('time since first event in decay window (s)')
 
 plt.show(block=False)
