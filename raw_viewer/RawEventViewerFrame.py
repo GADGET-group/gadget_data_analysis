@@ -229,6 +229,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.near_peak_window_entry.bind('<FocusOut>', self.entry_changed)
         self.near_peak_window_entry.grid(row=5, column=1)
         self.settings_entry_map['near_peak_window_width']=self.near_peak_window_entry
+
         ttk.Label(settings_frame, text='require peak between:').grid(row=6, column=0)
         self.peak_first_allowed_bin_entry, self.peak_last_allowed_bin_entry = ttk.Entry(settings_frame),ttk.Entry(settings_frame)
         self.peak_first_allowed_bin_entry.grid(row=6, column=1)
@@ -239,6 +240,20 @@ class RawEventViewerFrame(ttk.Frame):
         self.peak_last_allowed_bin_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['peak_first_allowed_bin']=self.peak_first_allowed_bin_entry
         self.settings_entry_map['peak_last_allowed_bin']=self.peak_last_allowed_bin_entry
+        
+        ttk.Label(settings_frame, text='smart: num bins away to check').grid(row=7, column = 0)
+        self.smart_bins_away_to_check_entry = ttk.Entry(settings_frame)
+        self.smart_bins_away_to_check_entry.insert(0, '3')
+        self.smart_bins_away_to_check_entry.grid(row=7, column=1)
+        self.smart_bins_away_to_check_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['smart_bins_away_to_check'] = self.smart_bins_away_to_check_entry
+        ttk.Label(settings_frame, text='smart: num points for baseline to each side of peak').grid(row=8, column=0)
+        self.smart_num_background_bins_entry = ttk.Entry(settings_frame)
+        self.smart_num_background_bins_entry.insert(0, '1')
+        self.smart_num_background_bins_entry.grid(row=8, column=1)
+        self.settings_entry_map['smart_num_background_bins'] = self.smart_bins_away_to_check_entry
+        self.smart_num_background_bins_entry.bind('<FocusOut>', self.entry_changed)
+
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
@@ -507,6 +522,8 @@ class RawEventViewerFrame(ttk.Frame):
         self.h5file.background_convolution_kernel = np.ones(r_include*2+1)
         self.h5file.background_convolution_kernel[r_include-r_exclude:r_include+r_exclude+1] = 0
         self.h5file.background_convolution_kernel /= np.sum(self.h5file.background_convolution_kernel)
+        self.h5file.smart_bins_away_to_check = int(self.smart_bins_away_to_check_entry.get())
+        self.h5file.num_smart_background_ave_bins = int(self.smart_num_background_bins_entry.get())
 
         #update zscale, and recalculate range and angles with new z_scale, if it is different than before
         zscale_old = self.h5file.zscale

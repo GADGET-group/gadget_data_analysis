@@ -9,9 +9,14 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
-import cupy as cp
-import cupyx.scipy.special as cpspecial
-
+USE_GPU = True
+if USE_GPU:
+    import cupy as cp
+    import cupyx.scipy.special as cpspecial
+else:
+    cp = np
+    import scipy.special as cpspecial
+    cp.asnumpy = lambda x: x
 
 
 import skimage.measure
@@ -95,6 +100,10 @@ class raw_h5_file:
         #'near peak' will only use data within some window of the peak of each trace
         self.data_select_mode = 'all data' 
         self.near_peak_window_width = 100 #+/- time bins to include
+        #number of bins past the start/end of trace to use when computing baseline
+        self.num_smart_background_ave_bins = 5 
+        #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
+        self.smart_bins_away_to_check = 3
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -218,7 +227,8 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-
+        #for smart baseline subtraction, zeroing traces outside thepeak window is handled by baseline subtraction
+        
         return data
 
     def calculate_background(self, trace):
@@ -238,11 +248,14 @@ class raw_h5_file:
             return np.zeros(len(trace))
         elif self.background_subtract_mode == 'smart':
             peak_index = np.argmax(trace)
-            #find  start of the peak, defined as where the a bin near_peak_window_width away
+            #zero traces with peaks outside specified region by returing the trace as the baseline
+            if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
+                return trace
+            #find  start of the peak, defined as where the going bin smart_bins_away_to_check
             #is no longer at least ic_counts_threshold below the current bin
             i = peak_index
             while i>0:
-                j = max(0, i - self.near_peak_window_width)
+                j = max(0, i - self.smart_bins_away_to_check)
                 if trace[i] < trace[j] + self.ic_counts_threshold:
                     break
                 i -= 1
@@ -250,14 +263,14 @@ class raw_h5_file:
             #find end
             i = peak_index
             while i < len(trace) - 1:
-                j = min(len(trace) - 1, i + self.near_peak_window_width)
+                j = min(len(trace) - 1, i + self.smart_bins_away_to_check)
                 if trace[i] < trace[j] + self.ic_counts_threshold:
                     break
                 i += 1
             peak_end = i
-            #fit a line through the points just outside the peak region
-            xs = np.concatenate([np.arange(max(0, peak_start - self.near_peak_window_width), peak_start),
-                                           np.arange(peak_end, min(peak_end + self.near_peak_window_width, len(trace)))])
+            #fit a line through the points just outside the peak regio
+            xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
+                                           np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
             slope, offset = np.polyfit(xs, ys, 1)
             #baseline will be the trace except in the peak region,
