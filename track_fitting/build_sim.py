@@ -82,6 +82,20 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.num_background_bins=(160, 250) #not used for "smart" background subtraction
         h5file.zscale = get_zscale(experiment, run)
         return h5file
+    if experiment == 'e24joe':
+        h5file = raw_h5_file(file_path='/egr/research-tpc/dopferjo/',
+                                    zscale=get_zscale(experiment, run),
+                                    flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
+        h5file.background_subtract_mode='fixed window'
+        h5file.data_select_mode='near peak' 
+        h5file.remove_outliers=True
+        h5file.near_peak_window_width = 50
+        h5file.require_peak_within= (-np.inf, np.inf)
+        h5file.ic_counts_threshold = 25
+        h5file.length_counts_threshold = 100
+        h5file.num_background_bins=(400, 500) #not used for "smart" background subtraction
+        h5file.zscale = get_zscale(experiment, run)
+        return h5file
     assert False
     
 def apply_config_to_object(config_file, object):

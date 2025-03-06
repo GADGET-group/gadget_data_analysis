@@ -1,4 +1,4 @@
-load_previous_fit = True
+load_previous_fit = False
 
 import time
 import multiprocessing
@@ -18,7 +18,7 @@ start_time = time.time()
 
 
 run_number = 124
-experiment = 'e21072'
+experiment = 'e24joe'
 
 m_guess, c_guess = 0.1004, 22.5
 use_likelihood = False #if false, uses least squares
@@ -36,7 +36,7 @@ else:
             pickle_fname = '%s_run%d_energy_free.dat'%(experiment,run_number)
     
 
-h5file = build_sim.get_rawh5_object('e21072', run_number)
+h5file = build_sim.get_rawh5_object(experiment, run_number)
 
 
 
@@ -51,7 +51,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         trace_sim = build_sim.create_multi_particle_decay(experiment, run, event, [particle_type], [product_mass], recoil_name, recoil_mass)
         particle = trace_sim.sims[0]
     else:
-        trace_sim = build_sim.create_single_particle_sim('e21072', run, event, particle_type)
+        trace_sim = build_sim.create_single_particle_sim(experiment, run, event, particle_type)
         particle = trace_sim
     if trace_sim.num_trace_bins > 100:
         print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
@@ -446,13 +446,13 @@ plt.show()
 
 plt.figure()
 bins=np.linspace(3,6,30)
-e_from_ic = np.array([build_sim.get_energy_from_ic('e21072', 124,e) for e in evts])  
+e_from_ic = np.array([build_sim.get_energy_from_ic(experiment, 124,e) for e in evts])  
 plt.hist(e_from_ic[cats==6], bins=bins, label='4434 keV alpha + 1108 16O recoil', alpha=0.5)
 plt.hist(e_from_ic[cats==7], bins=bins, label='4434 keV alpha w/o recoil from cathode', alpha=0.5)
 plt.legend()
 plt.xlabel('energy from IC (MeV)')
 plt.figure()
-e_from_ic = np.array([build_sim.get_energy_from_ic('e21072', 124,e) for e in evts])  
+e_from_ic = np.array([build_sim.get_energy_from_ic(experiment, 124,e) for e in evts])  
 plt.hist(Es[cats==6], bins=bins, label='4434 keV alpha + 1108 16O recoil', alpha=0.5)
 plt.hist(Es[cats==7], bins=bins, label='4434 keV alpha w/o recoil from cathode', alpha=0.5)
 plt.legend()
