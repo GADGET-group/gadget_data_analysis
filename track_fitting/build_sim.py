@@ -75,7 +75,8 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.background_subtract_mode='smart'
         h5file.data_select_mode='all data' 
         h5file.remove_outliers=True
-        h5file.near_peak_window_width = 50
+        h5file.smart_bins_away_to_check = 50
+        h5file.num_smart_background_ave_bins = 50
         h5file.require_peak_within= (-np.inf, np.inf)
         h5file.ic_counts_threshold = 9
         h5file.length_counts_threshold = 20

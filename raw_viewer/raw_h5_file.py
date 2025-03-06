@@ -164,13 +164,14 @@ class raw_h5_file:
             to_copy = []
             for i, line in enumerate(data):
                 chnl_info =  tuple(line[0:4])
-                cobo, asad, channel, *rest = chnl_info
-                pad = self.chnls_to_pad[chnl_info]
-                if (self.cobos == 'all' or cobo in self.cobos) and \
-                        (self.asads == 'all' or asad in self.asads) and \
-                        (self.pads == 'all' or pad in self.pads):
-                    to_copy.append(i)
-            data = np.array(data[to_copy], dtype=float)
+                cobo, asad, *rest = chnl_info
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                    if (self.cobos == 'all' or cobo in self.cobos) and \
+                            (self.asads == 'all' or asad in self.asads) and \
+                            (self.pads == 'all' or pad in self.pads):
+                        to_copy.append(i)
+            data = np.array(data[to_copy], dtype=float, copy=True)
 
         else:
             data = np.array(data, copy=True, dtype=float)
@@ -439,6 +440,7 @@ class raw_h5_file:
         Returns: max veto counts, dxy, dz, energy, angle, pads_railed
         max veto counts is max counts in any single time bin on a single veto pad
         dxy is the track length in the pad plane, dz is the other component of track length
+        TODO: currently pads_railed only works if baseline subtraction is off. Fix this
         '''
         should_veto=False
         counts = 0

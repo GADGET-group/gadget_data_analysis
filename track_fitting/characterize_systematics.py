@@ -22,8 +22,11 @@ experiment = 'e21072'
 
 m_guess, c_guess = 0.1004, 22.5
 use_likelihood = False #if false, uses least squares
+#x,y,z, theta, phi, sigma_xy, sigma_z are always free
+#adc_scale, energy, and density may and may not be free
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
-fix_energy = False
+fix_energy = True
+fit_density = True
 if use_likelihood:
     pickle_fname = '%s_run%d_m%f_c%f_results_objects.dat'%(experiment,run_number, m_guess, c_guess)
 else:
@@ -186,27 +189,26 @@ processes = []
 |   6   | 4434 keV alpha + 1108 16O recoil               |
 |   7   | 4434 keV alpha w/o recoil from cathode         |
 
-TODO: do a better job of outlier removal for adc gain fit
-
 '''
 def classify(range, counts):
-    if counts > 8.33e4 and  range > 16.93 and counts < 9.45e4 and range < 22.95:
-        return 0
-    elif counts > 1.738e5 and range>34.08 and counts < 2.032e5 and range < 59.33:
-        return 1
-    elif counts > 4.16e4 and range > 11.56 and counts < 5.37e4 and range < 13.12:
-        return 2
-    elif counts > 1.061e5 and range < 15.75 and counts < 1.188e5 and range > 13.99:
-        return 3
-    elif counts > 2.912e5 and range < 23.29 and counts < 3.365e5 and range > 18.03:
-        return 4
-    elif counts > 2.335e5 and range > 16.97 and counts < 2.721e5 and range < 21.64:
-        return 5
-    elif counts  > 5.91e5 and range < 46.8 and counts < 7.3e5 and range > 31:
-        return 6
-    elif counts > 4.7e5 and range > 24.1 and counts < 5.52e5 and range < 40.5:
-        return 7
-    return -1 
+    if run_number == 124:
+        if counts > 8.33e4 and  range > 16.93 and counts < 9.45e4 and range < 22.95:
+            return 0
+        elif counts > 1.738e5 and range>34.08 and counts < 2.032e5 and range < 59.33:
+            return 1
+        elif counts > 4.16e4 and range > 11.56 and counts < 5.37e4 and range < 13.12:
+            return 2
+        elif counts > 1.061e5 and range < 15.75 and counts < 1.188e5 and range > 13.99:
+            return 3
+        elif counts > 2.912e5 and range < 23.29 and counts < 3.365e5 and range > 18.03:
+            return 4
+        elif counts > 2.335e5 and range > 16.97 and counts < 2.721e5 and range < 21.64:
+            return 5
+        elif counts  > 5.91e5 and range < 46.8 and counts < 7.3e5 and range > 31:
+            return 6
+        elif counts > 4.7e5 and range > 24.1 and counts < 5.52e5 and range < 40.5:
+            return 7
+        return -1 
 
 ptype_and_recoil_dict = {
     0:('1H', True, 0.770),

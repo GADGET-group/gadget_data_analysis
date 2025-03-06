@@ -1,4 +1,5 @@
 import os
+import pickle
 
 import numpy as np
 import cupy as cp
@@ -8,7 +9,7 @@ from tqdm import tqdm
 
 from track_fitting import build_sim
 
-run_number = 212
+run_number = 124
 if run_number == 124:
     processed_directory = '/egr/research-tpc/shared/Run_Data/run_0124_raw_viewer/run_0124smart'
 elif run_number == 212:
@@ -29,6 +30,32 @@ ranges = np.sqrt(dzs**2 + dxys**2)
 angles = np.arctan2(dzs, dxys)
 
 std_plots = False
+
+def get_track_info():
+    '''
+    Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
+    Only redoes processing if a pickled version of this information isn't available.
+    '''
+    package_directory = os.path.dirname(os.path.abspath(__file__))
+    fname = os.path.join(package_directory, 'run%d.pkl'%run_number)
+    if os.path.exists(fname):
+        return pickle.load(fname)
+    else:
+        first_event, last_event = h5file.get_event_num_bounds()
+        track_centers, uus, vvs, dds, pad_charges = [],[],[],[],[]
+        for evt in tqdm(range(first_event, last_event + 1)):
+            center, uu,dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True)
+            track_centers.append(center)
+            uus.append(uus)
+            dds.append(dds)
+            pad_counts = np.zeros(1024)
+            for pad, trace in zip(*h5file.get_pad_traces(evt)):
+                pad_counts[pad] = np.sum(trace)
+            pad_charges.append(pad_counts)
+        track_centers, uus, vvs, dds, pad_charges = np.array(track_centers), np.array(uus), np.array(vvs), np.array(dds), np.array(pad_charges)
+        to_return={'track_center':track_centers, 'uu': uus, 'vv':vv, 'dd':dds, 'pad_charge': pad_charges}
+        pickle.dump(to_return, fname)
+        return to_return
 
 if run_number == 124:
     #1500 keV protons
@@ -72,8 +99,10 @@ for t, dt in zip(timestamps, time_since_last_event):
     times_since_start_of_window.append(t - start_of_current_winow)
 times_since_start_of_window = np.array(times_since_start_of_window)
 
+track_info_dict = get_track_info()
+
 for evt in tqdm(selected_events):
-    center, uu,dd,vv = h5file.get_track_axis(evt, threshold=20, return_all_svd_results=True)
+    center, uu,dd,vv = track_info_dict['center'][evt], track_info_dict['uu'][evt], track_info_dict['dd'][evt], track_info_dict['vv'][evt], 
     xs, ys, zs, es = h5file.get_xyze(evt, threshold=20, include_veto_pads=False)
 
     track_centers.append(center)
