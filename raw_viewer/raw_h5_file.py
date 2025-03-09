@@ -556,17 +556,18 @@ class raw_h5_file:
         plt.imshow(image, norm=colors.LogNorm())
         plt.colorbar()
         plt.subplot(2,1,2)
-        plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
-        def onclick(event):
-            x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
-            pad = self.xy_index_to_pad[(x,y)]
-            if pad in trace_dict:
-                plt.figure()
-                plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
-                plt.plot(trace_dict[pad])
-                plt.show(block=False)
+        if type(trace_dict) != type(None):
+            plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
+            def onclick(event):
+                x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
+                pad = self.xy_index_to_pad[(x,y)]
+                if pad in trace_dict:
+                    plt.figure()
+                    plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
+                    plt.plot(trace_dict[pad])
+                    plt.show(block=False)
 
-        fig.canvas.mpl_connect('button_press_event', onclick)
+            fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
 
 
