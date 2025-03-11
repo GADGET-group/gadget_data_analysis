@@ -403,7 +403,7 @@ class raw_h5_file:
         #move points to GPU
         xs, ys, zs, es = cp.array(xs), cp.array(ys), cp.array(zs), cp.array(es)
         track_center, vv = self.get_track_axis(xyze=(xs, ys, zs, es), return_np=False)
-        track_direction = vv[0]/cp.sqrt(np.sum(vv[0]*vv[0]))
+        track_direction = vv[0]/cp.sqrt(cp.sum(vv[0]*vv[0]))
         angle = cp.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),cp.abs(track_direction[2]))
 
         points = cp.concatenate((xs[:, cp.newaxis], 
