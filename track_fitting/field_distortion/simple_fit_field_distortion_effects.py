@@ -71,32 +71,42 @@ plt.scatter(np.sqrt(selected_track_widths[theta_mask]), selected_ranges[theta_ma
 plt.colorbar()
 plt.xlabel('width from pca')
 plt.ylabel('track range (mm)')
-plt.show(block=False)
 
 def to_minimize(constants):
-    to_return = 0
-    for i in range(len(selected_ranges)):
-        r =  constants[0] +  selected_ranges[i] + constants[2]*selected_times_into_decay_window[i] + constants[3]*selected_angles[i] + constants[4]*selected_track_widths[i] #constants[1]*selected_ranges[i]
-        to_return += (r - true_range)**2
-    return to_return
+    r_corrects = r =  (1 + constants[2]*selected_times_into_decay_window + constants[3]*selected_angles + constants[4]*selected_track_widths)*selected_ranges
+    return np.std(r_corrects)
 
-res = opt.minimize(to_minimize, (0,1,0,0,0))
+print('minimizing parameters')
+res = opt.minimize(to_minimize, (0,0,0,0,0))
 
-selected_ranges_corrected = res.x[0] + res.x[1]*selected_ranges + res.x[2]*selected_times_into_decay_window + res.x[3]*selected_angles + res.x[4]*selected_track_widths
+selected_ranges_corrected =  (1 + res.x[[2]]*selected_times_into_decay_window + res.x[3]*selected_angles + res.x[4]*selected_track_widths)*selected_ranges
 
 corrected_ranges = []
 good_counts = []
 for i in range(len(ranges)):
     if len(track_info_dict['variance_along_axes'][i]) ==3:
         good_counts.append(counts[i])
-        corrected_ranges.append(res.x[0] + res.x[1]*ranges[i] + res.x[2]*times_since_start_of_window[i]+ res.x[3]*angles[i] + res.x[4]*track_info_dict['variance_along_axes'][i][1])
+        corrected_ranges.append( (1 + res.x[2]*times_since_start_of_window[i] + res.x[3]*angles[i] + res.x[4]*track_info_dict['variance_along_axes'][i][1])*ranges[i] )
 
 good_counts = np.array(good_counts)
 corrected_ranges = np.array(corrected_ranges)
 plt.figure()
 plt.title('RvE with corrected ranges')
-plt_mask = (good_counts > 0) & (corrected_ranges < 150)
+plt_mask = (good_counts > 0) & (corrected_ranges < 150) & (corrected_ranges > 0)
 plt.hist2d(good_counts[plt_mask], corrected_ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
+
+plt.figure()
+plt.title('uncorrected RvE')
+plt_mask = (ranges>0)&(ranges<150)&(counts>0)
+plt.hist2d(counts[plt_mask], ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
+
+plt.figure()
+range_hist_bins = np.linspace(30, 65, 70)
+plt.hist(selected_ranges, bins=range_hist_bins, alpha=0.6, label='uncorrected range')
+plt.hist(selected_ranges_corrected, bins=range_hist_bins, alpha=0.6, label='corrected range')
+plt.legend()
+
+plt.show(block=False)
 
 '''
 plt_mask = (counts>0)&(ranges<150)
