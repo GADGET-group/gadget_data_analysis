@@ -24,7 +24,10 @@ read_data_mode = 'unchanged'
 #list of 2 point calibrations, inexed by experiment and then run number.
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
 calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
-                        {124:((90625 , 192102 ),(0.7856, 1.633))}}
+                        {124:((90625 , 192102 ),(0.7856, 1.633))},
+                    'e24joe':
+                        {124:((5.4e5, 6.9e5),(6.288, 8.7849))} # TODO: adjust these calibration points using fits to both peaks
+                    }
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
     adc_counts, MeV = calibration_points[experiment][run]
@@ -39,10 +42,19 @@ def get_detector_E_sigma(experiment:str, run:int, MeV):
         #assume energy calibraiton goes as sqrt energy, and use 770 keV protons
         if run == 124:
             return (5631/86431)*0.779*(MeV/0.779)**0.5
+    if experiment == 'e24joe':
+        #using same process as e21072 for now
+        #TODO change this to better reflect the likely larger sigma in e24joe
+        # if run == 124:
+        return (5631/86431)*0.779*(MeV/0.779)**0.5
+    assert False, "Experiment not found for get_detector_E_sigma function"
 
 def get_stopping_material(experiment:str, run:int):
     if experiment == 'e21072':
         return 'P10'
+    if experiment == 'e24joe':
+        return 'P10'
+    assert False, "Experiment not found for get_stopping_material function"
 
 def get_gas_density(experiment:str, run:int)->float:
     if experiment == 'e21072':
@@ -50,9 +62,21 @@ def get_gas_density(experiment:str, run:int)->float:
         T = 20+273.15 #K
         P = 860.3 #torr
         return rho0*(P/760)*(300./T)
+    if experiment == 'e24joe':
+        rho0 = 1.5256 # mg/cm^3, P10 at 300K and 760 torr
+        T = 19+273.15 # K
+        P = 2000 # torr
+        return rho0*(P/760)*(300./T)
+    assert False, "Experiment not found for get_gas_density function"
+
+
     
 def get_zscale(experiment:str, run:int):
     if experiment == 'e21072':
+        clock_freq = 50e6 #Hz, from e21062 config file on mac minis
+        drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+    if experiment == 'e24joe':
+        return 0.65
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
     return drift_speed/clock_freq
@@ -62,6 +86,15 @@ def get_raw_h5_path(experiment:str, run:int):
     if experiment == 'e21072':
         if socket.gethostname() == 'tpcgpu':
             return "/egr/research-tpc/shared/Run_Data/" + ('run_%04d.h5'%run)
+    if experiment == 'e24joe':
+        if socket.gethostname() == 'pike' or socket.gethostname() == 'steelhead' or socket.gethostname() == 'flagtail':
+            return "/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447.h5"
+            return "/mnt/daqtesting/protondet2024/h5/" + ('run_%04d.h5'%run)
+        if socket.gethostname() == 'tpcgpu':
+            print("Make sure double alpha data is transferred to the tpcgpu machine!")
+            return "/egr/research-tpc/shared/Run_Data/" + ('run_%04d.h5'%run)
+
+    assert False, "Experiment or hostname not found for get_raw_h5_path function"
 
 def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
     '''
@@ -83,7 +116,7 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.zscale = get_zscale(experiment, run)
         return h5file
     if experiment == 'e24joe':
-        h5file = raw_h5_file(file_path='/egr/research-tpc/dopferjo/',
+        h5file = raw_h5_file(file_path='/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5',
                                     zscale=get_zscale(experiment, run),
                                     flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
         h5file.background_subtract_mode='fixed window'
@@ -96,7 +129,7 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.num_background_bins=(400, 500) #not used for "smart" background subtraction
         h5file.zscale = get_zscale(experiment, run)
         return h5file
-    assert False
+    assert False, "Experiment not found for get_rawh5_object function"
     
 def apply_config_to_object(config_file, object):
     pass #TODO
@@ -140,6 +173,23 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
             if pad != 1:
                 sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
         sim.timing_offsets[1] = 0
+    
+    if experiment == 'e24joe':
+        sim.zscale = get_zscale(experiment, run)
+        pads, traces = get_pads_and_traces(experiment, run, event)
+        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.0706, 4.77
+        sim.pad_threshold = 54.8
+        if run == 124:
+            sim.counts_per_MeV = 129600.
+
+        with open('./raw_viewer/h5_utils/timing_offsets.pkl', 'rb') as f: # TODO: get specific timing offsets for e24joe
+            sim.timing_offsets = pickle.load(f)
+        for pad in sim.timing_offsets:
+            if pad != 1:
+                sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
+        sim.timing_offsets[1] = 0
+    assert sim.timing_offsets[1] == 0, "Experiment not found for configure_sim_for_event function"
 
 
 def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str, load_data=True)->SingleParticleEvent:
