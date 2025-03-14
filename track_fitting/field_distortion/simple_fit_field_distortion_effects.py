@@ -116,7 +116,7 @@ if do_simple_correction:
 if do_rmap:
     endpoints = np.array(track_info_dict['endpoints'])
     #try mapping r->r'(r, t, w)=sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w&k
-    N = 1
+    N = 3
     ijk_array = []
     for n in range(N+1):
         for i in range(n+1):
@@ -134,6 +134,10 @@ if do_rmap:
         for ijk, a in zip(ijk_array, a_ijk):
             i,j,k = ijk
             new_r += a*(r**i)*(t**j)*(w**k)
+        if type(new_r) == np.ndarray:
+            new_r[new_r < 0] = 0
+        elif new_r < 0:
+            new_r = 0
         return new_r
 
     def map_endpoints(a_ijk, event_select_mask):
