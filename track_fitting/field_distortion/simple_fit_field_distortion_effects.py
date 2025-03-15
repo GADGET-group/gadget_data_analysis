@@ -10,7 +10,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-do_simple_correction=False
+do_simple_linear_correction=False
 do_rmap = True
 
 experiment, run = 'e21072', 124
@@ -54,7 +54,7 @@ true_range_1500keV_proton = 46.7
 mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)
 true_range_750keV_protons = 16.1
 
-if do_simple_correction:
+if do_simple_linear_correction:
     selected_ranges = ranges[mask_1500keV_protons]
     selected_times_into_decay_window = times_since_start_of_window[mask_1500keV_protons]
     selected_angles = angles[mask_1500keV_protons]
@@ -116,8 +116,8 @@ if do_simple_correction:
 
 if do_rmap:
     endpoints = np.array(track_info_dict['endpoints'])
-    #try mapping r->r'(r, t, w)=sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w&k
-    N = 5
+    #try mapping r->r'(r, t, w)= r + sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w&k
+    N = 1
     ijk_array = []
     for n in range(N+1):
         for i in range(n+1):
@@ -126,12 +126,12 @@ if do_rmap:
                 ijk_array.append((i,j,k))
     ijk_array = np.array(ijk_array)
 
-    #guess a_ijk = 0 except a_100 = 1
+    #guess a_ijk = 0
     a_ijk_guess = np.zeros(len(ijk_array))
-    a_ijk_guess[np.all(ijk_array==(1,0,0), axis=1)] = 1
+    #a_ijk_guess[np.all(ijk_array==(1,0,0), axis=1)] = 1 
 
     def map_r(a_ijk, r, t, w):
-        new_r = 0
+        new_r = np.copy(r)
         for ijk, a in zip(ijk_array, a_ijk):
             i,j,k = ijk
             new_r += a*(r**i)*(t**j)*(w**k)
@@ -212,13 +212,24 @@ plt.legend()
 
 plt.figure()
 wsquared = 16
-r_obs = np.linspace(0, 50, 10)#radius at which charge was observed
+r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
 plt.title('r map for track with %f mm width'%wsquared**0.5)
 for t in [0, 0.02, 0.05, 0.1]:
     plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, wsquared) - r_obs, label='%f s'%t)
 plt.xlabel('position charge was observed')
 plt.ylabel('r_dep - r_obs')
 plt.legend()
+
+plt.figure()
+wsquared = 9
+r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
+plt.title('r map for track with %f mm width'%wsquared**0.5)
+for t in [0, 0.02, 0.05, 0.1]:
+    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, wsquared) - r_obs, label='%f s'%t)
+plt.xlabel('position charge was observed')
+plt.ylabel('r_dep - r_obs')
+plt.legend()
+
 
 plt.show(block=False)
 
