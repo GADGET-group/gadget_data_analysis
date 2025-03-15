@@ -1,4 +1,5 @@
 import os
+import pickle
 
 import numpy as np
 from tqdm import tqdm
@@ -116,7 +117,7 @@ if do_simple_correction:
 if do_rmap:
     endpoints = np.array(track_info_dict['endpoints'])
     #try mapping r->r'(r, t, w)=sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w&k
-    N = 3
+    N = 5
     ijk_array = []
     for n in range(N+1):
         for i in range(n+1):
@@ -177,8 +178,20 @@ if do_rmap:
         print(to_return, np.std(p1500_ranges), np.std(p750_ranges), np.mean(p1500_ranges), np.mean(p750_ranges))
         return to_return
 
-    res = opt.minimize(to_minimize, a_ijk_guess)
+    package_directory = os.path.dirname(os.path.abspath(__file__))
+    fname = os.path.join(package_directory, '%s_run%d_rmap_order%d.pkl'%(experiment, run, N))
+    if os.path.exists(fname):
+        print('optimizer previously run, loading saved result')
+        with open(fname, 'rb') as file:
+            res =  pickle.load(file)
+    else:
+        print('optimizing a_ijk parameters')
+        res = opt.minimize(to_minimize, a_ijk_guess)
+        with open(fname, 'wb') as file:
+            pickle.dump(res, file)
+    print(res)
     a_ijk_best = res.x
+        
 
 plt.figure()
 plt.title('uncorrected RvE')
@@ -199,10 +212,12 @@ plt.legend()
 
 plt.figure()
 wsquared = 16
-r_dep = np.linspace(0, 50, 10)#radius at which charge deposited
+r_obs = np.linspace(0, 50, 10)#radius at which charge was observed
 plt.title('r map for track with %f mm width'%wsquared**0.5)
 for t in [0, 0.02, 0.05, 0.1]:
-    plt.plot(r_dep, map_r(a_ijk_best, r_dep, t, wsquared), label='%f s'%t)
+    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, wsquared) - r_obs, label='%f s'%t)
+plt.xlabel('position charge was observed')
+plt.ylabel('r_dep - r_obs')
 plt.legend()
 
 plt.show(block=False)
