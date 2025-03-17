@@ -49,9 +49,13 @@ for t, dt in tqdm(zip(timestamps, time_since_last_event)):
     times_since_start_of_window.append(t - start_of_current_winow)
 times_since_start_of_window = np.array(times_since_start_of_window)
 
-mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
+if run==124:
+    mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
+    mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)
+elif run==212:
+    #TODO
+    pass
 true_range_1500keV_proton = 46.7
-mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)
 true_range_750keV_protons = 16.1
 
 if do_simple_linear_correction:

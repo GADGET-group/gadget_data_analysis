@@ -350,7 +350,13 @@ class raw_h5_file:
             x, y, z, e = xyze
         points = cp.concatenate((x[:, cp.newaxis], y[:, cp.newaxis], z[:, cp.newaxis]), axis=1)
         points_mean = points.mean(axis=0)
-        uu, dd, vv = cp.linalg.svd(points - points_mean)
+        try:
+            uu, dd, vv = cp.linalg.svd(points - points_mean)
+        except Exception as e:
+            print('caught exceptions while trying to perform SVD of event %d'%event)
+            print(e)
+            uu, vv, dd = None
+
         if return_np:
             points_mean = cp.asnumpy(points_mean)
             uu, dd, vv = cp.asnumpy(uu), cp.asnumpy(dd), cp.asnumpy(vv)
@@ -403,21 +409,25 @@ class raw_h5_file:
         #move points to GPU
         xs, ys, zs, es = cp.array(xs), cp.array(ys), cp.array(zs), cp.array(es)
         track_center, vv = self.get_track_axis(xyze=(xs, ys, zs, es), return_np=False)
-        track_direction = vv[0]/cp.sqrt(cp.sum(vv[0]*vv[0]))
-        angle = cp.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),cp.abs(track_direction[2]))
+        if type(vv) == type(None):
+            dxy = dz = 0
+            angle = np.inf
+        else:
+            track_direction = vv[0]/cp.sqrt(cp.sum(vv[0]*vv[0]))
+            angle = cp.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),cp.abs(track_direction[2]))
 
-        points = cp.concatenate((xs[:, cp.newaxis], 
-                       ys[:, cp.newaxis], 
-                       zs[:, cp.newaxis]), 
-                      axis=1)
-        rbar = points - track_center
-        rdotv = cp.dot(rbar, track_direction)
-        first_point = points[cp.argmin(rdotv)]
-        last_point = points[cp.argmax(rdotv)]
-        dr = last_point - first_point
-        dxy, dz = cp.sqrt(dr[0]**2 + dr[1]**2), dr[2]
-        if return_np:
-            dxy, dz, angle = cp.asnumpy(dxy), cp.asnumpy(dz), cp.asnumpy(angle)
+            points = cp.concatenate((xs[:, cp.newaxis], 
+                        ys[:, cp.newaxis], 
+                        zs[:, cp.newaxis]), 
+                        axis=1)
+            rbar = points - track_center
+            rdotv = cp.dot(rbar, track_direction)
+            first_point = points[cp.argmin(rdotv)]
+            last_point = points[cp.argmax(rdotv)]
+            dr = last_point - first_point
+            dxy, dz = cp.sqrt(dr[0]**2 + dr[1]**2), dr[2]
+            if return_np:
+                dxy, dz, angle = cp.asnumpy(dxy), cp.asnumpy(dz), cp.asnumpy(angle)
         return dxy, dz, angle
     
    
