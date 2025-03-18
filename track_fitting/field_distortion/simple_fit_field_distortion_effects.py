@@ -13,7 +13,7 @@ from track_fitting import build_sim
 do_simple_linear_correction=False
 do_rmap = True
 
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -53,7 +53,8 @@ if run==124:
     mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
     mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)
 elif run==212:
-    #TODO
+    mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5)
+    mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5) & (counts<1.64e5)
     pass
 true_range_1500keV_proton = 46.7
 true_range_750keV_protons = 16.1
