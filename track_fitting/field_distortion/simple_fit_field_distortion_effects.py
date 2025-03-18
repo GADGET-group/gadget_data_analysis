@@ -13,7 +13,7 @@ from track_fitting import build_sim
 do_simple_linear_correction=False
 do_rmap = True
 
-experiment, run = 'e21072', 212
+experiment, run = 'e21072', 124
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -71,7 +71,7 @@ if do_simple_linear_correction:
 
     theta_mask = selected_angles>np.radians(70)
     plt.figure()
-    plt.title('selected events to fit range to within 20 degrees of the pad plane')
+    plt.title('all 1500 keV protons')
     plt.scatter(np.sqrt(selected_track_widths), selected_ranges, c=selected_times_into_decay_window, marker='.')
     plt.colorbar()
     plt.xlabel('width from pca')
@@ -121,8 +121,8 @@ if do_simple_linear_correction:
 
 if do_rmap:
     endpoints = np.array(track_info_dict['endpoints'])
-    #try mapping r->r'(r, t, w)= r + sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w&k
-    N = 1
+    #try mapping r->r + r'(r, t, w)= r + sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w^k
+    N = 5
     ijk_array = []
     for n in range(N+1):
         for i in range(n+1):
@@ -130,10 +130,6 @@ if do_rmap:
                 k = n - i - j
                 ijk_array.append((i,j,k))
     ijk_array = np.array(ijk_array)
-
-    #guess a_ijk = 0
-    a_ijk_guess = np.zeros(len(ijk_array))
-    #a_ijk_guess[np.all(ijk_array==(1,0,0), axis=1)] = 1 
 
     def map_r(a_ijk, r, t, w):
         new_r = np.copy(r)
@@ -191,6 +187,25 @@ if do_rmap:
             res =  pickle.load(file)
     else:
         print('optimizing a_ijk parameters')
+        previous_fname = os.path.join(package_directory, '%s_run%d_rmap_order%d.pkl'%(experiment, run, N-1))
+        #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
+        a_ijk_guess = np.zeros(len(ijk_array))
+        if os.path.exists(previous_fname):
+            print('rmap exists for N-1, using as intial guess')
+            with open(previous_fname, 'rb') as file:
+                prev_res = pickle.load(file)
+                prev_ijk_array = []
+                for n in range(N):
+                    for i in range(n+1):
+                        for j in range(n - i +1):
+                            k = n - i - j
+                            prev_ijk_array.append((i,j,k))
+                prev_ijk_array = np.array(prev_ijk_array)
+                for prev_a_ijk, prev_ijk in zip(prev_res.x, prev_ijk_array):
+                    for new_index, ijk in enumerate(ijk_array):
+                        if np.all(ijk == prev_ijk):
+                            a_ijk_guess[new_index] = prev_a_ijk
+            
         res = opt.minimize(to_minimize, a_ijk_guess)
         with open(fname, 'wb') as file:
             pickle.dump(res, file)
