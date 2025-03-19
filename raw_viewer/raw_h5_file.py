@@ -8,6 +8,10 @@ import matplotlib.pylab as plt
 import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
+import sys
+from sklearn.cluster import DBSCAN
+
+# np.set_printoptions(threshold=sys.maxsize)
 
 USE_GPU = True
 if USE_GPU:
@@ -232,6 +236,105 @@ class raw_h5_file:
 
         return data
 
+    def label_data(self, event_number, threshold = -np.inf):
+        '''
+        I think for this to work correctly, I will have to use the get_data method so that the bg subtraction and outlier removal
+        '''
+        image_3d = np.zeros((38,38,512))
+        # print("Shape of 3d array that stores event data: ", np.shape(image_3d))
+        data = self.get_data(event_number)
+        # xs, ys, zs, es = self.get_xyze(event_number)
+        # print(zs)
+        # for i in range(len(xs)):   
+        #     image_3d[int(xs[i]/1.1),int(ys[i]/1.1),int(zs[i])] = es[i]
+        for line in data:
+            chnl_info = tuple(line[0:4])
+            if chnl_info in self.chnls_to_pad:
+                pad = self.chnls_to_pad[chnl_info]
+            else:
+                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                continue
+            x,y = self.pad_to_xy_index[pad]
+            for z in range(len(line[5:])):
+                image_3d[x,y,z] = line[z+5]
+                if pad in VETO_PADS or z == 0 or line[z+5] < np.max(data) * 0.5: # remove veto pad traces, starting time bins, and apply thresholding 
+                    image_3d[x,y,z] = 0
+
+        image_3d = np.where(image_3d!=0, 1, 0)
+        labeled_image_3d = skimage.measure.label(image_3d, connectivity=1)
+        
+        # Trying DBSCAN method of outlier removal
+        xs, ys, zs, es = self.get_xyze(event_number, threshold = threshold)
+        print("len(zs): ", len(zs))
+        zs_scale = 38 / 512
+        zs = zs * zs_scale # rescaling zs to give that dimension roughly the same weight as xs and ys (38/512)
+        print("scaled len(zs): ", len(zs))
+        data = np.array([xs.T,ys.T,zs.T]).T
+        DBSCAN_cluster = DBSCAN(eps = 6, min_samples = 10).fit(data)
+        del data
+
+        if all(element == -1 for element in DBSCAN_cluster.labels_):
+            veto = True
+        else:
+            # Identify largest clusters
+            hdb_labels = DBSCAN_cluster.labels_
+            unique_labels = set(hdb_labels)
+            if -1 in unique_labels:
+                unique_labels.remove(-1)
+            
+            # Find the two largest clusters
+            largest_clusters = sorted(unique_labels, key=lambda x: np.sum(hdb_labels==x), reverse=True)[:2]
+
+            # Relabel non-main-cluster points as outliers
+            for cluster_label in unique_labels:
+                if cluster_label not in largest_clusters:
+                    hdb_labels[hdb_labels == cluster_label] = -1
+            
+            # Remove outlier points
+            out_of_cluster_index = np.where(hdb_labels == -1)
+            rev = out_of_cluster_index[0][::-1]
+            for i in rev:
+                xs = np.delete(xs, i)
+                ys = np.delete(ys, i)
+                zs = np.delete(zs, i)
+                es = np.delete(es, i)
+                hdb_labels = np.delete(hdb_labels, i)
+
+            if len(xs) <= 500:
+                veto = True
+            else:
+                veto = False
+
+
+        labels, counts = np.unique(labeled_image_3d[labeled_image_3d!=0], return_counts=True)
+        print("Cluster Number, Number of counts in cluster: ", labels, counts)
+        print("Found %d tracks with label_data method!"%len(labels))
+        # print("Found %d tracks with DBSCAN method!"%len(labels))
+
+        # Create the 3D scatter plot
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plotting 3d image 
+        x, y, z = np.nonzero(image_3d)
+        label_color = []
+        # print("np.shape(labeled_image_3d): ",np.shape(labeled_image_3d))
+        # print("Length of x, y, and z: ", len(x), len(y), len(z))
+
+        label_color.append(labeled_image_3d[x,y,z])
+        ax.scatter(x, y, z, c=label_color, s=10)  # s is the marker size
+
+        # Plotting 3d image from DBSCAN
+        ax.scatter(xs,ys,zs/zs_scale,c=hdb_labels,s=10)
+
+        # Set labels for the axes
+        ax.set_xlabel('X-axis')
+        ax.set_ylabel('Y-axis')
+        ax.set_zlabel('Z-axis')
+
+        # Show the plot
+        plt.show(block=True)
+
     def calculate_background(self, trace):
         '''
         Return calculated background for each timebin.
@@ -285,7 +388,7 @@ class raw_h5_file:
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''
         Returns: xs, ys, ts, es
-                 Where each of these is an array s.t. each "pixel" in the in the raw TPC data is represented.
+                 Where each of these is an array s.t. each "pixel" in the raw TPC data is represented.
                  eg, (xs[i], ys[i], ts[i]) gives the position of a pad and time bin number,
                  and es[i] gives the charge that arrived at that pad at the given time.
                  Only data where the charge deposition is greater than the threshold is included.

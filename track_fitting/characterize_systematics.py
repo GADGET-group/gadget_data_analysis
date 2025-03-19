@@ -51,17 +51,21 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         trace_sim = build_sim.create_multi_particle_decay(experiment, run, event, [particle_type], [product_mass], recoil_name, recoil_mass)
         particle = trace_sim.sims[0]
     else:
-        trace_sim = build_sim.create_single_particle_sim(experiment, run, event, particle_type)
-        particle = trace_sim
-    if trace_sim.num_trace_bins > 100:
-        print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
-        return 
+        print("Creating MultiParticle Event: ",particle_type)
+        trace_sim = build_sim.create_multi_particle_event(experiment, run, event, particle_type)
+        particle = trace_sim.sims[0]
+    # if trace_sim.num_trace_bins > 100:
+    #     print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
+    #     return 
     
     #trace_sim.counts_per_MeV *= 1.058
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
-
+    # print(trace_sim.traces_to_fit)
+    h5file.plot_3d_traces(9091, threshold=100)
     x_real, y_real, z_real, e_real = trace_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=trace_sim.traces_to_fit)
+    print("x_real, y_real, z_real, e_real: ",x_real, y_real, z_real, e_real)
+    print("len x_real, len y_real, len z_real, len e_real: ",len(x_real), len(y_real), len(z_real), len(e_real))
     zmin = 0
     #set zmax to length of trimmed traces
     zmax = trace_sim.num_trace_bins*trace_sim.zscale
@@ -69,13 +73,30 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     track_center, track_direction_vec = h5file.get_track_axis(event)
     track_direction_vec = track_direction_vec[0]
 
-    d_best, best_point = np.inf, None #distance along track in direction of particle motion. Make as negative as possible
+    d_best, best_point_1, best_point_2 = np.inf, None, None #distance along track in direction of particle motion. Make as negative as possible
+    if self.remove_outliers:
+        labeled_image = skimage.measure.label(pad_image, background=0)
+        labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
+        bigest_label = labels[np.argmax(counts)]
+        new_data = []
+        for line in data: #only copy over pads in the bigest blob and veto pads
+            chnl_info = tuple(line[0:4])
+            if chnl_info in self.chnls_to_pad:
+                pad = self.chnls_to_pad[chnl_info]
+            else:
+                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                continue
+            x,y = self.pad_to_xy_index[pad]
+            if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
+                new_data.append(line)
+        data = np.array(new_data)
     for x, y, z in zip(x_real, y_real, z_real):
         delta = np.array([x,y,z]) - track_center
         dist = np.dot(delta, track_direction_vec*direction)
         if  dist < d_best:
             d_best= dist
             best_point = np.array([x,y,z])
+            print("Best Point: ", best_point)
     #start theta, phi in a small ball around track direction from svd
     vhat = track_direction_vec*direction
     #print('vhat:',vhat)
@@ -160,16 +181,18 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         print('total completed in direction %d:'%direction, len(return_dict.keys()))
     if debug_plots:
         print(res)
-        trace_sim.plot_residuals_3d(title=str(return_key)+particle_type, threshold=20)
-        trace_sim.plot_simulated_3d_data(title=str(return_key)+particle_type, threshold=20)
+        trace_sim.plot_residuals_3d(title=[str(return_key),particle_type], threshold=20)
+        trace_sim.plot_simulated_3d_data(title=[str(return_key),particle_type], threshold=20)
         trace_sim.plot_residuals()
         plt.show()
     return res
 
-if False: #try fitting one event to make sure it looks ok
+if True: #try fitting one event to make sure it looks ok
     #fit_event(124,108, '1H', debug_plots=True)
     #fit_event(124,145, '4He', True, direction=1, debug_plots=True)
-    fit_event(124,145, '4He', True, Eknown=4.434,direction=-1, debug_plots=True)
+    print(fit_event(124,9091, particle_type=['4He','4He'], include_recoil=False, Eknown=6.2 ,direction=1, debug_plots=False))
+    print('fitting took %f s'%(time.time() - start_time))
+
 
 events_in_catagory = [[] for i in range(8)]
 events_per_catagory = 20
@@ -221,17 +244,18 @@ ptype_and_recoil_dict = {
 
 veto_threshold = 300
 
-if not load_previous_fit:
+# if not load_previous_fit:
+if False:
     n = h5file.get_event_num_bounds()[0]
     manager = multiprocessing.Manager()
     forward_fit_results_dict = manager.dict()
     backward_fit_results_dict = manager.dict()
-    while np.min([len(x) for x in events_in_catagory]) < events_per_catagory and n < h5file.get_event_num_bounds()[1]:
-        max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n)
+    while np.min([len(x) for x in events_in_catagory]) < events_per_catagory and n < h5file.get_event_num_bounds()[1]: # collect a number of events from each category
+        max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n) # process event to extract length and ADC counts
         l = np.sqrt(dxy**2 + dz**2)
-        event_catagory = classify(l, counts)
-        #print(n, event_catagory, counts, l, max_veto_counts < veto_threshold )
-        if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory:
+        event_catagory = classify(l, counts) # classify event based on processed event
+        # now fit the event forwards and backwards if it was not vetoed, was categorized properly, and we still need an event from that category
+        if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory: 
             particle_type, include_recoil, E = ptype_and_recoil_dict[event_catagory]
             processes.append(multiprocessing.Process(target=fit_event, 
                                                         args=(run_number, n, particle_type, include_recoil, 1, E,

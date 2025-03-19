@@ -162,7 +162,7 @@ class SimulatedEvent:
 
     def set_real_data(self, pads, traces, trim_threshold, trim_pad = 5, pads_to_sim_select='adjacent'):
         '''
-        Prepares real pad traces for coomparison to simulated data.
+        Prepares real pad traces for comparison to simulated data.
         This function does the following:
         1. Stores traces to member variables
         2. Trim traces if possible, keeping the length of all traces the same but the portion of regions where 

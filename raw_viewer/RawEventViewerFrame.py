@@ -28,7 +28,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/Run_Data', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/dopferjo', title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.h5file = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
@@ -51,6 +51,7 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Label(settings_frame, text='settings file:').grid(row=0, column=0)
         self.settings_file_entry = ttk.Entry(settings_frame)
         self.settings_file_entry.grid(row=0, column=1)
+        self.settings_file_entry.insert(0, '/egr/research-tpc/dopferjo/gadget_analysis/raw_viewer/gui_configs/p10_2000torr.gui_ini')
         ttk.Button(settings_frame, text='Browse', command=self.browse_for_settings_file).grid(row=0, column=2)
         ttk.Button(settings_frame, text='Load', command=self.load_settings_file).grid(row=0, column=3)
         ttk.Button(settings_frame, text='Save Config File', command=self.save_settings_file).grid(row=1, column=0, columnspan=3)
@@ -384,6 +385,8 @@ class RawEventViewerFrame(ttk.Frame):
 
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
+        # TODO: delete this line before committing changes
+        # self.h5file.label_data(event_number, threshold=float(self.view_threshold_entry.get()))
         self.h5file.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
     
     def next(self):
