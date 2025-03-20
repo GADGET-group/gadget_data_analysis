@@ -220,10 +220,10 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        elif self.mode == 'fft':
+        # elif self.mode == 'fft':
             # baseline_window_scale = 20.0 is the default value given in the config.py file for Spyral
             # data = preprocess_traces(data,20.0)
-            print(data.shape)
+            # print(data.shape)
         
         return data
 
@@ -451,6 +451,7 @@ class raw_h5_file:
         max veto counts is max counts in any single time bin on a single veto pad
         dxy is the track length in the pad plane, dz is the other component of track length
         '''
+        # padgain = np.load('~/padgain.npy')
         should_veto=False
         counts = 0
         pads_railed = []
@@ -462,10 +463,23 @@ class raw_h5_file:
                     max_veto_pad_counts = trace_max
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
+                # counts += np.sum(trace[trace>self.ic_counts_threshold]*padgain[pad])
             if trace_max >= 4095:
                 pads_railed.append(pad)
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
+
+    def ic_of_pads(self,event_num):
+        # Returns list of total integral of charge on each pad
+        ic_of_pads = np.zeros(1020)
+        should_veto=False
+        counts = 0
+        pads_railed = []
+        max_veto_pad_counts = -np.inf
+        for pad, trace in zip(*self.get_pad_traces(event_num)):
+            if not pad in VETO_PADS: #don't include veto pad energy
+                ic_of_pads[pad] = np.sum(trace[trace>self.ic_counts_threshold])
+        return ic_of_pads
 
     def show_tve_histogram(self, num_e_bins, num_time_bins, fig_name=None, block=True):
         ranges, counts, angles = self.get_histogram_arrays()
