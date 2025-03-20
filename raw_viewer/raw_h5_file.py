@@ -8,6 +8,20 @@ import matplotlib.pylab as plt
 import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
+import sys
+from sklearn.cluster import DBSCAN
+
+# np.set_printoptions(threshold=sys.maxsize)
+
+USE_GPU = True
+if USE_GPU:
+    import cupy as cp
+    import cupyx.scipy.special as cpspecial
+else:
+    cp = np
+    import scipy.special as cpspecial
+    cp.asnumpy = lambda x: x
+
 
 import skimage.measure
 
@@ -35,16 +49,19 @@ class raw_h5_file:
         self.chnls_to_pad = {} #maps tuples of (asad, aget, channel) to pad number
         self.chnls_to_xy_coord = {} #maps tuples of (asad, aget, channel) to (x,y) coordinates in mm
         self.chnls_to_xy_index = {}
+        self.pad_to_chnl = {}
         for line in self.flat_lookup:
             chnls = tuple(line[0:4])
             pad = line[4]
             self.chnls_to_pad[chnls] = pad
+            self.pad_to_chnl[pad] = chnls
             self.chnls_to_xy_coord[chnls] = self.padxy[pad]
             self.chnls_to_xy_index[chnls] = self.pad_to_xy_index[pad]
         #round xy to nearest 10nths place to avoid issues with different floating point formats
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
         self.xy_to_chnls = {tuple(np.round(self.chnls_to_xy_coord[chnls], 1)):chnls 
                             for chnls in self.chnls_to_xy_coord}
+        self.xy_index_to_pad = {self.pad_to_xy_index[pad]:pad for pad in self.pad_to_xy_index}
         
         self.zscale = zscale #conversion factor from time bin to mm
 
@@ -75,7 +92,7 @@ class raw_h5_file:
         #                 (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
-        self.background_subtract_mode = 'none' #none, fixed window, or convolution
+        self.background_subtract_mode = 'none' #none, fixed window, smart, or convolution
         self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
@@ -87,6 +104,10 @@ class raw_h5_file:
         #'near peak' will only use data within some window of the peak of each trace
         self.data_select_mode = 'all data' 
         self.near_peak_window_width = 100 #+/- time bins to include
+        #number of bins past the start/end of trace to use when computing baseline
+        self.num_smart_background_ave_bins = 5 
+        #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
+        self.smart_bins_away_to_check = 3
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -210,12 +231,110 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        # elif self.mode == 'fft':
-        #     # baseline_window_scale = 20.0 is the default value given in the config.py file for Spyral
-        #     data = preprocess_traces(data,20.0)
-        #     print(data.shape)
-        
+        # To save with a delimiter (e.g., comma)
+        # np.savetxt('data_comma.txt', data, delimiter=',')
+
         return data
+
+    def label_data(self, event_number, threshold = -np.inf):
+        '''
+        I think for this to work correctly, I will have to use the get_data method so that the bg subtraction and outlier removal
+        '''
+        image_3d = np.zeros((38,38,512))
+        # print("Shape of 3d array that stores event data: ", np.shape(image_3d))
+        data = self.get_data(event_number)
+        # xs, ys, zs, es = self.get_xyze(event_number)
+        # print(zs)
+        # for i in range(len(xs)):   
+        #     image_3d[int(xs[i]/1.1),int(ys[i]/1.1),int(zs[i])] = es[i]
+        for line in data:
+            chnl_info = tuple(line[0:4])
+            if chnl_info in self.chnls_to_pad:
+                pad = self.chnls_to_pad[chnl_info]
+            else:
+                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                continue
+            x,y = self.pad_to_xy_index[pad]
+            for z in range(len(line[5:])):
+                image_3d[x,y,z] = line[z+5]
+                if pad in VETO_PADS or z == 0 or line[z+5] < np.max(data) * 0.5: # remove veto pad traces, starting time bins, and apply thresholding 
+                    image_3d[x,y,z] = 0
+
+        image_3d = np.where(image_3d!=0, 1, 0)
+        labeled_image_3d = skimage.measure.label(image_3d, connectivity=1)
+        
+        # Trying DBSCAN method of outlier removal
+        xs, ys, zs, es = self.get_xyze(event_number, threshold = threshold)
+        db_data = np.array([xs.T,ys.T,zs.T]).T
+        print("np.shape(db_data) for DBSCAN: ", np.shape(db_data))
+        print("np.shape(data) from get_data: ", np.shape(data))
+        DBSCAN_cluster = DBSCAN(eps = 3, min_samples = 70000).fit(db_data, sample_weight = es)
+        del db_data
+
+        if all(element == -1 for element in DBSCAN_cluster.labels_):
+            veto = True
+        else:
+            # Identify largest clusters
+            hdb_labels = DBSCAN_cluster.labels_
+            unique_labels = set(hdb_labels)
+            if -1 in unique_labels:
+                unique_labels.remove(-1)
+            
+            # Find the two largest clusters
+            largest_clusters = sorted(unique_labels, key=lambda x: np.sum(hdb_labels==x), reverse=True)[:2]
+
+            # Relabel non-main-cluster points as outliers
+            for cluster_label in unique_labels:
+                if cluster_label not in largest_clusters:
+                    hdb_labels[hdb_labels == cluster_label] = -1
+            
+            # Remove outlier points
+            out_of_cluster_index = np.where(hdb_labels == -1)
+            rev = out_of_cluster_index[0][::-1]
+            for i in rev:
+                xs = np.delete(xs, i)
+                ys = np.delete(ys, i)
+                zs = np.delete(zs, i)
+                es = np.delete(es, i)
+                hdb_labels = np.delete(hdb_labels, i)
+
+            if len(xs) <= 500:
+                veto = True
+            else:
+                veto = False
+
+
+        labels, counts = np.unique(labeled_image_3d[labeled_image_3d!=0], return_counts=True)
+        print("Cluster Number, Number of counts in cluster: ", labels, counts)
+        print("Found %d tracks with label_data method!"%len(labels))
+        # print("Found %d tracks with DBSCAN method!"%len(labels))
+
+        # Create the 3D scatter plot
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plotting 3d image 
+        x, y, z = np.nonzero(image_3d)
+        label_color = []
+        # print("np.shape(labeled_image_3d): ",np.shape(labeled_image_3d))
+        # print("Length of x, y, and z: ", len(x), len(y), len(z))
+
+        label_color.append(labeled_image_3d[x,y,z])
+        # ax.scatter(x, y, z, c=label_color, s=10)  # s is the marker size
+
+        # Plotting 3d image from DBSCAN
+        ax.scatter(xs,ys,zs,c=hdb_labels,s=10)
+
+        # Set labels for the axes
+        ax.set_xlabel('X-axis')
+        ax.set_ylabel('Y-axis')
+        ax.set_zlabel('Z-axis')
+        ax.set_xlim3d(-200, 200)
+        ax.set_ylim3d(-200, 200)
+        ax.set_zlim3d(0, 400)
+
+        # Show the plot
+        plt.show(block=True)
 
     def calculate_background(self, trace):
         '''
@@ -234,11 +353,14 @@ class raw_h5_file:
             return np.zeros(len(trace))
         elif self.background_subtract_mode == 'smart':
             peak_index = np.argmax(trace)
-            #find  start of the peak, defined as where the a bin near_peak_window_width away
+            #zero traces with peaks outside specified region by returing the trace as the baseline
+            if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
+                return trace
+            #find  start of the peak, defined as where the going bin smart_bins_away_to_check
             #is no longer at least ic_counts_threshold below the current bin
             i = peak_index
             while i>0:
-                j = max(0, i - self.near_peak_window_width)
+                j = max(0, i - self.smart_bins_away_to_check)
                 if trace[i] < trace[j] + self.ic_counts_threshold:
                     break
                 i -= 1
@@ -246,14 +368,14 @@ class raw_h5_file:
             #find end
             i = peak_index
             while i < len(trace) - 1:
-                j = min(len(trace) - 1, i + self.near_peak_window_width)
+                j = min(len(trace) - 1, i + self.smart_bins_away_to_check)
                 if trace[i] < trace[j] + self.ic_counts_threshold:
                     break
                 i += 1
             peak_end = i
-            #fit a line through the points just outside the peak region
-            xs = np.concatenate([np.arange(max(0, peak_start - self.near_peak_window_width), peak_start),
-                                           np.arange(peak_end, min(peak_end + self.near_peak_window_width, len(trace)))])
+            #fit a line through the points just outside the peak regio
+            xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
+                                           np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
             slope, offset = np.polyfit(xs, ys, 1)
             #baseline will be the trace except in the peak region,
@@ -267,7 +389,7 @@ class raw_h5_file:
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
         '''
         Returns: xs, ys, ts, es
-                 Where each of these is an array s.t. each "pixel" in the in the raw TPC data is represented.
+                 Where each of these is an array s.t. each "pixel" in the raw TPC data is represented.
                  eg, (xs[i], ys[i], ts[i]) gives the position of a pad and time bin number,
                  and es[i] gives the charge that arrived at that pad at the given time.
                  Only data where the charge deposition is greater than the threshold is included.
@@ -312,22 +434,34 @@ class raw_h5_file:
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
         return x,y, t*self.zscale ,e
     
-    def get_track_axis(self, event, threshold=None):
+    def get_track_axis(self, event=None, threshold=None, return_all_svd_results=False, xyze=None, return_np=True):
         '''
         Uses SVD on all points above some threshold to get track direction.
         Returns point, unit vector in track direction.
         If threshold==None, uses track length ic threshold.
+        
+        Either event number must be passed, or xyze which contans tuple of cupy arrays of 
+        xyze points. This can be useful to avoid transfering data to GPU twice
+
+        return_np specifies if data should be moved back to cpu from gpu 
         '''
         if threshold == None:
             threshold = self.length_counts_threshold
-        x,y,z,e = self.get_xyze(event, threshold, False)
-        points = np.concatenate((x[:, np.newaxis], 
-                       y[:, np.newaxis], 
-                       z[:, np.newaxis]), 
-                      axis=1)
+        if type(event) != type(None):
+            x,y,z,e = self.get_xyze(event, threshold, False)
+            x, y,z,e = cp.array(x), cp.array(y), cp.array(z), cp.array(e)
+        else:
+            x, y, z, e = xyze
+        points = cp.concatenate((x[:, cp.newaxis], y[:, cp.newaxis], z[:, cp.newaxis]), axis=1)
         points_mean = points.mean(axis=0)
-        uu, dd, vv = np.linalg.svd(points - points_mean)
-        return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
+        uu, dd, vv = cp.linalg.svd(points - points_mean)
+        if return_np:
+            points_mean = cp.asnumpy(points_mean)
+            uu, dd, vv = cp.asnumpy(uu), cp.asnumpy(dd), cp.asnumpy(vv)
+        if return_all_svd_results:
+            return points_mean, uu, dd, vv
+        else:
+            return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
 
     
     def get_event_num_bounds(self):
@@ -360,98 +494,37 @@ class raw_h5_file:
         event = self.get_data(event_number)
         return len(event)
     
-    def get_track_length_angle(self, event_number):
+    def get_track_length_angle(self, event_number, return_np=True):
         '''
-        1. Remove all points which are less than threshold sigma above background
-        2. Find max distance between any of the two remaining points.
-        Should replace this with something more robust in the future. This will NOT
-        well work if outlier removal and background subtraction haven't been performed.
+        1. Determin track principle axis, and use this to get azimuthal angle
+        2. Find point furthest along this axis, in each direction
 
         Returns: length, angle from z-axis in radians
         '''
         xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
-        if len(xs) == 0:
+        if len(xs) < 2:
             return 0, 0, 0
-        points = np.vstack((xs, ys, zs)).T
-        #print(points)
-        #find max distance using this algorithm
-        #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
-        try:
-            hull = scipy.spatial.ConvexHull(points)
-            points = points[hull.vertices,:]
-        except: #qhull will fail on colinear points, so just brute force if that's the case
-            pass
-        #find the two most distant points
-        hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
-        indices = np.unravel_index(np.argmax(hdist, axis=None), hdist.shape)
-        p1 = points[indices[0]]
-        p2 = points[indices[1]]
-        #print(p1, p2)
-        dist = hdist[indices]
-        dr = p1-p2
-        if dr[2] != 0:
-            angle = np.abs(np.arctan(np.sqrt(dr[0]**2 + dr[1]**2)/dr[2]))
-        else:
-            angle = np.radians(90)
-        return np.sqrt(dr[0]**2 + dr[1]**2), dr[2], angle
+        #move points to GPU
+        xs, ys, zs, es = cp.array(xs), cp.array(ys), cp.array(zs), cp.array(es)
+        track_center, vv = self.get_track_axis(xyze=(xs, ys, zs, es), return_np=False)
+        track_direction = vv[0]/cp.sqrt(np.sum(vv[0]*vv[0]))
+        angle = cp.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),cp.abs(track_direction[2]))
 
+        points = cp.concatenate((xs[:, cp.newaxis], 
+                       ys[:, cp.newaxis], 
+                       zs[:, cp.newaxis]), 
+                      axis=1)
+        rbar = points - track_center
+        rdotv = cp.dot(rbar, track_direction)
+        first_point = points[cp.argmin(rdotv)]
+        last_point = points[cp.argmax(rdotv)]
+        dr = last_point - first_point
+        dxy, dz = cp.sqrt(dr[0]**2 + dr[1]**2), dr[2]
+        if return_np:
+            dxy, dz, angle = cp.asnumpy(dxy), cp.asnumpy(dz), cp.asnumpy(angle)
+        return dxy, dz, angle
     
-    def determine_pad_backgrounds(self, num_background_bins=200, mode='background'):
-        '''
-        Assume the first num_background_bins of each pad's data only include background.
-        Determine average value of this pad and stddev across all events in which the pad fired.
-        Store this information in a dictionairy member variable.
-
-        Pad background will be stored in self.pad_backgrounds, which is a dictionairy indexed by pad
-        number which stores (background average, background standard deviation) pairs.
-        
-        Mode = background: determine average number of counts in background region
-        Mode = average: determine average number of counts above background (if background subtraction is turned on)
-        '''
-        first, last = self.get_event_num_bounds()
-
-        #compute average
-        running_averages = {}
-        for event_num in range(first, last+1):
-            if mode == 'background':
-                self.h5_file['get']['evt%d_data'%event_num]
-            elif mode == 'average':
-                event_data = self.get_data(event_num)#
-            for line in event_data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
-                if pad not in running_averages:
-                    running_averages[pad] = (0,0) #running everage, events processed
-                if mode == 'background':
-                    ave_this = np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:self.num_background_bins[1]+FIRST_DATA_BIN])
-                elif mode == 'average':
-                    ave_this = np.average(line[FIRST_DATA_BIN:511+FIRST_DATA_BIN])
-                ave_last, n = running_averages[pad]
-                running_averages[pad] = ((n*ave_last + ave_this)/(n+1), n+1)
-        #compute standard deviation
-        running_stddev = {}
-        for event_num in range(first, last+1):
-            event_data = self.h5_file['get']['evt%d_data'%event_num]
-            for line in event_data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
-                if pad not in running_stddev:
-                    running_stddev[pad] = (0,0)
-                std_this = np.std(line[FIRST_DATA_BIN:num_background_bins+FIRST_DATA_BIN])
-                std_last, n = running_stddev[pad]
-                running_stddev[pad] = ((n*std_last + std_this)/(n+1), n+1)
-        self.pad_backgrounds = {}
-        for pad in running_averages:
-            self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
-    
+   
     def get_histogram_arrays(self):
         max_veto_counts_list, pads_railed_list, angle_hist, counts_hist, dxy_hist, dz_hist = [], [], [], [], [], []
         first, last = self.get_event_num_bounds()
@@ -582,37 +655,54 @@ class raw_h5_file:
                                                                                                np.degrees(angle), len(pads_railed)))
         plt.show(block=block)
     
-    def get_2d_image(self, event_number):
-        data = self.get_data(event_number)
+    def get_2d_image(self, data):
         image = np.zeros(np.shape(self.pad_plane))
-        for line in data:
-            chnl_info = tuple(line[0:4])
-            if chnl_info not in self.chnls_to_pad:
-                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                continue
-            pad = self.chnls_to_pad[chnl_info]
+        for pad in data:
             x,y = self.pad_to_xy_index[pad]
-            image[x,y] = np.sum(line[FIRST_DATA_BIN:])
-        image[image<0]=0
+            image[y,x] = data[pad]
+        #image[image<0]=0
         return image
 
-    def show_2d_projection(self, event_number, block=True, fig_name=None):
-        data = self.get_data(event_number)
-        image = self.get_2d_image(event_number)
-        trace = np.sum(data[:,FIRST_DATA_BIN:],0)
-        
+    def show_padplane_image(self, data, trace_dict=None, block=False, fig_name=None, title=''):
+        '''
+        Shows a figure with pad plane displaying "data", above the sum of all "traces" (if not None).
+        Clicking on a pad will show the corresponding trace 
+        data: Dictionary of pixel brightnesses indexed by pad number
+        traces: optional. If passed, sould contain trace to dispay when a pad is clicked. Summed version of this 
+                will be shown below the pad plane.
+        '''
+        image = self.get_2d_image(data)
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
-        length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
+        plt.title(title)
         plt.subplot(2,1,1)
         plt.imshow(image, norm=colors.LogNorm())
         plt.colorbar()
         plt.subplot(2,1,2)
-        plt.plot(trace)
+        plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
+        def onclick(event):
+            x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
+            pad = self.xy_index_to_pad[(x,y)]
+            if pad in trace_dict:
+                plt.figure()
+                plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
+                plt.plot(trace_dict[pad])
+                plt.show(block=False)
+
+        fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
+
+
+    def show_2d_projection(self, event_number, block=True, fig_name=None):
+        pads, traces = self.get_pad_traces(event_number)
+        trace_dict = {pad: trace for pad, trace in zip(pads, traces)}
+        data = {pad:np.sum(trace_dict[pad]) for pad in trace_dict}
+        should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
+        length = np.sqrt(dxy**2 + dz**2)
+        title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
+        self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+        
 
     def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
         '''

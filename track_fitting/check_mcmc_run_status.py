@@ -88,7 +88,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             tau = tau_auto
         else:
             tau = [2]
-        burnin = int(2 * np.max(tau))
+        burnin = int(3 * np.max(tau))
         thin = int(0.5 * np.min(tau))
         output_text_file.write('burnin: %f\n'%burnin)
         output_text_file.write('thin: %f\n'%thin)
@@ -137,6 +137,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 
 
+<<<<<<< HEAD
 run_number= 124
 # steps = ['forward', 'backward']
 steps = ['backward']
@@ -151,6 +152,32 @@ tau = [2]
 Ea_Ep_labels = ['Ea', 'Ep', 'x', 'y', 'z', 'theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
 summary_file_path = './run%d_palpha_mcmc/summary.txt'%run_number
 filepath_template = './run%d_palpha_mcmc/event%d/%s.h5'
+=======
+if True: #change this to True for single particle fits
+    run_number= 124
+    steps = ['forward', 'backward']
+    filenames = []
+    events = [15,17]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
+        #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'rho']
+    theta_index, phi_index = 4,5
+    tau = [2]
+    Ea_Ep_labels = None
+    summary_file_path = './run%d_mcmc/summary.txt'%run_number
+    filepath_template = './run%d_mcmc/event%d/%s.h5'
+else:
+    run_number= 124
+    steps = 2
+    filenames = []
+    #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
+    events = [ 19699, 51777, 68192, 10356, 21640, 21662, 26303, 50543, 27067, 25304, 104723, 43833, 52010 ]
+    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
+    theta_index, phi_index = 5,6
+    tau = [2]
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
+    summary_file_path = './run%d_palpha_mcmc/summary.txt'%run_number
+    filepath_template = './run%d_palpha_mcmc/event%d/clustering_run%d.h5'
+>>>>>>> alex_track_fitting
 
 with open(summary_file_path, 'w') as summary_file:
     summary_file.write('event, energy from IC, ')

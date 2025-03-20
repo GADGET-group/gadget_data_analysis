@@ -1,10 +1,12 @@
 import numpy as np
 
 class SRIM_Table:
-    def __init__(self, data_path:str, material_density:float):
+    def __init__(self, data_path:str, material_density:float, ionization_file=None):
         '''
         data_path: path to SRIM file
         material_density: Density of material in mg/cm^3
+        ionization file: Optional csv file with ion_energy in keV, fraction_energy_as_ionization. 
+                         Ionization fraction is assumed to be 1 if not provided
         '''
         # Initialize lists to store the data
         energy_MeV = [0]
@@ -15,10 +17,10 @@ class SRIM_Table:
         # Read the file
         with open(data_path, 'r') as file:
             for i, line in enumerate(file):
-                if i == 9:#read in density at which calculation was done
+                if i == 10:#read in density at which calculation was done
                     table_density = float(line.split()[3])*1e3#convert g/cm^3 to mg/cm^3
                 # Start reading from the 26th line and stop after the 105th line
-                if 26 <= i <= 104:
+                if 27 <= i <= 105:
                     if line.strip():  # Ensure the line is not empty
                         parts = line.split()
                         # Handle energy conversion based on unit
@@ -56,6 +58,18 @@ class SRIM_Table:
         nuclear_stopping_MeV_um = np.array(nuclear_stopping_MeV_um)
         self.stopping_distance_mm = np.array(path_length_mm)/material_density*table_density
         self.stopping_power_MeV_mm = material_density * (electronic_stopping_MeV_um + nuclear_stopping_MeV_um)/10
+
+        if type(ionization_file) != type(None):
+            #load data and sort by ascending energy
+            ionization_data = np.loadtxt(ionization_file, skiprows=1, delimiter=',')
+            ion_Es = ionization_data[:,0]/1000
+            ion_frac = ionization_data[:,1]
+            sort_i = np.argsort(ion_Es)
+            ion_Es, ion_frac = ion_Es[sort_i], ion_frac[sort_i]
+            #interpolate to get ionization fraction ateach stopping power energy
+            self.ionization_fractions = np.interp(self.energy_MeV, ion_Es, ion_frac)
+        else:
+            self.ionization_fractions = np.ones(len(self.energy_MeV))
         
     def get_stopping_distance(self, E_MeV):
         '''
@@ -65,6 +79,9 @@ class SRIM_Table:
     
     def get_energy_w_stopping_distance(self, distance_mm):
         return np.interp(distance_mm, self.stopping_distance_mm, self.energy_MeV)
+    
+    def get_energy_as_ionization(self, energies):
+        return np.interp(energies, self.energy_MeV, self.ionization_fractions)*energies
     
     def get_stopping_power(self, E_MeV):
         '''

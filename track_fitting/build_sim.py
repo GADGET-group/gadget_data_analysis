@@ -10,12 +10,16 @@ import emcee
 import matplotlib.pylab as plt
 
 from raw_viewer.raw_h5_file import raw_h5_file
-from track_fitting.ParticleAndPointDeposition import ParticleAndPointDeposition
+from track_fitting.SimulatedEvent import SimulatedEvent
 from track_fitting.SingleParticleEvent import SingleParticleEvent
+<<<<<<< HEAD
 from track_fitting.MultiParticleEvent import MultiParticleEvent, ProtonAlphaEvent, DoubleAlphaEvent
+=======
+from track_fitting.MultiParticleEvent import MultiParticleEvent, MultiParticleDecay
+>>>>>>> alex_track_fitting
 from track_fitting.SimGui import SimGui
 
-read_data_mode = 'adjacent'
+read_data_mode = 'unchanged'
 
 #########################################################################
 # Functions for getting gain, pressure, etc which may vary between runs #
@@ -23,6 +27,7 @@ read_data_mode = 'adjacent'
 #detector settings
 #list of 2 point calibrations, inexed by experiment and then run number.
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
+<<<<<<< HEAD
 calibration_points = {
                     'e21072':{ #from 770 keV and 1.596 MeV protons, adjusted to include recoilling nucleus from Tyler
                         124:((183193, 86431),(1.623, 0.779))
@@ -31,6 +36,12 @@ calibration_points = {
                         342:((4.8e5, 6.3e5),(6.288, 8.7849)),
                         124:((4.8e5, 6.3e5),(6.288, 8.7849))
                         }
+=======
+calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
+                        {124:((90625 , 192102 ),(0.7856, 1.633))},
+                    'e24joe':
+                        {124:((5.4e5, 6.9e5),(6.288, 8.7849))} # TODO: adjust these calibration points using fits to both peaks
+>>>>>>> alex_track_fitting
                     }
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
@@ -46,12 +57,28 @@ def get_detector_E_sigma(experiment:str, run:int, MeV):
         #assume energy calibraiton goes as sqrt energy, and use 770 keV protons
         if run == 124:
             return (5631/86431)*0.779*(MeV/0.779)**0.5
+<<<<<<< HEAD
         
     if experiment == 'e24joe':
         #using same process as e21072 for now
         #TODO: change this to better reflect the likely larger sigma in e24joe
         # if run == 124:
         return (5631/86431)*0.779*(MeV/0.779)**0.5
+=======
+    if experiment == 'e24joe':
+        #using same process as e21072 for now
+        #TODO change this to better reflect the likely larger sigma in e24joe
+        # if run == 124:
+        return (5631/86431)*0.779*(MeV/0.779)**0.5
+    assert False, "Experiment not found for get_detector_E_sigma function"
+
+def get_stopping_material(experiment:str, run:int):
+    if experiment == 'e21072':
+        return 'P10'
+    if experiment == 'e24joe':
+        return 'P10'
+    assert False, "Experiment not found for get_stopping_material function"
+>>>>>>> alex_track_fitting
 
 def get_gas_density(experiment:str, run:int)->float:
     if experiment == 'e21072':
@@ -59,6 +86,14 @@ def get_gas_density(experiment:str, run:int)->float:
         T = 20+273.15 #K
         P = 860.3 #torr
         return rho0*(P/760)*(300./T)
+    if experiment == 'e24joe':
+        rho0 = 1.5256 # mg/cm^3, P10 at 300K and 760 torr
+        T = 19+273.15 # K
+        P = 2000 # torr
+        return rho0*(P/760)*(300./T)
+    assert False, "Experiment not found for get_gas_density function"
+
+
     
     if experiment == 'e24joe':
         rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
@@ -70,6 +105,7 @@ def get_zscale(experiment:str, run:int):
     if experiment == 'e21072':
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+<<<<<<< HEAD
         return drift_speed/clock_freq
     
     if experiment == 'e24joe':
@@ -77,6 +113,13 @@ def get_zscale(experiment:str, run:int):
         clock_freq = 50e6 #Hz, from e24joe config file on mac minis
         drift_speed = 60.9*1e6 #mm/s, taken from chart from CERN 84-08 'Drift and Diffusion of Electrons in Gases: A Compilation' although it underpredicts the drift speed of electrons in P10 at 860 torr compared to what Ruchi finds in her paper
         return drift_speed/clock_freq
+=======
+    if experiment == 'e24joe':
+        return 0.65
+        clock_freq = 50e6 #Hz, from e21062 config file on mac minis
+        drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+    return drift_speed/clock_freq
+>>>>>>> alex_track_fitting
 
 #raw h5 data location and processing settings
 def get_raw_h5_path(experiment:str, run:int):
@@ -88,10 +131,17 @@ def get_raw_h5_path(experiment:str, run:int):
             return "/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447.h5"
             return "/mnt/daqtesting/protondet2024/h5/" + ('run_%04d.h5'%run)
         if socket.gethostname() == 'tpcgpu':
+<<<<<<< HEAD
             if run == 0 or run ==124: #TODO: Fix the earlierst MCMC run so that it isn't associated with run 124 arbitrarily
                 return '/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5'
             else:
                 return '/egr/research-tpc/dopferjo/' + ('run_%04d.h5'%run)
+=======
+            print("Make sure double alpha data is transferred to the tpcgpu machine!")
+            return "/egr/research-tpc/shared/Run_Data/" + ('run_%04d.h5'%run)
+
+    assert False, "Experiment or hostname not found for get_raw_h5_path function"
+>>>>>>> alex_track_fitting
 
 def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
     '''
@@ -102,15 +152,18 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run),
                                     zscale=get_zscale(experiment, run),
                                     flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.background_subtract_mode='fixed window'
-        h5file.data_select_mode='near peak'
+        h5file.background_subtract_mode='smart'
+        h5file.data_select_mode='all data' 
         h5file.remove_outliers=True
         h5file.near_peak_window_width = 50
         h5file.require_peak_within= (-np.inf, np.inf)
-        h5file.num_background_bins=(160, 250)#(40,50)#
+        h5file.ic_counts_threshold = 9
+        h5file.length_counts_threshold = 20
+        h5file.num_background_bins=(160, 250) #not used for "smart" background subtraction
         h5file.zscale = get_zscale(experiment, run)
         return h5file
     if experiment == 'e24joe':
+<<<<<<< HEAD
         h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run),
                                     zscale=get_zscale(experiment, run),
                                     flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
@@ -124,6 +177,22 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.zscale = get_zscale(experiment, run)
         return h5file
     assert False
+=======
+        h5file = raw_h5_file(file_path='/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5',
+                                    zscale=get_zscale(experiment, run),
+                                    flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
+        h5file.background_subtract_mode='fixed window'
+        h5file.data_select_mode='near peak' 
+        h5file.remove_outliers=True
+        h5file.near_peak_window_width = 50
+        h5file.require_peak_within= (-np.inf, np.inf)
+        h5file.ic_counts_threshold = 25
+        h5file.length_counts_threshold = 100
+        h5file.num_background_bins=(400, 500) #not used for "smart" background subtraction
+        h5file.zscale = get_zscale(experiment, run)
+        return h5file
+    assert False, "Experiment not found for get_rawh5_object function"
+>>>>>>> alex_track_fitting
     
 def apply_config_to_object(config_file, object):
     pass #TODO
@@ -148,27 +217,18 @@ def get_energy_from_ic(experiment, run, event):
 ########################################################
 # Functions to creating and manipulating sim objects
 ########################################################
-
-def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str):
+def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:int):
     '''
-    sim_constructor: assumed to take the same parameters as single particle event
+    Load data from h5 file, and set sim variables
     '''
-    
-    pads, traces = get_pads_and_traces(experiment, run, event)
-    E_from_ic = get_energy_from_ic(experiment, run, event)
-
     if experiment == 'e21072':
-        sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
         sim.zscale = get_zscale(experiment, run)
+        pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-        sim.counts_per_MeV = get_adc_counts_per_MeV(experiment, run)
-        
-        sim.adaptive_stopping_power = False
-        sim.points_per_bin = 5
-        sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
-
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.1046, 24.99
-        sim.pad_threshold = 50.4
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.0706, 4.77
+        sim.pad_threshold = 54.8
+        if run == 124:
+            sim.counts_per_MeV = 129600.
 
         with open('./raw_viewer/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
             sim.timing_offsets = pickle.load(f)
@@ -176,6 +236,7 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
             if pad != 1:
                 sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
         sim.timing_offsets[1] = 0
+<<<<<<< HEAD
         return sim
     if experiment == 'e24joe':
         sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type)
@@ -197,17 +258,54 @@ def create_single_particle_sim(experiment:str, run:int, event:int, particle_type
                 sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
         sim.timing_offsets[1] = 0
         return sim
+=======
+    
+    if experiment == 'e24joe':
+        sim.zscale = get_zscale(experiment, run)
+        pads, traces = get_pads_and_traces(experiment, run, event)
+        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.0706, 4.77
+        sim.pad_threshold = 54.8
+        if run == 124:
+            sim.counts_per_MeV = 129600.
+>>>>>>> alex_track_fitting
 
-def create_pa_sim(experiment:str, run:int, event:int):
-    proton = create_single_particle_sim(experiment, run, event, 'proton')
-    alpha = create_single_particle_sim(experiment, run, event, 'alpha')
-    sims = [proton, alpha]
-    to_return =  MultiParticleEvent(sims)
-    pads, traces = pads, traces = get_pads_and_traces(experiment, run, event)
-    to_return.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-    to_return.pad_threshold = proton.pad_threshold
-    to_return.pad_gain_match_uncertainty = proton.pad_gain_match_uncertainty
-    to_return.other_systematics = proton.other_systematics
+        with open('./raw_viewer/h5_utils/timing_offsets.pkl', 'rb') as f: # TODO: get specific timing offsets for e24joe
+            sim.timing_offsets = pickle.load(f)
+        for pad in sim.timing_offsets:
+            if pad != 1:
+                sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
+        sim.timing_offsets[1] = 0
+    assert sim.timing_offsets[1] == 0, "Experiment not found for configure_sim_for_event function"
+
+
+def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str, load_data=True)->SingleParticleEvent:
+    '''
+    load_data:
+    '''
+    E_from_ic = get_energy_from_ic(experiment, run, event)
+    sim = SingleParticleEvent(get_gas_density(experiment, run), particle_type, get_stopping_material(experiment, run))
+    adaptive_stopping_power = False
+    sim.points_per_bin = 5
+    sim.num_stopping_power_points = sim.get_num_stopping_points_for_energy(E_from_ic)
+    if load_data:
+        configure_sim_for_event(sim, experiment, run, event)
+    return sim
+
+def create_multi_particle_event(experiment:str, run:int, event:int, particle_types:str, load_data=True)->MultiParticleEvent:
+    individual_sims = [create_single_particle_sim(experiment, run, event, ptype, False) for ptype in particle_types]
+    to_return = MultiParticleEvent(individual_sims)
+    if load_data:
+        configure_sim_for_event(to_return, experiment, run, event)
+    return to_return
+
+def create_multi_particle_decay(experiment:str, run:int, event:int, product_names:list[str], prodcut_masses:float, 
+                                recoil_name:str, recoil_mass:float, load_data=True)->MultiParticleDecay:
+    product_sims = [create_single_particle_sim(experiment, run, event, ptype, False) for ptype in product_names]
+    recoil_sim = create_single_particle_sim(experiment, run, event, recoil_name, False)
+    to_return = MultiParticleDecay(product_sims, prodcut_masses, recoil_sim, recoil_mass)
+    if load_data:
+        configure_sim_for_event(to_return, experiment, run, event)
     return to_return
 
 def create_da_sim(experiment:str, run:int, event:int):
@@ -264,6 +362,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     trace_sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
     return trace_sim
 
+<<<<<<< HEAD
 def load_da_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     reader = emcee.backends.HDFBackend(filename='run%d_dalpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
     
@@ -300,6 +399,10 @@ def load_da_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
 
 def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
     filename='run%d_mcmc/event%d/%s.h5'%(run, event, mcmc_name)
+=======
+def load_single_particle_mcmc_result(run:int, event:int, particle='1H', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
+    filename='run%d_mcmc/m0.07_c4.77/event%d/%s.h5'%(run, event, mcmc_name)
+>>>>>>> alex_track_fitting
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     
@@ -310,15 +413,23 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='proton', mcmc
         best_params = samples[np.argmax(ll)]
     else:
         best_params = samples[select_model]
-    E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params
+    E, x, y, z, theta, phi, sigma_xy, sigma_z = best_params #,density_scale
+    density_scale = 1
 
-    trace_sim = create_single_particle_sim('e21072', run, event, particle)
-    trace_sim.initial_energy = E
-    trace_sim.initial_point = (x,y,z)
+    if particle == '1H':
+        recoil_name = '19Ne'
+        recoil_mass = 19
+        product_mass = 1
+
+    trace_sim = create_multi_particle_decay('e21072', run, event, [particle], [product_mass], recoil_name, recoil_mass)
+    for sim in trace_sim.sims:
+        sim.load_srim_table(sim.particle, sim.material, sim.gas_density*density_scale)
+    trace_sim.products[0].initial_energy = E
+    trace_sim.initial_point = trace_sim.products[0].initial_point = (x,y,z)
     trace_sim.sigma_xy = sigma_xy
     trace_sim.sigma_z = sigma_z
-    trace_sim.theta = theta
-    trace_sim.phi = phi
+    trace_sim.products[0].theta = theta
+    trace_sim.products[0].phi = phi
     #trace_sim.other_systematics = c
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
     trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
