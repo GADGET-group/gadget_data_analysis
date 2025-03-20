@@ -386,8 +386,8 @@ class RawEventViewerFrame(ttk.Frame):
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
         # TODO: delete this line before committing changes
-        # self.h5file.label_data(event_number, threshold=float(self.view_threshold_entry.get()))
-        self.h5file.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
+        self.h5file.label_data(event_number, threshold=float(self.view_threshold_entry.get()))
+        # self.h5file.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
     
     def next(self):
         plt.close()

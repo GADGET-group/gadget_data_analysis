@@ -265,13 +265,11 @@ class raw_h5_file:
         
         # Trying DBSCAN method of outlier removal
         xs, ys, zs, es = self.get_xyze(event_number, threshold = threshold)
-        print("len(zs): ", len(zs))
-        zs_scale = 38 / 512
-        zs = zs * zs_scale # rescaling zs to give that dimension roughly the same weight as xs and ys (38/512)
-        print("scaled len(zs): ", len(zs))
-        data = np.array([xs.T,ys.T,zs.T]).T
-        DBSCAN_cluster = DBSCAN(eps = 6, min_samples = 10).fit(data)
-        del data
+        db_data = np.array([xs.T,ys.T,zs.T]).T
+        print("np.shape(db_data) for DBSCAN: ", np.shape(db_data))
+        print("np.shape(data) from get_data: ", np.shape(data))
+        DBSCAN_cluster = DBSCAN(eps = 3, min_samples = 70000).fit(db_data, sample_weight = es)
+        del db_data
 
         if all(element == -1 for element in DBSCAN_cluster.labels_):
             veto = True
@@ -322,15 +320,18 @@ class raw_h5_file:
         # print("Length of x, y, and z: ", len(x), len(y), len(z))
 
         label_color.append(labeled_image_3d[x,y,z])
-        ax.scatter(x, y, z, c=label_color, s=10)  # s is the marker size
+        # ax.scatter(x, y, z, c=label_color, s=10)  # s is the marker size
 
         # Plotting 3d image from DBSCAN
-        ax.scatter(xs,ys,zs/zs_scale,c=hdb_labels,s=10)
+        ax.scatter(xs,ys,zs,c=hdb_labels,s=10)
 
         # Set labels for the axes
         ax.set_xlabel('X-axis')
         ax.set_ylabel('Y-axis')
         ax.set_zlabel('Z-axis')
+        ax.set_xlim3d(-200, 200)
+        ax.set_ylim3d(-200, 200)
+        ax.set_zlim3d(0, 400)
 
         # Show the plot
         plt.show(block=True)
