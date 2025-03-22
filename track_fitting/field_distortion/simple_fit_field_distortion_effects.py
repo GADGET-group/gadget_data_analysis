@@ -13,7 +13,7 @@ from track_fitting import build_sim
 do_simple_linear_correction=False
 do_rmap = True
 
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -28,7 +28,8 @@ timestamps = np.load(os.path.join(processed_directory, 'timestamps.npy'))
 
 h5file = build_sim.get_rawh5_object(experiment, run)
 dzs = dts*h5file.zscale
-ranges = np.sqrt(dzs**2 + dxys**2)
+ranges = np.sqrt(dzs**2 + dxys**2) #why is this different than ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
+
 
 #use track angle from pca rather than that exported by raw event viewer
 angles = []
@@ -62,24 +63,24 @@ min_width, max_width = 2,5
 track_width_mask = (track_widths>=min_width) & (track_widths <= max_width)
 if run==124:
     mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
-    mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)& (track_widths>=min_width)
+    mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)
 elif run==212:
-    mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & (track_widths>=min_width) 
-    mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5) & (counts<1.64e5) & (track_widths>=min_width) 
+    mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5)
+    mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5)
     pass
 true_range_1500keV_proton = 46.7
 true_range_750keV_protons = 16.1
 
 plt.figure()
 plt.title('1500 keV protons')
-plt.scatter(ranges[mask_1500keV_protons], track_widths[mask_1500keV_protons], c=times_since_start_of_window[mask_1500keV_protons])
+plt.scatter(track_widths[mask_1500keV_protons], ranges[mask_1500keV_protons], c=times_since_start_of_window[mask_1500keV_protons])
 plt.xlabel('track width (mm)')
 plt.ylabel('range (mm)')
 plt.colorbar()
 
 plt.figure()
 plt.title('750 keV protons')
-plt.scatter(ranges[mask_750keV_protons], track_widths[mask_750keV_protons], c=times_since_start_of_window[mask_750keV_protons])
+plt.scatter( track_widths[mask_750keV_protons], ranges[mask_750keV_protons], c=times_since_start_of_window[mask_750keV_protons])
 plt.xlabel('track width (mm)')
 plt.ylabel('range (mm)')
 plt.colorbar()
@@ -193,21 +194,21 @@ plt.hist(mapped_ranges[mask_1500keV_protons], bins=range_hist_bins, alpha=0.6, l
 plt.legend()
 
 plt.figure()
-wsquared = 16
+w = 4
 r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
-plt.title('r map for track with %f mm width'%wsquared**0.5)
+plt.title('r map for track with %f mm width'%w)
 for t in [0, 0.02, 0.05, 0.1]:
-    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, wsquared) - r_obs, label='%f s'%t)
+    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
 plt.xlabel('position charge was observed')
 plt.ylabel('r_dep - r_obs')
 plt.legend()
 
 plt.figure()
-wsquared = 9
+w = 3
 r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
-plt.title('r map for track with %f mm width'%wsquared**0.5)
+plt.title('r map for track with %f mm width'%w)
 for t in [0, 0.02, 0.05, 0.1]:
-    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, wsquared) - r_obs, label='%f s'%t)
+    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
 plt.xlabel('position charge was observed')
 plt.ylabel('r_dep - r_obs')
 plt.legend()

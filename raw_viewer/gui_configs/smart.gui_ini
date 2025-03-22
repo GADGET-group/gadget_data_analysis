@@ -18,8 +18,8 @@ moving_average_include_width = 40
 moving_average_exclude_width = 20
 zscale = 1.088
 near_peak_window_width = 50
-peak_first_allowed_bin = -inf
-peak_last_allowed_bin = inf
+peak_first_allowed_bin = 20
+peak_last_allowed_bin = 300
 smart_bins_away_to_check = 50
 smart_num_background_bins = 50
 
