@@ -21,10 +21,10 @@ def get_track_info(experiment, run_number):
         h5file = build_sim.get_rawh5_object(experiment, run_number)
         print('calculating quantities not saved by GUI process run')
         first_event, last_event = h5file.get_event_num_bounds()
-        track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints = [],[],[],[],[]
+        track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths = [],[],[],[],[],[]
         for evt in tqdm(range(first_event, last_event + 1)):
             center, uu,dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
-            xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold)
+            xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
             principle_axes.append(vv)
             variances_along_axes.append(dd**2/(len(xs)-1))
             track_centers.append(center)
@@ -44,12 +44,21 @@ def get_track_info(experiment, run_number):
                 first_point = points[np.argmin(rdotv)]
                 last_point = points[np.argmax(rdotv)]
                 track_endpoints.append([first_point, last_point])
+                #above variance is just variance in postiion of points above some threshold
+                #instead calcualte variance along 2nd axis of charge
+                width_axis = vv[1]/np.sqrt(np.sum(vv[1]*vv[1]))
+                total_charge = np.sum(es)
+                center_of_charge = np.einsum('i,ij->j',es, points)/total_charge
+                displacement_from_center = points - center_of_charge
+                displacement_dot_width_axis_squared = np.einsum('ij, j', displacement_from_center, width_axis)**2
+                charge_widths.append(np.einsum('i,i', displacement_dot_width_axis_squared, es)/total_charge)
             else:
                 track_endpoints.append([(0,0,0), (0,0,0)])
+                charge_widths.append(0)
         track_centers = np.array(track_centers)
         pad_charges = np.array(pad_charges)
         to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
-                   'pad_charge': pad_charges, 'endpoints':track_endpoints}
+                   'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths}
         print('pickling')
         with open(fname, 'wb') as file:
             pickle.dump(to_return, file)

@@ -1,5 +1,6 @@
 import os
 import pickle
+import sys
 
 import numpy as np
 from tqdm import tqdm
@@ -13,10 +14,12 @@ from track_fitting import build_sim
 do_simple_linear_correction=False
 do_rmap = True
 
-experiment, run = 'e21072', 212
+experiment, run, N = 'e21072', 124, 1
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
+endpoints = np.array(track_info_dict['endpoints'])
+
 processed_directory = '/egr/research-tpc/shared/Run_Data/run_%04d_raw_viewer/run_%04dsmart'%(run, run)
 
 #load histogram arrays
@@ -28,7 +31,9 @@ timestamps = np.load(os.path.join(processed_directory, 'timestamps.npy'))
 
 h5file = build_sim.get_rawh5_object(experiment, run)
 dzs = dts*h5file.zscale
-ranges = np.sqrt(dzs**2 + dxys**2) #why is this different than ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
+#ranges = np.sqrt(dzs**2 + dxys**2) #why is this different than ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)?
+ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
+ranges = ds
 
 
 #use track angle from pca rather than that exported by raw event viewer
@@ -85,10 +90,8 @@ plt.xlabel('track width (mm)')
 plt.ylabel('range (mm)')
 plt.colorbar()
 
-endpoints = np.array(track_info_dict['endpoints'])
 rscale, wscale, tscale = 25, 4, 0.05
 #try mapping r->r + r'(r, t, w)= r + sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w^k
-N = 2
 ijk_array = []
 for n in range(N+1):
     for i in range(n+1):
@@ -138,7 +141,7 @@ def to_minimize(a_ijk):
     #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
     p1500_ranges = map_ranges(a_ijk, mask_1500keV_protons&track_width_mask)
     p750_ranges = map_ranges(a_ijk, mask_750keV_protons&track_width_mask)
-    to_return = np.std(p1500_ranges) + np.std(p750_ranges) + ((np.mean(p1500_ranges) - np.mean(p750_ranges)) - (true_range_1500keV_proton - true_range_750keV_protons))**2
+    to_return = np.std(p1500_ranges) + ((np.mean(p1500_ranges) - np.mean(p750_ranges)) - (true_range_1500keV_proton - true_range_750keV_protons))**2 # + np.std(p750_ranges)
     print(to_return, np.std(p1500_ranges), np.std(p750_ranges), np.mean(p1500_ranges), np.mean(p750_ranges))
     return to_return
 
@@ -177,15 +180,17 @@ a_ijk_best = res.x
         
 
 plt.figure()
-plt.title('uncorrected RvE')
+plt.title('run %d uncorrected RvE'%run)
 plt_mask = (ranges>0)&(ranges<150)&(counts>0)
 plt.hist2d(counts[plt_mask], ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.colorbar()
 
 mapped_ranges = map_ranges(a_ijk_best, ranges==ranges)
 plt.figure()
-plt.title('RvE corrected using r-map')
+plt.title('run %d RvE corrected using r-map'%run)
 plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)
 plt.hist2d(counts[plt_mask], mapped_ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.colorbar()
 
 plt.figure()
 range_hist_bins = np.linspace(30, 70, 80)

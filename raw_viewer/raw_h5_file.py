@@ -284,7 +284,7 @@ class raw_h5_file:
             return baseline
         assert False #invalid mode
 
-    def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
+    def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
         Returns: xs, ys, ts, es
                  Where each of these is an array s.t. each "pixel" in the in the raw TPC data is represented.
@@ -544,6 +544,7 @@ class raw_h5_file:
         plt.show(block=block)
     
     def get_2d_image(self, data):
+        #data should be a dictionary of numbers to put in the image, indexed by pad
         image = np.zeros(np.shape(self.pad_plane))
         for pad in data:
             x,y = self.pad_to_xy_index[pad]
