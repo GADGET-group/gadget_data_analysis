@@ -11,10 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-do_simple_linear_correction=False
-do_rmap = True
-
-experiment, run, N = 'e21072', 124, 1
+experiment, run, N = 'e21072', 212, 1
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -142,7 +139,7 @@ def to_minimize(a_ijk):
     #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
     p1500_ranges = map_ranges(a_ijk, mask_1500keV_protons&track_width_mask)
     p750_ranges = map_ranges(a_ijk, mask_750keV_protons&track_width_mask)
-    to_return = np.std(p1500_ranges) + ((np.mean(p1500_ranges) - np.mean(p750_ranges)) - (true_range_1500keV_proton - true_range_750keV_protons))**2 # + np.std(p750_ranges)
+    to_return = np.std(p1500_ranges) + ((np.mean(p1500_ranges) - np.mean(p750_ranges)) - (true_range_1500keV_proton - true_range_750keV_protons))**2  + np.std(p750_ranges)
     print(to_return, np.std(p1500_ranges), np.std(p750_ranges), np.mean(p1500_ranges), np.mean(p750_ranges))
     return to_return
 
