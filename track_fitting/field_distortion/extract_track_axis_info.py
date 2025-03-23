@@ -51,7 +51,7 @@ def get_track_info(experiment, run_number):
                 center_of_charge = np.einsum('i,ij->j',es, points)/total_charge
                 displacement_from_center = points - center_of_charge
                 displacement_dot_width_axis_squared = np.einsum('ij, j', displacement_from_center, width_axis)**2
-                charge_widths.append(np.einsum('i,i', displacement_dot_width_axis_squared, es)**0.5/total_charge)
+                charge_widths.append((np.einsum('i,i', displacement_dot_width_axis_squared, es)/total_charge)**0.5)
             else:
                 track_endpoints.append([(0,0,0), (0,0,0)])
                 charge_widths.append(0)
