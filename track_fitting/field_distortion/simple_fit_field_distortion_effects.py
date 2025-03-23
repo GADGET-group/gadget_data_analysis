@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 5
+experiment, run, N = 'e21072', 124, 3
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -74,6 +74,10 @@ elif run==212:
 true_range_1500keV_proton = 46.7
 true_range_750keV_protons = 16.1
 
+cut1_mask, cut1_true_range = mask_1500keV_protons, true_range_1500keV_proton
+cut2_mask, cut2_true_range = mask_750keV_protons, true_range_750keV_protons
+
+
 
 
 plt.figure()
@@ -106,9 +110,13 @@ def map_r(a_ijk, r, t, w):
         i,j,k = ijk
         new_r += a*((r/rscale)**i)*((t/tscale)**j)*((w/wscale)**k)
     if type(new_r) == np.ndarray:
-        new_r[new_r < 0] = 0
-    elif new_r < 0:
-        new_r = 0
+        #new_r[new_r < 0] = 0
+        new_r[new_r < r] = r[new_r < r] #don't allow Efield to point away from beam axis
+        new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
+    elif new_r < r:
+        new_r = r
+    elif new_r > 61:
+        new_r = 61
     return new_r
 
 def map_endpoints(a_ijk, event_select_mask):
@@ -117,8 +125,8 @@ def map_endpoints(a_ijk, event_select_mask):
     p2_init = selected_endpoints[:,1,:]
     t = times_since_start_of_window[event_select_mask]
     w = track_widths[event_select_mask]
-    r1_init = np.einsum('ij,ij->i', p1_init, p1_init)**0.5
-    r2_init = np.einsum('ij,ij->i', p2_init, p2_init)**0.5
+    r1_init = np.einsum('ij,ij->i', p1_init[:,:2], p1_init[:,:2])**0.5
+    r2_init = np.einsum('ij,ij->i', p2_init[:,:2], p2_init[:,:2])**0.5
     r1_final = map_r(a_ijk, r1_init, t, w)
     r2_final = map_r(a_ijk, r2_init, t, w)
     to_return =np.zeros(selected_endpoints.shape)
@@ -127,26 +135,6 @@ def map_endpoints(a_ijk, event_select_mask):
     return to_return
 
 
-    to_return = []
-    for event_index, pair in enumerate(endpoints):
-        if not event_select_mask[event_index]:
-            continue
-        new_pair = []
-        t = times_since_start_of_window[event_index]
-        w = track_widths[event_index]
-        new_pair = []
-        for point in pair:
-            r = np.sqrt(point[0]**2 + point[1]**2)
-            if r == 0:
-                new_pair.append(point) #points at the origin get mapped to points at the origin
-                continue
-            new_r = map_r(a_ijk, r, t, w)
-            new_point = np.array(point, copy=True)
-            new_point[0:2] *= new_r/r
-            new_pair.append(new_point)
-        to_return.append(new_pair)
-    return np.array(to_return)
-
 def map_ranges(a_ijk, event_select_mask):
     new_endpoints = map_endpoints(a_ijk, event_select_mask)
     return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1)
@@ -154,10 +142,10 @@ def map_ranges(a_ijk, event_select_mask):
 
 def to_minimize(a_ijk):
     #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
-    p1500_ranges = map_ranges(a_ijk, mask_1500keV_protons&track_width_mask)
-    p750_ranges = map_ranges(a_ijk, mask_750keV_protons&track_width_mask)
-    to_return = np.std(p1500_ranges) + ((np.mean(p1500_ranges) - np.mean(p750_ranges)) - (true_range_1500keV_proton - true_range_750keV_protons))**2  + np.std(p750_ranges)
-    print(to_return, np.std(p1500_ranges), np.std(p750_ranges), np.mean(p1500_ranges), np.mean(p750_ranges))
+    ranges1 = map_ranges(a_ijk, cut1_mask&track_width_mask)
+    ranges2 = map_ranges(a_ijk, cut2_mask&track_width_mask)
+    to_return = np.std(ranges1) + ((np.mean(ranges1) - np.mean(ranges2)) - (cut1_true_range - cut2_true_range))**2  + np.std(ranges2)
+    print(to_return, np.std(ranges1), np.std(ranges2), np.mean(ranges1), np.mean(ranges2))
     return to_return
 
 package_directory = os.path.dirname(os.path.abspath(__file__))
@@ -214,7 +202,7 @@ plt.hist(mapped_ranges[mask_1500keV_protons], bins=range_hist_bins, alpha=0.6, l
 plt.legend()
 
 plt.figure()
-w = 4
+w = 2
 r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
 plt.title('r map for track with %f mm width'%w)
 for t in [0, 0.02, 0.05, 0.1]:
