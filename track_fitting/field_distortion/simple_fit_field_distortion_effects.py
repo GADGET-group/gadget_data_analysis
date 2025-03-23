@@ -49,13 +49,14 @@ time_since_last_event[0] = .15 #we don't actuallly know what this is for the fir
 start_of_current_winow = 0
 times_since_start_of_window = []
 
-track_widths = []
-for event_index in range(len(timestamps)):
-    if len(track_info_dict['variance_along_axes'][event_index]) == 3:
-        track_widths.append(track_info_dict['variance_along_axes'][event_index][1]**0.5)
-    else:
-        track_widths.append(0)
-track_widths = np.array(track_widths)
+# track_widths = []
+# for event_index in range(len(timestamps)):
+#     if len(track_info_dict['variance_along_axes'][event_index]) == 3:
+#         track_widths.append(track_info_dict['variance_along_axes'][event_index][1]**0.5)
+#     else:
+#         track_widths.append(0)
+# track_widths = np.array(track_widths)
+track_widths = np.array(track_info_dict['charge_width'])
 
 print('calculating event times in decay window')
 for t, dt in tqdm(zip(timestamps, time_since_last_event)):
