@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 1
+experiment, run, N = 'e21072', 212, 5
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -62,7 +62,7 @@ for t, dt in tqdm(zip(timestamps, time_since_last_event)):
     times_since_start_of_window.append(t - start_of_current_winow)
 times_since_start_of_window = np.array(times_since_start_of_window)
 
-min_width, max_width = 2,5
+min_width, max_width = 1,5
 track_width_mask = (track_widths>=min_width) & (track_widths <= max_width)
 if run==124:
     mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
@@ -73,6 +73,8 @@ elif run==212:
     pass
 true_range_1500keV_proton = 46.7
 true_range_750keV_protons = 16.1
+
+
 
 plt.figure()
 plt.title('1500 keV protons')
@@ -110,6 +112,21 @@ def map_r(a_ijk, r, t, w):
     return new_r
 
 def map_endpoints(a_ijk, event_select_mask):
+    selected_endpoints = endpoints[event_select_mask]
+    p1_init = selected_endpoints[:,0,:]
+    p2_init = selected_endpoints[:,1,:]
+    t = times_since_start_of_window[event_select_mask]
+    w = track_widths[event_select_mask]
+    r1_init = np.einsum('ij,ij->i', p1_init, p1_init)**0.5
+    r2_init = np.einsum('ij,ij->i', p2_init, p2_init)**0.5
+    r1_final = map_r(a_ijk, r1_init, t, w)
+    r2_final = map_r(a_ijk, r2_init, t, w)
+    to_return =np.zeros(selected_endpoints.shape)
+    to_return[:,0,:] = np.einsum('ij,i ->ij', selected_endpoints[:,0,:], r1_final/r1_init)
+    to_return[:,1,:] = np.einsum('ij,i ->ij', selected_endpoints[:,1,:], r2_final/r2_init)
+    return to_return
+
+
     to_return = []
     for event_index, pair in enumerate(endpoints):
         if not event_select_mask[event_index]:
@@ -188,7 +205,7 @@ plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
 plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)
 plt.hist2d(counts[plt_mask], mapped_ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
-plt.colorbar()
+#plt.colorbar()
 
 plt.figure()
 range_hist_bins = np.linspace(30, 70, 80)
