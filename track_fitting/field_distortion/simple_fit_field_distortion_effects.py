@@ -171,14 +171,16 @@ for N in Ns:
         aranges2 = map_ranges(a_ijk, c, acut2_mask)
         #minimize width of each peak
         to_return = np.std(pranges1)**2 + np.std(pranges2)**2 + np.std(aranges1)**2  +  np.std(aranges2)**2
+
+        p1mean, p2mean, a1mean, a2mean = np.mean(pranges1), np.mean(pranges2), np.mean(aranges1), np.mean(aranges2), 
         #preserve distance between proton peaks
-        to_return += np.abs(np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
+        to_return += np.abs(p1mean - p2mean - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
         #preserve distance between alpha peaks
-        to_return += np.abs(np.mean(aranges1) - np.mean(aranges2) - (acut1_true_range - acut2_true_range))**2#/np.abs((acut1_true_range - acut2_true_range))**2
+        to_return += np.abs(a1mean - a2mean - (acut1_true_range - acut2_true_range))**2#/np.abs((acut1_true_range - acut2_true_range))**2
         #preserve distance between proton and alpha bands
-        to_return += np.abs(np.mean(pranges1) - np.mean(aranges1) - (pcut1_true_range - acut1_true_range))**2
+        to_return += np.abs(p1mean - a1mean - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
-        to_return += (np.mean(pranges1) - pcut1_true_range)**2
+        to_return += (p1mean - pcut1_true_range)**2
         return to_return
 
 
