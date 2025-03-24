@@ -162,11 +162,11 @@ for N in Ns:
         aranges1 = map_ranges(a_ijk, acut1_mask)
         aranges2 = map_ranges(a_ijk, acut2_mask)
         #minimize width of each peak
-        to_return = np.std(pranges1) + (np.mean(pranges2) - pcut2_true_range)**2+  np.std(aranges1)  +  np.std(aranges2)
+        to_return = np.std(pranges1) + np.std(pranges2) + np.std(aranges1)  +  np.std(aranges2)
         #preserve distance between proton peaks
-        to_return += (np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))**2
+        to_return += np.abs(np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))
         #preserve distance between alpha peaks
-        to_return += (np.mean(aranges1) - np.mean(aranges2) - (acut1_true_range - acut2_true_range))**2
+        to_return += np.abs(np.mean(aranges1) - np.mean(aranges2) - (acut1_true_range - acut2_true_range))
         #preserve distance between proton and alpha bands
         #to_return += (np.mean(pranges1) - np.mean(aranges1) - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
@@ -189,22 +189,22 @@ for N in Ns:
         print('optimizing a_ijk parameters')
         previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
         #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
-        guess = np.zeros(len(ijk_array)+1)
-        if os.path.exists(previous_fname):
-            print('rmap exists for N-1, using as intial guess')
-            with open(previous_fname, 'rb') as file:
-                prev_res = pickle.load(file)
-                prev_ijk_array = []
-                for n in range(N):
-                    for i in range(n+1):
-                        for j in range(n - i +1):
-                            k = n - i - j
-                            prev_ijk_array.append((i,j,k))
-                prev_ijk_array = np.array(prev_ijk_array)
-                for prev_a_ijk, prev_ijk in zip(prev_res.x, prev_ijk_array):
-                    for new_index, ijk in enumerate(ijk_array):
-                        if np.all(ijk == prev_ijk):
-                            guess[new_index] = prev_a_ijk
+        guess = np.zeros(len(ijk_array))
+        # if os.path.exists(previous_fname):
+        #     print('rmap exists for N-1, using as intial guess')
+        #     with open(previous_fname, 'rb') as file:
+        #         prev_res = pickle.load(file)
+        #         prev_ijk_array = []
+        #         for n in range(N):
+        #             for i in range(n+1):
+        #                 for j in range(n - i +1):
+        #                     k = n - i - j
+        #                     prev_ijk_array.append((i,j,k))
+        #         prev_ijk_array = np.array(prev_ijk_array)
+        #         for prev_a_ijk, prev_ijk in zip(prev_res.x, prev_ijk_array):
+        #             for new_index, ijk in enumerate(ijk_array):
+        #                 if np.all(ijk == prev_ijk):
+        #                     guess[new_index] = prev_a_ijk
             
         res = opt.minimize(to_minimize, guess)
         with open(fname, 'wb') as file:
