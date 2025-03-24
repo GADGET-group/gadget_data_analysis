@@ -14,6 +14,7 @@ import matplotlib.colors as colors
 
 import numpy as np
 from skspatial.objects import Line, Point
+import pandas as pd
 
 from tqdm import tqdm
 
@@ -27,7 +28,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/Run_Data', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir='C:/Users/dopfer/WredeGroup/gadget/analysis', title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
@@ -86,6 +87,9 @@ class RawEventViewerFrame(ttk.Frame):
 
         next_button = ttk.Button(individual_event_frame, text='next', command=self.next)
         next_button.grid(row=2, column=1)
+
+        # next_seq_button = ttk.Button(individual_event_frame, text='next (sequential)', command=self.next_seq)
+        # next_seq_button.grid(row=2, column=2)
 
         show_2D_button = ttk.Button(individual_event_frame, text='x-y proj', command=self.show_xy_proj)
         show_2D_button.grid(row=3, column=0)
@@ -365,11 +369,20 @@ class RawEventViewerFrame(ttk.Frame):
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
-        while self.should_veto(event_number):
+        categorized_events_of_interest = pd.read_csv('C:/Users/dopfer/WredeGroup/gadget/analysis/categorized_events_of_interest.csv',encoding='utf-8-sig', skip_blank_lines = False, nrows = 36164, header=None)
+        array_of_categorized_events_of_interest = categorized_events_of_interest[0].to_numpy()
+        while array_of_categorized_events_of_interest[event_number] == 'flagged':
             event_number += 1
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
-        self.show_3d_cloud()
+        self.show_xy_proj()
+
+    def next_seq(self):
+        plt.close()
+        event_number = int(self.event_number_entry.get())+1
+        self.event_number_entry.delete(0, tk.END)
+        self.event_number_entry.insert(0, event_number)
+        self.show_xy_proj()
 
     def should_veto(self, event_num):
         max_veto_counts, dxy, dz, energy, angle, pads_railed = self.data.process_event(event_num)

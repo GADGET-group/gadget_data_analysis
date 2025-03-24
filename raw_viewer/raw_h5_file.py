@@ -9,7 +9,7 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
-from numba import njit
+# from numba import njit
 import skimage.measure
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
