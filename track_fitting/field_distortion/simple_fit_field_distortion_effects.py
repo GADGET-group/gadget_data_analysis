@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 3
+experiment, run, N = 'e21072', 124, 4
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -119,11 +119,11 @@ def map_r(a_ijk, r, t, w):
         i,j,k = ijk
         new_r += a*((r/rscale)**i)*((t/tscale)**j)*((w/wscale)**k)
     if type(new_r) == np.ndarray:
-        #new_r[new_r < 0] = 0
-        new_r[new_r < r] = r[new_r < r] #don't allow Efield to point away from beam axis
+        new_r[new_r < 0] = 0
+        #new_r[new_r < r] = r[new_r < r] #don't allow Efield to point away from beam axis
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
-    elif new_r < r:
-        new_r = r
+    elif new_r < 0:
+        new_r = 0
     elif new_r > 61:
         new_r = 61
     return new_r
@@ -144,19 +144,26 @@ def map_endpoints(a_ijk, event_select_mask):
     return to_return
 
 
-def map_ranges(a_ijk, event_select_mask):
+def map_ranges(a_ijk, c, event_select_mask):
+    #map ranges as range -> range_from_mapped_r - c*width
     new_endpoints = map_endpoints(a_ijk, event_select_mask)
-    return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1)
+    return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) - c*track_widths[event_select_mask]
 
 
-def to_minimize(a_ijk):
+def to_minimize(a_ijk, c):
     #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
-    pranges1 = map_ranges(a_ijk, pcut1_mask)
-    pranges2 = map_ranges(a_ijk, pcut2_mask)
-    to_return = np.std(pranges1) + ((np.mean(pranges1) - np.mean(pranges2)) - (pcut1_true_range - pcut2_true_range))**2  + np.std(pranges2)
-    aranges1 = map_ranges(a_ijk, acut1_mask)
-    aranges2 = map_ranges(a_ijk, acut2_mask)
-    to_return += np.std(aranges1) + ((np.mean(aranges1) - np.mean(aranges2)) - (acut1_true_range - acut2_true_range))**2  + np.std(aranges2)
+    pranges1 = map_ranges(a_ijk, c, pcut1_mask)
+    pranges2 = map_ranges(a_ijk, c, pcut2_mask)
+    aranges1 = map_ranges(a_ijk, c, acut1_mask)
+    aranges2 = map_ranges(a_ijk, c, acut2_mask)
+    #minimize width of each peak
+    to_return = np.std(pranges1) + (np.mean(pranges2) - pcut2_true_range)**2+  np.std(aranges1)  +  np.std(aranges2)
+    #preserve distance between proton peaks
+    to_return += (np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))**2
+    #preserve distance between alpha peaks
+    to_return += (np.mean(aranges1) - np.mean(aranges2) - (acut1_true_range - acut2_true_range))**2
+    #and try to keep everything at roughly the correct true range
+    to_return += (np.mean(pranges1) - pcut1_true_range)**2
     return to_return
 
 package_directory = os.path.dirname(os.path.abspath(__file__))
@@ -169,7 +176,7 @@ else:
     print('optimizing a_ijk parameters')
     previous_fname = os.path.join(package_directory, '%s_run%d_rmap_order%d.pkl'%(experiment, run, N-1))
     #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
-    a_ijk_guess = np.zeros(len(ijk_array))
+    guess = np.zeros(len(ijk_array)+1)
     if os.path.exists(previous_fname):
         print('rmap exists for N-1, using as intial guess')
         with open(previous_fname, 'rb') as file:
@@ -181,16 +188,17 @@ else:
                         k = n - i - j
                         prev_ijk_array.append((i,j,k))
             prev_ijk_array = np.array(prev_ijk_array)
-            for prev_a_ijk, prev_ijk in zip(prev_res.x, prev_ijk_array):
+            for prev_a_ijk, prev_ijk in zip(prev_res.x[:-1], prev_ijk_array):
                 for new_index, ijk in enumerate(ijk_array):
                     if np.all(ijk == prev_ijk):
-                        a_ijk_guess[new_index] = prev_a_ijk
+                        guess[new_index] = prev_a_ijk
         
-    res = opt.minimize(to_minimize, a_ijk_guess)
+    res = opt.minimize(lambda x: to_minimize(x[:-1], x[-1]), guess)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 print(res)
-a_ijk_best = res.x
+a_ijk_best = res.x[:-1]
+c_best = res.x[-1]
         
 
 plt.figure()
@@ -199,7 +207,7 @@ plt_mask = (ranges>0)&(ranges<150)&(counts>0)
 plt.hist2d(counts[plt_mask], ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
 
-mapped_ranges = map_ranges(a_ijk_best, ranges==ranges)
+mapped_ranges = map_ranges(a_ijk_best, c_best, ranges==ranges)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
 plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
@@ -210,10 +218,10 @@ fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
 for ax, mask, label, true_range in zip(axs.reshape(-1), masks, mask_labels, [pcut1_true_range, pcut2_true_range, acut1_true_range, acut2_true_range]):
-    range_hist_bins = np.linspace(true_range-20, true_range+20, 80)
+    range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
     ax.set_title(label)
-    ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range')
-    ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range')
+    ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%f'%np.std(ranges[mask]))
+    ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%f'%np.std(mapped_ranges[mask]))
     ax.legend()
 
 fig, axs = plt.subplots(2,2)
