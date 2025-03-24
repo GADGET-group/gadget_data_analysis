@@ -12,7 +12,7 @@ from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
 experiment, run, Ns = 'e21072', 124, [6]
-use_pca_for_width = False
+use_pca_for_width = True
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -120,20 +120,32 @@ for N in Ns:
                 k = n - i - j
                 ijk_array.append((i,j,k))
     ijk_array = np.array(ijk_array)
+    i_array = ijk_array[:,0]
+    j_array = ijk_array[:,1]
+    k_array = ijk_array[:,2]
 
     def map_r(a_ijk, r, t, w):
+        # if type(t) != np.ndarray:
+        #     t = np.array([t]*len(r))
+        # if type(w) != np.ndarray:
+        #     w = np.array([w]*len(r))
+        r_scaled = r/rscale
+        t_scaled = t/tscale
+        w_scaled = w/wscale
+        # r_to_i = np.tile(r_scaled, (len(i_array), 1))**np.tile(np.transpose([i_array]), (1,len(r_scaled))) #[i index, r index]
+        # t_to_j = np.tile(t_scaled, (len(j_array), 1))**np.tile(np.transpose([j_array]), (1,len(t_scaled))) #[i index, r index]
+        # w_to_k = np.tile(w_scaled, (len(k_array), 1))**np.tile(np.transpose([k_array]), (1,len(w_scaled))) #[i index, r index]
+
+        # new_r = r + np.einsum('i,ij,ij,ij->j', a_ijk, r_to_i, t_to_j, w_to_k)
+
         new_r = np.copy(r)
         for ijk, a in zip(ijk_array, a_ijk):
             i,j,k = ijk
-            new_r += a*((r/rscale)**i)*((t/tscale)**j)*((w/wscale)**k)
-        if type(new_r) == np.ndarray:
-            #new_r[new_r < 0] = 0
-            new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
-            new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
-        elif new_r < r:
-            new_r = r
-        elif new_r > 61:
-            new_r = 61
+            new_r += a*(r_scaled**i)*(t_scaled**j)*(w_scaled**k)
+
+        #new_r[new_r < 0] = 0
+        new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
+        new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
     def map_endpoints(a_ijk, event_select_mask):
