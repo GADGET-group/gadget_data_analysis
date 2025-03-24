@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 3
+experiment, run, N = 'e21072', 124, 5
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -62,21 +62,24 @@ for t, dt in tqdm(zip(timestamps, time_since_last_event)):
     times_since_start_of_window.append(t - start_of_current_winow)
 times_since_start_of_window = np.array(times_since_start_of_window)
 
-min_width, max_width = 1,5
-track_width_mask = (track_widths>=min_width) & (track_widths <= max_width)
 if run==124:
     mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
     mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)
+    #these cuts include both events w/ and w/o recoil
+    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5)
+    mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5)
 elif run==212:
     mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5)
     mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5)
-    pass
 true_range_1500keV_proton = 46.7
 true_range_750keV_protons = 16.1
+true_range_4434keV_alphas = 30.6
+true_range_2153keV_alphas = 11.8
 
-cut1_mask, cut1_true_range = mask_1500keV_protons, true_range_1500keV_proton
-cut2_mask, cut2_true_range = mask_750keV_protons, true_range_750keV_protons
-
+pcut1_mask, pcut1_true_range = mask_1500keV_protons, true_range_1500keV_proton
+pcut2_mask, pcut2_true_range = mask_750keV_protons, true_range_750keV_protons
+acut1_mask, acut1_true_range = mask_4434keV_alphas, true_range_4434keV_alphas
+acut2_mask, acut2_true_range = mask_2153keV_alphas, true_range_2153keV_alphas
 
 
 
@@ -142,10 +145,12 @@ def map_ranges(a_ijk, event_select_mask):
 
 def to_minimize(a_ijk):
     #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
-    ranges1 = map_ranges(a_ijk, cut1_mask&track_width_mask)
-    ranges2 = map_ranges(a_ijk, cut2_mask&track_width_mask)
-    to_return = np.std(ranges1) + ((np.mean(ranges1) - np.mean(ranges2)) - (cut1_true_range - cut2_true_range))**2  + np.std(ranges2)
-    print(to_return, np.std(ranges1), np.std(ranges2), np.mean(ranges1), np.mean(ranges2))
+    pranges1 = map_ranges(a_ijk, pcut1_mask)
+    pranges2 = map_ranges(a_ijk, pcut2_mask)
+    to_return = np.std(pranges1) + ((np.mean(pranges1) - np.mean(pranges2)) - (pcut1_true_range - pcut2_true_range))**2  + np.std(pranges2)
+    aranges1 = map_ranges(a_ijk, acut1_mask)
+    aranges2 = map_ranges(a_ijk, acut2_mask)
+    to_return += np.std(aranges1) + ((np.mean(aranges1) - np.mean(aranges2)) - (acut1_true_range - acut2_true_range))**2  + np.std(aranges2)
     return to_return
 
 package_directory = os.path.dirname(os.path.abspath(__file__))
