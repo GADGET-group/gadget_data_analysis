@@ -11,8 +11,8 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, Ns = 'e21072', 124, [1]
-use_pca_for_width = True
+experiment, run, Ns = 'e21072', 124, [6]
+use_pca_for_width = False
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -128,7 +128,7 @@ for N in Ns:
             new_r += a*((r/rscale)**i)*((t/tscale)**j)*((w/wscale)**k)
         if type(new_r) == np.ndarray:
             #new_r[new_r < 0] = 0
-            new_r[new_r < r*.95] = r[new_r < r*.95]*.95 #don't allow Efield to move electrons away from the beam axis
+            new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
             new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         elif new_r < r:
             new_r = r
@@ -178,7 +178,7 @@ for N in Ns:
         #preserve distance between proton and alpha bands
         to_return += np.abs(np.mean(pranges1) - np.mean(aranges1) - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
-        #to_return += (np.mean(pranges1) - pcut1_true_range)**2
+        to_return += (np.mean(pranges1) - pcut1_true_range)**2
         return to_return
 
 
