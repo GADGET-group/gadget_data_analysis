@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, Ns = 'e21072', 124, [6]
+experiment, run, Ns = 'e21072', 124, [3]
 use_pca_for_width = True
 
 
@@ -71,8 +71,11 @@ if run==124:
     mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
     mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
     #these cuts include both events w/ and w/o recoil
-    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
-    mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+    #mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
+    #mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+    #only include events w/ recoil
+    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
+    mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
 elif run==212:
     mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & veto_mask
     mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5) & veto_mask
@@ -124,8 +127,8 @@ for N in Ns:
             i,j,k = ijk
             new_r += a*((r/rscale)**i)*((t/tscale)**j)*((w/wscale)**k)
         if type(new_r) == np.ndarray:
-            new_r[new_r < 0] = 0
-            #new_r[new_r < r] = r[new_r < r] #don't allow Efield to point away from beam axis
+            #new_r[new_r < 0] = 0
+            new_r[new_r < r*.95] = r[new_r < r*.95]*.95 #don't allow Efield to move electrons away from the beam axis
             new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         elif new_r < r:
             new_r = r
@@ -156,6 +159,7 @@ for N in Ns:
 
 
     def to_minimize(a_ijk, c):
+        #c=0
         #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
         pranges1 = map_ranges(a_ijk, c, pcut1_mask)
         pranges2 = map_ranges(a_ijk, c, pcut2_mask)
@@ -164,9 +168,9 @@ for N in Ns:
         #minimize width of each peak
         to_return = np.std(pranges1)**2 + np.std(pranges2)**2 + np.std(aranges1)**2  +  np.std(aranges2)**2
         #preserve distance between proton peaks
-        to_return += (np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))**2
+        to_return += (np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
         #preserve distance between alpha peaks
-        to_return += np.abs(np.mean(aranges1) - np.mean(aranges2) - (acut1_true_range - acut2_true_range))**2
+        to_return += np.abs(np.mean(aranges1) - np.mean(aranges2) - (acut1_true_range - acut2_true_range))**2#/np.abs((acut1_true_range - acut2_true_range))**2
         #preserve distance between proton and alpha bands
         to_return += (np.mean(pranges1) - np.mean(aranges1) - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
@@ -216,7 +220,7 @@ for N in Ns:
 
 plt.figure()
 plt.title('run %d uncorrected RvE'%run)
-plt_mask = (ranges>0)&(ranges<150)&(counts>0)
+plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
 plt.hist2d(counts[plt_mask], ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
 
