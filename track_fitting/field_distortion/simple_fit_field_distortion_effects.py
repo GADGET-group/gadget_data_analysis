@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, Ns = 'e21072', 124, [3]
+experiment, run, Ns = 'e21072', 124, [1]
 use_pca_for_width = True
 
 
@@ -146,16 +146,20 @@ for N in Ns:
         r2_init = np.einsum('ij,ij->i', p2_init[:,:2], p2_init[:,:2])**0.5
         r1_final = map_r(a_ijk, r1_init, t, w)
         r2_final = map_r(a_ijk, r2_init, t, w)
-        to_return =np.zeros(selected_endpoints.shape)
-        to_return[:,0,:] = np.einsum('ij,i ->ij', selected_endpoints[:,0,:], r1_final/r1_init)
-        to_return[:,1,:] = np.einsum('ij,i ->ij', selected_endpoints[:,1,:], r2_final/r2_init)
+        to_return =np.copy(selected_endpoints)
+        rscale1 = r1_final/r1_init
+        rscale1[r1_init==0] = 0
+        rscale2 = r2_final/r2_init
+        rscale2[r2_init==0] = 0
+        to_return[:,0,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,0,:2], rscale1)
+        to_return[:,1,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,1,:2], rscale2)
         return to_return
 
 
     def map_ranges(a_ijk, c, event_select_mask):
         #map ranges as range -> range_from_mapped_r - c*width
         new_endpoints = map_endpoints(a_ijk, event_select_mask)
-        return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) - c*track_widths[event_select_mask]
+        return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) - c*pca_widths[event_select_mask]#track_widths[event_select_mask]
 
 
     def to_minimize(a_ijk, c):
@@ -168,13 +172,13 @@ for N in Ns:
         #minimize width of each peak
         to_return = np.std(pranges1)**2 + np.std(pranges2)**2 + np.std(aranges1)**2  +  np.std(aranges2)**2
         #preserve distance between proton peaks
-        to_return += (np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
+        to_return += np.abs(np.mean(pranges1) - np.mean(pranges2) - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
         #preserve distance between alpha peaks
         to_return += np.abs(np.mean(aranges1) - np.mean(aranges2) - (acut1_true_range - acut2_true_range))**2#/np.abs((acut1_true_range - acut2_true_range))**2
         #preserve distance between proton and alpha bands
-        to_return += (np.mean(pranges1) - np.mean(aranges1) - (pcut1_true_range - acut1_true_range))**2
+        to_return += np.abs(np.mean(pranges1) - np.mean(aranges1) - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
-        to_return += (np.mean(pranges1) - pcut1_true_range)**2
+        #to_return += (np.mean(pranges1) - pcut1_true_range)**2
         return to_return
 
 
@@ -247,7 +251,7 @@ fig.set_figwidth(10)
 r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
 for ax, w in zip(axs.reshape(-1), [2, 2.5, 3, 3.5]): 
     ax.set_title('r map for track with %f mm width'%w)
-    for t in [0, 0.02, 0.05, 0.1]:
+    for t in np.linspace(0, 0.1, 10):
         ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
     ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
     ax.legend()
