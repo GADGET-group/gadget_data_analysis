@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 5
+experiment, run, N = 'e21072', 124, 3
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -206,11 +206,15 @@ plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
 plt.hist2d(counts[plt_mask], mapped_ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
 #plt.colorbar()
 
-plt.figure()
-range_hist_bins = np.linspace(30, 70, 80)
-plt.hist(ranges[mask_1500keV_protons], bins=range_hist_bins, alpha=0.6, label='uncorrected range')
-plt.hist(mapped_ranges[mask_1500keV_protons], bins=range_hist_bins, alpha=0.6, label='corrected range')
-plt.legend()
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
+for ax, mask, label, true_range in zip(axs.reshape(-1), masks, mask_labels, [pcut1_true_range, pcut2_true_range, acut1_true_range, acut2_true_range]):
+    range_hist_bins = np.linspace(true_range-20, true_range+20, 80)
+    ax.set_title(label)
+    ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range')
+    ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range')
+    ax.legend()
 
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
