@@ -32,6 +32,7 @@ dzs = dts*h5file.zscale
 ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 ranges = ds
 
+veto_mask = max_veto_counts<400
 
 #use track angle from pca rather than that exported by raw event viewer
 angles = []
@@ -63,14 +64,14 @@ for t, dt in tqdm(zip(timestamps, time_since_last_event)):
 times_since_start_of_window = np.array(times_since_start_of_window)
 
 if run==124:
-    mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5)
-    mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4)
+    mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
+    mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
     #these cuts include both events w/ and w/o recoil
-    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5)
-    mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5)
+    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
+    mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
 elif run==212:
-    mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5)
-    mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5)
+    mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & veto_mask
+    mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5) & veto_mask
 true_range_1500keV_proton = 46.7
 true_range_750keV_protons = 16.1
 true_range_4434keV_alphas = 30.6
@@ -81,21 +82,26 @@ pcut2_mask, pcut2_true_range = mask_750keV_protons, true_range_750keV_protons
 acut1_mask, acut1_true_range = mask_4434keV_alphas, true_range_4434keV_alphas
 acut2_mask, acut2_true_range = mask_2153keV_alphas, true_range_2153keV_alphas
 
-
-
-plt.figure()
-plt.title('1500 keV protons')
-plt.scatter(track_widths[mask_1500keV_protons], ranges[mask_1500keV_protons], c=times_since_start_of_window[mask_1500keV_protons])
-plt.xlabel('track width (mm)')
-plt.ylabel('range (mm)')
-plt.colorbar()
+masks=[pcut1_mask, pcut2_mask, acut1_mask, acut2_mask]
+mask_labels=['1500 keV protons', '750 keV protons', '4434 keV alphas', '2153 keV alphas']
 
 plt.figure()
-plt.title('750 keV protons')
-plt.scatter( track_widths[mask_750keV_protons], ranges[mask_750keV_protons], c=times_since_start_of_window[mask_750keV_protons])
-plt.xlabel('track width (mm)')
-plt.ylabel('range (mm)')
-plt.colorbar()
+width_hist_bins = np.linspace(1,5,100)
+plt.hist(track_widths[veto_mask], bins=width_hist_bins)
+for mask, label in zip(masks, mask_labels):
+    plt.hist(track_widths[mask], label=label, alpha=0.75, bins=width_hist_bins)
+plt.legend()
+plt.xlabel('track_width (mm)')
+
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
+for ax, mask, label in zip(axs.reshape(-1), masks, mask_labels):
+    ax.set_title(label)
+    plot = ax.scatter(track_widths[mask], ranges[mask], c=times_since_start_of_window[mask])
+    ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    fig.colorbar(plot, ax=ax)
+
 
 rscale, wscale, tscale = 25, 4, 0.05
 #try mapping r->r + r'(r, t, w)= r + sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w^k
@@ -196,7 +202,7 @@ plt.colorbar()
 mapped_ranges = map_ranges(a_ijk_best, ranges==ranges)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
-plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)
+plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
 plt.hist2d(counts[plt_mask], mapped_ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
 #plt.colorbar()
 
@@ -206,26 +212,16 @@ plt.hist(ranges[mask_1500keV_protons], bins=range_hist_bins, alpha=0.6, label='u
 plt.hist(mapped_ranges[mask_1500keV_protons], bins=range_hist_bins, alpha=0.6, label='corrected range')
 plt.legend()
 
-plt.figure()
-w = 2
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
 r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
-plt.title('r map for track with %f mm width'%w)
-for t in [0, 0.02, 0.05, 0.1]:
-    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
-plt.xlabel('position charge was observed')
-plt.ylabel('r_dep - r_obs')
-plt.legend()
-
-plt.figure()
-w = 3
-r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
-plt.title('r map for track with %f mm width'%w)
-for t in [0, 0.02, 0.05, 0.1]:
-    plt.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
-plt.xlabel('position charge was observed')
-plt.ylabel('r_dep - r_obs')
-plt.legend()
-
+for ax, w in zip(axs.reshape(-1), [2, 2.5, 3, 3.5]): 
+    ax.set_title('r map for track with %f mm width'%w)
+    for t in [0, 0.02, 0.05, 0.1]:
+        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
+    ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
+    ax.legend()
 
 plt.show(block=False)
 
