@@ -11,8 +11,10 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, Ns = 'e21072', 124, [6]
-use_pca_for_width = True
+experiment, run, N = 'e21072', 124, 1
+particles_for_fit='proton only'
+use_pca_for_width = False
+exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -111,7 +113,38 @@ for ax, mask, label in zip(axs.reshape(-1), masks, mask_labels):
 
 
 rscale, wscale, tscale = 25, 4, 0.05
-for N in Ns:
+if exploit_symmetry:
+    ijk_array = []
+    for n in range(N+1):
+        for i in range(N-n+1):
+            j = n-i
+            ijk_array.append((i,j))
+    ijk_array = np.array(ijk_array)
+
+    def map_r(a_ij, r, t, w):
+        #a_ij[-1] will contain drift speed constant
+        r_scaled, t_scaled, w_scaled = r/rscale, t/tscale, w/wscale
+        k = a_ij[-1]
+        wsquared = w_scaled**2
+        if type(w) == np.ndarray:
+            w_eff = np.zeros(wsquared.shape)
+            valid_width_mask = wsquared>k*t_scaled #avoid negative numbers in square root
+            w_eff[valid_width_mask] = np.sqrt(wsquared[valid_width_mask] - k*t_scaled[valid_width_mask])
+        else:
+            if wsquared>k*t_scaled:
+                w_eff = np.sqrt(wsquared - k*t_scaled)
+            else:
+                w_eff = 0
+        
+        new_r = np.copy(r)
+        for ij, a in zip(ijk_array, a_ij[:-1]):
+            new_r += a*(r_scaled**i)*(w_eff**j)
+        new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
+        new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
+        return new_r
+
+
+else:
     #try mapping r->r + r'(r, t, w)= r + sum_{i,j,k s.t i+j+k < N} a_ijk r^i t^j w^k
     ijk_array = []
     for n in range(N+1):
@@ -148,93 +181,104 @@ for N in Ns:
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
-    def map_endpoints(a_ijk, event_select_mask):
-        selected_endpoints = endpoints[event_select_mask]
-        p1_init = selected_endpoints[:,0,:]
-        p2_init = selected_endpoints[:,1,:]
-        t = times_since_start_of_window[event_select_mask]
-        w = track_widths[event_select_mask]
-        r1_init = np.einsum('ij,ij->i', p1_init[:,:2], p1_init[:,:2])**0.5
-        r2_init = np.einsum('ij,ij->i', p2_init[:,:2], p2_init[:,:2])**0.5
-        r1_final = map_r(a_ijk, r1_init, t, w)
-        r2_final = map_r(a_ijk, r2_init, t, w)
-        to_return =np.copy(selected_endpoints)
-        rscale1 = r1_final/r1_init
-        rscale1[r1_init==0] = 0
-        rscale2 = r2_final/r2_init
-        rscale2[r2_init==0] = 0
-        to_return[:,0,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,0,:2], rscale1)
-        to_return[:,1,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,1,:2], rscale2)
-        return to_return
+def map_endpoints(a_ijk, event_select_mask):
+    selected_endpoints = endpoints[event_select_mask]
+    p1_init = selected_endpoints[:,0,:]
+    p2_init = selected_endpoints[:,1,:]
+    t = times_since_start_of_window[event_select_mask]
+    w = track_widths[event_select_mask]
+    r1_init = np.einsum('ij,ij->i', p1_init[:,:2], p1_init[:,:2])**0.5
+    r2_init = np.einsum('ij,ij->i', p2_init[:,:2], p2_init[:,:2])**0.5
+    r1_final = map_r(a_ijk, r1_init, t, w)
+    r2_final = map_r(a_ijk, r2_init, t, w)
+    to_return =np.copy(selected_endpoints)
+    rscale1 = r1_final/r1_init
+    rscale1[r1_init==0] = 0
+    rscale2 = r2_final/r2_init
+    rscale2[r2_init==0] = 0
+    to_return[:,0,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,0,:2], rscale1)
+    to_return[:,1,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,1,:2], rscale2)
+    return to_return
 
 
-    def map_ranges(a_ijk, c, event_select_mask):
-        #map ranges as range -> range_from_mapped_r - c*width
-        new_endpoints = map_endpoints(a_ijk, event_select_mask)
-        return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) - c*pca_widths[event_select_mask]#track_widths[event_select_mask]
+def map_ranges(a_ijk, c, event_select_mask):
+    if particles_for_fit == 'proton only':
+        c=0
+    #map ranges as range -> range_from_mapped_r - c*width
+    new_endpoints = map_endpoints(a_ijk, event_select_mask)
+    return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) - c*pca_widths[event_select_mask]#track_widths[event_select_mask]
 
 
-    def to_minimize(a_ijk, c):
-        #c=0
-        #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
-        pranges1 = map_ranges(a_ijk, c, pcut1_mask)
-        pranges2 = map_ranges(a_ijk, c, pcut2_mask)
-        aranges1 = map_ranges(a_ijk, c, acut1_mask)
-        aranges2 = map_ranges(a_ijk, c, acut2_mask)
-        #minimize width of each peak
-        to_return = np.std(pranges1)**2 + np.std(pranges2)**2 + np.std(aranges1)**2  +  np.std(aranges2)**2
+def to_minimize(a_ijk, c):
+    #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
+    pranges1 = map_ranges(a_ijk, c, pcut1_mask)
+    pranges2 = map_ranges(a_ijk, c, pcut2_mask)
+    aranges1 = map_ranges(a_ijk, c, acut1_mask)
+    aranges2 = map_ranges(a_ijk, c, acut2_mask)
+    #minimize width of each peak
+    to_return = np.std(pranges1)**2 + np.std(pranges2)**2
+    if particles_for_fit != 'proton only':
+        to_return +=np.std(aranges1)**2  +  np.std(aranges2)**2
 
-        p1mean, p2mean, a1mean, a2mean = np.mean(pranges1), np.mean(pranges2), np.mean(aranges1), np.mean(aranges2), 
-        #preserve distance between proton peaks
-        to_return += np.abs(p1mean - p2mean - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
+    p1mean, p2mean, a1mean, a2mean = np.mean(pranges1), np.mean(pranges2), np.mean(aranges1), np.mean(aranges2), 
+    #preserve distance between proton peaks
+    to_return += np.abs(p1mean - p2mean - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
+    if particles_for_fit != 'proton only':
         #preserve distance between alpha peaks
         to_return += np.abs(a1mean - a2mean - (acut1_true_range - acut2_true_range))**2#/np.abs((acut1_true_range - acut2_true_range))**2
         #preserve distance between proton and alpha bands
         to_return += np.abs(p1mean - a1mean - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
         to_return += (p1mean - pcut1_true_range)**2
-        return to_return
+    return to_return
 
 
-    print('calculating order %d'%N)
-    if use_pca_for_width:
-        fname_template = '%s_run%d_rmap_order%d_pca_width.pkl'
+print('calculating order %d'%N)
+if use_pca_for_width:
+    fname_template = '%s_run%d_rmap_order%d_pca_width.pkl'
+else:
+    fname_template = '%s_run%d_rmap_order%d.pkl'
+if particles_for_fit == 'proton only':
+    fname_template = 'proton_only_'+fname_template
+if exploit_symmetry:
+    fname_template = 'sym_'+fname_template
+package_directory = os.path.dirname(os.path.abspath(__file__))
+fname = os.path.join(package_directory,fname_template%(experiment, run, N))
+if os.path.exists(fname):
+    print('optimizer previously run, loading saved result')
+    with open(fname, 'rb') as file:
+        res =  pickle.load(file)
+else:
+    print('optimizing a_ijk parameters')
+    previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
+    #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
+    if exploit_symmetry:
+        guess = np.zeros(len(ijk_array)+2)
     else:
-        fname_template = '%s_run%d_rmap_order%d.pkl'
-    package_directory = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(package_directory,fname_template%(experiment, run, N))
-    if os.path.exists(fname):
-        print('optimizer previously run, loading saved result')
-        with open(fname, 'rb') as file:
-            res =  pickle.load(file)
-    else:
-        print('optimizing a_ijk parameters')
-        previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
-        #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
         guess = np.zeros(len(ijk_array)+1)
-        # if os.path.exists(previous_fname):
-        #     print('rmap exists for N-1, using as intial guess')
-        #     with open(previous_fname, 'rb') as file:
-        #         prev_res = pickle.load(file)
-        #         prev_ijk_array = []
-        #         for n in range(N):
-        #             for i in range(n+1):
-        #                 for j in range(n - i +1):
-        #                     k = n - i - j
-        #                     prev_ijk_array.append((i,j,k))
-        #         prev_ijk_array = np.array(prev_ijk_array)
-        #         for prev_a_ijk, prev_ijk in zip(prev_res.x, prev_ijk_array):
-        #             for new_index, ijk in enumerate(ijk_array):
-        #                 if np.all(ijk == prev_ijk):
-        #                     guess[new_index] = prev_a_ijk
-            
-        res = opt.minimize(lambda x: to_minimize(x[:-1], x[-1]), guess)
-        with open(fname, 'wb') as file:
-            pickle.dump(res, file)
-    print(res)
-    a_ijk_best = res.x[:-1]
-    c_best = res.x[-1]
-            
+    # if os.path.exists(previous_fname):
+    #     print('rmap exists for N-1, using as intial guess')
+    #     with open(previous_fname, 'rb') as file:
+    #         prev_res = pickle.load(file)
+    #         prev_ijk_array = []
+    #         for n in range(N):
+    #             for i in range(n+1):
+    #                 for j in range(n - i +1):
+    #                     k = n - i - j
+    #                     prev_ijk_array.append((i,j,k))
+    #         prev_ijk_array = np.array(prev_ijk_array)
+    #         for prev_a_ijk, prev_ijk in zip(prev_res.x, prev_ijk_array):
+    #             for new_index, ijk in enumerate(ijk_array):
+    #                 if np.all(ijk == prev_ijk):
+    #                     guess[new_index] = prev_a_ijk
+        
+    res = opt.minimize(lambda x: to_minimize(x[:-1], x[-1]), guess)
+    with open(fname, 'wb') as file:
+        pickle.dump(res, file)
+print(res)
+a_ijk_best = res.x[:-1]
+c_best = res.x[-1]
+        
 
 plt.figure()
 plt.title('run %d uncorrected RvE'%run)
