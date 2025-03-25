@@ -115,9 +115,8 @@ for ax, mask, label in zip(axs.reshape(-1), masks, mask_labels):
 rscale, wscale, tscale = 25, 4, 0.05
 if exploit_symmetry:
     ijk_array = []
-    for n in range(N+1):
-        for i in range(N-n+1):
-            j = n-i
+    for i in range(0, N+1):
+        for j in range(0, N-np.abs(i) + 1): 
             ijk_array.append((i,j))
     ijk_array = np.array(ijk_array)
 
@@ -138,6 +137,7 @@ if exploit_symmetry:
         
         new_r = np.copy(r)
         for ij, a in zip(ijk_array, a_ij[:-1]):
+            i, j = ij
             new_r += a*(r_scaled**i)*(w_eff**j)
         new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
@@ -176,8 +176,8 @@ else:
             i,j,k = ijk
             new_r += a*(r_scaled**i)*(t_scaled**j)*(w_scaled**k)
 
-        #new_r[new_r < 0] = 0
-        new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
+        new_r[new_r < 0] = 0
+        #new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
@@ -230,6 +230,7 @@ def to_minimize(a_ijk, c):
         to_return += np.abs(p1mean - a1mean - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
         to_return += (p1mean - pcut1_true_range)**2
+    #print(to_return)
     return to_return
 
 
@@ -273,6 +274,7 @@ else:
     #                     guess[new_index] = prev_a_ijk
         
     res = opt.minimize(lambda x: to_minimize(x[:-1], x[-1]), guess)
+    #res = opt.basinhopping(lambda x: to_minimize(x[:-1], x[-1]), guess, stepsize=2, T=100)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 print(res)
@@ -302,6 +304,19 @@ for ax, mask, label, true_range in zip(axs.reshape(-1), masks, mask_labels, [pcu
     ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%f'%np.std(ranges[mask]))
     ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%f'%np.std(mapped_ranges[mask]))
     ax.legend()
+
+
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
+r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
+for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]): 
+    ax.set_title('r map for tracks at t=%f s'%t)
+    for w in np.linspace(1, 4, 10):
+        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f mm'%w)
+    ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
+    ax.legend()
+
 
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
