@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 1
+experiment, run, N = 'e21072', 124, 6
 particles_for_fit='proton only'
 use_pca_for_width = False
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
@@ -312,11 +312,20 @@ fig.set_figwidth(10)
 r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
 for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]): 
     ax.set_title('r map for tracks at t=%f s'%t)
-    for w in np.linspace(1, 4, 10):
+    for w in np.arange(2, 3.51, 0.25):
         ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f mm'%w)
     ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
     ax.legend()
 
+plt.figure()
+plt.title('t=0 s')
+w_squared = np.linspace(2**2, 3.5**2)
+w = w_squared**0.5
+for r in [1.,10., 20., 30., 40.]:
+    plt.plot(w_squared, map_r(a_ijk_best, np.array([r]*len(w_squared)), np.array([0.]*len(w_squared)), w)-r, label='r=%f mm'%r)
+plt.legend()
+plt.xlabel('w squared (mm^2)')
+plt.ylabel('r_dep - r_obs (mm)')
 
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
