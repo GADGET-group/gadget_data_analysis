@@ -11,10 +11,11 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 2
+experiment, run, N = 'e21072', 212, 4
 particles_for_fit='proton only'
 use_pca_for_width = False
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
+allow_beam_off_axis = True
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -183,14 +184,15 @@ else:
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
-def map_endpoints(a_ijk, event_select_mask):
+def map_endpoints(a_ijk, event_select_mask, beam_xy=(0,0)):
+    beam_xy = np.array(beam_xy)
     selected_endpoints = endpoints[event_select_mask]
-    p1_init = selected_endpoints[:,0,:]
-    p2_init = selected_endpoints[:,1,:]
+    p1_init = selected_endpoints[:,0,:2] - beam_xy
+    p2_init = selected_endpoints[:,1,:2] - beam_xy
     t = times_since_start_of_window[event_select_mask]
     w = track_widths[event_select_mask]
-    r1_init = np.einsum('ij,ij->i', p1_init[:,:2], p1_init[:,:2])**0.5
-    r2_init = np.einsum('ij,ij->i', p2_init[:,:2], p2_init[:,:2])**0.5
+    r1_init = np.einsum('ij,ij->i', p1_init, p1_init)**0.5
+    r2_init = np.einsum('ij,ij->i', p2_init, p2_init)**0.5
     r1_final = map_r(a_ijk, r1_init, t, w)
     r2_final = map_r(a_ijk, r2_init, t, w)
     to_return =np.copy(selected_endpoints)
@@ -198,31 +200,32 @@ def map_endpoints(a_ijk, event_select_mask):
     rscale1[r1_init==0] = 0
     rscale2 = r2_final/r2_init
     rscale2[r2_init==0] = 0
-    to_return[:,0,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,0,:2], rscale1)
-    to_return[:,1,:2] = np.einsum('ij,i ->ij', selected_endpoints[:,1,:2], rscale2)
+    to_return[:,0,:2] = np.einsum('ij,i ->ij', p1_init, rscale1) + beam_xy
+    to_return[:,1,:2] = np.einsum('ij,i ->ij', p2_init, rscale2) + beam_xy
     return to_return
 
 
-def map_ranges(a_ijk, c, event_select_mask):
-    if particles_for_fit == 'proton only':
-        c=0
+def map_ranges(a_ijk, event_select_mask, beam_xy=(0,0)):
     #map ranges as range -> range_from_mapped_r - c*width
-    new_endpoints = map_endpoints(a_ijk, event_select_mask)
-    return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) - c*pca_widths[event_select_mask]#track_widths[event_select_mask]
+    new_endpoints = map_endpoints(a_ijk, event_select_mask, beam_xy)
+    return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) #track_widths[event_select_mask]
 
 
-def to_minimize(a_ijk, c):
+def to_minimize(a_ijk, beam_xy=(0,0)):
     #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
-    pranges1 = map_ranges(a_ijk, c, pcut1_mask)
-    pranges2 = map_ranges(a_ijk, c, pcut2_mask)
-    aranges1 = map_ranges(a_ijk, c, acut1_mask)
-    aranges2 = map_ranges(a_ijk, c, acut2_mask)
+    pranges1 = map_ranges(a_ijk, pcut1_mask, beam_xy)
+    pranges2 = map_ranges(a_ijk, pcut2_mask, beam_xy)
+    p1mean, p2mean = np.mean(pranges1), np.mean(pranges2)
+    if particles_for_fit != 'proton_only':
+        aranges1 = map_ranges(a_ijk, acut1_mask, beam_xy)
+        aranges2 = map_ranges(a_ijk, acut2_mask, beam_xy)
+        a1mean, a2mean = np.mean(aranges1), np.mean(aranges2)
     #minimize width of each peak
     to_return = np.std(pranges1)**2 + np.std(pranges2)**2
     if particles_for_fit != 'proton only':
         to_return +=np.std(aranges1)**2  +  np.std(aranges2)**2
 
-    p1mean, p2mean, a1mean, a2mean = np.mean(pranges1), np.mean(pranges2), np.mean(aranges1), np.mean(aranges2), 
+    
     #preserve distance between proton peaks
     to_return += np.abs(p1mean - p2mean - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
     if particles_for_fit != 'proton only':
@@ -232,7 +235,7 @@ def to_minimize(a_ijk, c):
         to_return += np.abs(p1mean - a1mean - (pcut1_true_range - acut1_true_range))**2
         #and try to keep everything at roughly the correct true range
         to_return += (p1mean - pcut1_true_range)**2
-    #print(to_return)
+    print(to_return)
     return to_return
 
 
@@ -245,6 +248,8 @@ if particles_for_fit == 'proton only':
     fname_template = 'proton_only_'+fname_template
 if exploit_symmetry:
     fname_template = 'sym_'+fname_template
+if allow_beam_off_axis:
+    fname_template = 'offcenter_' + fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
 if os.path.exists(fname):
@@ -255,10 +260,12 @@ else:
     print('optimizing a_ijk parameters')
     previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
     #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
+    guess_length = len(ijk_array)
     if exploit_symmetry:
-        guess = np.zeros(len(ijk_array)+2)
-    else:
-        guess = np.zeros(len(ijk_array)+1)
+        guess_length += 1
+    if allow_beam_off_axis:
+        guess_length += 2
+    guess = np.zeros(guess_length)
     # if os.path.exists(previous_fname):
     #     print('rmap exists for N-1, using as intial guess')
     #     with open(previous_fname, 'rb') as file:
@@ -274,14 +281,20 @@ else:
     #             for new_index, ijk in enumerate(ijk_array):
     #                 if np.all(ijk == prev_ijk):
     #                     guess[new_index] = prev_a_ijk
-        
-    res = opt.minimize(lambda x: to_minimize(x[:-1], x[-1]), guess)
-    #res = opt.basinhopping(lambda x: to_minimize(x[:-1], x[-1]), guess, stepsize=2, T=100)
+    if allow_beam_off_axis:
+        res = opt.minimize(lambda x: to_minimize(x[:-2], x[-2:]), guess)
+    else:
+        res = opt.minimize(lambda x: to_minimize(x), guess)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
+if allow_beam_off_axis:
+    a_ijk_best = res.x[:-2]
+    beam_xy_best = res.x[-2:]
+else:
+    a_ijk_best = res.x
+    beam_xy_best = np.zeros(2)
 print(res)
-a_ijk_best = res.x[:-1]
-c_best = res.x[-1]
+
         
 
 plt.figure()
@@ -290,7 +303,7 @@ plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
 plt.hist2d(counts[plt_mask], ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
 
-mapped_ranges = map_ranges(a_ijk_best, c_best, ranges==ranges)
+mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
 plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
@@ -341,3 +354,6 @@ for ax, w in zip(axs.reshape(-1), [2, 2.5, 3, 3.5]):
     ax.legend()
 
 plt.show(block=False)
+
+if allow_beam_off_axis:
+    print('beam axis at:', beam_xy_best)
