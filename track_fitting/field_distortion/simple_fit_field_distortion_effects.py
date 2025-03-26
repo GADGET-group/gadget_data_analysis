@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 6
+experiment, run, N = 'e21072', 212, 2
 particles_for_fit='proton only'
 use_pca_for_width = False
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
@@ -79,8 +79,10 @@ if run==124:
     mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
     mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
 elif run==212:
-    mask_1500keV_protons = (ranges > 40) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & veto_mask
+    mask_1500keV_protons = (ranges > 32) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & veto_mask
     mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5) & veto_mask
+    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>6.5e5) & (counts < 8.5e5) & veto_mask
+    mask_2153keV_alphas = (ranges>22) & (ranges<28) & (counts>3e5) & (counts<5e5) & veto_mask
 true_range_1500keV_proton = 46.7
 true_range_750keV_protons = 16.1
 true_range_4434keV_alphas = 30.6
@@ -309,7 +311,7 @@ for ax, mask, label, true_range in zip(axs.reshape(-1), masks, mask_labels, [pcu
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
-r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
+r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
 for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]): 
     ax.set_title('r map for tracks at t=%f s'%t)
     for w in np.arange(2, 3.51, 0.25):
@@ -330,7 +332,7 @@ plt.ylabel('r_dep - r_obs (mm)')
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
-r_obs = np.linspace(0, 50, 100)#radius at which charge was observed
+r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
 for ax, w in zip(axs.reshape(-1), [2, 2.5, 3, 3.5]): 
     ax.set_title('r map for track with %f mm width'%w)
     for t in np.linspace(0, 0.1, 10):
