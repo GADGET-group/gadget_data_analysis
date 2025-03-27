@@ -11,13 +11,13 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 2
+experiment, run, N = 'e21072', 124, 4
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1500')]
+peak_widths_to_minimize = [(1, 'p1500'), (1, 'a4434')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = [(1, 'p1500', 'p770')]
+peak_spacings_to_preserve = [(1, 'p1500', 'a4434')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
@@ -165,15 +165,7 @@ if exploit_symmetry:
         r_scaled, t_scaled, w_scaled = r/rscale, t/tscale, w/wscale
         k = a_ij[-1]
         wsquared = w_scaled**2
-        if type(w) == np.ndarray:
-            w_eff = np.zeros(wsquared.shape)
-            valid_width_mask = wsquared>k*t_scaled #avoid negative numbers in square root
-            w_eff[valid_width_mask] = np.sqrt(wsquared[valid_width_mask] - k*t_scaled[valid_width_mask])
-        else:
-            if wsquared>k*t_scaled:
-                w_eff = np.sqrt(wsquared - k*t_scaled)
-            else:
-                w_eff = 0
+        w_eff = wsquared - k*t_scaled
         
         new_r = np.copy(r)
         for ij, a in zip(ijk_array, a_ij[:-1]):
