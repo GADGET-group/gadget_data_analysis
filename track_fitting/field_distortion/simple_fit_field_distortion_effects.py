@@ -11,13 +11,13 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 6
+experiment, run, N = 'e21072', 212, 4
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1500'), (1, 'a4434')]
+peak_widths_to_minimize = [(1, 'p1596'), (1, 'a4434')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = [(1, 'p1500', 'a4434')]
+peak_spacings_to_preserve = [(1, 'p1596', 'a4434')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
@@ -26,7 +26,7 @@ allow_beam_off_axis = True #if false, will assume electric field is centered at 
 
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['p770', 'p1500', 'a2153', 'a4434']
+particles_to_plot = ['p770', 'p1596', 'a2153', 'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -84,24 +84,24 @@ times_since_start_of_window = np.array(times_since_start_of_window)
 cut_mask_dict = {}
 label_dict = {}
 if experiment == 'e21072':
-    true_range_dict = {'p1500': 46.7, 'p770':16.8, 
+    true_range_dict = {'p1596': 51.6, 'p770':16.8, 
                        'a4434wr':30.6, 'a4434wor':30.6, 'a4434':30.6,
                         'a2153':11.8, 'a2153wr':11.8, 'a2153wor':11.8}
     label_dict['p770'] = '770 keV protons'
-    label_dict['p1500'] = '~1500 keV protons'
+    label_dict['p1596'] = '~1596 keV protons'
     label_dict['a4434'] = 'all 4434 keV alpha'
     label_dict['a4434wr'] = '4434 keV alpha with recoil'
     label_dict['a2153'] = 'all 2153 keV alpha'
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
     if run==124:
-        cut_mask_dict['p1500'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
+        cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
         cut_mask_dict['p770'] = (ranges>19) & (ranges<26) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
         cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
         cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
         cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
         cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
     elif run==212:
-        cut_mask_dict['p1500'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
+        cut_mask_dict['p1596'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
         cut_mask_dict['p770'] = (ranges>20) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
         cut_mask_dict['a4434'] = (ranges>22) & (ranges<50) & (counts>0.6e6) & (counts <1.1e6) & veto_mask
         cut_mask_dict['a2153'] = (ranges>19) & (ranges<26) & (counts>3e5) & (counts<5e5) & veto_mask
@@ -250,7 +250,7 @@ fname_template = '%s_run%d_rmap_order%d.pkl'
 #<weight>w<particle> will minimize standard deviation of range peaks(eg sp1sp2 will minimize standard deviation of the p1 and p2 peaks)
 #<weight>d<particle1>-<particle2> will minimize the difference beteen the spacing between the specified peaks and true difference between these particles ranges
 #The "weights" are numbers which will multiply each term in the objective function.
-#seperate each terms with underscores (eg sp1500_sp750_dp1500-p750)
+#seperate each terms with underscores (eg sp1596_sp750_dp1596-p750)
 #
 for weight, ptype in peak_widths_to_minimize:
     fname_template = ('%gw%s_'%(weight, ptype))+fname_template
