@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 4
+experiment, run, N = 'e21072', 212, 6
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1500'), (1, 'a4434')]
@@ -101,10 +101,10 @@ if experiment == 'e21072':
         cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
         cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
     elif run==212:
-        label_dict['p1500'] = (ranges > 32) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & veto_mask
-        cut_mask_dict['p770'] = (ranges>24) & (ranges<30) & (counts>1.5e5) & veto_mask
-        cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>6.5e5) & (counts < 8.5e5) & veto_mask
-        cut_mask_dict['a42153'] = (ranges>22) & (ranges<28) & (counts>3e5) & (counts<5e5) & veto_mask
+        cut_mask_dict['p1500'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
+        cut_mask_dict['p770'] = (ranges>20) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
+        cut_mask_dict['a4434'] = (ranges>22) & (ranges<50) & (counts>0.6e6) & (counts <1.1e6) & veto_mask
+        cut_mask_dict['a2153'] = (ranges>19) & (ranges<26) & (counts>3e5) & (counts<5e5) & veto_mask
 
 #plot showing selected events of each type
 rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
@@ -253,9 +253,9 @@ fname_template = '%s_run%d_rmap_order%d.pkl'
 #seperate each terms with underscores (eg sp1500_sp750_dp1500-p750)
 #
 for weight, ptype in peak_widths_to_minimize:
-    fname_template = ('%ew%s_'%(weight, ptype))+fname_template
+    fname_template = ('%gw%s_'%(weight, ptype))+fname_template
 for weight, ptype1, ptype2 in peak_spacings_to_preserve:
-    fname_template = ('%ed%s%s_'%(weight, ptype1, ptype2))+fname_template
+    fname_template = ('%gd%s%s_'%(weight, ptype1, ptype2))+fname_template
 
 if use_pca_for_width:
     fname_template = 'pca_width_'+fname_template
@@ -331,8 +331,8 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     mask, label, true_range  = cut_mask_dict[ptype], label_dict[ptype], true_range_dict[ptype]
     range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
     ax.set_title(label)
-    ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%f'%np.std(ranges[mask]))
-    ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%f'%np.std(mapped_ranges[mask]))
+    ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%g'%np.std(ranges[mask]))
+    ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
     ax.legend()
 
 
@@ -341,7 +341,7 @@ fig.set_figheight(10)
 fig.set_figwidth(10)
 r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
 for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]): 
-    ax.set_title('r map for tracks at t=%f s'%t)
+    ax.set_title('r map for tracks at t=%g s'%t)
     for w in np.arange(2, 3.51, 0.25):
         ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f mm'%w)
     ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
@@ -352,7 +352,7 @@ plt.title('t=0 s')
 w_squared = np.linspace(2**2, 3.5**2)
 w = w_squared**0.5
 for r in [1.,10., 20., 30., 40.]:
-    plt.plot(w_squared, map_r(a_ijk_best, np.array([r]*len(w_squared)), np.array([0.]*len(w_squared)), w)-r, label='r=%f mm'%r)
+    plt.plot(w_squared, map_r(a_ijk_best, np.array([r]*len(w_squared)), np.array([0.]*len(w_squared)), w)-r, label='r=%g mm'%r)
 plt.legend()
 plt.xlabel('w squared (mm^2)')
 plt.ylabel('r_dep - r_obs (mm)')
