@@ -11,11 +11,22 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 4
-particles_for_fit='proton only'
-use_pca_for_width = False
+experiment, run, N = 'e21072', 124, 2
+
+#list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
+peak_widths_to_minimize = [(1, 'p1500')]
+#list of (weight, peak 1, peak 2) tuples.
+#Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
+peak_spacings_to_preserve = [(1, 'p1500', 'p770')]
+
+use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
-allow_beam_off_axis = True
+allow_beam_off_axis = True #if false, will assume electric field is centered at (0,0)
+
+
+
+#include up to 4 particles to make scatter plots and histograms for
+particles_to_plot = ['p770', 'p1500', 'a2153', 'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -70,47 +81,73 @@ for t, dt in tqdm(zip(timestamps, time_since_last_event)):
     times_since_start_of_window.append(t - start_of_current_winow)
 times_since_start_of_window = np.array(times_since_start_of_window)
 
-if run==124:
-    mask_1500keV_protons = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
-    mask_750keV_protons = (ranges>20) & (ranges<30) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
-    #these cuts include both events w/ and w/o recoil
-    #mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
-    #mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
-    #only include events w/ recoil
-    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
-    mask_2153keV_alphas = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
-elif run==212:
-    mask_1500keV_protons = (ranges > 32) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & veto_mask
-    mask_750keV_protons = (ranges>24) & (ranges<30) & (counts>1.5e5) & veto_mask
-    mask_4434keV_alphas = (ranges>25) & (ranges<50) & (counts>6.5e5) & (counts < 8.5e5) & veto_mask
-    mask_2153keV_alphas = (ranges>22) & (ranges<28) & (counts>3e5) & (counts<5e5) & veto_mask
-true_range_1500keV_proton = 46.7
-true_range_750keV_protons = 16.1
-true_range_4434keV_alphas = 30.6
-true_range_2153keV_alphas = 11.8
+cut_mask_dict = {}
+label_dict = {}
+if experiment == 'e21072':
+    true_range_dict = {'p1500': 46.7, 'p770':16.8, 
+                       'a4434wr':30.6, 'a4434wor':30.6, 'a4434':30.6,
+                        'a2153':11.8, 'a2153wr':11.8, 'a2153wor':11.8}
+    label_dict['p770'] = '770 keV protons'
+    label_dict['p1500'] = '~1500 keV protons'
+    label_dict['a4434'] = 'all 4434 keV alpha'
+    label_dict['a4434wr'] = '4434 keV alpha with recoil'
+    label_dict['a2153'] = 'all 2153 keV alpha'
+    label_dict['a2153wr'] = '2153 keV alpha with recoil'
+    if run==124:
+        cut_mask_dict['p1500'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
+        cut_mask_dict['p770'] = (ranges>19) & (ranges<26) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
+        cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
+        cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+        cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
+        cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
+    elif run==212:
+        label_dict['p1500'] = (ranges > 32) & (ranges < 65) & (counts > 3e5) & (counts < 3.5e5) & veto_mask
+        cut_mask_dict['p770'] = (ranges>24) & (ranges<30) & (counts>1.5e5) & veto_mask
+        cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>6.5e5) & (counts < 8.5e5) & veto_mask
+        cut_mask_dict['a42153'] = (ranges>22) & (ranges<28) & (counts>3e5) & (counts<5e5) & veto_mask
 
-pcut1_mask, pcut1_true_range = mask_1500keV_protons, true_range_1500keV_proton
-pcut2_mask, pcut2_true_range = mask_750keV_protons, true_range_750keV_protons
-acut1_mask, acut1_true_range = mask_4434keV_alphas, true_range_4434keV_alphas
-acut2_mask, acut2_true_range = mask_2153keV_alphas, true_range_2153keV_alphas
-
-masks=[pcut1_mask, pcut2_mask, acut1_mask, acut2_mask]
-mask_labels=['1500 keV protons', '750 keV protons', '4434 keV alphas', '2153 keV alphas']
+#plot showing selected events of each type
+rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
+for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    ax.set_title(label_dict[ptype])
+    mask = cut_mask_dict[ptype]
+    hist,xbins,ybins,plot = ax.hist2d(counts[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm(), alpha=0.25)
+    hist,xbins,ybins,plot = ax.hist2d(counts[rve_plt_mask&mask], ranges[rve_plt_mask&mask], bins=[xbins, ybins],
+                                       norm=matplotlib.colors.LogNorm(), alpha=1, cmin=np.min(hist), cmax=np.max(hist))
+    ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    fig.colorbar(plot, ax=ax)
 
 plt.figure()
 width_hist_bins = np.linspace(1,5,100)
 plt.hist(track_widths[veto_mask], bins=width_hist_bins)
-for mask, label in zip(masks, mask_labels):
-    plt.hist(track_widths[mask], label=label, alpha=0.75, bins=width_hist_bins)
+for ptype in particles_to_plot:
+    plt.hist(track_widths[cut_mask_dict[ptype]], label=label_dict[ptype], alpha=0.75, bins=width_hist_bins)
 plt.legend()
 plt.xlabel('track_width (mm)')
 
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
-for ax, mask, label in zip(axs.reshape(-1), masks, mask_labels):
-    ax.set_title(label)
-    plot = ax.scatter(track_widths[mask], ranges[mask], c=times_since_start_of_window[mask])
+fig.suptitle('all angles')
+for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    ax.set_title(label_dict[ptype])
+    mask = cut_mask_dict[ptype]
+    plot = ax.scatter(track_widths[mask], ranges[mask], c=times_since_start_of_window[mask], marker='.')
+    ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    fig.colorbar(plot, ax=ax)
+
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
+fig.suptitle('within 20 deg of pad plane')
+theta_mask = angles>np.radians(70)
+for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    ax.set_title(label_dict[ptype])
+    mask = cut_mask_dict[ptype]
+    plot = ax.scatter(track_widths[mask&theta_mask], ranges[mask&theta_mask], c=times_since_start_of_window[mask&theta_mask], marker='.')
     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
 
@@ -161,26 +198,17 @@ else:
     k_array = ijk_array[:,2]
 
     def map_r(a_ijk, r, t, w):
-        # if type(t) != np.ndarray:
-        #     t = np.array([t]*len(r))
-        # if type(w) != np.ndarray:
-        #     w = np.array([w]*len(r))
         r_scaled = r/rscale
         t_scaled = t/tscale
         w_scaled = w/wscale
-        # r_to_i = np.tile(r_scaled, (len(i_array), 1))**np.tile(np.transpose([i_array]), (1,len(r_scaled))) #[i index, r index]
-        # t_to_j = np.tile(t_scaled, (len(j_array), 1))**np.tile(np.transpose([j_array]), (1,len(t_scaled))) #[i index, r index]
-        # w_to_k = np.tile(w_scaled, (len(k_array), 1))**np.tile(np.transpose([k_array]), (1,len(w_scaled))) #[i index, r index]
-
-        # new_r = r + np.einsum('i,ij,ij,ij->j', a_ijk, r_to_i, t_to_j, w_to_k)
 
         new_r = np.copy(r)
         for ijk, a in zip(ijk_array, a_ijk):
             i,j,k = ijk
             new_r += a*(r_scaled**i)*(t_scaled**j)*(w_scaled**k)
 
-        new_r[new_r < 0] = 0
-        #new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
+        #new_r[new_r < 0] = 0
+        new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
@@ -212,46 +240,41 @@ def map_ranges(a_ijk, event_select_mask, beam_xy=(0,0)):
 
 
 def to_minimize(a_ijk, beam_xy=(0,0)):
-    #try to minimize spread  in proton ranges within each peak, while preserving the distance between the two peaks
-    pranges1 = map_ranges(a_ijk, pcut1_mask, beam_xy)
-    pranges2 = map_ranges(a_ijk, pcut2_mask, beam_xy)
-    p1mean, p2mean = np.mean(pranges1), np.mean(pranges2)
-    if particles_for_fit != 'proton_only':
-        aranges1 = map_ranges(a_ijk, acut1_mask, beam_xy)
-        aranges2 = map_ranges(a_ijk, acut2_mask, beam_xy)
-        a1mean, a2mean = np.mean(aranges1), np.mean(aranges2)
-    #minimize width of each peak
-    to_return = np.std(pranges1)**2 + np.std(pranges2)**2
-    if particles_for_fit != 'proton only':
-        to_return +=np.std(aranges1)**2  +  np.std(aranges2)**2
-
-    
-    #preserve distance between proton peaks
-    to_return += np.abs(p1mean - p2mean - (pcut1_true_range - pcut2_true_range))**2#/np.abs((pcut1_true_range - pcut2_true_range))**2
-    if particles_for_fit != 'proton only':
-        #preserve distance between alpha peaks
-        to_return += np.abs(a1mean - a2mean - (acut1_true_range - acut2_true_range))**2#/np.abs((acut1_true_range - acut2_true_range))**2
-        #preserve distance between proton and alpha bands
-        to_return += np.abs(p1mean - a1mean - (pcut1_true_range - acut1_true_range))**2
-        #and try to keep everything at roughly the correct true range
-        to_return += (p1mean - pcut1_true_range)**2
-    print(to_return)
+    range_hist_dict = {} #dict to avoid doing the same rmap twice
+    to_return = 0
+    for weight, ptype in peak_widths_to_minimize:
+        range_hist_dict[ptype] = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy)
+        to_return += weight*np.std(range_hist_dict[ptype])**2
+    for weight, ptype1, ptype2 in peak_spacings_to_preserve:
+        if ptype1 not in range_hist_dict:
+            range_hist_dict[ptype1] = map_ranges(a_ijk, cut_mask_dict[ptype1], beam_xy)
+        if ptype2 not in range_hist_dict:
+            range_hist_dict[ptype2] = map_ranges(a_ijk, cut_mask_dict[ptype2], beam_xy)
+        to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
     return to_return
 
+fname_template = '%s_run%d_rmap_order%d.pkl'
+#Make string representation of the optimization function to use when saving/loading results.
+#<weight>w<particle> will minimize standard deviation of range peaks(eg sp1sp2 will minimize standard deviation of the p1 and p2 peaks)
+#<weight>d<particle1>-<particle2> will minimize the difference beteen the spacing between the specified peaks and true difference between these particles ranges
+#The "weights" are numbers which will multiply each term in the objective function.
+#seperate each terms with underscores (eg sp1500_sp750_dp1500-p750)
+#
+for weight, ptype in peak_widths_to_minimize:
+    fname_template = ('%ew%s_'%(weight, ptype))+fname_template
+for weight, ptype1, ptype2 in peak_spacings_to_preserve:
+    fname_template = ('%ed%s%s_'%(weight, ptype1, ptype2))+fname_template
 
-print('calculating order %d'%N)
 if use_pca_for_width:
-    fname_template = '%s_run%d_rmap_order%d_pca_width.pkl'
-else:
-    fname_template = '%s_run%d_rmap_order%d.pkl'
-if particles_for_fit == 'proton only':
-    fname_template = 'proton_only_'+fname_template
+    fname_template = 'pca_width_'+fname_template
+
 if exploit_symmetry:
     fname_template = 'sym_'+fname_template
 if allow_beam_off_axis:
     fname_template = 'offcenter_' + fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
+print('pickle file name: ', fname)
 if os.path.exists(fname):
     print('optimizer previously run, loading saved result')
     with open(fname, 'rb') as file:
@@ -299,21 +322,21 @@ print(res)
 
 plt.figure()
 plt.title('run %d uncorrected RvE'%run)
-plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
-plt.hist2d(counts[plt_mask], ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.hist2d(counts[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
 
 mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
-plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
-plt.hist2d(counts[plt_mask], mapped_ranges[plt_mask], 200, norm=matplotlib.colors.LogNorm())
-#plt.colorbar()
+rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
+plt.hist2d(counts[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.colorbar()
 
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
-for ax, mask, label, true_range in zip(axs.reshape(-1), masks, mask_labels, [pcut1_true_range, pcut2_true_range, acut1_true_range, acut2_true_range]):
+for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    mask, label, true_range  = cut_mask_dict[ptype], label_dict[ptype], true_range_dict[ptype]
     range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
     ax.set_title(label)
     ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%f'%np.std(ranges[mask]))
