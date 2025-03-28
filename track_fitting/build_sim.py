@@ -91,7 +91,7 @@ def get_raw_h5_path(experiment:str, run:int):
             return "/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447.h5"
             return "/mnt/daqtesting/protondet2024/h5/" + ('run_%04d.h5'%run)
         if socket.gethostname() == 'tpcgpu':
-            print("Make sure double alpha data is transferred to the tpcgpu machine!")
+            return "/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447.h5"
             return "/egr/research-tpc/shared/Run_Data/" + ('run_%04d.h5'%run)
 
     assert False, "Experiment or hostname not found for get_raw_h5_path function"
