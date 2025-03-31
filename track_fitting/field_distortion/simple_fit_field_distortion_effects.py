@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 1
+experiment, run, N = 'e21072', 124, 2
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'), (1, 'a4434')]
@@ -165,7 +165,8 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     fig.colorbar(plot, ax=ax)
 
 
-rscale, wscale, tscale = 25, 4, 0.05
+rscale, wscale, tscale = 20, 3, 0.05
+zscale = 200
 if exploit_symmetry:
     ijk_array = []
     for i in range(0, N+1):
@@ -179,11 +180,11 @@ if exploit_symmetry:
 
     def map_r(a_ij, r, t, w, cosphi=0):
         #phi is only has any effect if phi_dependence is True
-        #a_ij[-1] will contain drift speed constant
-        r_scaled, t_scaled, w_scaled = r/rscale, t/tscale, w/wscale
-        k = a_ij[-1]
-        wsquared = w_scaled**2
-        w_eff = wsquared - k*t_scaled
+        r_scaled= r/rscale
+        D, v, b = a_ij[-3:] #diffusion constant, ion drift velocity, and charge spreading width
+
+        z_eff = ((w - b)/D)**2 + v*t
+        z_scaled = z_eff/zscale
         #use absolute value of cos_phi since we expect beam distribution to be symetric under reflections across the x-z and y-z planes
         cos_phi = np.abs(cosphi) 
         
@@ -191,10 +192,10 @@ if exploit_symmetry:
         for ijk, a in zip(ijk_array, a_ij[:-1]):
             if phi_dependence:
                 i,j,k = ijk
-                new_r += a*(r_scaled**i)*(w_eff**j)*(cos_phi**k)
+                new_r += a*(r_scaled**i)*(z_scaled**j)*(cos_phi**k)
             else:
                 i, j = ijk
-                new_r += a*(r_scaled**i)*(w_eff**j)
+                new_r += a*(r_scaled**i)*(z_scaled**j)
         #new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
         #new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
@@ -306,12 +307,16 @@ else:
     print('optimizing a_ijk parameters')
     previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
     #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
-    guess_length = len(ijk_array)
+    guess = [0 for i in range(len(ijk_array))]
     if exploit_symmetry:
-        guess_length += 1
+        guess.append(0.09) #D, sqrt(mm)
+        guess.append(3000) #v, mm/s
+        guess.append(2) #mm  
     if allow_beam_off_axis:
-        guess_length += 2
-    guess = np.zeros(guess_length)
+        guess.append(0)
+        guess.append(0)
+
+    
     # if os.path.exists(previous_fname):
     #     print('rmap exists for N-1, using as intial guess')
     #     with open(previous_fname, 'rb') as file:
@@ -333,12 +338,17 @@ else:
     else:
         f_to_min = lambda x: to_minimize(x)
     if use_shgo_optimizer:
-        bounds = [[-10, 10] for i in guess]
+        bounds = [[-50, 50] for i in range(len(ijk_array))]
+        if exploit_symmetry:
+            bounds.append([1e-10, 1]) #D, sqrt(mm)
+            bounds.append([1e-10, 10000])#v, mm/s
+            bounds.append([1e-10, 3]) #charge spreading, mm
+
+            #charge spread
         if allow_beam_off_axis:
-            bounds[-3] = [-50, 50]
-        else:
-            bounds[-1] = [-50, 50]
-        res = opt.shgo(f_to_min, bounds)
+            bounds.append([-40, 40])
+            bounds.append([-40, 40])
+        res = opt.shgo(f_to_min, bounds, sampling_method='halton')
     else:
         res = opt.minimize(f_to_min, guess)
     with open(fname, 'wb') as file:
@@ -413,3 +423,6 @@ plt.show(block=False)
 
 if allow_beam_off_axis:
     print('beam axis at:', beam_xy_best)
+if exploit_symmetry:
+    print('D, v, charge spreading width = ',a_ijk_best[-3:])
+print('a_ijk', a_ijk_best)
