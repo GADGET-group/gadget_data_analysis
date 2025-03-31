@@ -11,17 +11,17 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 1
+experiment, run, N = 'e21072', 212, 2
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1596'), (1, 'a4434')]
+peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = [(1, 'p1596', 'a4434')]
+peak_spacings_to_preserve = [(1, 'p1596', 'p770')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
-phi_dependence = True #currently only works if exploit symetry is True
+phi_dependence = False #currently only works if exploit symetry is True
 allow_beam_off_axis = True #if false, will assume electric field is centered at (0,0)
 use_shgo_optimizer = True
 t_bounds = False
@@ -183,6 +183,8 @@ if exploit_symmetry:
         r_scaled= r/rscale
         D, v, b = a_ij[-3:] #diffusion constant, ion drift velocity, and charge spreading width
 
+        w = np.copy(w)
+        w[w<b] = 0
         z_eff = ((w - b)/D)**2 + v*t
         z_scaled = z_eff/zscale
         #use absolute value of cos_phi since we expect beam distribution to be symetric under reflections across the x-z and y-z planes
