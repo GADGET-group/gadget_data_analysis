@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 2
+experiment, run, N = 'e21072', 212, 1
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'), (1, 'a4434')]
@@ -21,7 +21,7 @@ peak_spacings_to_preserve = [(1, 'p1596', 'a4434')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
-phi_dependence = False #currently only works if exploit symetry is True
+phi_dependence = True #currently only works if exploit symetry is True
 allow_beam_off_axis = True #if false, will assume electric field is centered at (0,0)
 use_shgo_optimizer = True
 t_bounds = False
@@ -196,8 +196,8 @@ if exploit_symmetry:
             else:
                 i, j = ijk
                 new_r += a*(r_scaled**i)*(z_scaled**j)
-        #new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
-        #new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
+        new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
+        new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
 
@@ -337,20 +337,21 @@ else:
         
     else:
         f_to_min = lambda x: to_minimize(x)
-    if use_shgo_optimizer:
-        bounds = [[-50, 50] for i in range(len(ijk_array))]
-        if exploit_symmetry:
-            bounds.append([1e-10, 1]) #D, sqrt(mm)
-            bounds.append([1e-10, 10000])#v, mm/s
-            bounds.append([1e-10, 3]) #charge spreading, mm
 
-            #charge spread
-        if allow_beam_off_axis:
-            bounds.append([-40, 40])
-            bounds.append([-40, 40])
+    bounds = [[-50, 50] for i in range(len(ijk_array))]
+    if exploit_symmetry:
+        bounds.append([1e-10, 1]) #D, sqrt(mm)
+        bounds.append([1e-10, 10000])#v, mm/s
+        bounds.append([1e-10, 3]) #charge spreading, mm
+
+        #charge spread
+    if allow_beam_off_axis:
+        bounds.append([-10, 10])
+        bounds.append([-10, 10])
+    if use_shgo_optimizer:
         res = opt.shgo(f_to_min, bounds, sampling_method='halton')
     else:
-        res = opt.minimize(f_to_min, guess)
+        res = opt.minimize(f_to_min, guess, bounds=bounds)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 if allow_beam_off_axis:
