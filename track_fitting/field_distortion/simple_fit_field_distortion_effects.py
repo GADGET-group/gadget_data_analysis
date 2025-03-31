@@ -11,7 +11,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 4
+experiment, run, N = 'e21072', 124, 1
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'), (1, 'a4434')]
@@ -21,12 +21,17 @@ peak_spacings_to_preserve = [(1, 'p1596', 'a4434')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
+phi_dependence = False #currently only works if exploit symetry is True
 allow_beam_off_axis = True #if false, will assume electric field is centered at (0,0)
+use_shgo_optimizer = True
+t_bounds = False
+t_lower = 0.02
+t_upper = 1
 
 
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['p770', 'p1596', 'a2153', 'a4434']
+particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -81,6 +86,9 @@ for t, dt in tqdm(zip(timestamps, time_since_last_event)):
     times_since_start_of_window.append(t - start_of_current_winow)
 times_since_start_of_window = np.array(times_since_start_of_window)
 
+if t_bounds:
+    veto_mask = veto_mask & (times_since_start_of_window > t_lower) & (times_since_start_of_window < t_upper)
+
 cut_mask_dict = {}
 label_dict = {}
 if experiment == 'e21072':
@@ -91,7 +99,9 @@ if experiment == 'e21072':
     label_dict['p1596'] = '~1596 keV protons'
     label_dict['a4434'] = 'all 4434 keV alpha'
     label_dict['a4434wr'] = '4434 keV alpha with recoil'
+    label_dict['a4434wor'] = '4434 keV alpha without recoil'
     label_dict['a2153'] = 'all 2153 keV alpha'
+    label_dict['a2153wor'] = '2153 keV alpha without recoil'
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
     if run==124:
         cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
@@ -99,12 +109,15 @@ if experiment == 'e21072':
         cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
         cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
         cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
+        cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask & (~cut_mask_dict['a4434wr'])
         cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
+        cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
     elif run==212:
         cut_mask_dict['p1596'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
         cut_mask_dict['p770'] = (ranges>20) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
         cut_mask_dict['a4434'] = (ranges>22) & (ranges<50) & (counts>0.6e6) & (counts <1.1e6) & veto_mask
         cut_mask_dict['a2153'] = (ranges>19) & (ranges<26) & (counts>3e5) & (counts<5e5) & veto_mask
+        cut_mask_dict['a2153wor'] = (ranges>20.5) & (ranges<23) & (counts>3.15e5) & (counts<3.5e5) & veto_mask
 
 #plot showing selected events of each type
 rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
@@ -157,22 +170,33 @@ if exploit_symmetry:
     ijk_array = []
     for i in range(0, N+1):
         for j in range(0, N-np.abs(i) + 1): 
-            ijk_array.append((i,j))
+            if phi_dependence:
+                for k in range(0, N-np.abs(i) - np.abs(j) + 1):
+                    ijk_array.append((i,j,k),)
+            else:
+                ijk_array.append((i,j))
     ijk_array = np.array(ijk_array)
 
-    def map_r(a_ij, r, t, w):
+    def map_r(a_ij, r, t, w, cosphi=0):
+        #phi is only has any effect if phi_dependence is True
         #a_ij[-1] will contain drift speed constant
         r_scaled, t_scaled, w_scaled = r/rscale, t/tscale, w/wscale
         k = a_ij[-1]
         wsquared = w_scaled**2
         w_eff = wsquared - k*t_scaled
+        #use absolute value of cos_phi since we expect beam distribution to be symetric under reflections across the x-z and y-z planes
+        cos_phi = np.abs(cosphi) 
         
         new_r = np.copy(r)
-        for ij, a in zip(ijk_array, a_ij[:-1]):
-            i, j = ij
-            new_r += a*(r_scaled**i)*(w_eff**j)
-        new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
-        new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
+        for ijk, a in zip(ijk_array, a_ij[:-1]):
+            if phi_dependence:
+                i,j,k = ijk
+                new_r += a*(r_scaled**i)*(w_eff**j)*(cos_phi**k)
+            else:
+                i, j = ijk
+                new_r += a*(r_scaled**i)*(w_eff**j)
+        #new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
+        #new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
 
@@ -189,7 +213,7 @@ else:
     j_array = ijk_array[:,1]
     k_array = ijk_array[:,2]
 
-    def map_r(a_ijk, r, t, w):
+    def map_r(a_ijk, r, t, w, cosphi=0):
         r_scaled = r/rscale
         t_scaled = t/tscale
         w_scaled = w/wscale
@@ -213,8 +237,10 @@ def map_endpoints(a_ijk, event_select_mask, beam_xy=(0,0)):
     w = track_widths[event_select_mask]
     r1_init = np.einsum('ij,ij->i', p1_init, p1_init)**0.5
     r2_init = np.einsum('ij,ij->i', p2_init, p2_init)**0.5
-    r1_final = map_r(a_ijk, r1_init, t, w)
-    r2_final = map_r(a_ijk, r2_init, t, w)
+    cosphi1 = p1_init[:,0]/r1_init
+    cosphi2 = p2_init[:,0]/r2_init
+    r1_final = map_r(a_ijk, r1_init, t, w, cosphi1)
+    r2_final = map_r(a_ijk, r2_init, t, w, cosphi2)
     to_return =np.copy(selected_endpoints)
     rscale1 = r1_final/r1_init
     rscale1[r1_init==0] = 0
@@ -257,13 +283,18 @@ for weight, ptype in peak_widths_to_minimize:
 for weight, ptype1, ptype2 in peak_spacings_to_preserve:
     fname_template = ('%gd%s%s_'%(weight, ptype1, ptype2))+fname_template
 
+if phi_dependence:
+    fname_template = 'phidep_'+fname_template
 if use_pca_for_width:
     fname_template = 'pca_width_'+fname_template
-
 if exploit_symmetry:
     fname_template = 'sym_'+fname_template
 if allow_beam_off_axis:
-    fname_template = 'offcenter_' + fname_template
+    fname_template = 'beam_' + fname_template
+if t_bounds:
+    fname_template = 't%gand%g_'%(t_lower, t_upper)+fname_template
+if use_shgo_optimizer:
+    fname_template = 'shgo_'+fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
 print('pickle file name: ', fname)
@@ -297,9 +328,19 @@ else:
     #                 if np.all(ijk == prev_ijk):
     #                     guess[new_index] = prev_a_ijk
     if allow_beam_off_axis:
-        res = opt.minimize(lambda x: to_minimize(x[:-2], x[-2:]), guess)
+        f_to_min = lambda x: to_minimize(x[:-2], x[-2:])
+        
     else:
-        res = opt.minimize(lambda x: to_minimize(x), guess)
+        f_to_min = lambda x: to_minimize(x)
+    if use_shgo_optimizer:
+        bounds = [[-10, 10] for i in guess]
+        if allow_beam_off_axis:
+            bounds[-3] = [-50, 50]
+        else:
+            bounds[-1] = [-50, 50]
+        res = opt.shgo(f_to_min, bounds)
+    else:
+        res = opt.minimize(f_to_min, guess)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 if allow_beam_off_axis:
