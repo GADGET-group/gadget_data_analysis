@@ -11,19 +11,19 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 2
+experiment, run, N = 'e21072', 212, 5
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = [(1, 'p1596', 'p770')]
+peak_spacings_to_preserve = [(1, 'p1596', 'a4434')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
 phi_dependence = False #currently only works if exploit symetry is True
 allow_beam_off_axis = True #if false, will assume electric field is centered at (0,0)
-use_shgo_optimizer = True
+opt_method = 'annealing'#annealing, shgo, or local
 t_bounds = False
 t_lower = 0.02
 t_upper = 1
@@ -31,7 +31,7 @@ t_upper = 1
 
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
+particles_to_plot = ['p1596pp', 'p770pp', 'a2153', 'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -92,14 +92,17 @@ if t_bounds:
 cut_mask_dict = {}
 label_dict = {}
 if experiment == 'e21072':
-    true_range_dict = {'p1596': 51.6, 'p770':16.8, 
-                       'a4434wr':30.6, 'a4434wor':30.6, 'a4434':30.6,
+    true_range_dict = {'p1596': 51.6, 'p1596pp': 51.6, 'p770':16.8, 'p770pp':16.8, 
+                       'a4434wr':30.6, 'a4434wor':30.6, 'a4434':30.6,'a4434pp':30.6,
                         'a2153':11.8, 'a2153wr':11.8, 'a2153wor':11.8}
     label_dict['p770'] = '770 keV protons'
+    label_dict['p770pp'] = '770 keV protons within 20 deg of pad plane'
     label_dict['p1596'] = '~1596 keV protons'
+    label_dict['p1596pp'] = '~1596 keV protons within 20 deg of pad plane'
     label_dict['a4434'] = 'all 4434 keV alpha'
     label_dict['a4434wr'] = '4434 keV alpha with recoil'
     label_dict['a4434wor'] = '4434 keV alpha without recoil'
+    label_dict['a4434pp'] = '4434 keV alpha within 20 deg of pad plane'
     label_dict['a2153'] = 'all 2153 keV alpha'
     label_dict['a2153wor'] = '2153 keV alpha without recoil'
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
@@ -118,6 +121,10 @@ if experiment == 'e21072':
         cut_mask_dict['a4434'] = (ranges>22) & (ranges<50) & (counts>0.6e6) & (counts <1.1e6) & veto_mask
         cut_mask_dict['a2153'] = (ranges>19) & (ranges<26) & (counts>3e5) & (counts<5e5) & veto_mask
         cut_mask_dict['a2153wor'] = (ranges>20.5) & (ranges<23) & (counts>3.15e5) & (counts<3.5e5) & veto_mask
+    #cuts within 20 degrees of pad plan
+    cut_mask_dict['p1596pp'] = cut_mask_dict['p1596']&(angles>np.radians(70))
+    cut_mask_dict['p770pp'] = cut_mask_dict['p770']&(angles>np.radians(70))
+    cut_mask_dict['a4434pp'] = cut_mask_dict['a4434']&(angles>np.radians(70))
 
 #plot showing selected events of each type
 rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
@@ -296,8 +303,7 @@ if allow_beam_off_axis:
     fname_template = 'beam_' + fname_template
 if t_bounds:
     fname_template = 't%gand%g_'%(t_lower, t_upper)+fname_template
-if use_shgo_optimizer:
-    fname_template = 'shgo_'+fname_template
+fname_template = opt_method + '_' +fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
 print('pickle file name: ', fname)
@@ -350,9 +356,14 @@ else:
     if allow_beam_off_axis:
         bounds.append([-10, 10])
         bounds.append([-10, 10])
-    if use_shgo_optimizer:
+    if opt_method == 'shgo':
         res = opt.shgo(f_to_min, bounds, sampling_method='halton')
-    else:
+    elif opt_method == 'annealing':
+        def callback(x, f, context):
+            print(x, f, context)
+            return False
+        res = opt.dual_annealing(f_to_min, bounds, x0=guess, maxiter=10000, callback=callback)
+    elif opt_method == 'local':
         res = opt.minimize(f_to_min, guess, bounds=bounds)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
