@@ -3,6 +3,7 @@ import time
 
 import numpy as np
 import matplotlib.pylab as plt
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 import scipy
 
 class SimulatedEvent:
@@ -324,6 +325,30 @@ class SimulatedEvent:
         self.plot_traces(self.get_residuals(), 'residuals')
 
     def plot_xyze(self, xs, ys, zs, es, title='', threshold=-np.inf):
+        cdict={'red':  ((0.0, 0.0, 0.0),
+                    (0.25, 0.0, 0.0),
+                    (0.5, 0.8, 1.0),
+                    (0.75, 1.0, 1.0),
+                    (1.0, 0.4, 1.0)),
+
+            'green': ((0.0, 0.0, 0.0),
+                    (0.25, 0.0, 0.0),
+                    (0.5, 0.9, 0.9),
+                    (0.75, 0.0, 0.0),
+                    (1.0, 0.0, 0.0)),
+
+            'blue':  ((0.0, 0.0, 0.4),
+                    (0.25, 1.0, 1.0),
+                    (0.5, 1.0, 0.8),
+                    (0.75, 0.0, 0.0),
+                    (1.0, 0.0, 0.0))
+            }
+        cdict['alpha'] = ((0.0, 0.0, 0.0),
+                        (0.3,0.2, 0.2),
+                        (0.8,1.0, 1.0),
+                        (1.0, 1.0, 1.0))
+        cmap = LinearSegmentedColormap('test',cdict)
+
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         # Plot the 3D scatter plot with energy values as color
@@ -331,7 +356,7 @@ class SimulatedEvent:
         ys = ys[es>threshold]
         zs = zs[es>threshold]
         es = es[es>threshold]
-        sc = ax.scatter(xs, ys,zs, c=es,  alpha=0.5)#, cmap='inferno', marker='o',)# norm=matplotlib.colors.LogNorm())
+        sc = ax.scatter(xs, ys,zs, c=es,  alpha=0.5, cmap=cmap)#, norm=Normalize(vmin=0, vmax=500))
         # Add colorbar
         cbar = plt.colorbar(sc, ax=ax)
         cbar.set_label('Energy (adc units)')

@@ -11,10 +11,10 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 5
+experiment, run, N = 'e21072', 212, 2
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
+peak_widths_to_minimize = [(1, 'p1596'), (1, 'a4434')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
 peak_spacings_to_preserve = [(1, 'p1596', 'a4434')]
@@ -22,16 +22,16 @@ peak_spacings_to_preserve = [(1, 'p1596', 'a4434')]
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = True #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
 phi_dependence = False #currently only works if exploit symetry is True
-allow_beam_off_axis = True #if false, will assume electric field is centered at (0,0)
-opt_method = 'annealing'#annealing, shgo, or local
-t_bounds = False
-t_lower = 0.02
+allow_beam_off_axis = False #if false, will assume electric field is centered at (0,0)
+opt_method = 'local'#annealing, shgo, or local
+t_bounds = True
+t_lower = 0.01
 t_upper = 1
 
 
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['p1596pp', 'p770pp', 'a2153', 'a4434']
+particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -48,11 +48,12 @@ timestamps = np.load(os.path.join(processed_directory, 'timestamps.npy'))
 
 h5file = build_sim.get_rawh5_object(experiment, run)
 dzs = dts*h5file.zscale
+MeV = build_sim.get_integrated_charge_energy_offset(experiment, run) + counts/build_sim.get_adc_counts_per_MeV(experiment, run)
 #ranges = np.sqrt(dzs**2 + dxys**2) #why is this different than ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)?
 ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 ranges = ds
 
-veto_mask = max_veto_counts<400
+veto_mask = max_veto_counts<300
 
 #use track angle from pca rather than that exported by raw event viewer
 angles = []
@@ -112,7 +113,7 @@ if experiment == 'e21072':
         cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
         cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
         cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
-        cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask & (~cut_mask_dict['a4434wr'])
+        cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
         cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
         cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
     elif run==212:
@@ -134,8 +135,8 @@ fig.set_figwidth(10)
 for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     ax.set_title(label_dict[ptype])
     mask = cut_mask_dict[ptype]
-    hist,xbins,ybins,plot = ax.hist2d(counts[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm(), alpha=0.25)
-    hist,xbins,ybins,plot = ax.hist2d(counts[rve_plt_mask&mask], ranges[rve_plt_mask&mask], bins=[xbins, ybins],
+    hist,xbins,ybins,plot = ax.hist2d(MeV[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm(), alpha=0.25)
+    hist,xbins,ybins,plot = ax.hist2d(MeV[rve_plt_mask&mask], ranges[rve_plt_mask&mask], bins=[xbins, ybins],
                                        norm=matplotlib.colors.LogNorm(), alpha=1, cmin=np.min(hist), cmax=np.max(hist))
     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
@@ -151,7 +152,7 @@ plt.xlabel('track_width (mm)')
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
-fig.suptitle('all angles')
+fig.suptitle('uncorrected, all angles')
 for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     ax.set_title(label_dict[ptype])
     mask = cut_mask_dict[ptype]
@@ -162,7 +163,7 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
-fig.suptitle('within 20 deg of pad plane')
+fig.suptitle('uncorrected, within 20 deg of pad plane')
 theta_mask = angles>np.radians(70)
 for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     ax.set_title(label_dict[ptype])
@@ -364,7 +365,7 @@ else:
             return False
         res = opt.dual_annealing(f_to_min, bounds, x0=guess, maxiter=10000, callback=callback)
     elif opt_method == 'local':
-        res = opt.minimize(f_to_min, guess, bounds=bounds)
+        res = opt.minimize(f_to_min, guess)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 if allow_beam_off_axis:
@@ -379,14 +380,18 @@ print(res)
 
 plt.figure()
 plt.title('run %d uncorrected RvE'%run)
-plt.hist2d(counts[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.hist2d(MeV[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.xlabel('Energy (MeV)')
+plt.ylabel('Range (mm)')
 plt.colorbar()
 
 mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
-plt.hist2d(counts[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.xlabel('Energy (MeV)')
+plt.ylabel('Range (mm)')
 plt.colorbar()
 
 fig, axs = plt.subplots(2,2)
@@ -432,6 +437,17 @@ for ax, w in zip(axs.reshape(-1), [2, 2.5, 3, 3.5]):
         ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
     ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
     ax.legend()
+
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
+fig.suptitle('corrected range, all angles')
+for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    ax.set_title(label_dict[ptype])
+    mask = cut_mask_dict[ptype]
+    plot = ax.scatter(track_widths[mask], mapped_ranges[mask], c=times_since_start_of_window[mask], marker='.')
+    ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    fig.colorbar(plot, ax=ax)
 
 plt.show(block=False)
 

@@ -88,7 +88,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             tau = tau_auto
         else:
             tau = [2]
-        burnin = int(3 * np.max(tau))
+        burnin = int(5 * np.max(tau))
         thin = int(0.5 * np.min(tau))
         output_text_file.write('burnin: %f\n'%burnin)
         output_text_file.write('thin: %f\n'%thin)
@@ -139,9 +139,9 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 if True: #change this to True for single particle fits
     run_number= 124
-    steps = ['forward', 'backward']
+    steps = ['backward']#['forward', 'backward']
     filenames = []
-    events = [15,17]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
+    events = [1070]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
     labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'rho']
     theta_index, phi_index = 4,5
