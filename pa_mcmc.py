@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
     h5file = build_sim.get_rawh5_object(experiment, run_number)
     #set zmax to length of trimmed traces
-    temp_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
+    temp_sim = build_sim.create_multi_particle_event(experiment, run_number, event_num, ['1H', '4He'])
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     x_real, y_real, z_real, e_real = temp_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=temp_sim.traces_to_fit)
@@ -56,7 +56,7 @@ if __name__ == '__main__':
         E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
-        trace_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
+        trace_sim = build_sim.create_multi_particle_event(experiment, run_number, event_num, ['1H', '4He'])
         trace_sim.sims[0].initial_energy = Ep
         trace_sim.sims[1].initial_energy = Ea
         trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
@@ -69,7 +69,7 @@ if __name__ == '__main__':
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
         for sim in trace_sim.sims:
-            sim.load_srim_table(sim.particle, rho0)#*rho_scale)
+            sim.load_srim_table(sim.particle, 'P10', rho0)#*rho_scale)
         trace_sim.simulate_event()
         return trace_sim
 

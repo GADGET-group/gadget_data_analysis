@@ -24,7 +24,9 @@ read_data_mode = 'unchanged'
 #list of 2 point calibrations, inexed by experiment and then run number.
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
 calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
-                        {124:((90625 , 192102 ),(0.7856, 1.633))}}
+                        {124:((90625 , 192102 ),(0.7856, 1.633)),
+                         212:((158082,330108),(0.7856, 1.633))}
+                     }
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
     adc_counts, MeV = calibration_points[experiment][run]

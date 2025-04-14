@@ -53,7 +53,10 @@ MeV = build_sim.get_integrated_charge_energy_offset(experiment, run) + counts/bu
 ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 ranges = ds
 
-veto_mask = max_veto_counts<300
+if run == 124:
+    veto_mask = max_veto_counts<300
+elif run == 212:
+    veto_mask = max_veto_counts<150
 
 #use track angle from pca rather than that exported by raw event viewer
 angles = []
@@ -128,7 +131,7 @@ if experiment == 'e21072':
     cut_mask_dict['a4434pp'] = cut_mask_dict['a4434']&(angles>np.radians(70))
 
 #plot showing selected events of each type
-rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask
+rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask&(MeV<8)
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
@@ -388,7 +391,7 @@ plt.colorbar()
 mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
-rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)  & veto_mask
+rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
 plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
 plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')

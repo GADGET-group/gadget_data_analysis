@@ -121,6 +121,9 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             corner.corner(EaEp_flat, labels=Ea_Ep_labels)
             plt.savefig(base_fname+'corner_plot_EaEp.png')
 
+            corner.corner(EaEp_flat[:, :2], ['Ea', 'Ep'])
+            plt.savefig(base_fname+'corner_plot_onlyEaEp.png')
+
 
             ndim = len(labels)
             for i in range(ndim):
@@ -137,7 +140,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 
 
-if True: #change this to True for single particle fits
+if False: #change this to True for single particle fits
     run_number= 124
     steps = ['backward']#['forward', 'backward']
     filenames = []
@@ -151,10 +154,10 @@ if True: #change this to True for single particle fits
     filepath_template = './run%d_mcmc/event%d/%s.h5'
 else:
     run_number= 124
-    steps = 2
+    steps = ['backward', 'forward']
     filenames = []
     #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
-    events = [ 19699, 51777, 68192, 10356, 21640, 21662, 26303, 50543, 27067, 25304, 104723, 43833, 52010 ]
+    events = [ 51777 ]
     labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
     theta_index, phi_index = 5,6
     tau = [2]
