@@ -15,6 +15,7 @@ import matplotlib.colors as colors
 import numpy as np
 from skspatial.objects import Line, Point
 import scipy.fft
+import pandas as pd
 
 from tqdm import tqdm
 
@@ -88,6 +89,9 @@ class RawEventViewerFrame(ttk.Frame):
 
         next_button = ttk.Button(individual_event_frame, text='next', command=self.next)
         next_button.grid(row=2, column=1)
+
+        # next_seq_button = ttk.Button(individual_event_frame, text='next (sequential)', command=self.next_seq)
+        # next_seq_button.grid(row=2, column=2)
 
         next_seq_button = ttk.Button(individual_event_frame, text='next (sequential)', command=self.next_seq)
         next_seq_button.grid(row=2, column=2)
@@ -392,7 +396,9 @@ class RawEventViewerFrame(ttk.Frame):
     def next(self):
         plt.close()
         event_number = int(self.event_number_entry.get())+1
-        while self.should_veto(event_number):
+        categorized_events_of_interest = pd.read_csv('C:/Users/dopfer/WredeGroup/gadget/analysis/categorized_events_of_interest.csv',encoding='utf-8-sig', skip_blank_lines = False, nrows = 36164, header=None)
+        array_of_categorized_events_of_interest = categorized_events_of_interest[0].to_numpy()
+        while array_of_categorized_events_of_interest[event_number] == 'flagged':
             event_number += 1
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
