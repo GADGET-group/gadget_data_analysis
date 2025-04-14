@@ -76,9 +76,15 @@ def get_zscale(experiment:str, run:int):
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
     if experiment == 'e24joe':
+<<<<<<< HEAD
         return 0.65 #TODO: use correct value
         clock_freq = 50e6 #Hz, from e24joe config file on mac minis
         drift_speed = 60.9*1e6 #mm/s, taken from chart from CERN 84-08 'Drift and Diffusion of Electrons in Gases: A Compilation' although it underpredicts the drift speed of electrons in P10 at 860 torr compared to what Ruchi finds in her paper
+=======
+        return 0.65
+        clock_freq = 50e6 #Hz, from e21062 config file on mac minis
+        drift_speed = 38.0*1e6 #mm/s, English and Hanna Drift Speed Paper collected by CERN
+>>>>>>> alex_track_fitting
     return drift_speed/clock_freq
 
 #raw h5 data location and processing settings

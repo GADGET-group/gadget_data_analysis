@@ -1,6 +1,7 @@
 import os
 
 import emcee
+
 import matplotlib.pylab as plt
 import corner
 import numpy as np
@@ -111,14 +112,14 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
         if summary_file != None:
                 summary_file.write('\n')
            
-        corner.corner(flat_samples, labels=labels)
+        corner.corner(flat_samples, labels=labels, truths=[12,0.5,0,0,20,0,0,20,0.785398,3.92699,2.35619,0.785398,2,3,2,3])
         plt.savefig(base_fname+'_corner_plot.png')
         plt.close('all') 
         if Ea_Ep_labels != None:
             EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
             EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
             EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
-            corner.corner(EaEp_flat, labels=Ea_Ep_labels)
+            corner.corner(EaEp_flat, labels=Ea_Ep_labels, truths=[12,0.5,0,0,20,0,0,20,0.785398,3.92699,2.35619,0.785398,2,3,2,3])
             plt.savefig(base_fname+'corner_plot_EaEp.png')
 
 
@@ -128,7 +129,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
                 if Ea_Ep_labels[i] == 'theta' or Ea_Ep_labels[i] == 'phi':
                     mcmc = np.degrees(mcmc)
                 q = np.diff(mcmc)
-                txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}"
+                txt = "$\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}$"
                 txt = txt.format(mcmc[1], q[0], q[1], Ea_Ep_labels[i])
                 output_text_file.write('%s\n'%txt)
             
@@ -167,17 +168,17 @@ if True: #change this to True for single particle fits
     filepath_template = './run%d_mcmc/event%d/%s.h5'
 else:
     run_number= 124
-    steps = 2
+    steps = ['forward', 'backward']
     filenames = []
     #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
-    events = [ 19699, 51777, 68192, 10356, 21640, 21662, 26303, 50543, 27067, 25304, 104723, 43833, 52010 ]
-    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
+    # events = [ 19699, 51777, 68192, 10356, 21640, 21662, 26303, 50543, 27067, 25304, 104723, 43833, 52010 ]
+    events = [1762]
+    labels = ['E', 'Ea_frac', 'x','y','z', 'xa','ya','za','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
     theta_index, phi_index = 5,6
     tau = [2]
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
-    summary_file_path = './run%d_palpha_mcmc/summary.txt'%run_number
-    filepath_template = './run%d_palpha_mcmc/event%d/clustering_run%d.h5'
->>>>>>> alex_track_fitting
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z', 'xa','ya','za','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
+    summary_file_path = './run%d_dalpha_mcmc/summary.txt'%run_number
+    filepath_template = './run%d_dalpha_mcmc/event%d/%s.h5'
 
 with open(summary_file_path, 'w') as summary_file:
     summary_file.write('event, energy from IC, ')

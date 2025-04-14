@@ -20,7 +20,9 @@ class SRIM_Table:
                 if i == 10:#read in density at which calculation was done
                     table_density = float(line.split()[3])*1e3#convert g/cm^3 to mg/cm^3
                 # Start reading from the 26th line and stop after the 105th line
-                if 27 <= i <= 105:
+                if 27 <= i <= 124:
+                    if line == '-----------------------------------------------------------':
+                        break
                     if line.strip():  # Ensure the line is not empty
                         parts = line.split()
                         # Handle energy conversion based on unit

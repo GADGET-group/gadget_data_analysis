@@ -12,8 +12,8 @@ class SimulatedEvent:
 
     def __init__(self):
         #physical constants relating to the detector
-        self.sigma_xy = 1. #mm
-        self.sigma_z = 1. #mm
+        #self.sigma_xy = 1. #mm
+        #self.sigma_z = 1. #mm
         self.zscale = 1.45 #mm/time bin
         self.counts_per_MeV = 1.
         self.enable_print_statements = False
@@ -66,16 +66,16 @@ class SimulatedEvent:
     def get_energy_deposition(self):
         '''
         Child classes should override this method to determine where energy is deposited in the detector.
-        returns: numpy array of (x,y,z) points followed by a list of energies for each point.
+        returns: numpy array of (x,y,z) points followed by a list of energies for each point, list of simga_xs, list of sigma_z.
                  Points array should be set up such that points[:,i] gives [x,y,z]
         '''
-        return np.array([]), np.array([])
+        return np.array([]), np.array([]), np.array([]), np.array([])
 
     def simulate_event(self):
         '''
         
         '''
-        self.points, self.energy_depositions = self.get_energy_deposition()
+        self.points, self.energy_depositions, sigma_xys, sigma_zs = self.get_energy_deposition()
         #TODO: do a better job of veto pads
         time1=time.time()
 
@@ -90,16 +90,18 @@ class SimulatedEvent:
         
         erf_array = np.vectorize(erf)
 
-        for point, edep in zip(self.points, self.energy_depositions):
+        sigma_xy_max = np.max(sigma_xys)
+
+        for point, edep, sigma_xy, sigma_z in zip(self.points, self.energy_depositions, sigma_xys, sigma_zs):
             pads_to_sim = []
             for pad in self.pads_to_sim:
                 pad_x, pad_y = self.pad_to_xy[pad]
                 dist = np.sqrt((pad_x - point[0])**2 + (pad_y - point[1])**2)
-                if dist <= self.deposit_charge_sigma_away*self.sigma_xy:
+                if dist <= self.deposit_charge_sigma_away*sigma_xy_max:
                     pads_to_sim.append(pad)
             if self.timing_offsets == None:
                 dz = zs - point[2]
-                zfrac = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*self.sigma_z)) - erf_array(dz/np.sqrt(2*self.sigma_z)))
+                zfrac = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*sigma_z)) - erf_array(dz/np.sqrt(2*sigma_z)))
             else:
                 zfrac_dict = {} #used to avoid calculating the array of zfracs multiple times for the same timing offset
             for pad in pads_to_sim:
@@ -108,14 +110,14 @@ class SimulatedEvent:
                         continue #this pad never fired in any event
                     if self.timing_offsets[pad] not in zfrac_dict:
                         dz = zs - (point[2] + self.timing_offsets[pad]*self.zscale)
-                        zfrac_dict[self.timing_offsets[pad]] = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2)/self.sigma_z) - erf_array(dz/np.sqrt(2)/self.sigma_z))
+                        zfrac_dict[self.timing_offsets[pad]] = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2)/sigma_z) - erf_array(dz/np.sqrt(2)/sigma_z))
                     zfrac = zfrac_dict[self.timing_offsets[pad]]
                 dx = self.pad_to_xy[pad][0] - point[0]
-                xfrac = 0.5*(erf((dx + self.pad_width/2)/np.sqrt(2)/self.sigma_xy) - \
-                             erf((dx - self.pad_width/2)/np.sqrt(2)/self.sigma_xy))
+                xfrac = 0.5*(erf((dx + self.pad_width/2)/np.sqrt(2)/sigma_xy) - \
+                             erf((dx - self.pad_width/2)/np.sqrt(2)/sigma_xy))
                 dy = self.pad_to_xy[pad][1] - point[1]
-                yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2)/self.sigma_xy) - \
-                             erf((dy - self.pad_width/2)/np.sqrt(2)/self.sigma_xy))
+                yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2)/sigma_xy) - \
+                             erf((dy - self.pad_width/2)/np.sqrt(2)/sigma_xy))
                 self.sim_traces[pad] += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
             #adc_correction_factor = 1+1.558e-1 - 2.968e-5*trace
         for pad in self.pads_to_sim:

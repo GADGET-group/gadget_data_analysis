@@ -86,10 +86,10 @@ class raw_h5_file:
                     (0.75, 0.0, 0.0),
                     (1.0, 0.0, 0.0))
             }
-        # cdict['alpha'] = ((0.0, 0.0, 0.0),
-        #                 (0.3,0.2, 0.2),
-        #                 (0.8,1.0, 1.0),
-        #                 (1.0, 1.0, 1.0))
+        cdict['alpha'] = ((0.0, 0.0, 0.0),
+                        (0.3,0.2, 0.2),
+                        (0.8,1.0, 1.0),
+                        (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
         self.background_subtract_mode = 'none' #none, fixed window, smart, or convolution

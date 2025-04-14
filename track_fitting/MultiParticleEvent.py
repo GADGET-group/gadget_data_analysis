@@ -17,7 +17,7 @@ class MultiParticleEvent(SimulatedEvent):
             else:
                 ptype_dict[sim.particle] += 1
             self.sim_names.append('%s_%d'%(sim.particle, ptype_dict[sim.particle]))
-        self.per_particle_params = ['initial_energy', 'theta', 'phi', 'num_stopping_power_points'] 
+        self.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points'] 
         self.shared_params = ['initial_point', 
                               'gas_density'] 
         
@@ -51,12 +51,14 @@ class MultiParticleEvent(SimulatedEvent):
         
 
     def get_energy_deposition(self):
-        points, edeps = [],[]
+        points, edeps, sigma_xys, sigma_zs = [],[], [], []
         for sim in self.sims:
-            p,e = sim.get_energy_deposition()
+            p,e, sxy, sz = sim.get_energy_deposition()
             points.append(p)
             edeps.append(e)
-        return np.concatenate(points), np.concatenate(edeps)
+            sigma_xys.append(sxy)
+            sigma_zs.append(sz)
+        return np.concatenate(points), np.concatenate(edeps), np.concatenate(sigma_xys), np.concatenate(sigma_zs)
 
 
 class MultiParticleDecay(MultiParticleEvent):
