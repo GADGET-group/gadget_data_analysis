@@ -78,7 +78,7 @@ def get_zscale(experiment:str, run:int):
     if experiment == 'e24joe':
         return 0.65
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
-        drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
+        drift_speed = 38.0*1e6 #mm/s, English and Hanna Drift Speed Paper collected by CERN
     return drift_speed/clock_freq
 
 #raw h5 data location and processing settings

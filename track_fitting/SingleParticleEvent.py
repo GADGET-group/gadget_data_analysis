@@ -19,6 +19,8 @@ class SingleParticleEvent(SimulatedEvent):
         gas_density: density in mg/cm^3
         '''
         super().__init__()
+        self.sigma_xy, self.sigma_z = 1.,1.
+        
         self.particle = particle #this variable should only be changed using the load_srim_table function
         self.material = material
         self.gas_density = gas_density  #this variable should only be changed using the load_srim_table function
@@ -86,7 +88,7 @@ class SingleParticleEvent(SimulatedEvent):
         for i in range(3):
             points[:,i] = self.initial_point[i] + direction_vector[i]*self.distances
         time2 = time.time()
-        return points, energy_deposition
+        return points, energy_deposition, [self.sigma_xy]*len(energy_deposition), [self.sigma_z]*len(energy_deposition)
 
 
     
