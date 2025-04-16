@@ -121,7 +121,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             corner.corner(EaEp_flat, labels=Ea_Ep_labels)
             plt.savefig(base_fname+'corner_plot_EaEp.png')
 
-            corner.corner(EaEp_flat[:, :2], ['Ea', 'Ep'])
+            corner.corner(EaEp_flat[:, np.r_[:2,-1]], labels=['Ea', 'Ep', 'k'])
             plt.savefig(base_fname+'corner_plot_onlyEaEp.png')
 
 
@@ -154,16 +154,16 @@ if False: #change this to True for single particle fits
     filepath_template = './run%d_mcmc/event%d/%s.h5'
 else:
     run_number= 124
-    steps = ['backward', 'forward']
+    steps = ['forward', 'backward']
     filenames = []
     #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
     events = [ 51777 ]
-    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
+    labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'k']
     theta_index, phi_index = 5,6
     tau = [2]
-    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
+    Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'k']
     summary_file_path = './run%d_palpha_mcmc/summary.txt'%run_number
-    filepath_template = './run%d_palpha_mcmc/event%d/clustering_run%d.h5'
+    filepath_template = './run%d_palpha_mcmc/event%d/%s.h5'
 
 with open(summary_file_path, 'w') as summary_file:
     summary_file.write('event, energy from IC, ')

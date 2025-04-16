@@ -5,7 +5,7 @@ from track_fitting.SimulatedEvent import SimulatedEvent
 
 class MultiParticleEvent(SimulatedEvent):
     def __init__(self, sims:list[SingleParticleEvent]):
-        super().__init__()#this class won't use it's own SRIM table, so particle and density chosen don't matter
+        super().__init__()
         self.sims = sims
 
         #params for display on gui

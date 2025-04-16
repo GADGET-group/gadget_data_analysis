@@ -37,11 +37,11 @@ if __name__ == '__main__':
     E_from_ic_simga = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
     E_prior = GaussianVar(E_from_ic, E_from_ic_simga)
     rho0 = build_sim.get_gas_density('e21072', run_number)
-    density_scale_prior = GaussianVar(1, 0.1)#TODO: decid on density range
+    density_scale_prior = GaussianVar(1, 0.5)#TODO: decid on density range
 
     h5file = build_sim.get_rawh5_object(experiment, run_number)
     #set zmax to length of trimmed traces
-    temp_sim = build_sim.create_multi_particle_event(experiment, run_number, event_num, ['1H', '4He'])
+    temp_sim = build_sim.create_multi_particle_decay(experiment, run_number, event_num, ['1H', '4He'], [1.,4.], '16O', 16. )
     zmax = temp_sim.num_trace_bins*temp_sim.zscale
 
     x_real, y_real, z_real, e_real = temp_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=temp_sim.traces_to_fit)
@@ -53,23 +53,21 @@ if __name__ == '__main__':
     track_direction_vec = track_direction_vec[0]
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z, rho_scale = params
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
-        trace_sim = build_sim.create_multi_particle_event(experiment, run_number, event_num, ['1H', '4He'])
+        trace_sim = build_sim.create_multi_particle_decay(experiment, run_number, event_num, ['1H', '4He'], [1.,4.], '16O', 16. )
         trace_sim.sims[0].initial_energy = Ep
         trace_sim.sims[1].initial_energy = Ea
-        trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
-        trace_sim.sims[0].sigma_xy = sigma_xy
-        trace_sim.sims[0].sigma_z = sigma_z
-        trace_sim.sims[1].sigma_xy = sigma_xy
-        trace_sim.sims[1].sigma_z = sigma_z
+        trace_sim.initial_point = (x,y,z)
+        trace_sim.sigma_xy = sigma_xy
+        trace_sim.sigma_z = sigma_z
         trace_sim.sims[0].theta = theta_p
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
         for sim in trace_sim.sims:
-            sim.load_srim_table(sim.particle, 'P10', rho0)#*rho_scale)
+            sim.load_srim_table(sim.particle, 'P10', rho0*rho_scale)
         trace_sim.simulate_event()
         return trace_sim
 
@@ -82,7 +80,9 @@ if __name__ == '__main__':
         return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
 
     def log_priors(params, direction):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z = params
+        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, rho_scale = params
+        if E > 1.5*E_prior.mu:
+            return -np.inf
         #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
@@ -95,12 +95,12 @@ if __name__ == '__main__':
             return -np.inf
         if theta_a < 0 or theta_a >= np.pi or phi_a < 0 or phi_a>2*np.pi:
             return -np.inf 
-        if sigma_p_xy < 0 or sigma_p_xy > 40:
+        if sigma_p_xy < 0 or sigma_p_xy >10:
             return -np.inf
-        if sigma_p_z < 0 or sigma_p_z > 40:
+        if sigma_p_z < 0 or sigma_p_z > 10:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
-        return E_prior.log_likelihood(E)  + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p))) #+ density_scale_prior.log_likelihood(rho_scale)
+        return E_prior.log_likelihood(E)  + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p))) + density_scale_prior.log_likelihood(rho_scale)
 
     def log_posterior(params, direction, print_out=False):
         to_return = log_priors(params, direction)
@@ -114,8 +114,8 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 400
-    steps = 500
-    ndim = 11
+    steps = 400
+    ndim = 12
 
     def get_init_walker_pos(direction):
         #initialize E per priors
@@ -133,8 +133,9 @@ if __name__ == '__main__':
         phi = np.arctan2(vhat[1], vhat[0])
 
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
-        sigma_guess = 7
-        pos_ball_size = 1
+        sigma_guess = 2.5
+        sigma_ball_size = 0.5
+        pos_ball_size = 6
         angle_ball_size = 1*np.pi/180
 
         max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
@@ -146,14 +147,32 @@ if __name__ == '__main__':
 
         print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess, sigma_guess))
 
-        return [(E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
+        
+    
+        # while True:
+        #     workable_point = (E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
+        #                     best_point[0] + np.random.randn()*pos_ball_size,
+        #                     best_point[1] + np.random.randn()*pos_ball_size,
+        #                     best_point[2] + np.random.randn()*pos_ball_size,
+        #                     min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
+        #                     min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
+        #                     np.random.uniform(0, np.pi), np.random.uniform(-np.pi, np.pi),
+        #                     sigma_guess + np.random.randn()*sigma_ball_size, sigma_guess + np.random.randn()*sigma_ball_size,
+        #                     np.random.uniform(0.9, 2)
+        #                     )
+        #     if np.isfinite(log_posterior(workable_point, direction)):
+        #         break
+        # workable_point = np.array(workable_point)
+        # return [workable_point + np.random.randn(ndim)*1e-6 for w in range(nwalkers)]
+        return [ (E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
                             best_point[0] + np.random.randn()*pos_ball_size,
                             best_point[1] + np.random.randn()*pos_ball_size,
                             best_point[2] + np.random.randn()*pos_ball_size,
                             min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
                             min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
                             np.random.uniform(0, np.pi), np.random.uniform(-np.pi, np.pi),
-                            sigma_guess + np.random.randn()*pos_ball_size, sigma_guess + np.random.randn()*pos_ball_size,
+                            sigma_guess + np.random.randn()*sigma_ball_size, sigma_guess + np.random.randn()*sigma_ball_size,
+                            np.random.uniform(0.9, 2)
                             ) for w in range(nwalkers)]
 
 
@@ -164,7 +183,7 @@ if __name__ == '__main__':
 
 
     with multiprocessing.Pool() as pool:
-        for direction in [-1, 1]:
+        for direction in [1, -1]:
             if direction == 1:
                 backend_fname = 'forward.h5'
             elif direction == -1:

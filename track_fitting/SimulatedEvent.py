@@ -26,8 +26,8 @@ class SimulatedEvent:
         #TODO: implement clipping
         self.deposit_charge_sigma_away = 4 #charge will be simulated on pads up to this many times sigma_xy away from each charge deposition opoint
         
-        self.pad_gain_match_uncertainty = 0 #unitless
-        self.other_systematics = 0 #adc counts
+        self.pad_gain_match_uncertainty = 0.1 #unitless
+        self.other_systematics = 4 #adc counts
 
         self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
