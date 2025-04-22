@@ -386,10 +386,14 @@ class SimFrame(ttk.Frame):
         batch_number = self.sim_batch_number_entry.get()
         batch_name = f"run_s{batch_number}"
         
+        print(f"Merging simulations to batch {batch_name}")
+        
         # check if the batch already exists
         if not os.path.exists(f"{Simulation_path}{batch_name}"):
             os.makedirs(f"{Simulation_path}{batch_name}")
             os.makedirs(f"{Simulation_path}{batch_name}/component_h5")
+        
+        subprocess.run(f"cp {Simulation_path}parameters.csv {Simulation_path}{batch_name}/component_h5/param-{time.time()}.csv", shell=True, check=True)
         
         # move all component files to batch
         sim_files = os.listdir(Queue_path)
@@ -422,11 +426,13 @@ class SimFrame(ttk.Frame):
             # merge get data
             for key in component_h5['get'].keys():
                 if 'data' in key:
-                    event_number = int(key.split('_')[0][3:])
-                    batch_h5.create_dataset(f"get/evt{event_number + last_event_number}_header", data=component_h5[f"get/{key}"], dtype='float64')
-                    batch_h5.create_dataset(f"get/evt{event_number + last_event_number}_data", data=component_h5[f"get/{key}"], dtype='int16')
-                    batch_h5[f'get/evt{event_number + last_event_number}_header'][0] = event_number + last_event_number # update the event number in the header
-            
+                    try:
+                        event_number = int(key.split('_')[0][3:])
+                        batch_h5.create_dataset(f"get/evt{event_number + last_event_number}_header", data=component_h5[f"get/{key}"], dtype='float64')
+                        batch_h5.create_dataset(f"get/evt{event_number + last_event_number}_data", data=component_h5[f"get/{key}"], dtype='int16')
+                        batch_h5[f'get/evt{event_number + last_event_number}_header'][0] = event_number + last_event_number # update the event number in the header
+                    except IndexError:
+                        print(f"Error in {component_h5} - {key}")
             meta_data = batch_h5['meta/meta'] 
             
             # merge clouds data

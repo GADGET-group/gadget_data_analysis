@@ -5,8 +5,8 @@ Gain,float,8000,Average gain of micromegas,0
 GETGain,float,120,Gain of the GET electronics in fC,0
 PeakingTime,int,1014,Electronic peaking time in ns,0
 GasPressure,float,800,Gas pressure in torr,0
-EIonize,float,22.3,Ionization energy of gas in eV
-Fano,float,0.24,Fano factor of the gas
+EIonize,float,22.3,Ionization energy of gas in eV,0
+Fano,float,0.24,Fano factor of the gas,0
 Threshold,float,86,minimum energy to register a pad hit,0
 EnergyResolution,float,4.2,Energy Resolution Constant (5.3% @ 6.3MeV),0
 MediumGas,string,GADGET_P10_800,Gas medium in detector
