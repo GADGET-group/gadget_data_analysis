@@ -25,7 +25,7 @@ experiment, run = 'e21072', 124
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'p770')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = []#(1, 'p1596', 'a4434')]
+peak_spacings_to_preserve = [(1, 'p1596', 'p770')]
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 #include up to 4 particles to make scatter plots and histograms for
 particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
@@ -145,7 +145,7 @@ def map_endpoints(endpoints_to_map, w, t, xparams, yparams, zparams):
 
     to_return = np.copy(endpoints_to_map)
     #map first set of endpoints
-    x, y, z = endpoints_to_map[:,0,0], endpoints_to_map[:,0,1], endpoints_to_map[:,1,2]
+    x, y, z = endpoints_to_map[:,0,0], endpoints_to_map[:,0,1], endpoints_to_map[:,0,2]
     to_return[:,0,0] = interp.interpn(points=(x_grid, y_grid, w_grid, t_grid), values=xparams, xi=(x,y, w, t), bounds_error=False, fill_value=None)
     to_return[:,0,1] = interp.interpn(points=(x_grid, y_grid, w_grid, t_grid), values=yparams, xi=(x,y, w, t), bounds_error=False, fill_value=None)
     to_return[:,0,2] = interp.interpn(points=(x_grid, y_grid, z_grid, w_grid, t_grid), values=zparams, xi=(x,y, z, w, t), bounds_error=False, fill_value=None)
@@ -238,8 +238,29 @@ else:
                 for l in range(len(t_grid)):
                     zguess[i,j, :,k, l] = z_grid
     guess = np.concatenate([xguess.flatten()[1:], yguess.flatten()[1:], zguess.flatten()[1:]])
+
     
-    res = opt.minimize(to_minimize, guess, method='Nelder-Mead', options={'xatol':0.1}, callback=print)
+
+    def callback(x):
+        print(x,to_minimize(x))
+        xparams, yparams, zparams = convert_fit_params(x)
+        mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
+        plt.figure()
+        plt.title('run %d RvE corrected using r-map'%run)
+        rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
+        plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+        plt.xlabel('Energy (MeV)')
+        plt.ylabel('Range (mm)')
+        plt.colorbar()
+        plt.show(block=False)
+        plt.pause(0.01)
+    #res = opt.minimize(to_minimize, guess, method='Nelder-Mead', options={'xatol':0.1, 'adaptive':True}, callback=callback)
+    def jac(x):
+        eps = 1e-7
+    
+    plt.ion()
+    callback(guess)
+    res = opt.minimize(to_minimize, guess, callback=callback)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 if allow_beam_off_axis:
