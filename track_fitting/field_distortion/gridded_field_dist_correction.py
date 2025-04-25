@@ -6,6 +6,7 @@ and dz_dep(dz_det, x_dep, y_dep, width, time)
 import os
 import pickle
 import sys
+import multiprocessing as mp
 
 import numpy as np
 from tqdm import tqdm
@@ -20,7 +21,7 @@ from track_fitting import build_sim
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'p770')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -241,11 +242,12 @@ else:
 
     
 
-    def callback(x):
+    def callback(x, fig='%s update'):
         print(x,to_minimize(x))
         xparams, yparams, zparams = convert_fit_params(x)
         mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
-        plt.figure()
+        plt.figure(fig%fname)
+        plt.clf()
         plt.title('run %d RvE corrected using r-map'%run)
         rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
         plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
@@ -254,22 +256,28 @@ else:
         plt.colorbar()
         plt.show(block=False)
         plt.pause(0.01)
+    callback(guess, '%s init')
     #res = opt.minimize(to_minimize, guess, method='Nelder-Mead', options={'xatol':0.1, 'adaptive':True}, callback=callback)
-    def jac(x):
-        eps = 1e-7
-    
-    plt.ion()
-    callback(guess)
+    # pool = mp.Pool(10)
+    # def jac(x):
+    #     print("grad time!")
+    #     eps = 1e-7
+    #     to_map = [x]
+    #     for i in range(len(x)):
+    #         to_map.append(np.copy(x))
+    #         to_map[-1][i] += eps
+    #     res = pool.map(to_minimize, to_map)
+    #     f0 = res[0]
+    #     grad = (res[1:]-f0)/eps
+    #     print("grad done!")
+    #     return grad
+
     res = opt.minimize(to_minimize, guess, callback=callback)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
-if allow_beam_off_axis:
-    a_ijk_best = res.x[:-2]
-    beam_xy_best = res.x[-2:]
-else:
-    a_ijk_best = res.x
-    beam_xy_best = np.zeros(2)
+
 print(res)
+xparams, yparams, zparams = convert_fit_params(res.x)
 
 '''
 make plots
@@ -328,7 +336,7 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
-mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best)
+mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
@@ -360,26 +368,6 @@ for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]):
     ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
     ax.legend()
 
-plt.figure()
-plt.title('t=0 s')
-w_squared = np.linspace(2**2, 3.5**2)
-w = w_squared**0.5
-for r in [1.,10., 20., 30., 40.]:
-    plt.plot(w_squared, map_r(a_ijk_best, np.array([r]*len(w_squared)), np.array([0.]*len(w_squared)), w)-r, label='r=%g mm'%r)
-plt.legend()
-plt.xlabel('w squared (mm^2)')
-plt.ylabel('r_dep - r_obs (mm)')
-
-fig, axs = plt.subplots(2,2)
-fig.set_figheight(10)
-fig.set_figwidth(10)
-r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
-for ax, w in zip(axs.reshape(-1), [2, 2.25, 2.5, 2.75]): 
-    ax.set_title('r map for track with %f mm width'%w)
-    for t in np.linspace(0, 0.1, 10):
-        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
-    ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
-    ax.legend()
 
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
@@ -393,9 +381,3 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     fig.colorbar(plot, ax=ax)
 
 plt.show(block=False)
-
-if allow_beam_off_axis:
-    print('beam axis at:', beam_xy_best)
-if exploit_symmetry:
-    print('D, v, charge spreading width = ',a_ijk_best[-3:])
-print('a_ijk', a_ijk_best)
