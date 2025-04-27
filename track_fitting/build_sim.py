@@ -81,7 +81,7 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.num_smart_background_ave_bins = 50
         h5file.require_peak_within= (20, 300)
         h5file.ic_counts_threshold = 9
-        h5file.length_counts_threshold = 60
+        h5file.length_counts_threshold = 20 
         h5file.num_background_bins=(160, 250) #not used for "smart" background subtraction
         h5file.zscale = get_zscale(experiment, run)
         return h5file

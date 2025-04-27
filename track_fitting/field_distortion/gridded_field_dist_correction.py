@@ -23,10 +23,10 @@ Configuration for fit.
 '''
 experiment, run = 'e21072', 212
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1596'),  (1, 'p770')]
+peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = [(1, 'p1596', 'p770')]
+peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p1596', 'a2153')]
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 #include up to 4 particles to make scatter plots and histograms for
 particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
