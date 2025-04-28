@@ -158,13 +158,36 @@ def map_endpoints(endpoints_to_map, w, t, xparams, yparams, zparams):
     return to_return
 
 
-
 def map_ranges(xparams, yparams, zparams, event_select_mask):
     #map ranges as range -> range_from_mapped_r - c*width
     new_endpoints = map_endpoints(endpoints[event_select_mask], track_widths[event_select_mask],
                                    times_since_start_of_window[event_select_mask],
                                    xparams, yparams, zparams)
     return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) #track_widths[event_select_mask]
+
+#minimize events that need to be passed to other threads
+type_endpoints = {}
+type_widths = {}
+type_times = {}
+for weight, ptype in peak_widths_to_minimize:
+    type_endpoints[ptype] = endpoints[cut_mask_dict[ptype]]
+    type_widths[ptype] = track_widths[cut_mask_dict[ptype]]
+    type_times[ptype] = times_since_start_of_window[cut_mask_dict[ptype]]
+for weight, ptype1, ptype2 in peak_spacings_to_preserve:
+    type_endpoints[ptype1] = endpoints[cut_mask_dict[ptype1]]
+    type_widths[ptype1] = track_widths[cut_mask_dict[ptype1]]
+    type_times[ptype1] = times_since_start_of_window[cut_mask_dict[ptype1]]
+    type_endpoints[ptype2] = endpoints[cut_mask_dict[ptype2]]
+    type_widths[ptype2] = track_widths[cut_mask_dict[ptype2]]
+    type_times[ptype2] = times_since_start_of_window[cut_mask_dict[ptype2]]
+
+
+def map_type_range(xparams, yparams, zparams, ptype):
+    new_endpoints = map_endpoints(type_endpoints[ptype], type_widths[ptype],
+                                   type_times[ptype],
+                                   xparams, yparams, zparams)
+    return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1)
+
 
 def convert_fit_params(params):
     '''
@@ -196,14 +219,15 @@ def to_minimize(params):
     range_hist_dict = {} #dict to avoid doing the same rmap twice
     to_return = 0
     for weight, ptype in peak_widths_to_minimize:
-        range_hist_dict[ptype] = map_ranges(xparams, yparams, zparams, cut_mask_dict[ptype]) 
+        range_hist_dict[ptype] = map_type_range(xparams, yparams, zparams, ptype) 
         to_return += weight*np.std(range_hist_dict[ptype])**2
     for weight, ptype1, ptype2 in peak_spacings_to_preserve:
         if ptype1 not in range_hist_dict:
-            range_hist_dict[ptype1] = map_ranges(xparams, yparams, zparams, cut_mask_dict[ptype1])
+            range_hist_dict[ptype1] = map_type_range(xparams, yparams, zparams, ptype1) 
         if ptype2 not in range_hist_dict:
-            range_hist_dict[ptype2] = map_ranges(xparams, yparams, zparams, cut_mask_dict[ptype2])
+            range_hist_dict[ptype2] = map_type_range(xparams, yparams, zparams, ptype2) 
         to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
+    #print(to_return)
     return to_return
 
 fname_template = 'gridcor_%s_run%d_x%d_y%d_z%d_w%d_t%d.pkl'
@@ -242,37 +266,39 @@ else:
 
     
 
-    def callback(x, fig='%s update'):
+    def callback(x, fig='%s update', show_plots=True):
         print(x,to_minimize(x))
-        xparams, yparams, zparams = convert_fit_params(x)
-        mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
-        plt.figure(fig%fname)
-        plt.clf()
-        plt.title('run %d RvE corrected using r-map'%run)
-        rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
-        plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
-        plt.xlabel('Energy (MeV)')
-        plt.ylabel('Range (mm)')
-        plt.colorbar()
-        plt.show(block=False)
-        plt.pause(0.01)
+        if show_plots:
+            xparams, yparams, zparams = convert_fit_params(x)
+            mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
+            plt.figure(fig%fname)
+            plt.clf()
+            plt.title('run %d RvE corrected using r-map'%run)
+            rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
+            plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+            plt.xlabel('Energy (MeV)')
+            plt.ylabel('Range (mm)')
+            plt.colorbar()
+            plt.show(block=False)
+            plt.pause(0.01)
+
     callback(guess, '%s init')
     #res = opt.minimize(to_minimize, guess, method='Nelder-Mead', options={'xatol':0.1, 'adaptive':True}, callback=callback)
-    # pool = mp.Pool(10)
-    # def jac(x):
-    #     print("grad time!")
-    #     eps = 1e-7
-    #     to_map = [x]
-    #     for i in range(len(x)):
-    #         to_map.append(np.copy(x))
-    #         to_map[-1][i] += eps
-    #     res = pool.map(to_minimize, to_map)
-    #     f0 = res[0]
-    #     grad = (res[1:]-f0)/eps
-    #     print("grad done!")
-    #     return grad
-
-    res = opt.minimize(to_minimize, guess, callback=callback)
+    # with mp.Pool() as pool:
+    #     def jac(x):
+    #         print("grad time!")
+    #         eps = 1e-7
+    #         to_map = [x]
+    #         for i in range(len(x)):
+    #             to_map.append(np.copy(x))
+    #             to_map[-1][i] += eps
+    #         res = pool.map(to_minimize, to_map)
+    #         f0 = res[0]
+    #         grad = (res[1:]-f0)/eps
+    #         print("grad done!")
+    #         return grad
+    print('number of parameters to fit:', len(guess))
+    res = opt.minimize(to_minimize, guess, callback=callback, method='BFGS')
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 
