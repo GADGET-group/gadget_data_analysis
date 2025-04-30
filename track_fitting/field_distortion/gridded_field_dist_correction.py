@@ -21,7 +21,7 @@ from track_fitting import build_sim
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 212
+experiment, run = 'e21072', 124
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -32,6 +32,8 @@ use_pca_for_width = False #if false, uses standard deviation of charge along the
 particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
 t_bounds = False 
 t_lower, t_upper = 0, 0.01
+offset_endpoints = True
+
 load_intermediate_result = False # if True, then load saved pickle file of best result found so far, and display data with no further optimization
 
 x_grid = np.linspace(-40, 40, 5)
@@ -68,10 +70,12 @@ elif run == 212:
 
 #use track angle from pca rather than that exported by raw event viewer
 angles = []
+track_vects = []
 for axes in track_info_dict['principle_axes']:
     dir = axes[0]
     angles.append(np.arctan2(np.sqrt(dir[0]**2 + dir[1]**2), np.abs(dir[2])))
 angles = np.array(angles)
+track_vects = np.array(track_vects)
 
 #estimate time since start of decay window to be time since first event in the window
 time_since_last_event = timestamps - np.roll(timestamps, 1)
@@ -138,10 +142,23 @@ if experiment == 'e21072':
     cut_mask_dict['p770pp'] = cut_mask_dict['p770']&(angles>np.radians(70))
     cut_mask_dict['a4434pp'] = cut_mask_dict['a4434']&(angles>np.radians(70))
 
+
+if offset_endpoints:
+    total_track_widths = np.array(track_info_dict['width_above_threshold'])
+    endpoints_offset_dir1 = endpoints[:, 0, :] - endpoints[:, 1, :]
+    endpoints_offset_dir1 /= np.linalg.norm(endpoints_offset_dir1, axis=1)[:, np.newaxis]
+    endpoints[:, 0, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir1
+    endpoints_offset_dir2 = endpoints[:, 1, :] - endpoints[:, 0, :]
+    endpoints_offset_dir2 /= np.linalg.norm(endpoints_offset_dir2, axis=1)[:, np.newaxis]
+    endpoints[:, 1, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir2
+
+
+
 #translate endpoint pairs in z so z=0 is the average of the z values
 z_ave_init = (endpoints[:,0,2] + endpoints[:,1,2])/2
 endpoints[:,0,2] -= z_ave_init
 endpoints[:,1,2] -= z_ave_init
+
 
 def map_endpoints(endpoints_to_map, w, t, xparams, yparams, zparams):
 
@@ -234,6 +251,10 @@ def to_minimize(params):
 fname_template = 'gridcor_%s_run%d_x%d_y%d_z%d_w%d_t%d.pkl'
 if t_bounds:
     fname_template = 't%gand%g_'%(t_lower, t_upper)+fname_template
+if use_pca_for_width:
+    fname_template = 'pca_width_'+fname_template
+if offset_endpoints:
+    fname_template = 'offset_points_'+fname_template
 
 for weight, ptype in peak_widths_to_minimize:
     fname_template = ('%gw%s_'%(weight, ptype))+fname_template
@@ -270,7 +291,7 @@ else:
 
     
 
-    def callback(x, fig='%s update', show_plots=False, save_intermediate_res=True):
+    def callback(x, fig='%s update', show_plots=True, save_intermediate_res=True):
         print(x,to_minimize(x))
         if save_intermediate_res:
             with open(inter_fname, 'wb') as f:
