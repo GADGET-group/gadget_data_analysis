@@ -21,7 +21,7 @@ def get_track_info(experiment, run_number):
         h5file = build_sim.get_rawh5_object(experiment, run_number)
         print('calculating quantities not saved by GUI process run')
         first_event, last_event = h5file.get_event_num_bounds()
-        track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths = [],[],[],[],[],[]
+        track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
         for evt in tqdm(range(first_event, last_event + 1)):
             center, uu,dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
             xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
@@ -52,13 +52,19 @@ def get_track_info(experiment, run_number):
                 displacement_from_center = points - center_of_charge
                 displacement_dot_width_axis_squared = np.einsum('ij, j', displacement_from_center, width_axis)**2
                 charge_widths.append((np.einsum('i,i', displacement_dot_width_axis_squared, es)/total_charge)**0.5)
+                #calculate width in the same way we do length
+                rdotv = np.dot(rbar, width_axis)
+                width_above_thresholds.append(np.max(rdotv) - np.min(rdotv))
+
             else:
                 track_endpoints.append([(0,0,0), (0,0,0)])
                 charge_widths.append(0)
+                width_above_thresholds.append(0)
         track_centers = np.array(track_centers)
         pad_charges = np.array(pad_charges)
         to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
-                   'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths}
+                   'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
+                   'width_above_threshold':width_above_thresholds}
         print('pickling')
         with open(fname, 'wb') as file:
             pickle.dump(to_return, file)

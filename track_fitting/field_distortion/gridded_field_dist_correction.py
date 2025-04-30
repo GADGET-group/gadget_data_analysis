@@ -30,14 +30,15 @@ peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 #include up to 4 particles to make scatter plots and histograms for
 particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
-t_bounds = False
+t_bounds = False 
 t_lower, t_upper = 0, 0.01
+load_intermediate_result = False # if True, then load saved pickle file of best result found so far, and display data with no further optimization
 
 x_grid = np.linspace(-40, 40, 5)
 y_grid = np.linspace(-40, 40, 5)
 z_grid = np.linspace(-40, 40, 2)
 w_grid = np.linspace(2, 3.5, 5)
-t_grid = np.linspace(0, 0.09, 9)
+t_grid = np.linspace(0, 0.09, 9)#np.array([0,0.005,0.010,0.015, 0.020, 0.025, 0.030, 0.040, 0.050, 0.060, 0.07, 0.08])#
 
 '''
 Load data and do pre-processing
@@ -231,6 +232,8 @@ def to_minimize(params):
     return to_return
 
 fname_template = 'gridcor_%s_run%d_x%d_y%d_z%d_w%d_t%d.pkl'
+if t_bounds:
+    fname_template = 't%gand%g_'%(t_lower, t_upper)+fname_template
 
 for weight, ptype in peak_widths_to_minimize:
     fname_template = ('%gw%s_'%(weight, ptype))+fname_template
@@ -238,7 +241,8 @@ for weight, ptype1, ptype2 in peak_spacings_to_preserve:
     fname_template = ('%gd%s%s_'%(weight, ptype1, ptype2))+fname_template
 
 package_directory = os.path.dirname(os.path.abspath(__file__))
-fname = os.path.join(package_directory,fname_template%(experiment, run, len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(z_grid)))
+fname = os.path.join(package_directory,fname_template%(experiment, run, len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(t_grid)))
+inter_fname = os.path.join(package_directory,'inter_' + fname_template%(experiment, run, len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(t_grid)))
 print('pickle file name: ', fname)
 if os.path.exists(fname):
     print('optimizer previously run, loading saved result')
@@ -266,8 +270,11 @@ else:
 
     
 
-    def callback(x, fig='%s update', show_plots=True):
+    def callback(x, fig='%s update', show_plots=False, save_intermediate_res=True):
         print(x,to_minimize(x))
+        if save_intermediate_res:
+            with open(inter_fname, 'wb') as f:
+                pickle.dump(x, f)
         if show_plots:
             xparams, yparams, zparams = convert_fit_params(x)
             mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
