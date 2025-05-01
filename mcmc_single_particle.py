@@ -77,6 +77,8 @@ if __name__ == '__main__':
     def log_likelihood(params, print_out=False):
         trace_sim = get_sim(params)
         to_return = trace_sim.log_likelihood()
+        if np.isnan(to_return):
+            return -1e38
         if print_out:
             print(params, to_return)
         #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
@@ -84,39 +86,24 @@ if __name__ == '__main__':
 
     def log_priors(params, direction):
         E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale = params
+        #uniform priors
+        if x**2 + y**2 > 40**2:
+            return -np.inf
+        if z < zmin or z >zmax:
+            return -np.inf
+        if sigma_xy < sigma_min or sigma_xy > sigma_max:
+            return -np.inf
+        if sigma_z < sigma_min or sigma_z > sigma_max:
+            return -np.inf
+        if density_scale < 0:
+            return -np.inf
+        #require particle to be within 90 degrees of track axis
+        vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
+        if np.dot(vhat, direction*track_direction_vec) < 0 or theta > np.pi or theta < 0 or np.abs(phi)>np.pi:
+            return -np.inf
+        #gaussian prior for energy, and assume uniform over solid angle
+        return E_prior.log_likelihood(E) + np.log(np.abs(np.sin(theta))) + density_rescale_prior.log_likelihood(density_scale)
 
-        # Convert conditions to PyMC-friendly format using pm.math.switch()
-        prior_x_y = pm.math.switch(x**2 + y**2 > 40**2, -np.inf, 0)
-        prior_z = pm.math.switch(pm.math.or_(z < zmin, z > zmax), -np.inf, 0)
-        prior_sigma_xy = pm.math.switch(pm.math.or_(sigma_xy < sigma_min, sigma_xy > sigma_max), -np.inf, 0)
-        prior_sigma_z = pm.math.switch(pm.math.or_(sigma_z < sigma_min, sigma_z > sigma_max), -np.inf, 0)
-        prior_density = pm.math.switch(density_scale < 0, -np.inf, 0)
-
-        # Ensure particle motion is within 90 degrees of track axis
-        vhat_x = pm.math.sin(theta) * pm.math.cos(phi)
-        vhat_y = pm.math.sin(theta) * pm.math.sin(phi)
-        vhat_z = pm.math.cos(theta)
-        vhat = pm.math.stack([vhat_x, vhat_y, vhat_z])  # Convert to PyMC tensor
-        dot_product = pm.math.dot(vhat, direction * track_direction_vec)
-
-        prior_track_alignment = pm.math.switch(
-            pm.math.or_(dot_product < 0, pm.math.or_(theta > np.pi, theta < 0)),
-            -np.inf,
-            0
-        )
-
-        # Gaussian prior for energy and uniform over solid angle
-        prior_energy = E_prior.log_likelihood(E)
-        prior_solid_angle = pm.math.log(pm.math.abs(pm.math.sin(theta)))
-        prior_density_scale = density_rescale_prior.log_likelihood(density_scale)
-
-        # Sum all priors
-        priors = (
-            prior_x_y + prior_z + prior_sigma_xy + prior_sigma_z + prior_density +
-            prior_track_alignment + prior_energy + prior_solid_angle + prior_density_scale
-        )
-
-        return priors
     
     def log_posterior(params, direction, print_out=False):
         to_return = log_priors(params, direction)
@@ -202,21 +189,33 @@ if __name__ == '__main__':
     #             xs = sampler.get_chain()[-1]
     #             print(np.percentile(xs, [50], axis=0))
     #             print('log prob:',np.percentile(lls, [0,16, 50, 84,100]))
+    
+    from pytensor.graph.op import Op
+    from pytensor.graph.basic import Apply
+    import pytensor.tensor as pt
+
+    class LogPosteriorOp(Op):
+        itypes = [pt.dvector]
+        otypes = [pt.dscalar]
+
+        def __init__(self, direction):
+            self.direction = direction
+
+        def perform(self, node, inputs, outputs):
+            params, = inputs
+            val = log_likelihood(params)
+            outputs[0][0] = np.array(val, dtype=np.float64)
+
 
     directory = f'run{run_number}_mcmc/event{event_num}'
     os.makedirs(directory, exist_ok=True)
 
-    for direction in [-1, 1]:
-        if direction == 1:
-            backend_fname = 'forward_smc.nc'
-        else:
-            backend_fname = 'backward_smc.nc'
-
+    for direction in [1]:
+        backend_fname = 'forward_smc.nc' if direction == 1 else 'backward_smc.nc'
         backend_file = os.path.join(directory, backend_fname)
 
-        # ============================
-        # PyMC Model Definition
-        # ============================
+        logp_op = LogPosteriorOp(direction)
+
         with pm.Model() as smc_model:
             E = pm.Normal("E", mu=E_prior.mu, sigma=E_prior.sigma)
             x = pm.Uniform("x", lower=xmin, upper=xmax)
@@ -228,20 +227,13 @@ if __name__ == '__main__':
             sigma_z = pm.Uniform("sigma_z", lower=sigma_min, upper=sigma_max)
             density_scale = pm.Normal("density_scale", mu=density_rescale_prior.mu, sigma=density_rescale_prior.sigma)
 
-            # Custom logp function using the existing log_posterior
-            def logp_func(E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale):
-                params = [E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale]
-                return log_posterior(params, direction)
+            # Stack parameters into one vector for the Op
+            param_vector = pt.stack([E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale])
 
-            pm.Potential("logp", logp_func(E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale))
+            # Add logp as a potential
+            pm.Potential("logp", logp_op(param_vector))
 
-            # ============================
-            # Run SMC Sampling
-            # ============================
-            trace_smc = pm.sample_smc(draws=2000, homepath=backend_file)
+            trace_smc = pm.sample_smc(draws=2, chains = 100, correlation_threshold = 0.2)
+            trace_smc.to_netcdf(backend_file)
+            print(f"SMC Sampling Complete: Results saved to {backend_file}")
 
-        # ============================
-        # Save Results
-        # ============================
-        trace_smc.to_netcdf(backend_file)
-        print(f"SMC Sampling Complete: Results saved to {backend_file}")
