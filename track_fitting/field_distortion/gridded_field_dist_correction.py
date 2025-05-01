@@ -21,7 +21,7 @@ from track_fitting import build_sim
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -31,10 +31,10 @@ use_pca_for_width = False #if false, uses standard deviation of charge along the
 #include up to 4 particles to make scatter plots and histograms for
 particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
 t_bounds = False 
-t_lower, t_upper = 0, 0.01
+t_lower, t_upper = 0, 0.1
 offset_endpoints = True
 
-load_intermediate_result = False # if True, then load saved pickle file of best result found so far, and display data with no further optimization
+load_intermediate_result = True # if True, then load saved pickle file of best result found so far, and display data with no further optimization
 
 x_grid = np.linspace(-40, 40, 5)
 y_grid = np.linspace(-40, 40, 5)
@@ -231,6 +231,23 @@ def convert_fit_params(params):
     zparams = np.reshape(zparams_flat, (len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(t_grid)))
     return xparams, yparams, zparams
 
+xguess = np.zeros((len(x_grid), len(y_grid), len(w_grid), len(t_grid)))
+yguess = np.zeros((len(x_grid), len(y_grid), len(w_grid), len(t_grid)))
+zguess = np.zeros((len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(t_grid)))
+for i in range(len(y_grid)):
+    for j in range(len(w_grid)):
+        for k in range(len(t_grid)):
+            xguess[:,i,j,k] = x_grid
+for i in range(len(x_grid)):
+    for j in range(len(w_grid)):
+        for k in range(len(t_grid)):
+            yguess[i,:,j,k] = y_grid
+for i in range(len(x_grid)):
+    for j in range(len(y_grid)):
+        for k in range(len(w_grid)):
+            for l in range(len(t_grid)):
+                zguess[i,j, :,k, l] = z_grid
+guess = np.concatenate([xguess.flatten()[1:], yguess.flatten()[1:], zguess.flatten()[1:]])
 
 def to_minimize(params):
     xparams, yparams, zparams = convert_fit_params(params)
@@ -265,33 +282,21 @@ package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(t_grid)))
 inter_fname = os.path.join(package_directory,'inter_' + fname_template%(experiment, run, len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(t_grid)))
 print('pickle file name: ', fname)
-if os.path.exists(fname):
+if load_intermediate_result:
+    with open(inter_fname, 'rb') as file:
+        x =  pickle.load(file)
+    print(x, to_minimize(x))
+    xparams, yparams, zparams = convert_fit_params(x)    
+elif os.path.exists(fname):
     print('optimizer previously run, loading saved result')
     with open(fname, 'rb') as file:
         res =  pickle.load(file)
+    print(res)
+    xparams, yparams, zparams = convert_fit_params(res.x)
 else:
-    print('performing optimization')
-    xguess = np.zeros((len(x_grid), len(y_grid), len(w_grid), len(t_grid)))
-    yguess = np.zeros((len(x_grid), len(y_grid), len(w_grid), len(t_grid)))
-    zguess = np.zeros((len(x_grid), len(y_grid), len(z_grid), len(w_grid), len(t_grid)))
-    for i in range(len(y_grid)):
-        for j in range(len(w_grid)):
-            for k in range(len(t_grid)):
-                xguess[:,i,j,k] = x_grid
-    for i in range(len(x_grid)):
-        for j in range(len(w_grid)):
-            for k in range(len(t_grid)):
-                yguess[i,:,j,k] = y_grid
-    for i in range(len(x_grid)):
-        for j in range(len(y_grid)):
-            for k in range(len(w_grid)):
-                for l in range(len(t_grid)):
-                    zguess[i,j, :,k, l] = z_grid
-    guess = np.concatenate([xguess.flatten()[1:], yguess.flatten()[1:], zguess.flatten()[1:]])
+    print('performing optimization')   
 
-    
-
-    def callback(x, fig='%s update', show_plots=True, save_intermediate_res=True):
+    def callback(x, fig='%s update', show_plots=False, save_intermediate_res=True):
         print(x,to_minimize(x))
         if save_intermediate_res:
             with open(inter_fname, 'wb') as f:
@@ -329,9 +334,8 @@ else:
     res = opt.minimize(to_minimize, guess, callback=callback, method='BFGS')
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
-
-print(res)
-xparams, yparams, zparams = convert_fit_params(res.x)
+    print(res)
+    xparams, yparams, zparams = convert_fit_params(res.x)
 
 '''
 make plots
@@ -390,9 +394,18 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
+init_ranges = map_ranges(xguess, yguess, zguess, ranges==ranges)
+plt.figure()
+plt.title('run %d init guess RvE'%run)
+rve_plt_mask = (init_ranges>0)&(init_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
+plt.hist2d(MeV[rve_plt_mask], init_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
+plt.xlabel('Energy (MeV)')
+plt.ylabel('Range (mm)')
+plt.colorbar()
+
 mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
 plt.figure()
-plt.title('run %d RvE corrected using r-map'%run)
+plt.title('run %d correct RvE'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
 plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
 plt.xlabel('Energy (MeV)')
@@ -407,19 +420,8 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
     ax.set_title(label)
     ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%g'%np.std(ranges[mask]))
+    ax.hist(init_ranges[mask], bins=range_hist_bins, alpha=0.6, label='guess range; std=%g'%np.std(ranges[mask]))
     ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
-    ax.legend()
-
-
-fig, axs = plt.subplots(2,2)
-fig.set_figheight(10)
-fig.set_figwidth(10)
-r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
-for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]): 
-    ax.set_title('r map for tracks at t=%g s'%t)
-    for w in np.arange(2, 3.51, 0.25):
-        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f mm'%w)
-    ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
     ax.legend()
 
 

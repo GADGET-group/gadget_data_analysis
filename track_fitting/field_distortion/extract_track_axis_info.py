@@ -41,8 +41,9 @@ def get_track_info(experiment, run_number):
                 rbar = points - center
                 track_direction = vv[0]/np.sqrt(np.sum(vv[0]*vv[0]))
                 rdotv = np.dot(rbar, track_direction)
-                first_point = points[np.argmin(rdotv)]
-                last_point = points[np.argmax(rdotv)]
+                #project endpoints onto track axis
+                first_point = np.min(rdotv)*track_direction + center#points[np.argmin(rdotv)]
+                last_point = np.max(rdotv)*track_direction + center#points[np.argmax(rdotv)]
                 track_endpoints.append([first_point, last_point])
                 #above variance is just variance in postiion of points above some threshold
                 #instead calcualte variance along 2nd axis of charge
