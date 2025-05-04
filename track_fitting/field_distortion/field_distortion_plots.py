@@ -50,8 +50,12 @@ plt.hist2d(MeV[rve_mask], ranges[rve_mask], norm=matplotlib.colors.LogNorm(), bi
 
 plt.figure()
 widths_above_thresh = np.array(track_info_dict['width_above_threshold'])
-ranges = ranges - widths_above_thresh
-rve_mask = veto_mask & (ranges<100) & (ranges>0)
-plt.hist2d(MeV[rve_mask], ranges[rve_mask], norm=matplotlib.colors.LogNorm(), bins=100)
-plt.show()
+range_minus_width = ranges - widths_above_thresh
+rve_mask = veto_mask & (range_minus_width<100) & (range_minus_width>0)
+plt.title('length - width')
+plt.hist2d(MeV[rve_mask], range_minus_width[rve_mask], norm=matplotlib.colors.LogNorm(), bins=100)
 
+plt.figure()
+plt.scatter(MeV[rve_mask], ranges[rve_mask], marker='.', c=widths_above_thresh[rve_mask]/ranges[rve_mask])
+plt.colorbar()
+plt.show(block=False)

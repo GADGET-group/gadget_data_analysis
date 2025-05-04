@@ -18,10 +18,12 @@ import scipy.interpolate as interp
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
+load_intermediate_result = True # if True, then load saved pickle file of best result found so far, and display data with no further optimization
+
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 212
+experiment, run = 'e21072', 124
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -34,13 +36,18 @@ t_bounds = False
 t_lower, t_upper = 0, 0.1
 offset_endpoints = True
 
-load_intermediate_result = True # if True, then load saved pickle file of best result found so far, and display data with no further optimization
-
-x_grid = np.linspace(-40, 40, 5)
-y_grid = np.linspace(-40, 40, 5)
-z_grid = np.linspace(-40, 40, 2)
-w_grid = np.linspace(2, 3.5, 5)
-t_grid = np.linspace(0, 0.09, 9)#np.array([0,0.005,0.010,0.015, 0.020, 0.025, 0.030, 0.040, 0.050, 0.060, 0.07, 0.08])#
+if True: #high res
+    x_grid = np.linspace(-40, 40, 9)
+    y_grid = np.linspace(-40, 40, 9)
+    z_grid = np.linspace(-40, 40, 3)
+    w_grid = np.linspace(2, 3.5, 7)
+    t_grid = np.array([0,0.005,0.010,0.015, 0.020, 0.025, 0.030, 0.040, 0.050, 0.060, 0.07, 0.08])#
+else:
+    x_grid = np.linspace(-40, 40, 5)
+    y_grid = np.linspace(-40, 40, 5)
+    z_grid = np.linspace(-40, 40, 2)
+    w_grid = np.linspace(2, 3.5, 5)
+    t_grid = np.linspace(0, 0.09, 9)#np.array([0,0.005,0.010,0.015, 0.020, 0.025, 0.030, 0.040, 0.050, 0.060, 0.07, 0.08])#
 
 '''
 Load data and do pre-processing
@@ -64,6 +71,8 @@ MeV = build_sim.get_integrated_charge_energy_offset(experiment, run) + counts/bu
 ranges = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 
 if run == 124:
+    veto_mask = max_veto_counts<300
+elif run == 144:
     veto_mask = max_veto_counts<300
 elif run == 212:
     veto_mask = max_veto_counts<150
@@ -131,7 +140,7 @@ if experiment == 'e21072':
         cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
         cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
         cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
-    elif run==212:
+    elif run==212 or run == 144:
         cut_mask_dict['p1596'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
         cut_mask_dict['p770'] = (ranges>20) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
         cut_mask_dict['a4434'] = (ranges>22) & (ranges<50) & (counts>0.6e6) & (counts <1.1e6) & veto_mask
@@ -405,7 +414,7 @@ plt.colorbar()
 
 mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
 plt.figure()
-plt.title('run %d correct RvE'%run)
+plt.title('run %d corrected RvE'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
 plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
 plt.xlabel('Energy (MeV)')
@@ -417,10 +426,10 @@ fig.set_figheight(10)
 fig.set_figwidth(10)
 for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     mask, label, true_range  = cut_mask_dict[ptype], label_dict[ptype], true_range_dict[ptype]
-    range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
+    range_hist_bins = np.linspace(max(true_range-35, 0), true_range+25, 100)
     ax.set_title(label)
     ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%g'%np.std(ranges[mask]))
-    ax.hist(init_ranges[mask], bins=range_hist_bins, alpha=0.6, label='guess range; std=%g'%np.std(ranges[mask]))
+    ax.hist(init_ranges[mask], bins=range_hist_bins, alpha=0.6, label='guess range; std=%g'%np.std(init_ranges[mask]))
     ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
     ax.legend()
 
@@ -435,5 +444,20 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     plot = ax.scatter(track_widths[mask], mapped_ranges[mask], c=times_since_start_of_window[mask], marker='.')
     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
+
+
+plt.figure()
+plt.title('1550-1650 keV event ranges')
+mask = veto_mask & (MeV>1.55) & (MeV<1.65)
+range_hist_bins = np.linspace(0, 70, 100)
+plt.hist(ranges[mask], bins=range_hist_bins, alpha=1, label='uncorrected range; std=%g'%np.std(ranges[mask]))
+plt.hist(init_ranges[mask], bins=range_hist_bins, alpha=0.6, label='guess range; std=%g'%np.std(init_ranges[mask]))
+plt.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
+plt.xlabel('range (mm)')
+plt.legend()
+
+#make interactive figure for viewing results
+#fig, axs = plt.subplots(1,2)
+
 
 plt.show(block=False)

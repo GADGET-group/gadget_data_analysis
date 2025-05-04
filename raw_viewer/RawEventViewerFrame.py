@@ -251,7 +251,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.smart_num_background_bins_entry = ttk.Entry(settings_frame)
         self.smart_num_background_bins_entry.insert(0, '1')
         self.smart_num_background_bins_entry.grid(row=8, column=1)
-        self.settings_entry_map['smart_num_background_bins'] = self.smart_bins_away_to_check_entry
+        self.settings_entry_map['smart_num_background_bins'] = self.smart_num_background_bins_entry
         self.smart_num_background_bins_entry.bind('<FocusOut>', self.entry_changed)
 
         settings_frame.grid()
