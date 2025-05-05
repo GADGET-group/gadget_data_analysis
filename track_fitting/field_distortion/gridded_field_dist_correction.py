@@ -23,7 +23,7 @@ load_intermediate_result = True # if True, then load saved pickle file of best r
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -59,21 +59,16 @@ processed_directory = '/egr/research-tpc/shared/Run_Data/run_%04d_raw_viewer/run
 
 #load histogram arrays
 counts = np.load(os.path.join(processed_directory, 'counts.npy'))
-dxys = np.load(os.path.join(processed_directory, 'dxy.npy'))
-dts = np.load(os.path.join(processed_directory, 'dt.npy'))
 max_veto_counts = np.load(os.path.join(processed_directory, 'veto.npy'))
 timestamps = np.load(os.path.join(processed_directory, 'timestamps.npy'))
 
 h5file = build_sim.get_rawh5_object(experiment, run)
-dzs = dts*h5file.zscale
 MeV = build_sim.get_integrated_charge_energy_offset(experiment, run) + counts/build_sim.get_adc_counts_per_MeV(experiment, run)
 #ranges = np.sqrt(dzs**2 + dxys**2) #why is this different than ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)?
 ranges = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 
 if run == 124:
-    veto_mask = max_veto_counts<300
-elif run == 144:
-    veto_mask = max_veto_counts<300
+    veto_mask = max_veto_counts<200
 elif run == 212:
     veto_mask = max_veto_counts<150
 
@@ -132,20 +127,22 @@ if experiment == 'e21072':
     label_dict['a2153wor'] = '2153 keV alpha without recoil'
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
     if run==124:
-        cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
-        cut_mask_dict['p770'] = (ranges>19) & (ranges<26) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
-        cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
-        cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
-        cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
-        cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
-        cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
-        cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
-    elif run==212 or run == 144:
-        cut_mask_dict['p1596'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
-        cut_mask_dict['p770'] = (ranges>20) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
+        cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 60) & (counts > 1.69e5) & (counts < 2.08e5) & veto_mask
+        cut_mask_dict['p770'] = (ranges>16.8) & (ranges<23) & (counts>8.2e4) & (counts<9.5e4) & veto_mask
+        cut_mask_dict['a4434'] = (ranges>21) & (ranges<47) & (counts>4.5e5) & (counts < 7e5) & veto_mask
+        cut_mask_dict['a2153'] = (ranges>16) & (ranges<26) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+        #TODO: need to update these
+        # cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
+        # cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
+        # cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
+        # cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
+    elif run==212:
+        cut_mask_dict['p1596'] = (ranges > 30) & (ranges < 61) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
+        cut_mask_dict['p770'] = (ranges>16.5) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
         cut_mask_dict['a4434'] = (ranges>22) & (ranges<50) & (counts>0.6e6) & (counts <1.1e6) & veto_mask
-        cut_mask_dict['a2153'] = (ranges>19) & (ranges<26) & (counts>3e5) & (counts<5e5) & veto_mask
-        cut_mask_dict['a2153wor'] = (ranges>20.5) & (ranges<23) & (counts>3.15e5) & (counts<3.5e5) & veto_mask
+        cut_mask_dict['a2153'] = (ranges>17) & (ranges<26) & (counts>2.8e5) & (counts<5.1e5) & veto_mask
+        #TODO: update this one
+        #cut_mask_dict['a2153wor'] = (ranges>20.5) & (ranges<23) & (counts>3.15e5) & (counts<3.5e5) & veto_mask
     #cuts within 20 degrees of pad plan
     cut_mask_dict['p1596pp'] = cut_mask_dict['p1596']&(angles>np.radians(70))
     cut_mask_dict['p770pp'] = cut_mask_dict['p770']&(angles>np.radians(70))

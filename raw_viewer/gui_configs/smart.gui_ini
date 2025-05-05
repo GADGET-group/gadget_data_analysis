@@ -1,5 +1,5 @@
 [ttk.Entry]
-length_ic_threshold = 55
+length_ic_threshold = 100
 energy_ic_threshold = 9
 view_threshold = 20
 include_cobos = all

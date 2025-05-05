@@ -10,7 +10,7 @@ from tqdm import tqdm
 from track_fitting import build_sim
 from track_fitting.field_distortion import extract_track_axis_info
 
-experiment, run = 'e21072', 212
+experiment, run = 'e21072', 124
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
