@@ -180,11 +180,11 @@ def map_endpoints(endpoints_to_map, w, t, xparams, yparams, zparams,  x_grid, y_
     return to_return
 
 
-def map_ranges(xparams, yparams, zparams, event_select_mask):
+def map_ranges(xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid, event_select_mask):
     #map ranges as range -> range_from_mapped_r - c*width
     new_endpoints = map_endpoints(endpoints[event_select_mask], track_widths[event_select_mask],
                                    times_since_start_of_window[event_select_mask],
-                                   xparams, yparams, zparams)
+                                   xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid)
     return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) #track_widths[event_select_mask]
 
 #minimize events that need to be passed to other threads
@@ -268,17 +268,21 @@ for i in range(xgrid_len):
 guess = np.concatenate([x_grid_guess, y_grid_guess, z_grid_guess, w_grid_guess, t_grid_guess, xguess.flatten()[1:], yguess.flatten()[1:], zguess.flatten()[1:]])
 
 def to_minimize(params):
-    xparams, yparams, zparams, x_grid, y_grid, zgrid, w_grid, t_grid = convert_fit_params(params)
+    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(params)
+    #confirm all grid spacings are strictly accending
+    if np.any(np.diff(x_grid) <= 0) or np.any(np.diff(y_grid) <= 0) or np.any(np.diff(z_grid) <= 0)  \
+            or np.any(np.diff(t_grid) <= 0) or np.any(np.diff(w_grid) <= 0):
+        return np.inf
     range_hist_dict = {} #dict to avoid doing the same rmap twice
     to_return = 0
     for weight, ptype in peak_widths_to_minimize:
-        range_hist_dict[ptype] = map_type_range(xparams, yparams, zparams, x_grid, y_grid, zgrid, w_grid, t_grid, ptype) 
+        range_hist_dict[ptype] = map_type_range(xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid, ptype) 
         to_return += weight*np.std(range_hist_dict[ptype])**2
     for weight, ptype1, ptype2 in peak_spacings_to_preserve:
         if ptype1 not in range_hist_dict:
-            range_hist_dict[ptype1] = map_type_range(xparams, yparams, zparams, x_grid, y_grid, zgrid, w_grid, t_grid, ptype1) 
+            range_hist_dict[ptype1] = map_type_range(xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid, ptype1) 
         if ptype2 not in range_hist_dict:
-            range_hist_dict[ptype2] = map_type_range(xparams, yparams, zparams, x_grid, y_grid, zgrid, w_grid, t_grid, ptype2) 
+            range_hist_dict[ptype2] = map_type_range(xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid, ptype2) 
         to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
     #print(to_return)
     return to_return
@@ -304,34 +308,21 @@ if load_intermediate_result:
     with open(inter_fname, 'rb') as file:
         x =  pickle.load(file)
     print(x, to_minimize(x))
-    xparams, yparams, zparams = convert_fit_params(x)    
+    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)    
 elif os.path.exists(fname):
     print('optimizer previously run, loading saved result')
     with open(fname, 'rb') as file:
         res =  pickle.load(file)
     print(res)
-    xparams, yparams, zparams = convert_fit_params(res.x)
+    xparams, yparams, zparam, x_grid, y_grid, z_grid, w_grid, t_grids = convert_fit_params(res.x)
 else:
     print('performing optimization')   
 
-    def callback(x, fig='%s update', show_plots=False, save_intermediate_res=True):
+    def callback(x, fig='%s update', save_intermediate_res=True):
         print(x,to_minimize(x))
         if save_intermediate_res:
             with open(inter_fname, 'wb') as f:
                 pickle.dump(x, f)
-        if show_plots:
-            xparams, yparams, zparams = convert_fit_params(x)
-            mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
-            plt.figure(fig%fname)
-            plt.clf()
-            plt.title('run %d RvE corrected using r-map'%run)
-            rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
-            plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
-            plt.xlabel('Energy (MeV)')
-            plt.ylabel('Range (mm)')
-            plt.colorbar()
-            plt.show(block=False)
-            plt.pause(0.01)
 
     callback(guess, '%s init')
     print('number of parameters to fit:', len(guess))
@@ -398,7 +389,7 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
-init_ranges = map_ranges(xguess, yguess, zguess, ranges==ranges)
+init_ranges = map_ranges(xguess, yguess, zguess, x_grid_guess, y_grid_guess, z_grid_guess, w_grid_guess,t_grid_guess, ranges==ranges)
 plt.figure()
 plt.title('run %d init guess RvE'%run)
 rve_plt_mask = (init_ranges>0)&(init_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
@@ -407,7 +398,7 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
-mapped_ranges = map_ranges(xparams, yparams, zparams, ranges==ranges)
+mapped_ranges = map_ranges(xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid, ranges==ranges)
 plt.figure()
 plt.title('run %d corrected RvE'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
