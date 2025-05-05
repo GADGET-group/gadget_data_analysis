@@ -23,7 +23,7 @@ load_intermediate_result = False # if True, then load saved pickle file of best 
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -216,16 +216,46 @@ def convert_fit_params(params):
     Takes 1D array of parameters used for fitting, and maps to xparams, yparams, zparams used by range mapping.
     xparams[0,0,0,0]=yparams[0,0,0,0]=grid value 0
     '''
-    start, end = 0, xgrid_len
-    x_grid = params[start:end]
-    start, end= end, end+ygrid_len
-    y_grid = params[start:end]
-    start, end = end, end+zgrid_len
-    z_grid = params[start:end]
-    start, end = end, end+wgrid_len
-    w_grid = params[start:end]
-    start, end = end, end+tgrid_len
-    t_grid = params[start:end]
+    min_grid_spacing = 1e-6
+    start, end = 0, xgrid_len-2
+    x_grid = np.zeros(xgrid_len)
+    x_grid[1:-1] = params[start:end]
+    x_grid[0], x_grid[-1] = x_grid_guess[0], x_grid_guess[-1]
+    for i in range(1, xgrid_len):
+        if x_grid[i] < x_grid[i-1]:
+            x_grid[i] = x_grid[i-1] + min_grid_spacing
+
+    start, end= end, end+ygrid_len-2
+    y_grid = np.zeros(ygrid_len)
+    y_grid[1:-1] = params[start:end]
+    y_grid[0], y_grid[-1] = y_grid_guess[0], y_grid_guess[-1]
+    for i in range(1, ygrid_len):
+        if y_grid[i] < y_grid[i-1]:
+            y_grid[i] = y_grid[i-1] + min_grid_spacing
+    
+    start, end = end, end+zgrid_len-2
+    z_grid = np.zeros(zgrid_len)
+    z_grid[1:-1] = params[start:end]
+    z_grid[0], z_grid[-1] = z_grid_guess[0], z_grid_guess[-1]
+    for i in range(1, zgrid_len):
+        if z_grid[i] < z_grid[i-1]:
+            z_grid[i] = z_grid[i-1] + min_grid_spacing
+    
+    start, end = end, end+wgrid_len-2
+    w_grid = np.zeros(wgrid_len)
+    w_grid[0], w_grid[-1] = w_grid_guess[0], w_grid_guess[-1]
+    w_grid[1:-1] = params[start:end]
+    for i in range(1, wgrid_len):
+        if w_grid[i] < w_grid[i-1]:
+            w_grid[i] = w_grid[i-1] + min_grid_spacing
+    
+    start, end = end, end+tgrid_len-2
+    t_grid = np.zeros(tgrid_len)
+    t_grid[1:-1] = params[start:end]
+    t_grid[0], t_grid[-1] = t_grid_guess[0], t_grid_guess[-1]
+    for i in range(1, tgrid_len):
+        if t_grid[i] < t_grid[i-1]:
+            t_grid[i] = t_grid[i-1] + min_grid_spacing
 
     xparam_length = xgrid_len*ygrid_len*wgrid_len*tgrid_len
     start, end = end, end + xparam_length-1
@@ -265,7 +295,8 @@ for i in range(xgrid_len):
         for k in range(wgrid_len):
             for l in range(tgrid_len):
                 zguess[i,j, :,k, l] = z_grid_guess
-guess = np.concatenate([x_grid_guess, y_grid_guess, z_grid_guess, w_grid_guess, t_grid_guess, xguess.flatten()[1:], yguess.flatten()[1:], zguess.flatten()[1:]])
+guess = np.concatenate([x_grid_guess[1:-1], y_grid_guess[1:-1], z_grid_guess[1:-1], w_grid_guess[1:-1], t_grid_guess[1:-1], 
+                        xguess.flatten()[1:], yguess.flatten()[1:], zguess.flatten()[1:]])
 
 def to_minimize(params):
     xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(params)
@@ -322,11 +353,12 @@ else:
 
     callback(guess, '%s init')
     print('number of parameters to fit:', len(guess))
-    def constraint_fun(x):
-            xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)
-            return min(np.min(np.diff(x_grid)), np.min(np.diff(y_grid)), np.min(np.diff(z_grid)), np.min(np.diff(w_grid)), np.min(np.diff(t_grid)))
-    constraint = opt.NonlinearConstraint(constraint_fun, 1e-10, np.inf)
-    res = opt.minimize(to_minimize, guess, callback=callback, method='SLSQP', constraints=(constraint,))
+    # def constraint_fun(x):
+    #         xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)
+    #         return min(np.min(np.diff(x_grid)), np.min(np.diff(y_grid)), np.min(np.diff(z_grid)), np.min(np.diff(w_grid)), np.min(np.diff(t_grid)))-1e-9
+    # constraint = opt.NonlinearConstraint(constraint_fun, 1e-10, np.inf, keep_feasible=True)
+    #res = opt.minimize(to_minimize, guess, callback=callback, method='SLSQP', constraints=({'type':'ineq', 'fun':constraint_fun},))
+    res = opt.minimize(to_minimize, guess, callback=callback, method='BFGS')
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
     print(res)
