@@ -23,7 +23,7 @@ load_intermediate_result = False # if True, then load saved pickle file of best 
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 212
+experiment, run = 'e21072', 124
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -269,10 +269,6 @@ guess = np.concatenate([x_grid_guess, y_grid_guess, z_grid_guess, w_grid_guess, 
 
 def to_minimize(params):
     xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(params)
-    #confirm all grid spacings are strictly accending
-    if np.any(np.diff(x_grid) <= 0) or np.any(np.diff(y_grid) <= 0) or np.any(np.diff(z_grid) <= 0)  \
-            or np.any(np.diff(t_grid) <= 0) or np.any(np.diff(w_grid) <= 0):
-        return np.inf
     range_hist_dict = {} #dict to avoid doing the same rmap twice
     to_return = 0
     for weight, ptype in peak_widths_to_minimize:
@@ -326,7 +322,11 @@ else:
 
     callback(guess, '%s init')
     print('number of parameters to fit:', len(guess))
-    res = opt.minimize(to_minimize, guess, callback=callback, method='BFGS')
+    def constraint_fun(x):
+            xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)
+            return min(np.min(np.diff(x_grid)), np.min(np.diff(y_grid)), np.min(np.diff(z_grid)), np.min(np.diff(w_grid)), np.min(np.diff(t_grid)))
+    constraint = opt.NonlinearConstraint(constraint_fun, 1e-10, np.inf)
+    res = opt.minimize(to_minimize, guess, callback=callback, method='SLSQP', constraints=(constraint,))
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
     print(res)
