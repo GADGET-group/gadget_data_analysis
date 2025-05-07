@@ -1,0 +1,11 @@
+# pycache files
+__pycache__/
+*/__pycache__/
+*.pyc
+
+# Simulation temporary files
+Simulations/.sims/
+Simulations/parameters.csv
+Simulations/Output/*.h5
+Simulations/status.csv
+Simulations/Batches/
