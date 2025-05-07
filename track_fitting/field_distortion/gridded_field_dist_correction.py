@@ -204,8 +204,12 @@ def get_interpolators(params):
     x_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, w_grid, t_grid), values=xparams, method=xy_interp_method, 
                                               bounds_error=False, fill_value=None, 
                                               solver = xy_solver, solver_args=xy_solver_args)
-    y_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, w_grid, t_grid), values=yparams, method=xy_interp_method, bounds_error=False, fill_value=None, solver_args=xy_solver_args)
-    z_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, z_grid, w_grid, t_grid), values=zparams, method=z_interp_method, bounds_error=False, fill_value=None, solver_args=z_solver_args)
+    y_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, w_grid, t_grid), values=yparams, method=xy_interp_method,
+                                               bounds_error=False, fill_value=None, 
+                                               solver=xy_solver, solver_args=xy_solver_args)
+    z_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, z_grid, w_grid, t_grid), values=zparams, method=z_interp_method, 
+                                              bounds_error=False, fill_value=None, 
+                                              solver=z_solver, solver_args=z_solver_args)
     return x_interp, y_interp, z_interp
 
 def map_endpoints(endpoints_to_map, w, t, x_interp, y_interp, z_interp):
@@ -340,19 +344,19 @@ start, end = 0, xgrid_len - 2
 if end > start:
     bounds[start:end, 0] = x_grid_guess[0]
     bounds[start:end, 1] = x_grid_guess[-1]
-    constraint_funcs.append(lambda x, start=start, end=end : x[start] - x_grid_guess[0] - min_spacial_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : x_grid_guess[-1] - x[end-1] - min_spacial_grid_spacing)
+    constraint_funcs.append(lambda x, start=start, end=end : x[start]*pos_scale - x_grid_guess[0] - min_spacial_grid_spacing)
+    constraint_funcs.append(lambda x, start=start, end=end : x_grid_guess[-1] - x[end-1]*pos_scale - min_spacial_grid_spacing)
     for i in range(start, end-1):
-        constraint_funcs.append(lambda x,i=i: x[i+1] - x[i] - min_spacial_grid_spacing)
+        constraint_funcs.append(lambda x,i=i: x[i+1]*pos_scale - x[i]*pos_scale - min_spacial_grid_spacing)
 
 start,end = end, end + ygrid_len - 2
 if end > start:
     bounds[start:end, 0] = y_grid_guess[0]
     bounds[start:end, 1] = y_grid_guess[-1]
-    constraint_funcs.append(lambda x, start=start, end=end: x[int(start)] - y_grid_guess[0] - min_spacial_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : y_grid_guess[-1] - x[int(end)-1] - min_spacial_grid_spacing)
+    constraint_funcs.append(lambda x, start=start, end=end: x[int(start)]*pos_scale - y_grid_guess[0] - min_spacial_grid_spacing)
+    constraint_funcs.append(lambda x, start=start, end=end : y_grid_guess[-1] - x[int(end)-1]*pos_scale - min_spacial_grid_spacing)
     for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i: x[i+1] - x[i] - min_spacial_grid_spacing)
+        constraint_funcs.append(lambda x, i=i: x[i+1]*pos_scale - x[i]*pos_scale - min_spacial_grid_spacing)
 
 start,end = end, end + zgrid_len - 2
 if end > start:
@@ -361,25 +365,25 @@ if end > start:
     constraint_funcs.append(lambda x, start=start, end=end : x[start] - z_grid_guess[0] - min_spacial_grid_spacing)
     constraint_funcs.append(lambda x, start=start, end=end : z_grid_guess[-1] - x[end-1] - min_spacial_grid_spacing)
     for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i : x[i+1] - x[i] - min_spacial_grid_spacing)
+        constraint_funcs.append(lambda x, i=i : x[i+1]*pos_scale - x[i]*pos_scale - min_spacial_grid_spacing)
 
 start,end = end, end + wgrid_len - 2
 if end > start:
     bounds[start:end, 0] = w_grid_guess[0]
     bounds[start:end, 1] = w_grid_guess[-1]
-    constraint_funcs.append(lambda x, start=start, end=end : x[start] - w_grid_guess[0] - min_w_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : w_grid_guess[-1] - x[end-1] - min_w_grid_spacing)
+    constraint_funcs.append(lambda x, start=start, end=end : x[start]*w_scale - w_grid_guess[0] - min_w_grid_spacing)
+    constraint_funcs.append(lambda x, start=start, end=end : w_grid_guess[-1] - x[end-1]*w_scale - min_w_grid_spacing)
     for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i : x[i+1] - x[i] - min_w_grid_spacing)
+        constraint_funcs.append(lambda x, i=i : x[i+1]*w_scale - x[i]*w_scale - min_w_grid_spacing)
 
 start,end = end, end + tgrid_len - 2
 if end > start:
     bounds[start:end, 0] = t_grid_guess[0]
     bounds[start:end, 1] = t_grid_guess[-1]
-    constraint_funcs.append(lambda x, start=start, end=end : x[start] - t_grid_guess[0] - min_t_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : t_grid_guess[-1] - x[end-1] - min_t_grid_spacing )
+    constraint_funcs.append(lambda x, start=start, end=end : x[start]*t_scale - t_grid_guess[0] - min_t_grid_spacing)
+    constraint_funcs.append(lambda x, start=start, end=end : t_grid_guess[-1] - x[end-1]*t_scale - min_t_grid_spacing )
     for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i : x[i+1] - x[i] - min_t_grid_spacing)
+        constraint_funcs.append(lambda x, i=i : x[i+1]*t_scale - x[i]*t_scale - min_t_grid_spacing)
 bounds[end:, 0] = -np.inf
 bounds[end:, 1] = np.inf
 print('------------------------')
