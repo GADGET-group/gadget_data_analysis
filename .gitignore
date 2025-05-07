@@ -6,6 +6,6 @@ __pycache__/
 # Simulation temporary files
 Simulations/.sims/
 Simulations/parameters.csv
-Simulations/Output/*.h5
+Simulations/Output/
 Simulations/status.csv
 Simulations/Batches/
