@@ -38,12 +38,12 @@ t_bounds = False
 t_lower, t_upper = 0, 0.1
 offset_endpoints = True
 
-if True:
+if False:
     xgrid_len = ygrid_len = 5
     zgrid_len = 2
     wgrid_len = 5
     tgrid_len = 7
-elif True:
+elif False:
     xgrid_len = ygrid_len = 4
     zgrid_len = 2
     wgrid_len = 4
@@ -53,14 +53,18 @@ else:
     zgrid_len = 3
     wgrid_len = 7
     tgrid_len = 9
-x_grid_guess = np.linspace(-40, 40, xgrid_len)
-y_grid_guess = np.linspace(-40, 40, ygrid_len)
-z_grid_guess = np.linspace(-40, 40, zgrid_len)
-w_grid_guess = np.linspace(2, 3.5, wgrid_len)
-t_grid_guess = np.linspace(0, 0.09, tgrid_len)
+x_grid = np.linspace(-40, 40, xgrid_len)
+y_grid = np.linspace(-40, 40, ygrid_len)
+z_grid = np.linspace(-40, 40, zgrid_len)
+w_grid = np.linspace(2, 3.5, wgrid_len)
+t_grid = np.linspace(0, 0.09, tgrid_len)
 pos_scale = 40
 w_scale = 3
 t_scale = 0.09
+
+x_grid_scaled, y_grid_scaled, z_grid_scaled = x_grid/pos_scale, y_grid/pos_scale, z_grid/pos_scale
+w_grid_scaled = w_grid/w_scale
+t_grid_scaled = t_grid/t_scale
 
 '''
 Load data and do pre-processing
@@ -179,7 +183,7 @@ endpoints[:,0,2] -= z_ave_init
 endpoints[:,1,2] -= z_ave_init
 
 def get_interpolators(params):
-    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(params)
+    xparams, yparams, zparams = convert_fit_params(params)
     if min(xgrid_len, ygrid_len, wgrid_len, tgrid_len) >= 4:
         xy_interp_method='cubic'
         xy_solver = scipy.sparse.linalg.spsolve
@@ -198,16 +202,14 @@ def get_interpolators(params):
         z_interp_method='linear'
         z_solver_args = None
         z_solver = None
-    x_grid, y_grid, z_grid = x_grid/pos_scale, y_grid/pos_scale, z_grid/pos_scale
-    w_grid /= w_scale
-    t_grid /= t_scale
-    x_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, w_grid, t_grid), values=xparams, method=xy_interp_method, 
+    
+    x_interp = interp.RegularGridInterpolator(points=(x_grid_scaled, y_grid_scaled, w_grid_scaled, t_grid_scaled), values=xparams, method=xy_interp_method, 
                                               bounds_error=False, fill_value=None, 
                                               solver = xy_solver, solver_args=xy_solver_args)
-    y_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, w_grid, t_grid), values=yparams, method=xy_interp_method,
+    y_interp = interp.RegularGridInterpolator(points=(x_grid_scaled, y_grid_scaled, w_grid_scaled, t_grid_scaled), values=yparams, method=xy_interp_method,
                                                bounds_error=False, fill_value=None, 
                                                solver=xy_solver, solver_args=xy_solver_args)
-    z_interp = interp.RegularGridInterpolator(points=(x_grid, y_grid, z_grid, w_grid, t_grid), values=zparams, method=z_interp_method, 
+    z_interp = interp.RegularGridInterpolator(points=(x_grid_scaled, y_grid_scaled, z_grid_scaled, w_grid_scaled, t_grid_scaled), values=zparams, method=z_interp_method, 
                                               bounds_error=False, fill_value=None, 
                                               solver=z_solver, solver_args=z_solver_args)
     return x_interp, y_interp, z_interp
@@ -262,39 +264,9 @@ def convert_fit_params(params):
     Takes 1D array of parameters used for fitting, and maps to xparams, yparams, zparams used by range mapping.
     xparams[0,0,0,0]=yparams[0,0,0,0]=grid value 0
     '''
-    min_grid_spacing = 1e-6
-    start, end = 0, xgrid_len-2
-    x_grid = np.zeros(xgrid_len)
-    x_grid[1:-1] = params[start:end]*pos_scale
-    x_grid[0], x_grid[-1] = x_grid_guess[0], x_grid_guess[-1]
-    #x_grid = np.sort(x_grid)
-
-    start, end= end, end+ygrid_len-2
-    y_grid = np.zeros(ygrid_len)
-    y_grid[1:-1] = params[start:end]*pos_scale
-    y_grid[0], y_grid[-1] = y_grid_guess[0], y_grid_guess[-1]
-    #y_grid = np.sort(y_grid)
-    
-    start, end = end, end+zgrid_len-2
-    z_grid = np.zeros(zgrid_len)
-    z_grid[1:-1] = params[start:end]*pos_scale
-    z_grid[0], z_grid[-1] = z_grid_guess[0], z_grid_guess[-1]
-    #z_grid = np.sort(z_grid)
-    
-    start, end = end, end+wgrid_len-2
-    w_grid = np.zeros(wgrid_len)
-    w_grid[0], w_grid[-1] = w_grid_guess[0], w_grid_guess[-1]
-    w_grid[1:-1] = params[start:end]*w_scale
-    #w_grid = np.sort(w_grid)
-    
-    start, end = end, end+tgrid_len-2
-    t_grid = np.zeros(tgrid_len)
-    t_grid[1:-1] = params[start:end]*t_scale
-    t_grid[0], t_grid[-1] = t_grid_guess[0], t_grid_guess[-1]
-    #t_grid = np.sort(t_grid)
 
     xparam_length = xgrid_len*ygrid_len*wgrid_len*tgrid_len
-    start, end = end, end + xparam_length-1
+    start, end = 0, 0 + xparam_length-1
     xparams_flat = np.zeros(xparam_length)
     xparams_flat[0] = x_grid[0]
     xparams_flat[1:] = params[start:end]*pos_scale
@@ -313,7 +285,7 @@ def convert_fit_params(params):
     zparams_flat[0] = z_grid[0]
     zparams_flat[1:] = params[start:end]*pos_scale
     zparams = np.reshape(zparams_flat, (xgrid_len, ygrid_len, zgrid_len, wgrid_len, tgrid_len))
-    return xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid
+    return xparams, yparams, zparams
 
 xguess = np.zeros((xgrid_len, ygrid_len, wgrid_len, tgrid_len))
 yguess = np.zeros((xgrid_len, ygrid_len, wgrid_len, tgrid_len))
@@ -321,106 +293,21 @@ zguess = np.zeros((xgrid_len, ygrid_len, zgrid_len, wgrid_len, tgrid_len))
 for i in range(ygrid_len):
     for j in range(wgrid_len):
         for k in range(tgrid_len):
-            xguess[:,i,j,k] = x_grid_guess
+            xguess[:,i,j,k] = x_grid
 for i in range(xgrid_len):
     for j in range(wgrid_len):
         for k in range(tgrid_len):
-            yguess[i,:,j,k] = y_grid_guess
+            yguess[i,:,j,k] = y_grid
 for i in range(xgrid_len):
     for j in range(ygrid_len):
         for k in range(wgrid_len):
             for l in range(tgrid_len):
-                zguess[i,j, :,k, l] = z_grid_guess
-guess = np.concatenate([x_grid_guess[1:-1]/pos_scale, y_grid_guess[1:-1]/pos_scale, z_grid_guess[1:-1]/pos_scale,
-                        w_grid_guess[1:-1]/w_scale, t_grid_guess[1:-1]/t_scale, 
-                        xguess.flatten()[1:]/pos_scale, yguess.flatten()[1:]/pos_scale, zguess.flatten()[1:]/pos_scale])
-
-constraint_funcs = []
-min_spacial_grid_spacing = 4
-min_w_grid_spacing = 0.05
-min_t_grid_spacing = 0.002
-bounds = np.zeros((len(guess), 2))
-start, end = 0, xgrid_len - 2
-if end > start:
-    bounds[start:end, 0] = x_grid_guess[0]/pos_scale
-    bounds[start:end, 1] = x_grid_guess[-1]/pos_scale
-    constraint_funcs.append(lambda x, start=start, end=end : x[start]*pos_scale - x_grid_guess[0] - min_spacial_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : x_grid_guess[-1] - x[end-1]*pos_scale - min_spacial_grid_spacing)
-    for i in range(start, end-1):
-        constraint_funcs.append(lambda x,i=i: x[i+1]*pos_scale - x[i]*pos_scale - min_spacial_grid_spacing)
-
-start,end = end, end + ygrid_len - 2
-if end > start:
-    bounds[start:end, 0] = y_grid_guess[0]/pos_scale
-    bounds[start:end, 1] = y_grid_guess[-1]/pos_scale
-    constraint_funcs.append(lambda x, start=start, end=end: x[int(start)]*pos_scale - y_grid_guess[0] - min_spacial_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : y_grid_guess[-1] - x[int(end)-1]*pos_scale - min_spacial_grid_spacing)
-    for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i: x[i+1]*pos_scale - x[i]*pos_scale - min_spacial_grid_spacing)
-
-start,end = end, end + zgrid_len - 2
-if end > start:
-    bounds[start:end, 0] = z_grid_guess[0]/pos_scale
-    bounds[start:end, 1] = z_grid_guess[-1]/pos_scale
-    constraint_funcs.append(lambda x, start=start, end=end : x[start] - z_grid_guess[0] - min_spacial_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : z_grid_guess[-1] - x[end-1] - min_spacial_grid_spacing)
-    for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i : x[i+1]*pos_scale - x[i]*pos_scale - min_spacial_grid_spacing)
-
-start,end = end, end + wgrid_len - 2
-if end > start:
-    bounds[start:end, 0] = w_grid_guess[0]/w_scale
-    bounds[start:end, 1] = w_grid_guess[-1]/w_scale
-    constraint_funcs.append(lambda x, start=start, end=end : x[start]*w_scale - w_grid_guess[0] - min_w_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : w_grid_guess[-1] - x[end-1]*w_scale - min_w_grid_spacing)
-    for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i : x[i+1]*w_scale - x[i]*w_scale - min_w_grid_spacing)
-
-start,end = end, end + tgrid_len - 2
-if end > start:
-    bounds[start:end, 0] = t_grid_guess[0]/t_scale
-    bounds[start:end, 1] = t_grid_guess[-1]/t_scale
-    constraint_funcs.append(lambda x, start=start, end=end : x[start]*t_scale - t_grid_guess[0] - min_t_grid_spacing)
-    constraint_funcs.append(lambda x, start=start, end=end : t_grid_guess[-1] - x[end-1]*t_scale - min_t_grid_spacing )
-    for i in range(start, end-1):
-        constraint_funcs.append(lambda x, i=i : x[i+1]*t_scale - x[i]*t_scale - min_t_grid_spacing)
-bounds[end:, 0] = -50/pos_scale
-bounds[end:, 1] = 50/pos_scale
-print('------------------------')
-for f in constraint_funcs:
-    print(f(guess))
-print('------------------------')
-def check_constraints(x):
-    for f in constraint_funcs:
-        if f(x) <= 0:
-            return False
-    return True
-
-if check_constraints(guess):
-    print('initial guess satifies constraints')
-else:
-    print('initial guess DOES NOT satisfy constriants!!!')
-    print('guess:',guess)
-    for i in range(len(constraint_funcs)):
-        if constraint_funcs[i](guess) <= 0:
-            print('constraint func %d not satisfied'%i)
+                zguess[i,j, :,k, l] = z_grid
+guess = np.concatenate([xguess.flatten()[1:]/pos_scale, yguess.flatten()[1:]/pos_scale, zguess.flatten()[1:]/pos_scale])
 
 def to_minimize(params):
-    # xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(params)
-    # if np.any((np.diff(x_grid) <= 0)):
-    #     print('xgrid not stricly ascending: ', x_grid)
-    # if np.any(np.diff(y_grid) <= 0):
-    #     print('ygrid not stricly ascending: ', y_grid)
-    # if np.any(np.diff(z_grid) <= 0):
-    #     print('zgrid not stricly ascending: ', z_grid)
-    # if np.any(np.diff(w_grid) <= 0):
-    #     print('wgrid not stricly ascending: ', w_grid)
-    # if np.any(np.diff(t_grid) <= 0):
-    #     print('tgrid not stricly ascending: ', t_grid)
     range_hist_dict = {} #dict to avoid doing the same rmap twice
     to_return = 0
-    if not check_constraints(params):
-        return np.inf
     x_interp, y_interp, z_interp = get_interpolators(params)
     for weight, ptype in peak_widths_to_minimize:
         range_hist_dict[ptype] = map_type_range(x_interp, y_interp, z_interp, ptype) 
@@ -455,9 +342,8 @@ print('pickle file name: ', fname)
 tlast = time.time()
 def callback(x, fig='%s update', save_intermediate_res=True):
         global tlast
-        xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)
-        print('%g'%to_minimize(x))
-        print(x_grid, y_grid, z_grid, w_grid, t_grid)
+        xparams, yparams, zparams= convert_fit_params(x)
+        print(x, '%g'%to_minimize(x))
         print('%f s'%(time.time() - tlast))
         tlast = time.time()
         if save_intermediate_res:
@@ -468,37 +354,25 @@ if load_intermediate_result:
     with open(inter_fname, 'rb') as file:
         x =  pickle.load(file)
     print(x, to_minimize(x))
-    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)
+    xparams, yparams, zparams = convert_fit_params(x)
     x_interp, y_interp, z_interp = get_interpolators(x) 
 elif os.path.exists(fname):
     print('optimizer previously run, loading saved result')
     with open(fname, 'rb') as file:
         res =  pickle.load(file)
     print(res)
-    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(res.x)
+    xparams, yparams, zparams = convert_fit_params(res.x)
     x_interp, y_interp, z_interp = get_interpolators(res.x)
 else:
     print('performing optimization')   
     callback(guess, '%s init')
     print('number of parameters to fit:', len(guess))
 
-    # res = opt.minimize(to_minimize, guess, callback=callback, method='SLSQP', 
-    #                    constraints=[{'type':'ineq', 'fun':f} for f in constraint_funcs], 
-    #                    bounds=bounds,
-    #                    options={'maxiter':1000})
-
-    res = opt.minimize(to_minimize, guess, callback=callback, method='COBYLA', 
-                       constraints=[{'type':'ineq', 'fun':f} for f in constraint_funcs], 
-                       bounds=bounds,
-                       options={'maxiter':80000})
-    
-    # res = opt.minimize(to_minimize, guess, callback=callback, method='Powell')
-
-    #res = opt.minimize(to_minimize, guess, bounds=bounds, callback=callback, method='L-BFGS-B')
+    res = opt.minimize(to_minimize, guess, callback=callback)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
     print(res)
-    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid  = convert_fit_params(res.x)
+    xparams, yparams, zparams  = convert_fit_params(res.x)
     x_interp, y_interp, z_interp = get_interpolators(res.x)
 
 
