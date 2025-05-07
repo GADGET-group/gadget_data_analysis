@@ -25,7 +25,7 @@ load_intermediate_result = False # if True, then load saved pickle file of best 
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -38,7 +38,7 @@ t_bounds = False
 t_lower, t_upper = 0, 0.1
 offset_endpoints = True
 
-if False:
+if True:
     xgrid_len = ygrid_len = 5
     zgrid_len = 2
     wgrid_len = 5
@@ -59,7 +59,7 @@ z_grid_guess = np.linspace(-40, 40, zgrid_len)
 w_grid_guess = np.linspace(2, 3.5, wgrid_len)
 t_grid_guess = np.linspace(0, 0.09, tgrid_len)
 pos_scale = 40
-w_scale = 2
+w_scale = 3
 t_scale = 0.09
 
 '''
@@ -336,14 +336,14 @@ guess = np.concatenate([x_grid_guess[1:-1]/pos_scale, y_grid_guess[1:-1]/pos_sca
                         xguess.flatten()[1:]/pos_scale, yguess.flatten()[1:]/pos_scale, zguess.flatten()[1:]/pos_scale])
 
 constraint_funcs = []
-min_spacial_grid_spacing = 2.2
+min_spacial_grid_spacing = 4
 min_w_grid_spacing = 0.05
-min_t_grid_spacing = 0.001
+min_t_grid_spacing = 0.002
 bounds = np.zeros((len(guess), 2))
 start, end = 0, xgrid_len - 2
 if end > start:
-    bounds[start:end, 0] = x_grid_guess[0]
-    bounds[start:end, 1] = x_grid_guess[-1]
+    bounds[start:end, 0] = x_grid_guess[0]/pos_scale
+    bounds[start:end, 1] = x_grid_guess[-1]/pos_scale
     constraint_funcs.append(lambda x, start=start, end=end : x[start]*pos_scale - x_grid_guess[0] - min_spacial_grid_spacing)
     constraint_funcs.append(lambda x, start=start, end=end : x_grid_guess[-1] - x[end-1]*pos_scale - min_spacial_grid_spacing)
     for i in range(start, end-1):
@@ -351,8 +351,8 @@ if end > start:
 
 start,end = end, end + ygrid_len - 2
 if end > start:
-    bounds[start:end, 0] = y_grid_guess[0]
-    bounds[start:end, 1] = y_grid_guess[-1]
+    bounds[start:end, 0] = y_grid_guess[0]/pos_scale
+    bounds[start:end, 1] = y_grid_guess[-1]/pos_scale
     constraint_funcs.append(lambda x, start=start, end=end: x[int(start)]*pos_scale - y_grid_guess[0] - min_spacial_grid_spacing)
     constraint_funcs.append(lambda x, start=start, end=end : y_grid_guess[-1] - x[int(end)-1]*pos_scale - min_spacial_grid_spacing)
     for i in range(start, end-1):
@@ -360,8 +360,8 @@ if end > start:
 
 start,end = end, end + zgrid_len - 2
 if end > start:
-    bounds[start:end, 0] = z_grid_guess[0]
-    bounds[start:end, 1] = z_grid_guess[-1]
+    bounds[start:end, 0] = z_grid_guess[0]/pos_scale
+    bounds[start:end, 1] = z_grid_guess[-1]/pos_scale
     constraint_funcs.append(lambda x, start=start, end=end : x[start] - z_grid_guess[0] - min_spacial_grid_spacing)
     constraint_funcs.append(lambda x, start=start, end=end : z_grid_guess[-1] - x[end-1] - min_spacial_grid_spacing)
     for i in range(start, end-1):
@@ -369,8 +369,8 @@ if end > start:
 
 start,end = end, end + wgrid_len - 2
 if end > start:
-    bounds[start:end, 0] = w_grid_guess[0]
-    bounds[start:end, 1] = w_grid_guess[-1]
+    bounds[start:end, 0] = w_grid_guess[0]/w_scale
+    bounds[start:end, 1] = w_grid_guess[-1]/w_scale
     constraint_funcs.append(lambda x, start=start, end=end : x[start]*w_scale - w_grid_guess[0] - min_w_grid_spacing)
     constraint_funcs.append(lambda x, start=start, end=end : w_grid_guess[-1] - x[end-1]*w_scale - min_w_grid_spacing)
     for i in range(start, end-1):
@@ -378,14 +378,14 @@ if end > start:
 
 start,end = end, end + tgrid_len - 2
 if end > start:
-    bounds[start:end, 0] = t_grid_guess[0]
-    bounds[start:end, 1] = t_grid_guess[-1]
+    bounds[start:end, 0] = t_grid_guess[0]/t_scale
+    bounds[start:end, 1] = t_grid_guess[-1]/t_scale
     constraint_funcs.append(lambda x, start=start, end=end : x[start]*t_scale - t_grid_guess[0] - min_t_grid_spacing)
     constraint_funcs.append(lambda x, start=start, end=end : t_grid_guess[-1] - x[end-1]*t_scale - min_t_grid_spacing )
     for i in range(start, end-1):
         constraint_funcs.append(lambda x, i=i : x[i+1]*t_scale - x[i]*t_scale - min_t_grid_spacing)
-bounds[end:, 0] = -np.inf
-bounds[end:, 1] = np.inf
+bounds[end:, 0] = -50/pos_scale
+bounds[end:, 1] = 50/pos_scale
 print('------------------------')
 for f in constraint_funcs:
     print(f(guess))
@@ -419,6 +419,8 @@ def to_minimize(params):
     #     print('tgrid not stricly ascending: ', t_grid)
     range_hist_dict = {} #dict to avoid doing the same rmap twice
     to_return = 0
+    if not check_constraints(params):
+        return np.inf
     x_interp, y_interp, z_interp = get_interpolators(params)
     for weight, ptype in peak_widths_to_minimize:
         range_hist_dict[ptype] = map_type_range(x_interp, y_interp, z_interp, ptype) 
@@ -454,10 +456,10 @@ tlast = time.time()
 def callback(x, fig='%s update', save_intermediate_res=True):
         global tlast
         xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)
-        print('%f s'%(time.time() - tlast))
-        tlast = time.time()
         print('%g'%to_minimize(x))
         print(x_grid, y_grid, z_grid, w_grid, t_grid)
+        print('%f s'%(time.time() - tlast))
+        tlast = time.time()
         if save_intermediate_res:
             with open(inter_fname, 'wb') as f:
                 pickle.dump(x, f)
@@ -466,27 +468,39 @@ if load_intermediate_result:
     with open(inter_fname, 'rb') as file:
         x =  pickle.load(file)
     print(x, to_minimize(x))
-    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)    
+    xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(x)
+    x_interp, y_interp, z_interp = get_interpolators(x) 
 elif os.path.exists(fname):
     print('optimizer previously run, loading saved result')
     with open(fname, 'rb') as file:
         res =  pickle.load(file)
     print(res)
     xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid = convert_fit_params(res.x)
+    x_interp, y_interp, z_interp = get_interpolators(res.x)
 else:
     print('performing optimization')   
     callback(guess, '%s init')
     print('number of parameters to fit:', len(guess))
 
-    res = opt.minimize(to_minimize, guess, callback=callback, method='SLSQP', 
+    # res = opt.minimize(to_minimize, guess, callback=callback, method='SLSQP', 
+    #                    constraints=[{'type':'ineq', 'fun':f} for f in constraint_funcs], 
+    #                    bounds=bounds,
+    #                    options={'maxiter':1000})
+
+    res = opt.minimize(to_minimize, guess, callback=callback, method='COBYLA', 
                        constraints=[{'type':'ineq', 'fun':f} for f in constraint_funcs], 
-                       options={'maxiter':1000})
+                       bounds=bounds,
+                       options={'maxiter':80000})
+    
+    # res = opt.minimize(to_minimize, guess, callback=callback, method='Powell')
 
     #res = opt.minimize(to_minimize, guess, bounds=bounds, callback=callback, method='L-BFGS-B')
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
     print(res)
     xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid  = convert_fit_params(res.x)
+    x_interp, y_interp, z_interp = get_interpolators(res.x)
+
 
 '''
 make plots
@@ -545,7 +559,8 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
-init_ranges = map_ranges(xguess, yguess, zguess, x_grid_guess, y_grid_guess, z_grid_guess, w_grid_guess,t_grid_guess, ranges==ranges)
+x_interp_guess, y_interp_guess, z_interp_guess = get_interpolators(guess)
+init_ranges = map_ranges(x_interp_guess, y_interp_guess, z_interp_guess, ranges==ranges)
 plt.figure()
 plt.title('run %d init guess RvE'%run)
 rve_plt_mask = (init_ranges>0)&(init_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
@@ -554,7 +569,7 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
-mapped_ranges = map_ranges(xparams, yparams, zparams, x_grid, y_grid, z_grid, w_grid, t_grid, ranges==ranges)
+mapped_ranges = map_ranges(x_interp, y_interp, z_interp, ranges==ranges)
 plt.figure()
 plt.title('run %d corrected RvE'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
