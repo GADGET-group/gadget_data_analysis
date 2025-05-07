@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 from PIL import Image, ImageTk
+import re
+import numpy as np
 
 class ViewCutImagesWindow(tk.Toplevel):
     def __init__(self, parent, run_data, selected_dir, **kwargs):
@@ -21,6 +23,8 @@ class ViewCutImagesWindow(tk.Toplevel):
         self.next_button = ttk.Button(self, text='>>', command=self.next)
         self.go_to_entry = ttk.Entry(self)
         self.go_to_button = ttk.Button(self, text='Go to Image', command=self.go_to)
+        self.go_to_good_events_entry = ttk.Entry(self)
+        self.go_to_good_events_button = ttk.Button(self, text='Go to Image (Good Event Number)', command=self.go_to2)
         
         # Setup single image frame with a frame to include the file name
         self.single_image_frame = ttk.Frame(self.notebook)
@@ -28,6 +32,8 @@ class ViewCutImagesWindow(tk.Toplevel):
         self.single_image_label.grid(row=0, column=0)
         self.single_filename_label = tk.Label(self.single_image_frame, text="", font=('Helvetica', 14))
         self.single_filename_label.grid(row=1, column=0)
+        self.good_event_label = tk.Label(self.single_image_frame, text="", font=('Helvetica', 14))
+        self.good_event_label.grid(row=2, column=0)  # Ensure this is placed correctly within your layout
         self.notebook.add(self.single_image_frame, text='single')
 
         # Setup grid for displaying multiple images
@@ -47,8 +53,10 @@ class ViewCutImagesWindow(tk.Toplevel):
         # Positioning the main GUI components
         self.back_button.grid(row=0, column=0)
         self.next_button.grid(row=0, column=3)
-        self.go_to_entry.grid(row=1, column=1)
-        self.go_to_button.grid(row=1, column=2)
+        self.go_to_entry.grid(row=1, column=0)
+        self.go_to_button.grid(row=1, column=1)
+        self.go_to_good_events_entry.grid(row=1, column=2)
+        self.go_to_good_events_button.grid(row=1, column=3)
         self.notebook.grid(row=2, column=0, columnspan=4)
 
         self.current_index = 0  # Track which image we're viewing
@@ -90,6 +98,9 @@ class ViewCutImagesWindow(tk.Toplevel):
             self.single_image_label.configure(image=self.single_image)
             file_name = os.path.basename(image_path)
             self.single_filename_label.config(text=file_name)
+            match = re.search(r'image_(\d+)\.png', file_name)
+            number = int(match.group(1))
+            self.good_event_label.config(text=f'Good Event Number: {self.run_data.good_events[number]}')
 
         # Update the 3x3 grid and filenames
         self.grid_images = []
@@ -122,6 +133,19 @@ class ViewCutImagesWindow(tk.Toplevel):
     def go_to(self):
         try:
             event_num = int(self.go_to_entry.get())
+            search_string = f'image_{event_num}.png'
+            for i, fname in enumerate(self.image_path_list):
+                if search_string in fname:
+                    self.change_index(i)
+                    return
+            messagebox.showwarning('Event not found!', 'Event not found!')
+        except ValueError:
+            messagebox.showerror('Invalid Input', 'Please enter a valid number.')
+
+    def go_to2(self):
+        try:
+            good_event_num = int(self.go_to_good_events_entry.get())
+            event_num = np.where(self.run_data.good_events == good_event_num)[0][0]
             search_string = f'image_{event_num}.png'
             for i, fname in enumerate(self.image_path_list):
                 if search_string in fname:
