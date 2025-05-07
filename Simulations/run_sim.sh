@@ -11,25 +11,16 @@ tuning=0
 reset_params=0
 var_params=0
 premade=0
+zip_output=0
 
 while getopts "htvdcakm:p" option; do
     case ${option} in
         h ) # display help
-            echo "    GADGET2 ATTPCROOT Parameters Automation"
-            echo "Developed by Adam Jaros as part of the FRIB's E21072 under Dr. Chris Wrede"
-            echo "See documentation on the project's GitHub page for more information"
-            echo "https://github.com/Jaros24/GADGET2"
-            echo ""
-            echo "Usage: run_sim.sh [-flags]"
-            echo "  -t   run tuning mode"
-            echo "  -v   generate parameters with variation script"
-            echo "  -m#  specify number of simulators (1 - 10)"
-            echo "  -p   premade tuning / var file"
-            echo "  -c   clean Output before running"
-            echo "  -a   force reset of Simulators"
-            echo "  -d   reset parameter file for testing"
-            echo "  -k   kill all running simulators"
-            echo "  -h   display this help message"
+            if [ -f "$automation_dir/README.md" ]; then
+                cat "$automation_dir/README.md"
+            else
+                echo "README.md file not found in $automation_dir"
+            fi
             exit 0
             ;;
         t ) # run simulation in tuning mode
@@ -40,13 +31,12 @@ while getopts "htvdcakm:p" option; do
             var_params="y"
             ;;
         d ) # parameter debug mode
-            echo "parameters.csv will be reset at end of loop"
+            echo "parameters.csv will be reset at end of loop and sim0 log file will be printed for debugging"
             reset_params="y"
             ;;
         c ) # clean output before running
             echo "Cleaning Output Directory..."
             rm -rf $automation_dir"Output/"
-            mkdir -p $automation_dir"Output/"
             ;;
         a ) # force reset of ATTPCROOT
             echo "Resetting Simulators..."
@@ -62,6 +52,9 @@ while getopts "htvdcakm:p" option; do
             ;;
         p ) # premade tuning / var file
             premade="y"
+            ;;
+        z ) # zip output folder
+            zip_output="y"
             ;;
         \? ) # invalid option
             echo "Invalid option: -$OPTARG" 1>&2
@@ -102,8 +95,9 @@ fi
 
 if [ ! -f $automation_dir"parameters.csv" ]; then # test for parameters.csv
     if [ $tuning != "y" ]; then
-        echo "parameters.csv not found"
+        echo "parameters.csv not found, creating new one"
         echo "If this is your first time, run with -h flag for help"
+        cp $automation_dir".input/sim/param.csv" $automation_dir"parameters.csv"
         exit 1
     fi
 fi
@@ -117,6 +111,10 @@ if [ ! -d $automation_dir".sims/" ]; then # create Sims directory if needed
 fi
 
 rm -f $automation_dir".sims/STOP.tmp" # remove master STOP.tmp if present
+
+# setup Output directories
+mkdir -p $automation_dir"Output/"
+mkdir -p $automation_dir"Analysis/Models/"
 
 if [ $tuning == "y" ]; then
     python3 $automation_dir".input/nb2py.py" $automation_dir".input/tuning.ipynb"
@@ -137,17 +135,27 @@ python3 $automation_dir".input/simManager.py" $automation_dir $num_simulators $t
 rm -f $automation_dir".input/simManager.py"
 rm -f $automation_dir"status.csv"
 rm -f $automation_dir".input/tuning.py"
+cp -f $automation_dir"parameters.csv" $automation_dir"Output/parameters.csv"
 
 if [ $reset_params == "y" ]; then # restore parameters.csv
     mv $automation_dir".input/parameters.bak" $automation_dir"parameters.csv"
+
+    # read off sim0 log file for debugging
+    if [ -f $automation_dir".sims/0/log.log" ]; then
+        echo "sim0 log file:"
+        cat $automation_dir".sims/0/log.log"
+    fi
 fi
 
 touch $automation_dir".sims/STOP.tmp" # create master STOP.tmp
 
-# return to automation directory
-cd $automation_dir
+# zip simOutput folder
+if [ $zip_output == "y" ]; then
+    cd $automation_dir"Output/"
+    zip -r output.zip *
+    cd $automation_dir
+fi
 
-# print runtime
 end=`date +%s`
 runtime=$((end-start))
 echo "Finished simulations at `date` "

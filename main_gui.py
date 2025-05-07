@@ -8,7 +8,7 @@ from RunSelectFrame import RunSelectFrame
 from EnergySpectrumFrame import EnergySpectrumFrame
 from RvE_Frame import RvE_Frame
 from IndividualEventFrame import IndividualEventFrame
-from Simulations.SimFrame import SimFrame
+from SimFrame import SimFrame
 
 import matplotlib.pyplot
 

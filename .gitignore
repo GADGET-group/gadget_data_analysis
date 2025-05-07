@@ -7,3 +7,5 @@ __pycache__/
 Simulations/.sims/
 Simulations/parameters.csv
 Simulations/Output/*.h5
+Simulations/status.csv
+Simulations/Batches/

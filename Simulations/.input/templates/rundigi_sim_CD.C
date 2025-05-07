@@ -48,8 +48,7 @@ auto pulseImp = std::make_shared<AtPulseGADGET>(mapping);
    pulse->SetSaveMCInfo();
    pulseImp->SetSaveCharge(kTRUE);
 
-   auto psa = std::make_unique<AtPSAHitPerTB>();
-   // AtPSAHitPerTB AtPSAMax AtPSAFull 
+   auto psa = std::make_unique<AtPSAMax>();
    psa->SetThreshold(100); // Threshold
 
    AtPSAtask *psaTask = new AtPSAtask(std::move(psa));
@@ -68,7 +67,7 @@ auto pulseImp = std::make_shared<AtPulseGADGET>(mapping);
    fRun->AddTask(pulse);
    fRun->AddTask(psaTask);
    fRun->AddTask(wHDF);
-  
+   // fRun -> AddTask(praTask);
    // fRun -> AddTask(trigTask);
 
    // __ Init and run ___________________________________

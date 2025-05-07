@@ -37,7 +37,7 @@ def run_num_to_str(run_num):
 def get_default_path(run_id):    
     run_str = run_num_to_str(run_id)
     if 's' in run_str: # simulation
-        return f"/mnt/analysis/e17023/Adam/simulations/run_{run_str}"
+        return f"./Simulations/Batches/run_{run_str}"
     else:
         return f"/mnt/analysis/e21072/h5test/run_{run_str}"
 
@@ -63,7 +63,7 @@ class GadgetRunH5:
         
         run_num = run_num_to_str(run_num)
         if 's' in run_num: # simulation
-            h5_dir = '/mnt/analysis/e17023/Adam/simulations/'
+            h5_dir = './Simulations/Batches/'
         else:
             h5_dir = '/mnt/analysis/e21072/h5test/'
         
@@ -830,7 +830,7 @@ def generate_files(run_num, length, ic, pads, eps, samps, poly):
 
     #str_file = f"/mnt/rawdata/e21072/h5/run_{run_num}.h5"
     if 's' in run_num:
-        str_file = f"/mnt/analysis/e17023/Adam/simulations/run_{run_num}.h5"
+        str_file = f"./Simulations/Batches/run_{run_num}.h5"
     else:
         str_file = f"/mnt/analysis/e21072/h5test/run_{run_num}.h5"
     f = h5py.File(str_file, 'r')
@@ -838,7 +838,7 @@ def generate_files(run_num, length, ic, pads, eps, samps, poly):
 
     # Save Arrays
     if 's' in run_num:
-        directory_path = f"/mnt/analysis/e17023/Adam/simulations/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}"
+        directory_path = f"./Simulations/Batches/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}"
     else:
         directory_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}"
     
