@@ -48,6 +48,15 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
             plt.xlabel('theta (deg)')
             plt.ylabel('phi (deg)')
             plt.savefig(base_fname+'_theta_phi_ll.png')
+            thetas_2 = samples[-1][:, theta_index_2]
+            phis_2 = samples[-1][:, phi_index_2]
+            plt.figure()
+            plt.title("before clustering")
+            plt.scatter(np.degrees(thetas_2), np.degrees(phis_2), c=log_prob[-1])
+            plt.colorbar(label="log prob")
+            plt.xlabel('theta (deg)')
+            plt.ylabel('phi (deg)')
+            plt.savefig(base_fname+'_theta_phi_ll_2.png')
             
 
 
@@ -111,15 +120,17 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
                 summary_file.write('%f +%f/-%f, '%(mcmc[1], q[0], q[1]))
         if summary_file != None:
                 summary_file.write('\n')
-           
-        corner.corner(flat_samples, labels=labels, truths=[12,0.5,0,0,20,0,0,20,0.785398,3.92699,2.35619,0.785398,2,3,2,3])
+        
+        # true_params = [12,0.5,0,0,20,0.785398,0.785398,2.35619,3.92699,2,3]
+        # true_params = [6,0,0,20,0.785398,0.785398,2,3]   
+        corner.corner(flat_samples, labels=labels)# , truths=true_params)
         plt.savefig(base_fname+'_corner_plot.png')
         plt.close('all') 
         if Ea_Ep_labels != None:
             EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
             EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
             EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
-            corner.corner(EaEp_flat, labels=Ea_Ep_labels, truths=[12,0.5,0,0,20,0,0,20,0.785398,3.92699,2.35619,0.785398,2,3,2,3])
+            corner.corner(EaEp_flat, labels=Ea_Ep_labels)# , truths=true_params)
             plt.savefig(base_fname+'corner_plot_EaEp.png')
 
 
@@ -138,47 +149,53 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
 
 
 
-<<<<<<< HEAD
 run_number= 124
-# steps = ['forward', 'backward']
-steps = ['backward']
+steps = ['forward', 'backward']
+steps = ['forward']
 filenames = []
-#events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
-events = [ 90]
+events = [1]
 # labels = ['E', 'Ea_frac', 'x', 'y', 'z', 'x_1', 'y_1', 'z_1', 'theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c']
 labels = ['E', 'Ea_frac', 'x', 'y', 'z', 'theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
 theta_index, phi_index = 5,6
+theta_index_2, phi_index_2 = 7,8
 tau = [2]
 # Ea_Ep_labels = ['Ea', 'Ep', 'x', 'y', 'z', 'x_1', 'y_1', 'z_1', 'theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'c']
 Ea_Ep_labels = ['Ea', 'Ep', 'x', 'y', 'z', 'theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z']
-summary_file_path = './run%d_palpha_mcmc/summary.txt'%run_number
-filepath_template = './run%d_palpha_mcmc/event%d/%s.h5'
-=======
-if True: #change this to True for single particle fits
+summary_file_path = './run%d_dalpha_sim_mcmc_init_walker_at_true_values/summary.txt'%run_number
+filepath_template = './run%d_dalpha_sim_mcmc_init_walker_at_true_values/event%d/%s.h5'
+
+if False: #change this to True for single particle fits
     run_number= 124
     steps = ['forward', 'backward']
     filenames = []
-    events = [15,17]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
+    events = [3]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'rho']
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None
-    summary_file_path = './run%d_mcmc/summary.txt'%run_number
-    filepath_template = './run%d_mcmc/event%d/%s.h5'
+    summary_file_path = './run%d_single_alpha_sim_mcmc/summary.txt'%run_number
+    filepath_template = './run%d_single_alpha_sim_mcmc/event%d/%s.h5'
 else:
     run_number= 124
     steps = ['forward', 'backward']
+    steps = ['forward']
     filenames = []
-    #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
-    # events = [ 19699, 51777, 68192, 10356, 21640, 21662, 26303, 50543, 27067, 25304, 104723, 43833, 52010 ]
-    events = [1762]
+    events = [90]
     labels = ['E', 'Ea_frac', 'x','y','z', 'xa','ya','za','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
-    theta_index, phi_index = 5,6
+    # labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_xy', 'sigma_z']
+    # labels = ['E', 'x','y','z','theta_p', 'phi_p', 'sigma_xy', 'sigma_z']
+    theta_index, phi_index = 6,7
+    theta_index_2, phi_index_2 = 8,9
     tau = [2]
     Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z', 'xa','ya','za','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
+    # Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_xy', 'sigma_z']
+    # Ea_Ep_labels = ['Ea', 'x','y','z','theta_p', 'phi_p', 'sigma_xy', 'sigma_z']
     summary_file_path = './run%d_dalpha_mcmc/summary.txt'%run_number
     filepath_template = './run%d_dalpha_mcmc/event%d/%s.h5'
+    # summary_file_path = './run%d_single_alpha_sim_mcmc/summary.txt'%run_number
+    # filepath_template = './run%d_single_alpha_sim_mcmc/event%d/%s.h5'
+
 
 with open(summary_file_path, 'w') as summary_file:
     summary_file.write('event, energy from IC, ')

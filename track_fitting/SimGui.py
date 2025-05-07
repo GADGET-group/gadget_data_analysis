@@ -177,7 +177,7 @@ class SimGui(ttk.Frame):
         ll_vals = []
         for v in vals_to_plot:
             self.sim.__dict__[var_to_plot] = v
-            self.sim.load_srim_table(self.sim.particle, self.sim.gas_density)
+            # self.sim.load_srim_table(self.sim.particle, self.sim.gas_density)
             self.sim.simulate_event()
             ll_vals.append(self.sim.log_likelihood())
         plt.figure()

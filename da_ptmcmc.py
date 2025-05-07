@@ -69,6 +69,8 @@ if __name__ == '__main__':
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
+        trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
+        trace_sim.shared_params = ['gas_density'] 
         for sim in trace_sim.sims:
             sim.load_srim_table(sim.particle, 'P10', rho0)#*rho_scale
         trace_sim.simulate_event()
@@ -95,20 +97,20 @@ if __name__ == '__main__':
             return -np.inf
         if za < zmin or za >zmax:
             return -np.inf
-        vhat = np.array([np.sin(theta_p)*np.cos(phi_p), np.sin(theta_p)*np.sin(phi_p), np.cos(theta_p)])
-        if np.dot(vhat, direction*track_direction_vec) < 0 or theta_p > np.pi or theta_p < 0 or np.abs(phi_p)>np.pi:
-            return -np.inf 
+        # vhat = np.array([np.sin(theta_p)*np.cos(phi_p), np.sin(theta_p)*np.sin(phi_p), np.cos(theta_p)])
+        # if np.dot(vhat, direction*track_direction_vec) < 0 or theta_p > np.pi or theta_p < 0 or np.abs(phi_p)>np.pi:
+        #    return -np.inf 
         if theta_p < 0 or theta_p >= np.pi or phi_p < 0 or phi_p>2*np.pi:
             return -np.inf 
         if theta_a < 0 or theta_a >= np.pi or phi_a < 0 or phi_a>2*np.pi:
             return -np.inf
-        if sigma_xy_p < 0 or sigma_xy_p > 40:
+        if sigma_xy_p < 0 or sigma_xy_p > 10:
             return -np.inf
-        if sigma_z_p < 0 or sigma_z_p > 40:
+        if sigma_z_p < 0 or sigma_z_p > 10:
             return -np.inf
-        if sigma_xy_a < 0 or sigma_xy_a > 40:
+        if sigma_xy_a < 0 or sigma_xy_a > 10:
             return -np.inf
-        if sigma_z_a < 0 or sigma_z_a > 40:
+        if sigma_z_a < 0 or sigma_z_a > 10:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E)  + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p))) #+ density_scale_prior.log_likelihood(rho_scale)
@@ -139,7 +141,7 @@ if __name__ == '__main__':
             if  dist < d_best:
                 d_best= dist
                 best_point = np.array([x,y,z])
-        best_point = np.array([5,-3,100])
+        best_point = np.array([-23,5,40])
         # points = np.array([x_real,y_real,z_real])
         # candidates = points[sp.spatial.ConvexHull(points).vertices]
         # dist_mat = sp.spatial.distance_matrix(candidates,candidates)
@@ -175,8 +177,8 @@ if __name__ == '__main__':
         phi = np.arctan2(vhat[1], vhat[0])
 
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
-        sigma_guess = 10
-        pos_ball_size = 20 # default value is 1
+        sigma_guess = 2
+        pos_ball_size = 1
         angle_ball_size = 1*np.pi/180
 
         max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
@@ -185,9 +187,50 @@ if __name__ == '__main__':
         Ea_frac_guess = 1-Ep_guess/E_prior.mu
         assert Ea_frac_guess >0
 
+        if event_num == 90:
+            E1 = 8.298229878796851
+            E2 = 3.3079535189141134
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([18.5,-18.8,20])
+            theta_1 = 0.43
+            phi_1 = 3.636
+            theta_2 = 3.034
+            phi_2 = 6.064
+            sigma_xy_guess = 2.0
+            sigma_z_guess = 2.5      
 
-        print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess))
+        if event_num == 1762:
+            E_prior.mu = 12
+            Ea_frac_guess = 0.5
+            best_point = np.array([0,-1,25])
+            theta_1 = 1.07
+            phi_1 = 3.0
+            theta_2 = 1.9
+            phi_2 = 6.1
+            sigma_xy_guess = 0.5
+            sigma_z_guess = 2.0
+            
+        print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta_1, phi_1,theta_2,phi_2,sigma_xy_guess,sigma_z_guess))
 
+        # print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess))
+        guess_sim = get_sim((E_prior.mu, Ea_frac_guess, best_point[0], best_point[1], best_point[2], best_point[0], best_point[1], best_point[2],
+                            theta_1, phi_1, theta_2, phi_2, sigma_xy_guess, sigma_z_guess, sigma_xy_guess, sigma_z_guess))
+        build_sim.open_gui(guess_sim, {'4He_0_initial_point':float, '4He_1_initial_point':float})
+        return [(E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
+                            best_point[0] + np.random.randn()*pos_ball_size,
+                            best_point[1] + np.random.randn()*pos_ball_size,
+                            best_point[2] + np.random.randn()*pos_ball_size,
+                            best_point[0] + np.random.randn()*pos_ball_size,
+                            best_point[1] + np.random.randn()*pos_ball_size,
+                            best_point[2] + np.random.randn()*pos_ball_size,
+                            theta_1 + np.random.randn()*angle_ball_size,
+                            phi_1 + np.random.randn()*angle_ball_size,
+                            theta_2 + np.random.randn()*angle_ball_size,
+                            phi_2 + np.random.randn()*angle_ball_size,
+                            sigma_xy_guess+ np.random.randn()*pos_ball_size, sigma_z_guess+ np.random.randn()*pos_ball_size,
+                            sigma_xy_guess+ np.random.randn()*pos_ball_size, sigma_z_guess+ np.random.randn()*pos_ball_size,
+                            ) for w in range(nwalkers)]
         return [(E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
                             best_point[0] + np.random.randn()*pos_ball_size,
                             best_point[1] + np.random.randn()*pos_ball_size,
@@ -210,7 +253,7 @@ if __name__ == '__main__':
 
 
     with multiprocessing.Pool() as pool:
-        for direction in [-1, 1]:
+        for direction in [1]:
             if direction == 1:
                 backend_fname = 'forward.h5'
             elif direction == -1:

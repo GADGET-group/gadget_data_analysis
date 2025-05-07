@@ -76,15 +76,10 @@ def get_zscale(experiment:str, run:int):
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
     if experiment == 'e24joe':
-<<<<<<< HEAD
-        return 0.65 #TODO: use correct value
-        clock_freq = 50e6 #Hz, from e24joe config file on mac minis
-        drift_speed = 60.9*1e6 #mm/s, taken from chart from CERN 84-08 'Drift and Diffusion of Electrons in Gases: A Compilation' although it underpredicts the drift speed of electrons in P10 at 860 torr compared to what Ruchi finds in her paper
-=======
         return 0.65
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
         drift_speed = 38.0*1e6 #mm/s, English and Hanna Drift Speed Paper collected by CERN
->>>>>>> alex_track_fitting
+        drift_speed = 60.9*1e6 #mm/s, (not sure where exactly this came from) taken from chart from CERN 84-08 'Drift and Diffusion of Electrons in Gases: A Compilation' although it underpredicts the drift speed of electrons in P10 at 860 torr compared to what Ruchi finds in her paper
     return drift_speed/clock_freq
 
 #raw h5 data location and processing settings
@@ -269,7 +264,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     return trace_sim
 
 def load_single_particle_mcmc_result(run:int, event:int, particle='1H', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:
-    filename='run%d_mcmc/m0.07_c4.77/event%d/%s.h5'%(run, event, mcmc_name)
+    filename='run%d_single_alpha_sim_mcmc/event%d/%s.h5'%(run, event, mcmc_name)
     print('loading: ', filename)
     reader = emcee.backends.HDFBackend(filename=filename, read_only=True)
     
@@ -315,12 +310,12 @@ def show_results(event:int):
     h5.plot_3d_traces(event,threshold=20)
     #plt.show()
 
-def open_gui(sim:SingleParticleEvent):
+def open_gui(sim:SimulatedEvent, expose_arrays={'initial_point':float}):
     import tkinter as tk
     root = tk.Tk()
     if 'name' in sim.__dict__:
         root.title(sim.name)
-    SimGui(root, sim).grid()
+    SimGui(root, sim, expose_arrays).grid()
     root.mainloop()
 
 def show_3d_plots(sim, view_thresh = 20):
