@@ -99,7 +99,7 @@ class GadgetRunH5:
         self.trace_list = np.load(os.path.join(folder_path, 'trace_list.npy'), allow_pickle=True)
         #
         self.angle_list = np.load(os.path.join(folder_path, 'angle_list.npy'), allow_pickle=True)
-        self.file_path = get_h5_path() + ('run_%04d.h5'%run_num)
+        self.file_path = f'{get_default_path(run_num)}.h5'
     
         self.h5_file = raw_h5_file(self.file_path, flat_lookup_csv='./raw_viewer/channel_mappings/flatlookup4cobos.csv')
         self.h5_file.background_subtract_mode='fixed window'
