@@ -5,3 +5,5 @@ Virtual environment must be activated with "source activate_env" before running 
 
 Run new version of analysis GUI with "python main_gui.py"
 Run original analysis gui with "python3 The_GADGET_GUI.py"
+
+Select simulations via run_sXXXX.h5

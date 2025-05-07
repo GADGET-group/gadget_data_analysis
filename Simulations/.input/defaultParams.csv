@@ -1,0 +1,47 @@
+Parameter,Type,Value,Description,Min,Max
+CoefL,float,0.000114,Longitudal coefficient of diffusion [cm2/us],0
+CoefT,float,0.00284,Transverse coefficient of diffusion [cm2/us],0
+Gain,float,8000,Average gain of micromegas,0
+GETGain,float,120,Gain of the GET electronics in fC,0
+PeakingTime,int,1014,Electronic peaking time in ns,0
+GasPressure,float,800,Gas pressure in torr,0
+EIonize,float,22.3,Ionization energy of gas in eV,0
+Fano,float,0.24,Fano factor of the gas,0
+Threshold,float,86,minimum energy to register a pad hit,0
+EnergyResolution,float,4.2,Energy Resolution Constant (5.3% @ 6.3MeV),0
+MediumGas,string,GADGET_P10_800,Gas medium in detector
+Xb,float,2,cm (Set 99 for efficiency fix),0
+Yb,float,2,cm (radius if efficiency fixed),0
+Zb1,float,10,cm,0
+Zb2,float,40,cm,0
+CD,int,2,,0
+CDH,int,2,,0
+PadPlaneX,int,864,mm,
+PadPlaneZ,int,1344,mm,
+PadSizeX,int,8,mm,
+PadSizeZ,int,12,mm,
+PadRows,int,108,,0
+PadLayers,int,112,,0
+AnodeWirePlaneY,float,-4.05,mm,,
+GroundWirePlaneY,float,-8.1,mm,,
+GatingWirePlaneY,float,-14,mm,,
+EField,float,6000,V/m,
+NumTbs,int,512,,0
+SamplingRate,int,6,Real value is 6.25 MHz,0
+DriftVelocity,float,1.25,cm/us,0
+DriftLength,float,490,mm    ATTPC 1000 - Prototype 500,0
+YDivider,int,1000,Full drift length will be divided by this number when finding cluster,0
+GasFile,int,2,
+PadPlaneFile,int,3,
+PadShapeFile,int,4,might not be needed because the shape is simply rectangle
+BField,float,2.0,Tesla
+TiltAng,float,0.0,Degrees
+TB0,int,98,Time Bucket reference for micromegas position (DEPRECATED)
+LorentzAngle,float,0.0,Lorentz Angle
+TBEntrance,int,300,Beam position at detector entrance in TB
+ZPadPlane,float,490,Position of the micromegas pad plane
+Density,float,0.165,Gas density (kg/m3 or mg/cm3),0
+ThetaPad,float,110.9,AT-TPC pad plane rotation
+ThetaRot,float,0.0,Second Lorentz Angle
+MaxRange,float,500.0,Maximum range from Beam energy in mm,0
+Seed,int,0,Seed for random number generator   0 for random seed,0
