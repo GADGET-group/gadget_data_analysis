@@ -20,12 +20,12 @@ import scipy.sparse.linalg
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-load_intermediate_result = False # if True, then load saved pickle file of best result found so far, and display data with no further optimization
+load_intermediate_result = True # if True, then load saved pickle file of best result found so far, and display data with no further optimization
 
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 212
+experiment, run = 'e21072', 124
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -38,12 +38,12 @@ t_bounds = False
 t_lower, t_upper = 0, 0.1
 offset_endpoints = True
 
-if False:
+if True:
     xgrid_len = ygrid_len = 5
     zgrid_len = 2
     wgrid_len = 5
     tgrid_len = 7
-elif False:
+elif True:
     xgrid_len = ygrid_len = 4
     zgrid_len = 2
     wgrid_len = 4
@@ -468,6 +468,17 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
 fig, axs = plt.subplots(2,2)
 fig.set_figheight(10)
 fig.set_figwidth(10)
+fig.suptitle('guess range, all angles')
+for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    ax.set_title(label_dict[ptype])
+    mask = cut_mask_dict[ptype]
+    plot = ax.scatter(track_widths[mask], init_ranges[mask], c=times_since_start_of_window[mask], marker='.')
+    ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    fig.colorbar(plot, ax=ax)
+
+fig, axs = plt.subplots(2,2)
+fig.set_figheight(10)
+fig.set_figwidth(10)
 fig.suptitle('corrected range, all angles')
 for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     ax.set_title(label_dict[ptype])
@@ -488,7 +499,30 @@ plt.xlabel('range (mm)')
 plt.legend()
 
 #make interactive figure for viewing results
-#fig, axs = plt.subplots(1,2)
-
+# def show_field(w_index, t_index, xparams, yparams):
+#     figs, axs = plt.subplots(1,2)
+#     x_dep, y_dep, x_obs, y_obs = [],[],[],[]
+#     for i in range(xgrid_len):
+#         for j in range(ygrid_len):
+#             x_dep.append(xparams[i,j,w_index, t_index])
+#             y_dep.append(yparams[i,j,w_index, t_index])
+#             x_obs.append(x_grid[i])
+#             y_obs.append(y_grid[j])
+#     x_dep, y_dep, x_obs, y_obs = np.array(x_dep), np.array(y_dep), np.array(x_obs), np.array(y_obs)
+#     axs[0].quiver(x_dep, y_dep, (x_obs-x_dep), (y_obs-y_dep), angles='xy', scale_units='xy', scale=1)
+#     plt.show(block=False)
+def show_field(w, t, xinterp, yinterp):
+    figs, axs = plt.subplots(1,2)
+    x_dep, y_dep, x_obs, y_obs = [],[],[],[]
+    for x in np.linspace(-40, 40, 11):
+        for y in np.linspace(-40, 40, 11):
+            x_obs.append(x)
+            y_obs.append(y)
+            x_dep.append(xinterp((x/pos_scale,y/pos_scale,w/w_scale,t/t_scale)))
+            y_dep.append(yinterp((x/pos_scale,y/pos_scale,w/w_scale,t/t_scale)))
+    x_dep, y_dep, x_obs, y_obs = np.array(x_dep), np.array(y_dep), np.array(x_obs), np.array(y_obs)
+    #print(x_dep, y_dep, x_obs, y_obs)
+    axs[0].quiver(x_dep, y_dep, (x_obs-x_dep), (y_obs-y_dep), angles='xy', scale_units='xy', scale=1)
+    plt.show(block=False)
 
 plt.show(block=False)
