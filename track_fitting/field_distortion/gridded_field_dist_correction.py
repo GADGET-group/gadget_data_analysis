@@ -20,7 +20,7 @@ import scipy.sparse.linalg
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-load_intermediate_result = True # if True, then load saved pickle file of best result found so far, and display data with no further optimization
+load_intermediate_result = False # if True, then load saved pickle file of best result found so far, and display data with no further optimization
 
 '''
 Configuration for fit.
@@ -56,7 +56,7 @@ else:
 x_grid = np.linspace(-40, 40, xgrid_len)
 y_grid = np.linspace(-40, 40, ygrid_len)
 z_grid = np.linspace(-40, 40, zgrid_len)
-w_grid = np.linspace(2, 3.5, wgrid_len)
+w_grid = np.linspace(2.25, 3.25, wgrid_len)
 t_grid = np.linspace(0, 0.09, tgrid_len)
 pos_scale = 40
 w_scale = 3
@@ -266,24 +266,18 @@ def convert_fit_params(params):
     '''
 
     xparam_length = xgrid_len*ygrid_len*wgrid_len*tgrid_len
-    start, end = 0, 0 + xparam_length-1
-    xparams_flat = np.zeros(xparam_length)
-    xparams_flat[0] = x_grid[0]
-    xparams_flat[1:] = params[start:end]*pos_scale
+    start, end = 0, 0 + xparam_length
+    xparams_flat = params[start:end]*pos_scale
     xparams = np.reshape(xparams_flat, (xgrid_len, ygrid_len, wgrid_len, tgrid_len))
     
     yparam_length = xgrid_len*ygrid_len*wgrid_len*tgrid_len
-    start, end = end, end + yparam_length-1
-    yparams_flat = np.zeros(yparam_length)
-    yparams_flat[0] = y_grid[0]
-    yparams_flat[1:] = params[start:end]*pos_scale
+    start, end = end, end + yparam_length
+    yparams_flat = params[start:end]*pos_scale
     yparams = np.reshape(yparams_flat,(xgrid_len, ygrid_len, wgrid_len, tgrid_len))
 
     z_param_length = xgrid_len*ygrid_len*zgrid_len*wgrid_len*tgrid_len
-    start, end = end, end+z_param_length-1
-    zparams_flat = np.zeros(z_param_length)
-    zparams_flat[0] = z_grid[0]
-    zparams_flat[1:] = params[start:end]*pos_scale
+    start, end = end, end+z_param_length
+    zparams_flat= params[start:end]*pos_scale
     zparams = np.reshape(zparams_flat, (xgrid_len, ygrid_len, zgrid_len, wgrid_len, tgrid_len))
     return xparams, yparams, zparams
 
@@ -303,7 +297,7 @@ for i in range(xgrid_len):
         for k in range(wgrid_len):
             for l in range(tgrid_len):
                 zguess[i,j, :,k, l] = z_grid
-guess = np.concatenate([xguess.flatten()[1:]/pos_scale, yguess.flatten()[1:]/pos_scale, zguess.flatten()[1:]/pos_scale])
+guess = np.concatenate([xguess.flatten()/pos_scale, yguess.flatten()/pos_scale, zguess.flatten()/pos_scale])
 
 def to_minimize(params):
     range_hist_dict = {} #dict to avoid doing the same rmap twice
@@ -499,18 +493,6 @@ plt.xlabel('range (mm)')
 plt.legend()
 
 #make interactive figure for viewing results
-# def show_field(w_index, t_index, xparams, yparams):
-#     figs, axs = plt.subplots(1,2)
-#     x_dep, y_dep, x_obs, y_obs = [],[],[],[]
-#     for i in range(xgrid_len):
-#         for j in range(ygrid_len):
-#             x_dep.append(xparams[i,j,w_index, t_index])
-#             y_dep.append(yparams[i,j,w_index, t_index])
-#             x_obs.append(x_grid[i])
-#             y_obs.append(y_grid[j])
-#     x_dep, y_dep, x_obs, y_obs = np.array(x_dep), np.array(y_dep), np.array(x_obs), np.array(y_obs)
-#     axs[0].quiver(x_dep, y_dep, (x_obs-x_dep), (y_obs-y_dep), angles='xy', scale_units='xy', scale=1)
-#     plt.show(block=False)
 def show_field(w, t, xinterp, yinterp):
     figs, axs = plt.subplots(1,2)
     x_dep, y_dep, x_obs, y_obs = [],[],[],[]
