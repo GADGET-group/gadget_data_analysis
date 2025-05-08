@@ -215,6 +215,10 @@ def get_interpolators(params):
     return x_interp, y_interp, z_interp
 
 def map_endpoints(endpoints_to_map, w, t, x_interp, y_interp, z_interp):
+    w[w<w_grid[0]] = w_grid[0]
+    w[w>w_grid[-1]] = w_grid[-1]
+    w[t<t_grid[0]] = t_grid[0]
+    w[t>t_grid[-1]] = t_grid[-1]
     to_return = np.copy(endpoints_to_map)
     x, y, z = endpoints_to_map[:,0,0], endpoints_to_map[:,0,1], endpoints_to_map[:,0,2] 
     to_return[:,0,0] = x_interp((x/pos_scale,y/pos_scale, w/w_scale, t/t_scale))
@@ -493,8 +497,9 @@ plt.xlabel('range (mm)')
 plt.legend()
 
 #make interactive figure for viewing results
-def show_field(w, t, xinterp, yinterp):
-    figs, axs = plt.subplots(1,2)
+fig, axs = plt.subplots(1,2)
+def show_field(w, t, xinterp=x_interp, yinterp=y_interp):
+    axs[0].cla()
     x_dep, y_dep, x_obs, y_obs = [],[],[],[]
     for x in np.linspace(-40, 40, 11):
         for y in np.linspace(-40, 40, 11):
@@ -505,6 +510,31 @@ def show_field(w, t, xinterp, yinterp):
     x_dep, y_dep, x_obs, y_obs = np.array(x_dep), np.array(y_dep), np.array(x_obs), np.array(y_obs)
     #print(x_dep, y_dep, x_obs, y_obs)
     axs[0].quiver(x_dep, y_dep, (x_obs-x_dep), (y_obs-y_dep), angles='xy', scale_units='xy', scale=1)
-    plt.show(block=False)
+
+
+show_field(2.5, 0)
+from matplotlib.widgets import Slider
+axwslider = fig.add_axes([0.25, 0.1, 0.65, 0.03])
+w_slider = Slider(
+    ax=axwslider,
+    label='width [mm]',
+    valmin=2,
+    valmax=4,
+    valinit=2.5,
+)
+axtslider = fig.add_axes([0.25, 0.2, 0.65, 0.03])
+t_slider = Slider(
+    ax=axtslider,
+    label='time [s]',
+    valmin=0,
+    valmax=0.1,
+    valinit=0,
+)
+
+def update(val):
+    show_field(w_slider.val, t_slider.val)
+    fig.canvas.draw_idle()
+w_slider.on_changed(update)
+t_slider.on_changed(update)
 
 plt.show(block=False)
