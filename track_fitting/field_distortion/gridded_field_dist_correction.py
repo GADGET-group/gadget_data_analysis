@@ -20,12 +20,12 @@ import scipy.sparse.linalg
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-load_intermediate_result = False # if True, then load saved pickle file of best result found so far, and display data with no further optimization
+load_intermediate_result = True # if True, then load saved pickle file of best result found so far, and display data with no further optimization
 
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 124
+experiment, run = 'e21072', 212
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
@@ -43,7 +43,7 @@ if True:
     zgrid_len = 2
     wgrid_len = 5
     tgrid_len = 7
-elif True:
+elif False:
     xgrid_len = ygrid_len = 4
     zgrid_len = 2
     wgrid_len = 4
@@ -518,17 +518,17 @@ axwslider = fig.add_axes([0.25, 0.1, 0.65, 0.03])
 w_slider = Slider(
     ax=axwslider,
     label='width [mm]',
-    valmin=2,
-    valmax=4,
-    valinit=2.5,
+    valmin=w_grid[0],
+    valmax=w_grid[-1],
+    valinit=w_grid[0],
 )
 axtslider = fig.add_axes([0.25, 0.2, 0.65, 0.03])
 t_slider = Slider(
     ax=axtslider,
     label='time [s]',
-    valmin=0,
-    valmax=0.1,
-    valinit=0,
+    valmin=t_grid[0],
+    valmax=t_grid[-1],
+    valinit=t_grid[0],
 )
 
 def update(val):

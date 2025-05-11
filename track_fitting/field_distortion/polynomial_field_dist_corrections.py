@@ -1,6 +1,7 @@
 import os
 import pickle
 import sys
+import time
 
 import numpy as np
 from tqdm import tqdm
@@ -11,13 +12,13 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 3   
+experiment, run, N = 'e21072', 212, 5  
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1596'), (1, 'a4434')]
+peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = []#(1, 'p1596', 'a4434')]
+peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p1596', 'a2153')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = False #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
@@ -27,6 +28,8 @@ opt_method = 'local'#annealing, shgo, or local
 t_bounds = False
 t_lower = 0.0
 t_upper = 0.02
+
+offset_endpoints = True
 
 
 
@@ -130,6 +133,15 @@ if experiment == 'e21072':
     cut_mask_dict['p1596pp'] = cut_mask_dict['p1596']&(angles>np.radians(70))
     cut_mask_dict['p770pp'] = cut_mask_dict['p770']&(angles>np.radians(70))
     cut_mask_dict['a4434pp'] = cut_mask_dict['a4434']&(angles>np.radians(70))
+
+if offset_endpoints:
+    total_track_widths = np.array(track_info_dict['width_above_threshold'])
+    endpoints_offset_dir1 = endpoints[:, 0, :] - endpoints[:, 1, :]
+    endpoints_offset_dir1 /= np.linalg.norm(endpoints_offset_dir1, axis=1)[:, np.newaxis]
+    endpoints[:, 0, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir1
+    endpoints_offset_dir2 = endpoints[:, 1, :] - endpoints[:, 0, :]
+    endpoints_offset_dir2 /= np.linalg.norm(endpoints_offset_dir2, axis=1)[:, np.newaxis]
+    endpoints[:, 1, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir2
 
 #plot showing selected events of each type
 rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask&(MeV<8)
@@ -320,6 +332,8 @@ if allow_beam_off_axis:
     fname_template = 'beam_' + fname_template
 if t_bounds:
     fname_template = 't%gand%g_'%(t_lower, t_upper)+fname_template
+if offset_endpoints:
+    fname_template = 'offset_points_'+fname_template
 fname_template = opt_method + '_' +fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
@@ -370,6 +384,13 @@ else:
         bounds.append([1e-10, 3]) #charge spreading, mm
 
         #charge spread
+
+    tlast = time.time()
+    def callback(x, fig='%s update', save_intermediate_res=True):
+        global tlast
+        print(x, to_minimize(x))
+        print('%f s'%(time.time() - tlast))
+        tlast = time.time()
     if allow_beam_off_axis:
         bounds.append([-10, 10])
         bounds.append([-10, 10])
@@ -381,7 +402,7 @@ else:
             return False
         res = opt.dual_annealing(f_to_min, bounds, x0=guess, maxiter=10000, callback=callback)
     elif opt_method == 'local':
-        res = opt.minimize(f_to_min, guess)
+        res = opt.minimize(f_to_min, guess, callback=callback)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
 if allow_beam_off_axis:
