@@ -451,7 +451,9 @@ class raw_h5_file:
         max veto counts is max counts in any single time bin on a single veto pad
         dxy is the track length in the pad plane, dz is the other component of track length
         '''
-        # padgain = np.load('~/padgain.npy')
+        padgain = np.load('/user/dopfer/padgain_noveto_with_neg_constraint.npy')
+        data_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
+        data_with_vetos = np.append(data_with_vetos,[1,1])
         should_veto=False
         counts = 0
         pads_railed = []
@@ -462,8 +464,8 @@ class raw_h5_file:
                 if  trace_max > max_veto_pad_counts:
                     max_veto_pad_counts = trace_max
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
-                counts += np.sum(trace[trace>self.ic_counts_threshold])
-                # counts += np.sum(trace[trace>self.ic_counts_threshold]*padgain[pad])
+                # counts += np.sum(trace[trace>self.ic_counts_threshold])
+                counts += np.sum(trace[trace>self.ic_counts_threshold]*data_with_vetos[pad])
             if trace_max >= 4095:
                 pads_railed.append(pad)
         dxy, dz, angle = self.get_track_length_angle(event_num)
