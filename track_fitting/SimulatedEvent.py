@@ -292,7 +292,7 @@ class SimulatedEvent:
                 else: #pad was simulated firing, but did not
                     #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
                     #than this value
-                    #TODO: is there a not to expensive way to account for corralations between time bins?
+                    #TODO: is there a not to expensive way to account for correlations between time bins?
                     sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
                     pad_ll = np.sum(np.log(0.5 + 0.5*scipy.special.erf((self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma)))
 

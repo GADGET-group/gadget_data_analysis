@@ -77,9 +77,9 @@ def display_progress(intermediate_result):
         print(np.min(changed_res), np.max(changed_res))
     counter += 1
 
-
-res = opt.minimize(to_minimize, init_guess*np.ones(npads), callback=display_progress)
-np.save('padgain_noveto.npy',res.x)
+bnds = ((0, None),) * npads
+res = opt.minimize(to_minimize, init_guess*np.ones(npads), callback=display_progress, bounds=bnds)
+np.save('padgain_noveto_with_neg_constraint.npy',res.x)
 
 
 # Current minimization: 4.544050e+16

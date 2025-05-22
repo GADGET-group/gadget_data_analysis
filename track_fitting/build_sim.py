@@ -180,7 +180,7 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.0706, 4.77
-        sim.pad_threshold = 54.8
+        sim.pad_threshold = 20.0
         if run == 124:
             sim.counts_per_MeV = 129600.
 
