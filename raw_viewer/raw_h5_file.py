@@ -4,10 +4,11 @@ import numpy as np
 import scipy.spatial
 import scipy.spatial.distance
 import h5py
-import matplotlib.pylab as plt
 import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
+import configparser
+
 
 import skimage.measure
 
@@ -56,31 +57,6 @@ class raw_h5_file:
         self.zscale = zscale #conversion factor from time bin to mm
 
         self.pad_backgrounds = None #initialize with determine_pad_backgrounds
-
-        #color map for plotting
-        cdict={'red':  ((0.0, 0.0, 0.0),
-                    (0.25, 0.0, 0.0),
-                    (0.5, 0.8, 1.0),
-                    (0.75, 1.0, 1.0),
-                    (1.0, 0.4, 1.0)),
-
-            'green': ((0.0, 0.0, 0.0),
-                    (0.25, 0.0, 0.0),
-                    (0.5, 0.9, 0.9),
-                    (0.75, 0.0, 0.0),
-                    (1.0, 0.0, 0.0)),
-
-            'blue':  ((0.0, 0.0, 0.4),
-                    (0.25, 1.0, 1.0),
-                    (0.5, 1.0, 0.8),
-                    (0.75, 0.0, 0.0),
-                    (1.0, 0.0, 0.0))
-            }
-        # cdict['alpha'] = ((0.0, 0.0, 0.0),
-        #                 (0.3,0.2, 0.2),
-        #                 (0.8,1.0, 1.0),
-        #                 (1.0, 1.0, 1.0))
-        self.cmap = LinearSegmentedColormap('test',cdict)
 
         self.background_subtract_mode = 'none' #none, fixed window, or convolution
         self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
@@ -472,131 +448,58 @@ class raw_h5_file:
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
 
-    def show_pad_backgrounds(self, fig_name=None, block=True):
-        ave_image = np.zeros(np.shape(self.pad_plane))
-        std_image = np.zeros(np.shape(self.pad_plane))
-        for pad in self.pad_backgrounds:
-            x,y = self.pad_to_xy_index[pad]
-            ave, std = self.pad_backgrounds[pad]
-            ave_image[x,y] = ave
-            std_image[x,y] = std
-
-        fig=plt.figure(fig_name)
-        plt.clf()
-        ave_ax = plt.subplot(1,2,1)
-        ave_ax.set_title('average counts')
-        ave_shown = ave_ax.imshow(ave_image, cmap=self.cmap)
-        fig.colorbar(ave_shown, ax=ave_ax)
-
-        std_ax = plt.subplot(1,2,2)
-        std_ax.set_title('standard deviation')
-        std_shown=std_ax.imshow(std_image, cmap=self.cmap)
-        fig.colorbar(std_shown, ax=std_ax)
-        #plt.colorbar(ax=std_plot)
-        #plt.colorbar())
-        plt.show(block=block)
-
-    def plot_traces(self, event_num, block=True, fig_name=None):
+    def load_config(self, config_file_path=None):
         '''
-        Note: veto pads are plotted as dotted lines
+        Load the config file for the raw h5 file.
         '''
-        plt.figure(fig_name)
-        plt.clf()
-        pads, pad_data = self.get_pad_traces(event_num)
-        for pad, data in zip(pads, pad_data):
-            r = pad/1024*.8
-            g = (pad%512)/512*.8
-            b = (pad%256)/256*.8
-            if pad in VETO_PADS:
-                plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
-            else:
-                plt.plot(data, color=(r,g,b), label='%d'%pad)
-        plt.legend(loc='upper right')
-        plt.show(block=block)
-
-    def plot_3d_traces(self, event_num, threshold=-np.inf, block=True, fig_name=None):
-        fig = plt.figure(fig_name, figsize=(6,6))
-        plt.clf()
-        ax = plt.axes(projection='3d')
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.set_zlabel("z")
-        ax.set_xlim3d(-200, 200)
-        ax.set_ylim3d(-200, 200)
-        ax.set_zlim3d(0, 400)
-
-        xs, ys, zs, es = self.get_xyze(event_num, threshold=threshold)
-
-        #TODO: make generic, these are P10 values
-        calib_point_1 = (0.806, 156745)
-        calib_point_2 = (1.679, 320842)
-        energy_1, channel_1 = calib_point_1
-        energy_2, channel_2 = calib_point_2
-        energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
-        energy_offset = energy_1 - energy_scale_factor * channel_1
-
-        ax.view_init(elev=45, azim=45)
-        ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
-        cbar = fig.colorbar(ax.get_children()[0])
-        max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(event_num)
-        length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
-                                                                                               energy*energy_scale_factor + energy_offset, length,
-                                                                                               np.degrees(angle), len(pads_railed)))
-        plt.show(block=block)
-    
-    def show_2d_projection(self, event_number, block=True, fig_name=None):
-        data = self.get_data(event_number)
-        image = np.zeros(np.shape(self.pad_plane))
-        for line in data:
-            chnl_info = tuple(line[0:4])
-            if chnl_info not in self.chnls_to_pad:
-                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                continue
-            pad = self.chnls_to_pad[chnl_info]
-            x,y = self.pad_to_xy_index[pad]
-            image[x,y] = np.sum(line[FIRST_DATA_BIN:])
-        image[image<0]=0
-        trace = np.sum(data[:,FIRST_DATA_BIN:],0)
+        config = configparser.ConfigParser()
+        config.read(config_file_path)
+        self.length_ic_threshold = config.get('ttk.Entry','length_ic_threshold')
+        self.energy_ic_threshold = config.get('ttk.Entry','energy_ic_threshold')
+        self.view_threshold = config.get('ttk.Entry','view_threshold')
+        self.include_cobos = config.get('ttk.Entry','include_cobos')
+        self.include_asads = config.get('ttk.Entry','include_asads')
+        self.include_pads = config.get('ttk.Entry','include_pads')
+        self.veto_threshold = config.get('ttk.Entry','veto_threshold')
+        self.range_min = config.get('ttk.Entry','range_min')
+        self.range_max = config.get('ttk.Entry','range_max')
+        self.min_ic = config.get('ttk.Entry','min_ic')
+        self.max_ic = config.get('ttk.Entry','max_ic')
+        self.angle_min = config.get('ttk.Entry','angle_min')
+        self.angle_max = config.get('ttk.Entry','angle_max')
+        self.background_bin_start = config.get('ttk.Entry','background_bin_start')
+        self.background_bin_stop = config.get('ttk.Entry','background_bin_stop')
+        self.zscale = config.get('ttk.Entry','zscale')
+        self.near_peak_window_width = config.get('ttk.Entry','near_peak_window_width')
+        self.peak_first_allowed_bin = config.get('ttk.Entry','peak_first_allowed_bin')
+        self.peak_last_allowed_bin = config.get('ttk.Entry','peak_last_allowed_bin')
+        self.peak_mode = config.get('ttk.OptionMenu','peak_mode')
+        self.background_mode = config.get('ttk.OptionMenu','background_mode')
+        self.remove_outliers = config.get('ttk.CheckButton','remove_outliers')
         
-
-        fig = plt.figure(fig_name, figsize=(6,6))
-        plt.clf()
-        should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
-        length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
-        plt.subplot(2,1,1)
-        plt.imshow(image, norm=colors.LogNorm())
-        plt.colorbar()
-        plt.subplot(2,1,2)
-        plt.plot(trace)
-        plt.show(block=block)
-
-    def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
+    def save_config(self, config_file_path=None):
         '''
-        plots traces without background subtraction, with backgrounds shown as ... lines
         '''
-        plt.figure(fig_name)
-        plt.clf()
-        old_background_mode = self.background_subtract_mode
-        self.background_subtract_mode = 'none' #will set back after drawing traces
-        old_mode = self.data_select_mode
-        self.data_select_mode = 'all data'
-        pads, pad_data = self.get_pad_traces(event_num)
-        for pad, data in zip(pads, pad_data):
-            r = pad/1024*.8
-            g = (pad%512)/512*.8
-            b = (pad%256)/256*.8
-            if pad in VETO_PADS:
-                plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
-            else:
-                plt.plot(data, color=(r,g,b), label='%d'%pad)
-        self.background_subtract_mode = old_background_mode
-        for pad, data in zip(pads, pad_data):
-            r = pad/1024*.8
-            g = (pad%512)/512*.8
-            b = (pad%256)/256*.8
-            plt.plot(self.calculate_background(data), '.', color=(r,g,b), label='%d baseline'%pad)
-        self.data_select_mode = old_mode
-        plt.legend(loc='upper right')
-        plt.show(block=block)
+        if file_path == None:
+            file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/gui_configs', title='GUI settings file save path', filetypes=([("gui config", ".gui_ini")]), defaultextension='.gui_ini')
+        config = configparser.ConfigParser()
+        
+        entries_to_save = {}
+        for entry_name in self.settings_entry_map:
+            entries_to_save[entry_name] = self.settings_entry_map[entry_name].get()
+        config['ttk.Entry']=entries_to_save
+
+        option_menus_to_save = {}
+        for menu_name in self.settings_optionmenu_map:
+            option_menus_to_save[menu_name] = self.settings_optionmenu_map[menu_name].get()
+        config['ttk.OptionMenu']=option_menus_to_save
+
+        check_buttons_to_save = {}
+        for check_name in self.settings_checkbutton_map:
+            check_buttons_to_save[check_name] = self.settings_checkbutton_map[check_name].get()
+        config['ttk.CheckButton']=check_buttons_to_save
+
+        with open(file_path, 'w') as configfile:
+            config.write(configfile)
+    def process_run():
+        

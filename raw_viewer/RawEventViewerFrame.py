@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from fit_gui.HistogramFitFrame import HistogramFitFrame
 from raw_viewer import raw_h5_file
+from raw_viewer import event_display
 from raw_viewer import heritage_h5_file
 
 class RawEventViewerFrame(ttk.Frame):
