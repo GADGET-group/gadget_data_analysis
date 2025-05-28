@@ -12,7 +12,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 212, 5  
+experiment, run, N = 'e21072', 124, 1
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
@@ -34,7 +34,7 @@ offset_endpoints = True
 
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
+particles_to_plot = ['p1596', 'p770', 'a2153', 'p1927']#'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -102,7 +102,7 @@ label_dict = {}
 if experiment == 'e21072':
     true_range_dict = {'p1596': 51.6, 'p1596pp': 51.6, 'p770':16.8, 'p770pp':16.8, 
                        'a4434wr':30.6, 'a4434wor':30.6, 'a4434':30.6,'a4434pp':30.6,
-                        'a2153':11.8, 'a2153wr':11.8, 'a2153wor':11.8}
+                        'a2153':11.8, 'a2153wr':11.8, 'a2153wor':11., 'p1927':0}
     label_dict['p770'] = '770 keV protons'
     label_dict['p770pp'] = '770 keV protons within 20 deg of pad plane'
     label_dict['p1596'] = '~1596 keV protons'
@@ -114,6 +114,7 @@ if experiment == 'e21072':
     label_dict['a2153'] = 'all 2153 keV alpha'
     label_dict['a2153wor'] = '2153 keV alpha without recoil'
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
+    label_dict['p1927']='>1900 keV protons'
     if run==124:
         cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
         cut_mask_dict['p770'] = (ranges>19) & (ranges<26) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
@@ -123,6 +124,7 @@ if experiment == 'e21072':
         cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
         cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
         cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
+        cut_mask_dict['p1927'] = (ranges>70) &(MeV>1.9) & veto_mask
     elif run==212:
         cut_mask_dict['p1596'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
         cut_mask_dict['p770'] = (ranges>20) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask

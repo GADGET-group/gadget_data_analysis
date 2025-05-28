@@ -38,7 +38,7 @@ t_bounds = False
 t_lower, t_upper = 0, 0.1
 offset_endpoints = True
 
-if True:
+if False:
     xgrid_len = ygrid_len = 5
     zgrid_len = 2
     wgrid_len = 5
@@ -318,6 +318,10 @@ def to_minimize(params):
         to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
     #print(to_return)
     return to_return
+
+#constraints to add:
+#charge deposited inside detector
+#end points relative to adjacent cells (cell left  has to originate to the left of current cell)
 
 fname_template = 'gridcor_%s_run%d_x%d_y%d_z%d_w%d_t%d.pkl'
 if t_bounds:
