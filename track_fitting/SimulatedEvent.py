@@ -127,6 +127,63 @@ class SimulatedEvent:
         if self.enable_print_statements:
             print("Time to compute traces: ", time1 - time2)
 
+    def simulate_test_event(self):
+            '''
+            Same as simulate_event, but allows for added uncertainty to the energy in the pad traces.
+            This is useful for testing the log likelihood function.
+            '''
+            self.points, self.energy_depositions, sigma_xys, sigma_zs = self.get_energy_deposition()
+            #TODO: do a better job of veto pads
+            time1=time.time()
+
+            zs = np.arange(self.num_trace_bins)*self.zscale
+            #loop over pads, and calculate energy deposition in each bin
+            self.sim_traces = {pad:np.zeros(self.num_trace_bins) for pad in self.pads_to_sim}
+            erf_dict = {}
+            def erf(val):
+                if val not in erf_dict:
+                    erf_dict[val] = scipy.special.erf(val)
+                return erf_dict[val]
+            
+            erf_array = np.vectorize(erf)
+
+            sigma_xy_max = np.max(sigma_xys)
+
+            for point, edep, sigma_xy, sigma_z in zip(self.points, self.energy_depositions, sigma_xys, sigma_zs):
+                pads_to_sim = []
+                for pad in self.pads_to_sim:
+                    pad_x, pad_y = self.pad_to_xy[pad]
+                    dist = np.sqrt((pad_x - point[0])**2 + (pad_y - point[1])**2)
+                    if dist <= self.deposit_charge_sigma_away*sigma_xy_max:
+                        pads_to_sim.append(pad)
+                if self.timing_offsets == None:
+                    dz = zs - point[2]
+                    zfrac = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2*sigma_z)) - erf_array(dz/np.sqrt(2*sigma_z)))
+                else:
+                    zfrac_dict = {} #used to avoid calculating the array of zfracs multiple times for the same timing offset
+                for pad in pads_to_sim:
+                    if self.timing_offsets != None:
+                        if pad not in self.timing_offsets:
+                            continue #this pad never fired in any event
+                        if self.timing_offsets[pad] not in zfrac_dict:
+                            dz = zs - (point[2] + self.timing_offsets[pad]*self.zscale)
+                            zfrac_dict[self.timing_offsets[pad]] = 0.5*(erf_array((dz + self.zscale)/np.sqrt(2)/sigma_z) - erf_array(dz/np.sqrt(2)/sigma_z))
+                        zfrac = zfrac_dict[self.timing_offsets[pad]]
+                    dx = self.pad_to_xy[pad][0] - point[0]
+                    xfrac = 0.5*(erf((dx + self.pad_width/2)/np.sqrt(2)/sigma_xy) - \
+                                erf((dx - self.pad_width/2)/np.sqrt(2)/sigma_xy))
+                    dy = self.pad_to_xy[pad][1] - point[1]
+                    yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2)/sigma_xy) - \
+                                erf((dy - self.pad_width/2)/np.sqrt(2)/sigma_xy))
+                    self.sim_traces[pad] += edep *xfrac*yfrac*zfrac*self.counts_per_MeV*np.random.normal(1, 0.1)
+                #adc_correction_factor = 1+1.558e-1 - 2.968e-5*trace
+            for pad in self.pads_to_sim:
+                self.sim_traces[pad][self.sim_traces[pad]<self.zero_traces_less_than] = 0
+            time2 = time.time()
+            
+            if self.enable_print_statements:
+                print("Time to compute traces: ", time1 - time2)
+
     def get_pad_from_xy(self, xy):
             '''
             xy: tuple of (x,y) to lookup pad number for

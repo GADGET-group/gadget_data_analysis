@@ -8,6 +8,7 @@ import pandas as pd
 
 veto_pads = [253,254,508,509,763,764,1018,1019]
 
+# data comes from first 100,000 events of Po-212 alpha peak, whose energy is 8.7849 MeV
 f = h5py.File("/egr/research-tpc/dopferjo/pad_gainmatch_events.h5",'r')
 real_events = []
 for event in range(100000):
