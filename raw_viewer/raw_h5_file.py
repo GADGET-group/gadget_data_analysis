@@ -11,7 +11,7 @@ import configparser
 
 
 import skimage.measure
-
+from gadget_analysis.event_display import *
 '''
 Notes for tomorrow:
 --make main_gui.py work with recent updates
@@ -39,6 +39,8 @@ class raw_h5_file:
                 pad = self.pad_plane[x,y]
                 if pad != -1:
                     self.pad_to_xy_index[int(pad)] = (x,y)
+        
+        self.cmap = LinearSegmentedColormap('test',cdict)
 
         self.chnls_to_pad = {} #maps tuples of (asad, aget, channel) to pad number
         self.chnls_to_xy_coord = {} #maps tuples of (asad, aget, channel) to (x,y) coordinates in mm
@@ -502,4 +504,4 @@ class raw_h5_file:
         with open(file_path, 'w') as configfile:
             config.write(configfile)
     def process_run():
-        
+        return
