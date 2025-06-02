@@ -1,7 +1,8 @@
-# import matplotlib.pylab as plt
-# import matplotlib.colors as colors
-# from matplotlib.colors import LinearSegmentedColormap
-# import numpy as np
+import matplotlib.pylab as plt
+import matplotlib.colors as colors
+from matplotlib.colors import LinearSegmentedColormap
+import numpy as np
+import raw_viewer.raw_h5_file as raw_h5_file
 
 # class event_display:
 #     def __init__(self, data:raw_h5_file, pad_plane, pad_to_xy_index, chnl_to_pad, veto_pads, data_select_mode='all data', background_subtract_mode='none'):
@@ -34,17 +35,21 @@ cdict={'red':  ((0.0, 0.0, 0.0),
             (0.75, 0.0, 0.0),
             (1.0, 0.0, 0.0))
         }
-    # cdict['alpha'] = ((0.0, 0.0, 0.0),
-    #                 (0.3,0.2, 0.2),
-    #                 (0.8,1.0, 1.0),
-    #                 (1.0, 1.0, 1.0))
+cdict['alpha'] = ((0.0, 0.0, 0.0),
+                (0.3,0.2, 0.2),
+                (0.8,1.0, 1.0),
+                (1.0, 1.0, 1.0))
 
-def show_pad_backgrounds(self, fig_name=None, block=True):
-    ave_image = np.zeros(np.shape(self.pad_plane))
-    std_image = np.zeros(np.shape(self.pad_plane))
-    for pad in self.pad_backgrounds:
-        x,y = self.pad_to_xy_index[pad]
-        ave, std = self.pad_backgrounds[pad]
+cmap = LinearSegmentedColormap('test',cdict)
+
+
+def show_pad_backgrounds(pad_plane, pad_backgrounds, fig_name=None, block=True):
+    temp = raw_h5_file()
+    ave_image = np.zeros(np.shape(pad_plane))
+    std_image = np.zeros(np.shape(pad_plane))
+    for pad in pad_backgrounds:
+        x,y = temp.pad_to_xy_index[pad]
+        ave, std = pad_backgrounds[pad]
         ave_image[x,y] = ave
         std_image[x,y] = std
 
@@ -52,12 +57,12 @@ def show_pad_backgrounds(self, fig_name=None, block=True):
     plt.clf()
     ave_ax = plt.subplot(1,2,1)
     ave_ax.set_title('average counts')
-    ave_shown = ave_ax.imshow(ave_image, cmap=self.cmap)
+    ave_shown = ave_ax.imshow(ave_image, cmap=cmap)
     fig.colorbar(ave_shown, ax=ave_ax)
 
     std_ax = plt.subplot(1,2,2)
     std_ax.set_title('standard deviation')
-    std_shown=std_ax.imshow(std_image, cmap=self.cmap)
+    std_shown=std_ax.imshow(std_image, cmap=cmap)
     fig.colorbar(std_shown, ax=std_ax)
     #plt.colorbar(ax=std_plot)
     #plt.colorbar())
@@ -103,7 +108,7 @@ def plot_3d_traces(self, event_num, threshold=-np.inf, block=True, fig_name=None
     energy_offset = energy_1 - energy_scale_factor * channel_1
 
     ax.view_init(elev=45, azim=45)
-    ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
+    ax.scatter(xs, ys, zs, c=es, cmap=cmap)
     cbar = fig.colorbar(ax.get_children()[0])
     max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(event_num)
     length = np.sqrt(dxy**2 + dz**2)
