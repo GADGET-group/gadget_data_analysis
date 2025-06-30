@@ -12,7 +12,7 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 1
+experiment, run, N = 'e21072', 212, 1
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
@@ -34,7 +34,7 @@ offset_endpoints = True
 
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['p1596', 'p770', 'a2153', 'p1927']#'a4434']
+particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -441,7 +441,7 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
     ax.set_title(label)
     ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%g'%np.std(ranges[mask]))
-    ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
+    #ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
     ax.legend()
 
 
