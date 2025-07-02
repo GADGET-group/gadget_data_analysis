@@ -10,10 +10,11 @@ np.set_printoptions(threshold=sys.maxsize)
 
 data = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto.npy')
 data = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
-print(np.shape(data))
+data = np.load('/egr/research-tpc/dopferjo/gadget_analysis/run_124_padgain_noveto_with_neg_constraint.npy')
+# print(np.shape(data))
 data_with_vetos = np.insert(data,[253,253,506,506,759,759],0)
 data_with_vetos = np.append(data_with_vetos,[0,0])
-print(np.shape(data_with_vetos))
+# print(np.shape(data_with_vetos))
 # print(np.std(data[data<0.0002 and data>-0.0001])/np.mean(data[data<0.0002 and data>-0.0001]))
 # print(np.std(data_with_vetos)/np.mean(data_with_vetos))
 # print(np.mean(data))
@@ -40,7 +41,8 @@ plt.title(f'Pad Gain Hist with Neg Value Constraint, μ={mean:.4e}, σ={stdev:.4
 # plt.ylabel('Counts')
 # plt.legend()
 
-plt.savefig('pad_gain_histogram_with_neg_value_constraint.png')
+plt.savefig('run_0124_pad_gain_histogram_with_neg_value_constraint.png')
+
 # uncomment below to plot the 2d pad plane gain
 pad_plane = np.genfromtxt(os.path.join(os.path.dirname(__file__),'raw_viewer/PadPlane.csv'),delimiter=',', filling_values=-1)
 
@@ -77,4 +79,4 @@ plt.colorbar()
 # plt.subplot(2,1,2)
 # plt.plot(trace)
 plt.show(block=True)
-plt.savefig('pad_gain_plane_with_neg_value_constraint.png')
+plt.savefig('run_0124_pad_gain_plane_with_neg_value_constraint.png')

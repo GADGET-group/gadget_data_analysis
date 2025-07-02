@@ -545,6 +545,9 @@ class raw_h5_file:
         max veto counts is max counts in any single time bin on a single veto pad
         dxy is the track length in the pad plane, dz is the other component of track length
         '''
+        # padgain = np.load('/user/dopfer/padgain_noveto_with_neg_constraint.npy')
+        # padgain_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
+        # padgain_with_vetos = np.append(data_with_vetos,[1,1])
         should_veto=False
         counts = 0
         pads_railed = []
@@ -556,10 +559,23 @@ class raw_h5_file:
                     max_veto_pad_counts = trace_max
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
+                # counts += np.sum(trace[trace>self.ic_counts_threshold])*padgain_with_vetos[pad]
             if trace_max >= 4095:
                 pads_railed.append(pad)
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
+
+    def ic_of_pads(self,event_num):
+        # Returns list of total integral of charge on each pad, used in select_gainmatch_events.py and as such, does not apply gain match correction
+        ic_of_pads = np.zeros(1020)
+        should_veto=False
+        counts = 0
+        pads_railed = []
+        max_veto_pad_counts = -np.inf
+        for pad, trace in zip(*self.get_pad_traces(event_num)):
+            if not pad in VETO_PADS: #don't include veto pad energy
+                ic_of_pads[pad] = np.sum(trace[trace>self.ic_counts_threshold])
+        return ic_of_pads
 
     def show_tve_histogram(self, num_e_bins, num_time_bins, fig_name=None, block=True):
         ranges, counts, angles = self.get_histogram_arrays()
@@ -673,21 +689,31 @@ class raw_h5_file:
         '''
         image = self.get_2d_image(data)
 
-        fig = plt.figure(fig_name, figsize=(6,6))
-        plt.clf()
-        plt.title(title)
-        plt.subplot(2,1,1)
-        plt.imshow(image, norm=colors.LogNorm())
-        plt.colorbar()
-        plt.subplot(2,1,2)
-        plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 6), constrained_layout=True, num=fig_name)
+        fig.suptitle(title)
+
+        # Top plot: padplane image
+        im = ax1.imshow(image, norm=colors.LogNorm())
+        fig.colorbar(im, ax=ax1)
+        ax1.set_title('Padplane Image')
+
+        # Bottom plot: sum of traces
+        if trace_dict:
+            summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
+            ax2.plot(summed_trace)
+            ax2.set_title('Summed Trace')
+            ax2.set_xlabel('Time')
+            ax2.set_ylabel('ADC Counts')
+
         def onclick(event):
             x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
-            pad = self.xy_index_to_pad[(x,y)]
+            pad = self.xy_index_to_pad.get((x, y))
             if pad in trace_dict:
                 plt.figure()
                 plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
                 plt.plot(trace_dict[pad])
+                plt.xlabel('Time')
+                plt.ylabel('ADC Counts')
                 plt.show(block=False)
 
         fig.canvas.mpl_connect('button_press_event', onclick)
@@ -700,7 +726,7 @@ class raw_h5_file:
         data = {pad:np.sum(trace_dict[pad]) for pad in trace_dict}
         should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
         length = np.sqrt(dxy**2 + dz**2)
-        title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
+        title='event %d, total counts=%d, length=%f mm,\n angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
         self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
         
 
