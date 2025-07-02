@@ -379,7 +379,6 @@ class raw_h5_file:
             angle = np.radians(90)
         return np.sqrt(dr[0]**2 + dr[1]**2), dr[2], angle
 
-    
     def determine_pad_backgrounds(self, num_background_bins=200, mode='background'):
         '''
         Assume the first num_background_bins of each pad's data only include background.

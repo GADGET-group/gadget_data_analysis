@@ -11,6 +11,7 @@ import tkinter.messagebox
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+import matplotlib.widgets
 
 import numpy as np
 from skspatial.objects import Line, Point
@@ -240,6 +241,14 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_entry_map['peak_last_allowed_bin']=self.peak_last_allowed_bin_entry
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+
+        rve_cut_frame = ttk.LabelFrame(self, text='RvE Cut')
+        ttk.Button(rve_cut_frame, text='define cut on gui', command=self.define_cut_on_gui).grid(row=0, column=0)
+        range_cut_entry = ttk.Entry(rve_cut_frame)
+        range_cut_entry.grid(row=1, column=0)
+        ttk.Button(rve_cut_frame, text='browse', command=self.browse_for_rve_cut).grid(row=1, column=1)
+        ttk.Button(rve_cut_frame, text='load', command=self.load_rve_cut).grid(row=1, column=2)
+        ttk.Button(rve_cut_frame, text='save', command=self.save_rve_cut).grid(row=1, column=3)
 
         #sync setting with GUI
         self.entry_changed(None) 
@@ -590,3 +599,28 @@ class RawEventViewerFrame(ttk.Frame):
         event_num = int(self.event_number_entry.get())
         self.data.show_traces_w_baseline_estimate(event_num, block=False)
 
+    def set_cut_polygon(self, counts, ranges):
+        pass
+
+    def define_cut_on_gui(self):
+        #open a RvE histogram with the current settings
+        bins = int(self.bins_entry.get())
+        fig, ax = plt.subplots()
+        mask = self.get_processed_event_mask()
+        plt.hist2d(self.counts[mask], self.ranges[mask], bins=(bins, bins), norm=colors.LogNorm())
+        plt.xlabel('adc counts')
+        plt.ylabel('range (mm)')
+        plt.colorbar()
+        fig.show()
+        matplotlib.widgets.PolygonSelector(ax, self.set_cut_polygon)
+
+
+
+    def browse_for_rve_cut(self):
+        pass
+    
+    def load_rve_cut(self):
+        pass
+    
+    def save_rve_cut(self):
+        pass
