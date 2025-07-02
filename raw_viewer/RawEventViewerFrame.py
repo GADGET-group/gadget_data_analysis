@@ -11,10 +11,10 @@ import tkinter.messagebox
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
-import matplotlib.widgets
 
 import numpy as np
 from skspatial.objects import Line, Point
+import scipy.fft
 
 from tqdm import tqdm
 
@@ -28,14 +28,14 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/Run_Data', title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
-            self.data = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
+            self.h5file = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
         else:
             if file_path == None:
                 file_path = tk.filedialog.askopenfilename(initialdir='.', title='Select H5 File', filetypes=[('H5', ".h5")])
-            self.data = heritage_h5_file.heritage_h5_file(file_path)
+            self.h5file = heritage_h5_file.heritage_h5_file(file_path)
         self.winfo_toplevel().title(file_path)
 
         #initialize member variables used after a run is procesed
@@ -65,7 +65,7 @@ class RawEventViewerFrame(ttk.Frame):
 
         ttk.Label(individual_event_frame, text='event #:').grid(row=0, column=0)
         self.event_number_entry = ttk.Entry(individual_event_frame)
-        self.event_number_entry.insert(0, self.data.get_event_num_bounds()[0])
+        self.event_number_entry.insert(0, self.h5file.get_event_num_bounds()[0])
         self.event_number_entry.grid(row=0, column=1)
 
         ttk.Label(individual_event_frame, text='length ic threshold:').grid(row=1, column=0)
@@ -229,6 +229,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.near_peak_window_entry.bind('<FocusOut>', self.entry_changed)
         self.near_peak_window_entry.grid(row=5, column=1)
         self.settings_entry_map['near_peak_window_width']=self.near_peak_window_entry
+
         ttk.Label(settings_frame, text='require peak between:').grid(row=6, column=0)
         self.peak_first_allowed_bin_entry, self.peak_last_allowed_bin_entry = ttk.Entry(settings_frame),ttk.Entry(settings_frame)
         self.peak_first_allowed_bin_entry.grid(row=6, column=1)
@@ -239,6 +240,20 @@ class RawEventViewerFrame(ttk.Frame):
         self.peak_last_allowed_bin_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['peak_first_allowed_bin']=self.peak_first_allowed_bin_entry
         self.settings_entry_map['peak_last_allowed_bin']=self.peak_last_allowed_bin_entry
+        
+        ttk.Label(settings_frame, text='smart: num bins away to check').grid(row=7, column = 0)
+        self.smart_bins_away_to_check_entry = ttk.Entry(settings_frame)
+        self.smart_bins_away_to_check_entry.insert(0, '3')
+        self.smart_bins_away_to_check_entry.grid(row=7, column=1)
+        self.smart_bins_away_to_check_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['smart_bins_away_to_check'] = self.smart_bins_away_to_check_entry
+        ttk.Label(settings_frame, text='smart: num points for baseline to each side of peak').grid(row=8, column=0)
+        self.smart_num_background_bins_entry = ttk.Entry(settings_frame)
+        self.smart_num_background_bins_entry.insert(0, '1')
+        self.smart_num_background_bins_entry.grid(row=8, column=1)
+        self.settings_entry_map['smart_num_background_bins'] = self.smart_num_background_bins_entry
+        self.smart_num_background_bins_entry.bind('<FocusOut>', self.entry_changed)
+
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
@@ -249,6 +264,10 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Button(rve_cut_frame, text='browse', command=self.browse_for_rve_cut).grid(row=1, column=1)
         ttk.Button(rve_cut_frame, text='load', command=self.load_rve_cut).grid(row=1, column=2)
         ttk.Button(rve_cut_frame, text='save', command=self.save_rve_cut).grid(row=1, column=3)
+        misc_tools_frame = ttk.LabelFrame(self, text='Noise Hunting Tools')
+        indiv_event_noise_button = ttk.Button(misc_tools_frame, text='individual event', command=self.single_event_noise_button_clicked)
+        indiv_event_noise_button.grid()
+        misc_tools_frame.grid()
 
         #sync setting with GUI
         self.entry_changed(None) 
@@ -306,9 +325,9 @@ class RawEventViewerFrame(ttk.Frame):
             config.write(configfile)
 
     def process_run(self):
-        directory_path, h5_fname = os.path.split(self.data.file_path)
+        directory_path, h5_fname = os.path.split(self.h5file.file_path)
         #make directory for processed data from this run, if it doesn't already exist
-        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0])
+        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0] + "_raw_viewer")
         if not os.path.isdir(directory_path):
             os.mkdir(directory_path)
         #make directory for this export
@@ -327,22 +346,22 @@ class RawEventViewerFrame(ttk.Frame):
             subprocess.run(['git', 'status'], stdout=f)
             subprocess.run(['git', 'diff'], stdout=f)
         #copy channel mapping files
-        shutil.copy(self.data.flat_lookup_file_path, directory_path)
+        shutil.copy(self.h5file.flat_lookup_file_path, directory_path)
         #save event timestamps array
-        self.timestamps = self.data.get_timestamps_array()
+        self.timestamps = self.h5file.get_timestamps_array()
         np.save(os.path.join(directory_path, 'timestamps.npy'), self.timestamps)
         #save all the other properties
-        max_veto_counts, dxy, dz, counts, angles, pads_railed_list = self.data.get_histogram_arrays()
+        max_veto_counts, dxy, dz, counts, angles, pads_railed_list = self.h5file.get_histogram_arrays()
         np.save(os.path.join(directory_path, 'counts.npy'), counts)
         np.save(os.path.join(directory_path, 'dxy.npy'), dxy)
-        np.save(os.path.join(directory_path, 'dt.npy'), dz/self.data.zscale)
+        np.save(os.path.join(directory_path, 'dt.npy'), dz/self.h5file.zscale)
         np.save(os.path.join(directory_path, 'angles.npy'), angles)
         np.save(os.path.join(directory_path, 'veto.npy'), max_veto_counts)
         with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
             #TODO: fix railed pads feature so it works with background subtraction turned on
             writer = csv.writer(f)
             writer.writerows(pads_railed_list)
-        self.max_veto_counts, self.dxys, self.dts, self.counts = max_veto_counts, dxy, dz/self.data.zscale, counts
+        self.max_veto_counts, self.dxys, self.dts, self.counts = max_veto_counts, dxy, dz/self.h5file.zscale, counts
         #do zscale dependent calcuations of range and angle
         self.entry_changed(None)
         
@@ -351,7 +370,7 @@ class RawEventViewerFrame(ttk.Frame):
         Load exported data, and update GUI to match the settings used to export the given file.
         '''
         #open file dialog in export for this run, and find which export should be opened
-        directory_path = os.path.splitext(self.data.file_path)[0]
+        directory_path = os.path.splitext(self.h5file.file_path)[0] + '_raw_viewer'
         directory_path = tk.filedialog.askdirectory (initialdir=directory_path, title='Select processed run to open')
         #load GUI settings to from export
         self.settings_file_entry.delete(0, tk.END)
@@ -369,7 +388,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
-        self.data.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
+        self.h5file.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
     
     def next(self):
         plt.close()
@@ -381,7 +400,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.show_3d_cloud()
 
     def should_veto(self, event_num):
-        max_veto_counts, dxy, dz, energy, angle, pads_railed = self.data.process_event(event_num)
+        max_veto_counts, dxy, dz, energy, angle, pads_railed = self.h5file.process_event(event_num)
         length = np.sqrt(dxy**2 + dz**2)
         if np.degrees(angle) > float(self.angle_max_entry.get()) or np.degrees(angle) < float(self.angle_min_entry.get()):
             return True
@@ -396,15 +415,26 @@ class RawEventViewerFrame(ttk.Frame):
 
     def show_raw_traces(self):
         event_number = int(self.event_number_entry.get())
-        self.data.plot_traces(event_number, block=False)
+        self.h5file.plot_traces(event_number, block=False)
 
     def show_xy_proj(self):
         event_number = int(self.event_number_entry.get())
-        self.data.show_2d_projection(event_number, False)
+        self.h5file.show_2d_projection(event_number, False)
+
+    def single_event_noise_button_clicked(self):
+        event_number = int(self.event_number_entry.get())
+        pads, traces = self.h5file.get_pad_traces(event_number)
+        background_traces = [trace[int(self.background_start_entry.get()):1+int(self.background_stop_entry.get())] for trace in traces]
+        trace_noise_dict = {pad:np.abs(scipy.fft.rfft(trace)[1:]) for pad, trace in zip(pads, background_traces)}
+        data = {pad:np.std(trace) for pad, trace in zip(pads, background_traces)}
+        self.h5file.show_padplane_image(data, trace_dict=trace_noise_dict, block=False, fig_name='Event %d Noise'%event_number)
+        #TODO: plot frequency in multiples of sampling frequency
     
     def get_processed_event_mask(self):
         '''
         Returns a mask that can be used to select events in the processed data set
+
+        TODO: calculate angles from dz and dxy
         '''
         veto_maxs = self.max_veto_counts
 
@@ -419,7 +449,7 @@ class RawEventViewerFrame(ttk.Frame):
                                     ))
 
     def check_state_changed(self):
-        self.data.remove_outliers = (self.remove_outlier_var.get() == 1)
+        self.h5file.remove_outliers = (self.remove_outlier_var.get() == 1)
 
     def get_hist_data_from_name(self, name):
         if name == 'adc counts':
@@ -472,40 +502,42 @@ class RawEventViewerFrame(ttk.Frame):
         HistogramFitFrame(new_window, data=xdata).pack()
 
     def entry_changed(self, event):
-        self.data.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
-        self.data.length_counts_threshold = float(self.length_threshold_entry.get())
-        self.data.ic_counts_threshold = float(self.energy_threshold_entry.get())
-        self.data.data_select_mode = self.mode_var.get()
-        self.data.near_peak_window_width = int(self.near_peak_window_entry.get())
-        self.data.require_peak_within=(float(self.peak_first_allowed_bin_entry.get()), float(self.peak_last_allowed_bin_entry.get()))
+        self.h5file.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
+        self.h5file.length_counts_threshold = float(self.length_threshold_entry.get())
+        self.h5file.ic_counts_threshold = float(self.energy_threshold_entry.get())
+        self.h5file.data_select_mode = self.mode_var.get()
+        self.h5file.near_peak_window_width = int(self.near_peak_window_entry.get())
+        self.h5file.require_peak_within=(float(self.peak_first_allowed_bin_entry.get()), float(self.peak_last_allowed_bin_entry.get()))
         asads = self.asads_entry.get()
         if asads.lower() == 'all':
-            self.data.asads = 'all'
+            self.h5file.asads = 'all'
         else:
-            self.data.asads = np.fromstring(asads, sep=',')
+            self.h5file.asads = np.fromstring(asads, sep=',')
         cobos = self.cobos_entry.get()
         if cobos.lower() == 'all':
-            self.data.cobos = 'all'
+            self.h5file.cobos = 'all'
         else:
-            self.data.cobos = np.fromstring(cobos, sep=',')
+            self.h5file.cobos = np.fromstring(cobos, sep=',')
         pads = self.pads_entry.get()
         if pads.lower() == 'all':
-            self.data.pads = 'all'
+            self.h5file.pads = 'all'
         else:
-            self.data.pads = np.fromstring(pads, sep=',')
-        self.data.background_subtract_mode=self.background_mode_var.get()
+            self.h5file.pads = np.fromstring(pads, sep=',')
+        self.h5file.background_subtract_mode=self.background_mode_var.get()
         r_include = int(self.include_width_entry.get())
         r_exclude = int(self.exclude_width_entry.get())
-        self.data.background_convolution_kernel = np.ones(r_include*2+1)
-        self.data.background_convolution_kernel[r_include-r_exclude:r_include+r_exclude+1] = 0
-        self.data.background_convolution_kernel /= np.sum(self.data.background_convolution_kernel)
+        self.h5file.background_convolution_kernel = np.ones(r_include*2+1)
+        self.h5file.background_convolution_kernel[r_include-r_exclude:r_include+r_exclude+1] = 0
+        self.h5file.background_convolution_kernel /= np.sum(self.h5file.background_convolution_kernel)
+        self.h5file.smart_bins_away_to_check = int(self.smart_bins_away_to_check_entry.get())
+        self.h5file.num_smart_background_ave_bins = int(self.smart_num_background_bins_entry.get())
 
         #update zscale, and recalculate range and angles with new z_scale, if it is different than before
-        zscale_old = self.data.zscale
-        self.data.zscale = float(self.zscale_entry.get())
+        zscale_old = self.h5file.zscale
+        self.h5file.zscale = float(self.zscale_entry.get())
         if type(self.dts) != type(None):
-            if  zscale_old != self.data.zscale or type(self.dzs) == type(None):
-                self.dzs = self.dts*self.data.zscale
+            if  zscale_old != self.h5file.zscale or type(self.dzs) == type(None):
+                self.dzs = self.dts*self.h5file.zscale
                 self.ranges = np.sqrt(self.dzs*self.dzs + self.dxys*self.dxys)
                 with np.errstate(divide='ignore',invalid='ignore'):#we expect some divide by zeros here
                     self.angles =  np.degrees(np.arctan(self.dxys/self.dzs))
@@ -522,7 +554,7 @@ class RawEventViewerFrame(ttk.Frame):
         length_threshold = float(self.length_threshold_entry.get())
         ic_threshold = float(self.energy_threshold_entry.get())
         #get fit line for all data above the length threshold
-        xs, ys, zs, es = self.data.get_xyze(event_number, include_veto_pads=False)
+        xs, ys, zs, es = self.h5file.get_xyze(event_number, include_veto_pads=False)
         if length_threshold != -np.inf:
             xs = xs[es>length_threshold]
             ys = ys[es>length_threshold]
@@ -541,7 +573,7 @@ class RawEventViewerFrame(ttk.Frame):
             ax.set_xlim3d(-200, 200)
             ax.set_ylim3d(-200, 200)
             ax.set_zlim3d(0, 400)
-            xs, ys, zs, es = self.data.get_xyze(event_number, threshold=length_threshold)
+            xs, ys, zs, es = self.h5file.get_xyze(event_number, threshold=length_threshold)
             ax.scatter(xs, ys, zs, c=es)
         #bin the charge, assume charge is uniformly distributed in each voxel.
         #approximate this by breaking each point into N^3 points, each with 1/N^3
@@ -549,18 +581,18 @@ class RawEventViewerFrame(ttk.Frame):
         N = 10
         xs, ys, zs, es,pads= [],[],[],[], []
         dxys = np.arange(0, 2.2, 2.2/N)
-        dzs = np.arange(0,self.data.zscale, self.data.zscale/N)
+        dzs = np.arange(0,self.h5file.zscale, self.h5file.zscale/N)
         if self.heritage_file: 
             #smear z even more because of timing jitter
             #TODO: be rigorous about this
             dzs *= 10
-        x_old, y_old, z_old, e_old = self.data.get_xyze(event_number, include_veto_pads=False)
+        x_old, y_old, z_old, e_old = self.h5file.get_xyze(event_number, include_veto_pads=False)
         x_old = x_old[e_old>ic_threshold]
         y_old = y_old[e_old>ic_threshold]
         z_old = z_old[e_old>ic_threshold]
         e_old = e_old[e_old>ic_threshold]
         for x,y,z,e in tqdm(zip(x_old, y_old, z_old, e_old)):
-            pad = self.data.get_pad_from_xy((x,y))
+            pad = self.h5file.get_pad_from_xy((x,y))
             for dx in dxys:
                 for dy in dxys:
                     for dz in dzs:
@@ -597,7 +629,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def trace_w_baseline(self):
         event_num = int(self.event_number_entry.get())
-        self.data.show_traces_w_baseline_estimate(event_num, block=False)
+        self.h5file.show_traces_w_baseline_estimate(event_num, block=False)
 
     def set_cut_polygon(self, counts, ranges):
         pass
