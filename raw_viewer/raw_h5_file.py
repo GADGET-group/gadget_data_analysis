@@ -13,6 +13,9 @@ from sklearn.cluster import DBSCAN
 
 # np.set_printoptions(threshold=sys.maxsize)
 
+# temporaty and bad way to implement pad gain correction
+PGM = True
+
 USE_GPU = True
 if USE_GPU:
     import cupy as cp
@@ -182,6 +185,22 @@ class raw_h5_file:
         if self.remove_outliers:
             pad_image = np.zeros(np.shape(self.pad_plane))
 
+        # optionally add gain matching
+        if PGM:
+            # padgain = np.load('/user/dopfer/padgain_noveto_with_neg_constraint.npy')
+            padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
+            padgain_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
+            padgain_with_vetos = np.append(padgain_with_vetos,[1,1])
+            padgain_with_vetos = 1000 * np.asarray(padgain_with_vetos, dtype=cp.float32) # keV PGM and energy calibration
+            for i in range(len(data)):
+                chnl_info = tuple(data[i][0:4])
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                # print(np.shape(data[i][FIRST_DATA_BIN:]))
+                # print(type(data[i][FIRST_DATA_BIN:]))
+                # print(type(padgain_with_vetos[pad]))
+                # print(padgain_with_vetos[pad])
+                data[i][FIRST_DATA_BIN:] = data[i][FIRST_DATA_BIN:] * padgain_with_vetos[pad]
 
         #Loop over each pad, performing background subtraction and marking the pad in the pad image
         #which will be used for outlier removal.
@@ -231,8 +250,7 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        # To save with a delimiter (e.g., comma)
-        # np.savetxt('data_comma.txt', data, delimiter=',')
+
 
         return data
 
@@ -545,9 +563,12 @@ class raw_h5_file:
         max veto counts is max counts in any single time bin on a single veto pad
         dxy is the track length in the pad plane, dz is the other component of track length
         '''
+        # THIS PAD GAIN CORRECTION IS MOVED TO THE get_data METHOD (which is called by get_pad_traces)
+        
         # padgain = np.load('/user/dopfer/padgain_noveto_with_neg_constraint.npy')
+        # padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
         # padgain_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
-        # padgain_with_vetos = np.append(data_with_vetos,[1,1])
+        # padgain_with_vetos = np.append(padgain_with_vetos,[1,1])
         should_veto=False
         counts = 0
         pads_railed = []
@@ -634,7 +655,10 @@ class raw_h5_file:
             g = (pad%512)/512*.8
             b = (pad%256)/256*.8
             if pad in VETO_PADS:
-                plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
+                if PGM:
+                    continue #skip veto pads if gain matching is enabled (these traces are not scaled so they dominate the plot if they are included)
+                else:
+                    plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
             else:
                 plt.plot(data, color=(r,g,b), label='%d'%pad)
         plt.legend(loc='upper right')
@@ -674,8 +698,15 @@ class raw_h5_file:
     def get_2d_image(self, data):
         image = np.zeros(np.shape(self.pad_plane))
         for pad in data:
-            x,y = self.pad_to_xy_index[pad]
-            image[y,x] = data[pad]
+            if PGM:
+                if pad in VETO_PADS:
+                    continue
+                else:
+                    x,y = self.pad_to_xy_index[pad]
+                    image[y,x] = data[pad]
+            else:
+                x,y = self.pad_to_xy_index[pad]
+                image[y,x] = data[pad]
         #image[image<0]=0
         return image
 
@@ -699,7 +730,10 @@ class raw_h5_file:
 
         # Bottom plot: sum of traces
         if trace_dict:
-            summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
+            if PGM:
+                summed_trace = np.sum([trace_dict[pad] for pad in trace_dict if pad not in VETO_PADS], axis=0)
+            else:
+                summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
             ax2.plot(summed_trace)
             ax2.set_title('Summed Trace')
             ax2.set_xlabel('Time')
