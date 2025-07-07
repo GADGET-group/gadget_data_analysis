@@ -11,6 +11,8 @@ import tkinter.messagebox
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+import matplotlib.widgets
+import matplotlib.path
 
 import numpy as np
 from skspatial.objects import Line, Point
@@ -259,11 +261,18 @@ class RawEventViewerFrame(ttk.Frame):
 
         rve_cut_frame = ttk.LabelFrame(self, text='RvE Cut')
         ttk.Button(rve_cut_frame, text='define cut on gui', command=self.define_cut_on_gui).grid(row=0, column=0)
+        self.enable_rve_cut_var = tk.IntVar()
+        enable_rve_check = ttk.Checkbutton(rve_cut_frame, text='enable rve cut', variable=self.enable_rve_cut_var, 
+                                                         command=self.check_state_changed)
+        enable_rve_check.grid(row=0, column=1)
         range_cut_entry = ttk.Entry(rve_cut_frame)
         range_cut_entry.grid(row=1, column=0)
         ttk.Button(rve_cut_frame, text='browse', command=self.browse_for_rve_cut).grid(row=1, column=1)
         ttk.Button(rve_cut_frame, text='load', command=self.load_rve_cut).grid(row=1, column=2)
         ttk.Button(rve_cut_frame, text='save', command=self.save_rve_cut).grid(row=1, column=3)
+        rve_cut_frame.grid()
+
+
         misc_tools_frame = ttk.LabelFrame(self, text='Noise Hunting Tools')
         indiv_event_noise_button = ttk.Button(misc_tools_frame, text='individual event', command=self.single_event_noise_button_clicked)
         indiv_event_noise_button.grid()
@@ -439,7 +448,7 @@ class RawEventViewerFrame(ttk.Frame):
         veto_maxs = self.max_veto_counts
 
         #return veto_maxs < float(self.veto_threshold_entry.get())
-        return np.logical_and.reduce((veto_maxs < float(self.veto_threshold_entry.get()),
+        to_return =  np.logical_and.reduce((veto_maxs < float(self.veto_threshold_entry.get()),
                                       self.angles < float(self.angle_max_entry.get()),
                                       self.angles > float(self.angle_min_entry.get()),
                                       self.ranges > float(self.range_min_entry.get()),
@@ -447,6 +456,9 @@ class RawEventViewerFrame(ttk.Frame):
                                       self.counts < float(self.ic_max_entry.get()),
                                       self.counts > float(self.ic_min_entry.get())
                                     ))
+        if self.enable_rve_cut_var.get():
+            to_return &= self.rve_cut_select_mask
+        return to_return
 
     def check_state_changed(self):
         self.h5file.remove_outliers = (self.remove_outlier_var.get() == 1)
@@ -631,21 +643,28 @@ class RawEventViewerFrame(ttk.Frame):
         event_num = int(self.event_number_entry.get())
         self.h5file.show_traces_w_baseline_estimate(event_num, block=False)
 
-    def set_cut_polygon(self, counts, ranges):
-        pass
+    def set_cut_polygon(self, verticies):
+        '''
+        verticies: (counts, ranges)
+        '''
+        print(verticies)
+        self.cut_verticies = verticies
+        selected_path = matplotlib.path.Path(self.cut_verticies)
+        rve_points = np.vstack((self.counts, self.ranges)).transpose()
+        self.rve_cut_select_mask = selected_path.contains_points(rve_points)
+
+
 
     def define_cut_on_gui(self):
         #open a RvE histogram with the current settings
         bins = int(self.bins_entry.get())
         fig, ax = plt.subplots()
         mask = self.get_processed_event_mask()
-        plt.hist2d(self.counts[mask], self.ranges[mask], bins=(bins, bins), norm=colors.LogNorm())
-        plt.xlabel('adc counts')
-        plt.ylabel('range (mm)')
-        plt.colorbar()
+        ax.hist2d(self.counts[mask], self.ranges[mask], bins=(bins, bins), norm=colors.LogNorm())
+        ax.set_xlabel('adc counts')
+        ax.set_ylabel('range (mm)')
+        self.poly_selector = matplotlib.widgets.PolygonSelector(ax,self.set_cut_polygon)
         fig.show()
-        matplotlib.widgets.PolygonSelector(ax, self.set_cut_polygon)
-
 
 
     def browse_for_rve_cut(self):
