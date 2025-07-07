@@ -265,8 +265,8 @@ class RawEventViewerFrame(ttk.Frame):
         enable_rve_check = ttk.Checkbutton(rve_cut_frame, text='enable rve cut', variable=self.enable_rve_cut_var, 
                                                          command=self.check_state_changed)
         enable_rve_check.grid(row=0, column=1)
-        range_cut_entry = ttk.Entry(rve_cut_frame)
-        range_cut_entry.grid(row=1, column=0)
+        self.rve_cut_entry = ttk.Entry(rve_cut_frame)
+        self.rve_cut_entry.grid(row=1, column=0)
         ttk.Button(rve_cut_frame, text='browse', command=self.browse_for_rve_cut).grid(row=1, column=1)
         ttk.Button(rve_cut_frame, text='load', command=self.load_rve_cut).grid(row=1, column=2)
         ttk.Button(rve_cut_frame, text='save', command=self.save_rve_cut).grid(row=1, column=3)
@@ -648,8 +648,8 @@ class RawEventViewerFrame(ttk.Frame):
         verticies: (counts, ranges)
         '''
         print(verticies)
-        self.cut_verticies = verticies
-        selected_path = matplotlib.path.Path(self.cut_verticies)
+        self.rve_cut_verticies = verticies
+        selected_path = matplotlib.path.Path(self.rve_cut_verticies)
         rve_points = np.vstack((self.counts, self.ranges)).transpose()
         self.rve_cut_select_mask = selected_path.contains_points(rve_points)
 
@@ -668,10 +668,15 @@ class RawEventViewerFrame(ttk.Frame):
 
 
     def browse_for_rve_cut(self):
-        pass
+        file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/rve_cuts/', title='select RvE cut', filetypes=([("csv", ".csv")]))
+        self.rve_cut_entry.delete(0, tk.END)
+        self.rve_cut_entry.insert(0, file_path)
     
     def load_rve_cut(self):
-        pass
+        filepath = self.rve_cut_entry.get()
+        data =  np.loadtxt(filepath, delimiter=',')
+        self.set_cut_polygon(data)
     
     def save_rve_cut(self):
-        pass
+        filepath = self.rve_cut_entry.get()
+        np.savetxt(filepath, self.rve_cut_verticies, delimiter=",")
