@@ -201,15 +201,17 @@ if __name__ == '__main__':
             sigma_z_guess = 2.5      
 
         if event_num == 1762:
-            E_prior.mu = 12
-            Ea_frac_guess = 0.5
-            best_point = np.array([0,-1,25])
-            theta_1 = 1.07
-            phi_1 = 3.0
-            theta_2 = 1.9
-            phi_2 = 6.1
+            E1 = 6
+            E2 = 6
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([0,0,26])
+            theta_1 = 2.19
+            phi_1 = 0.0
+            theta_2 = 0.9608
+            phi_2 = 3.1415
             sigma_xy_guess = 0.5
-            sigma_z_guess = 2.0
+            sigma_z_guess = 3.0
             
         print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta_1, phi_1,theta_2,phi_2,sigma_xy_guess,sigma_z_guess))
 
