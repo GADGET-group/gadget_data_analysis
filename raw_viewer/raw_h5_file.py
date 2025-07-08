@@ -1,7 +1,6 @@
 import os
 
 import numpy as np
-import scipy.spatial
 import scipy.spatial.distance
 import h5py
 import matplotlib.pylab as plt
@@ -9,14 +8,17 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
-import skimage.measure
+USE_GPU = True
+if USE_GPU:
+    import cupy as cp
+    import cupyx.scipy.special as cpspecial
+else:
+    cp = np
+    import scipy.special as cpspecial
+    cp.asnumpy = lambda x: x
 
-'''
-Notes for tomorrow:
---make main_gui.py work with recent updates
---background subtraction, outlier removal, PCA, RvE plot
---are some pads more noisy than other? Are they all on one cobo or ASAD board or AGET chip?
-'''
+
+import skimage.measure
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
@@ -42,16 +44,19 @@ class raw_h5_file:
         self.chnls_to_pad = {} #maps tuples of (asad, aget, channel) to pad number
         self.chnls_to_xy_coord = {} #maps tuples of (asad, aget, channel) to (x,y) coordinates in mm
         self.chnls_to_xy_index = {}
+        self.pad_to_chnl = {}
         for line in self.flat_lookup:
             chnls = tuple(line[0:4])
             pad = line[4]
             self.chnls_to_pad[chnls] = pad
+            self.pad_to_chnl[pad] = chnls
             self.chnls_to_xy_coord[chnls] = self.padxy[pad]
             self.chnls_to_xy_index[chnls] = self.pad_to_xy_index[pad]
         #round xy to nearest 10nths place to avoid issues with different floating point formats
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
         self.xy_to_chnls = {tuple(np.round(self.chnls_to_xy_coord[chnls], 1)):chnls 
                             for chnls in self.chnls_to_xy_coord}
+        self.xy_index_to_pad = {self.pad_to_xy_index[pad]:pad for pad in self.pad_to_xy_index}
         
         self.zscale = zscale #conversion factor from time bin to mm
 
@@ -76,13 +81,13 @@ class raw_h5_file:
                     (0.75, 0.0, 0.0),
                     (1.0, 0.0, 0.0))
             }
-        # cdict['alpha'] = ((0.0, 0.0, 0.0),
-        #                 (0.3,0.2, 0.2),
-        #                 (0.8,1.0, 1.0),
-        #                 (1.0, 1.0, 1.0))
+        cdict['alpha'] = ((0.0, 0.0, 0.0),
+                        (0.3,0.2, 0.2),
+                        (0.8,1.0, 1.0),
+                        (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
-        self.background_subtract_mode = 'none' #none, fixed window, or convolution
+        self.background_subtract_mode = 'none' #none, fixed window, smart, or convolution
         self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
@@ -94,6 +99,10 @@ class raw_h5_file:
         #'near peak' will only use data within some window of the peak of each trace
         self.data_select_mode = 'all data' 
         self.near_peak_window_width = 100 #+/- time bins to include
+        #number of bins past the start/end of trace to use when computing baseline
+        self.num_smart_background_ave_bins = 5 
+        #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
+        self.smart_bins_away_to_check = 3
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -154,13 +163,14 @@ class raw_h5_file:
             to_copy = []
             for i, line in enumerate(data):
                 chnl_info =  tuple(line[0:4])
-                cobo, asad, channel, *rest = chnl_info
-                pad = self.chnls_to_pad[chnl_info]
-                if (self.cobos == 'all' or cobo in self.cobos) and \
-                        (self.asads == 'all' or asad in self.asads) and \
-                        (self.pads == 'all' or pad in self.pads):
-                    to_copy.append(i)
-            data = np.array(data[to_copy], dtype=float)
+                cobo, asad, *rest = chnl_info
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                    if (self.cobos == 'all' or cobo in self.cobos) and \
+                            (self.asads == 'all' or asad in self.asads) and \
+                            (self.pads == 'all' or pad in self.pads):
+                        to_copy.append(i)
+            data = np.array(data[to_copy], dtype=float, copy=True)
 
         else:
             data = np.array(data, copy=True, dtype=float)
@@ -217,6 +227,7 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
+        #for smart baseline subtraction, zeroing traces outside thepeak window is handled by baseline subtraction
         
         return data
 
@@ -237,11 +248,14 @@ class raw_h5_file:
             return np.zeros(len(trace))
         elif self.background_subtract_mode == 'smart':
             peak_index = np.argmax(trace)
-            #find  start of the peak, defined as where the a bin near_peak_window_width away
+            #zero traces with peaks outside specified region by returing the trace as the baseline
+            if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
+                return trace
+            #find  start of the peak, defined as where the going bin smart_bins_away_to_check
             #is no longer at least ic_counts_threshold below the current bin
             i = peak_index
             while i>0:
-                j = max(0, i - self.near_peak_window_width)
+                j = max(0, i - self.smart_bins_away_to_check)
                 if trace[i] < trace[j] + self.ic_counts_threshold:
                     break
                 i -= 1
@@ -249,25 +263,27 @@ class raw_h5_file:
             #find end
             i = peak_index
             while i < len(trace) - 1:
-                j = min(len(trace) - 1, i + self.near_peak_window_width)
+                j = min(len(trace) - 1, i + self.smart_bins_away_to_check)
                 if trace[i] < trace[j] + self.ic_counts_threshold:
                     break
                 i += 1
             peak_end = i
-            #fit a line through the points just outside the peak region
-            xs = np.concatenate([np.arange(max(0, peak_start - self.near_peak_window_width), peak_start),
-                                           np.arange(peak_end, min(peak_end + self.near_peak_window_width, len(trace)))])
+            #fit a line through the points just outside the peak regio
+            xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
+                                           np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            slope, offset = np.polyfit(xs, ys, 1)
+            #slope, offset = np.polyfit(xs, ys, 1)
+            offset = np.mean(ys)
             #baseline will be the trace except in the peak region,
             #so that everything away from the peak is zero'd out
             baseline = np.array(trace, copy=True)
-            for i in range(peak_start, peak_end+1):
-                baseline[i] = slope*i + offset
+            # for i in range(peak_start, peak_end+1):
+            #     baseline[i] = slope*i + offset
+            baseline[np.arange(peak_start, peak_end+1)] = offset
             return baseline
         assert False #invalid mode
 
-    def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=True):
+    def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
         Returns: xs, ys, ts, es
                  Where each of these is an array s.t. each "pixel" in the in the raw TPC data is represented.
@@ -308,12 +324,48 @@ class raw_h5_file:
             es = es[es>threshold]
         return xs, ys, ts, es
     
-    def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=True):
+    def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
         return x,y, t*self.zscale ,e
+    
+    def get_track_axis(self, event=None, threshold=None, return_all_svd_results=False, xyze=None, return_np=True):
+        '''
+        Uses SVD on all points above some threshold to get track direction.
+        Returns point, unit vector in track direction.
+        If threshold==None, uses track length ic threshold.
+        
+        Either event number must be passed, or xyze which contans tuple of cupy arrays of 
+        xyze points. This can be useful to avoid transfering data to GPU twice
+
+        return_np specifies if data should be moved back to cpu from gpu 
+        '''
+        if threshold == None:
+            threshold = self.length_counts_threshold
+        if type(event) != type(None):
+            x,y,z,e = self.get_xyze(event, threshold, False)
+            x, y,z,e = cp.array(x), cp.array(y), cp.array(z), cp.array(e)
+        else:
+            x, y, z, e = xyze
+        points = cp.concatenate((x[:, cp.newaxis], y[:, cp.newaxis], z[:, cp.newaxis]), axis=1)
+        points_mean = points.mean(axis=0)
+        try:
+            uu, dd, vv = cp.linalg.svd(points - points_mean)
+        except Exception as e:
+            print('caught exceptions while trying to perform SVD of event %d'%event)
+            print(e)
+            uu, vv, dd = None
+
+        if return_np:
+            points_mean = cp.asnumpy(points_mean)
+            uu, dd, vv = cp.asnumpy(uu), cp.asnumpy(dd), cp.asnumpy(vv)
+        if return_all_svd_results:
+            return points_mean, uu, dd, vv
+        else:
+            return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
+
     
     def get_event_num_bounds(self):
         #returns first event number, last event number
@@ -321,7 +373,7 @@ class raw_h5_file:
         #return int(self.h5_file['meta']['meta'][0]), np.min((int(self.h5_file['meta']['meta'][2]), int(self.h5_file['meta']['meta'][0])+10000))#TODO
 
 
-    def get_pad_traces(self, event_number):
+    def get_pad_traces(self, event_number, include_veto_pads=True):
         '''
         returns [pads which fired], [[time series data for first pad], [time series data for 2nd pad], ...]
         Pad numbers are determined from AGET, COBO, and channel number, rather than the pad number written during
@@ -336,106 +388,50 @@ class raw_h5_file:
             else:
                 #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                 continue
-            pads.append(pad)
-            pad_datas.append(line[FIRST_DATA_BIN:])
+            if include_veto_pads or pad not in VETO_PADS:
+                pads.append(pad)
+                pad_datas.append(line[FIRST_DATA_BIN:])
         return pads, pad_datas
     
     def get_num_pads_fired(self, event_number):
         event = self.get_data(event_number)
         return len(event)
     
-    def get_track_length_angle(self, event_number):
+    def get_track_length_angle(self, event_number, return_np=True):
         '''
-        1. Remove all points which are less than threshold sigma above background
-        2. Find max distance between any of the two remaining points.
-        Should replace this with something more robust in the future. This will NOT
-        well work if outlier removal and background subtraction haven't been performed.
+        1. Determin track principle axis, and use this to get azimuthal angle
+        2. Find point furthest along this axis, in each direction
 
         Returns: length, angle from z-axis in radians
         '''
         xs, ys, zs, es = self.get_xyze(event_number, self.length_counts_threshold, include_veto_pads=False)
-        if len(xs) == 0:
+        if len(xs) < 2:
             return 0, 0, 0
-        points = np.vstack((xs, ys, zs)).T
-        #print(points)
-        #find max distance using this algorithm
-        #https://stackoverflow.com/questions/31667070/max-distance-between-2-points-in-a-data-set-and-identifying-the-points
-        try:
-            hull = scipy.spatial.ConvexHull(points)
-            points = points[hull.vertices,:]
-        except: #qhull will fail on colinear points, so just brute force if that's the case
-            pass
-        #find the two most distant points
-        hdist = scipy.spatial.distance.cdist(points, points, metric='euclidean')
-        indices = np.unravel_index(np.argmax(hdist, axis=None), hdist.shape)
-        p1 = points[indices[0]]
-        p2 = points[indices[1]]
-        #print(p1, p2)
-        dist = hdist[indices]
-        dr = p1-p2
-        if dr[2] != 0:
-            angle = np.abs(np.arctan(np.sqrt(dr[0]**2 + dr[1]**2)/dr[2]))
+        #move points to GPU
+        xs, ys, zs, es = cp.array(xs), cp.array(ys), cp.array(zs), cp.array(es)
+        track_center, vv = self.get_track_axis(xyze=(xs, ys, zs, es), return_np=False)
+        if type(vv) == type(None):
+            dxy = dz = 0
+            angle = np.inf
         else:
-            angle = np.radians(90)
-        return np.sqrt(dr[0]**2 + dr[1]**2), dr[2], angle
+            track_direction = vv[0]/cp.sqrt(cp.sum(vv[0]*vv[0]))
+            angle = cp.arctan2(np.sqrt(track_direction[0]**2 + track_direction[1]**2),cp.abs(track_direction[2]))
 
+            points = cp.concatenate((xs[:, cp.newaxis], 
+                        ys[:, cp.newaxis], 
+                        zs[:, cp.newaxis]), 
+                        axis=1)
+            rbar = points - track_center
+            rdotv = cp.dot(rbar, track_direction)
+            first_point = points[cp.argmin(rdotv)]
+            last_point = points[cp.argmax(rdotv)]
+            dr = last_point - first_point
+            dxy, dz = cp.sqrt(dr[0]**2 + dr[1]**2), dr[2]
+            if return_np:
+                dxy, dz, angle = cp.asnumpy(dxy), cp.asnumpy(dz), cp.asnumpy(angle)
+        return dxy, dz, angle
     
-    def determine_pad_backgrounds(self, num_background_bins=200, mode='background'):
-        '''
-        Assume the first num_background_bins of each pad's data only include background.
-        Determine average value of this pad and stddev across all events in which the pad fired.
-        Store this information in a dictionairy member variable.
-
-        Pad background will be stored in self.pad_backgrounds, which is a dictionairy indexed by pad
-        number which stores (background average, background standard deviation) pairs.
-        
-        Mode = background: determine average number of counts in background region
-        Mode = average: determine average number of counts above background (if background subtraction is turned on)
-        '''
-        first, last = self.get_event_num_bounds()
-
-        #compute average
-        running_averages = {}
-        for event_num in range(first, last+1):
-            if mode == 'background':
-                self.h5_file['get']['evt%d_data'%event_num]
-            elif mode == 'average':
-                event_data = self.get_data(event_num)#
-            for line in event_data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
-                if pad not in running_averages:
-                    running_averages[pad] = (0,0) #running everage, events processed
-                if mode == 'background':
-                    ave_this = np.average(line[FIRST_DATA_BIN+self.num_background_bins[0]:self.num_background_bins[1]+FIRST_DATA_BIN])
-                elif mode == 'average':
-                    ave_this = np.average(line[FIRST_DATA_BIN:511+FIRST_DATA_BIN])
-                ave_last, n = running_averages[pad]
-                running_averages[pad] = ((n*ave_last + ave_this)/(n+1), n+1)
-        #compute standard deviation
-        running_stddev = {}
-        for event_num in range(first, last+1):
-            event_data = self.h5_file['get']['evt%d_data'%event_num]
-            for line in event_data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
-                if pad not in running_stddev:
-                    running_stddev[pad] = (0,0)
-                std_this = np.std(line[FIRST_DATA_BIN:num_background_bins+FIRST_DATA_BIN])
-                std_last, n = running_stddev[pad]
-                running_stddev[pad] = ((n*std_last + std_this)/(n+1), n+1)
-        self.pad_backgrounds = {}
-        for pad in running_averages:
-            self.pad_backgrounds[pad] = (running_averages[pad][0], running_stddev[pad][0])
-    
+   
     def get_histogram_arrays(self):
         max_veto_counts_list, pads_railed_list, angle_hist, counts_hist, dxy_hist, dz_hist = [], [], [], [], [], []
         first, last = self.get_event_num_bounds()
@@ -455,6 +451,7 @@ class raw_h5_file:
         Returns: max veto counts, dxy, dz, energy, angle, pads_railed
         max veto counts is max counts in any single time bin on a single veto pad
         dxy is the track length in the pad plane, dz is the other component of track length
+        TODO: currently pads_railed only works if baseline subtraction is off. Fix this
         '''
         should_veto=False
         counts = 0
@@ -545,32 +542,56 @@ class raw_h5_file:
                                                                                                np.degrees(angle), len(pads_railed)))
         plt.show(block=block)
     
-    def show_2d_projection(self, event_number, block=True, fig_name=None):
-        data = self.get_data(event_number)
+    def get_2d_image(self, data):
+        #data should be a dictionary of numbers to put in the image, indexed by pad
         image = np.zeros(np.shape(self.pad_plane))
-        for line in data:
-            chnl_info = tuple(line[0:4])
-            if chnl_info not in self.chnls_to_pad:
-                print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                continue
-            pad = self.chnls_to_pad[chnl_info]
+        for pad in data:
             x,y = self.pad_to_xy_index[pad]
-            image[x,y] = np.sum(line[FIRST_DATA_BIN:])
-        image[image<0]=0
-        trace = np.sum(data[:,FIRST_DATA_BIN:],0)
-        
+            image[y,x] = data[pad]
+        #image[image<0]=0
+        return image
+
+    def show_padplane_image(self, data, trace_dict=None, block=False, fig_name=None, title=''):
+        '''
+        Shows a figure with pad plane displaying "data", above the sum of all "traces" (if not None).
+        Clicking on a pad will show the corresponding trace 
+        data: Dictionary of pixel brightnesses indexed by pad number
+        traces: optional. If passed, sould contain trace to dispay when a pad is clicked. Summed version of this 
+                will be shown below the pad plane.
+        '''
+        image = self.get_2d_image(data)
 
         fig = plt.figure(fig_name, figsize=(6,6))
         plt.clf()
-        should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
-        length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto))
+        plt.title(title)
         plt.subplot(2,1,1)
         plt.imshow(image, norm=colors.LogNorm())
         plt.colorbar()
         plt.subplot(2,1,2)
-        plt.plot(trace)
+        if type(trace_dict) != type(None):
+            plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
+            def onclick(event):
+                x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
+                pad = self.xy_index_to_pad[(x,y)]
+                if pad in trace_dict:
+                    plt.figure()
+                    plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
+                    plt.plot(trace_dict[pad])
+                    plt.show(block=False)
+
+            fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
+
+
+    def show_2d_projection(self, event_number, block=True, fig_name=None):
+        pads, traces = self.get_pad_traces(event_number)
+        trace_dict = {pad: trace for pad, trace in zip(pads, traces)}
+        data = {pad:np.sum(trace_dict[pad]) for pad in trace_dict}
+        should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
+        length = np.sqrt(dxy**2 + dz**2)
+        title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
+        self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+        
 
     def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
         '''
