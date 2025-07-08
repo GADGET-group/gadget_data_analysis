@@ -191,7 +191,7 @@ class raw_h5_file:
             padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
             padgain_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
             padgain_with_vetos = np.append(padgain_with_vetos,[1,1])
-            padgain_with_vetos = 1000 * np.asarray(padgain_with_vetos, dtype=cp.float32) # keV PGM and energy calibration
+            padgain_with_vetos = 1000000 * np.asarray(padgain_with_vetos, dtype=cp.float32) # keV PGM and energy calibration
             for i in range(len(data)):
                 chnl_info = tuple(data[i][0:4])
                 if chnl_info in self.chnls_to_pad:
