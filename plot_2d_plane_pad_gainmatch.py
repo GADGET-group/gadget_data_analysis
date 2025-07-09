@@ -10,7 +10,7 @@ np.set_printoptions(threshold=sys.maxsize)
 
 data = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto.npy')
 data = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
-# data = np.load('/egr/research-tpc/dopferjo/gadget_analysis/run_124_padgain_noveto_with_neg_constraint.npy')
+data = np.load('/egr/research-tpc/dopferjo/gadget_analysis/better_guess_run_124_proton_padgain_noveto_with_neg_constraint.npy')
 # print(np.shape(data))
 data_with_vetos = np.insert(data,[253,253,506,506,759,759],0)
 data_with_vetos = np.append(data_with_vetos,[0,0])

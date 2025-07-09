@@ -14,7 +14,7 @@ from sklearn.cluster import DBSCAN
 # np.set_printoptions(threshold=sys.maxsize)
 
 # temporaty and bad way to implement pad gain correction
-PGM = True
+PGM = False
 
 USE_GPU = True
 if USE_GPU:

@@ -73,7 +73,7 @@ def to_minimize(g):
 # print(time.time()-tstart)
 
 
-init_guess = 1/10000
+init_guess = 0.000013904
 
 counter = 0
 def display_progress(intermediate_result):
@@ -88,7 +88,7 @@ def display_progress(intermediate_result):
 
 bnds = ((0, None),) * npads
 res = opt.minimize(to_minimize, init_guess*np.ones(npads), callback=display_progress, bounds=bnds)
-np.save('run_124_proton_padgain_noveto_with_neg_constraint.npy',res.x)
+np.save('better_guess_run_124_proton_padgain_noveto_with_neg_constraint.npy',res.x)
 
 
 # Current minimization: 4.544050e+16
