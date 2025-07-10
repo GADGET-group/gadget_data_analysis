@@ -1,7 +1,9 @@
 import os
+import pickle
 
 import numpy as np
 import scipy.spatial.distance
+import scipy.optimize as opt
 import h5py
 import matplotlib.pylab as plt
 import matplotlib.colors as colors
@@ -23,6 +25,7 @@ import skimage.measure
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
+NUM_PADS = 1024
 
 class raw_h5_file:
     def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
@@ -105,6 +108,9 @@ class raw_h5_file:
         self.smart_bins_away_to_check = 3
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
+
+        self.apply_gain_match = False
+        self.pad_gains=np.ones(NUM_PADS)
 
         #cobo and asad selction. Can be "all" or a list of ints
         self.asads='all'
@@ -229,6 +235,15 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
         #for smart baseline subtraction, zeroing traces outside thepeak window is handled by baseline subtraction
         
+        #pad gain match is applied after baseline subtraction because a number of baseline subtraction
+        #parameters are mostly driven by noise, which we don't expect to strongly correlate with pad gain
+        if self.apply_gain_match:
+            for line in data:
+                chnl_info = tuple(line[0:4])
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                    line *= self.pad_gains[pad]  
+
         return data
 
     def calculate_background(self, trace):
@@ -468,6 +483,36 @@ class raw_h5_file:
                 pads_railed.append(pad)
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
+    
+    def do_gain_match(self, event_numbers:list, save_results:bool, save_path=''):
+        N = len(event_numbers)
+        print('gain matching using %d events'%N)
+        print('getting list of energy per pad for each event')
+        pad_counts = []
+        for event in tqdm.tqdm(event_numbers):
+            pads, traces = self.get_pad_traces(event, include_veto_pads=False)
+            pad_counts.append(np.zeros(NUM_PADS))
+            for pad, trace in zip(pads, traces):
+                pad_counts[-1][pad] = np.sum(trace)
+        pad_counts = np.array(pad_counts)
+        
+        event_adc_counts = np.sum(pad_counts, axis=1)
+        print('average event adc counts:', np.mean(event_adc_counts))
+        pad_counts /= np.mean(event_adc_counts)
+        print('performing minimization')
+        def objective_function(gains):
+            return np.sum((np.einsum('ij,j->i', pad_counts, gains)-1)**2)
+        def callback(intermediate_result):
+            print(intermediate_result)
+        res = opt.minimize(objective_function, np.ones(N), method='BFGS', callback=callback)
+        print(res)
+        self.pad_gains = res.x
+        if save_results:
+            res.events_used = event_numbers
+            with open(save_path, 'wb') as f:
+                pickle.dump(res, f)
+
+
 
     def show_pad_backgrounds(self, fig_name=None, block=True):
         ave_image = np.zeros(np.shape(self.pad_plane))

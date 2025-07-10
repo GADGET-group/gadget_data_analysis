@@ -56,55 +56,70 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Button(settings_frame, text='Browse', command=self.browse_for_settings_file).grid(row=0, column=2)
         ttk.Button(settings_frame, text='Load', command=self.load_settings_file).grid(row=0, column=3)
         ttk.Button(settings_frame, text='Save Config File', command=self.save_settings_file).grid(row=1, column=0, columnspan=3)
-        settings_frame.grid()
-
         ttk.Button(settings_frame, text='process run', command=self.process_run).grid(row=3, column=0)
         ttk.Button(settings_frame, text='load processed run', command=self.load_processed_run).grid(row=3, column=1)
+        settings_frame.grid()
 
+        energy_cal_frame = ttk.LabelFrame(self, text="energy calibration")
+        ttk.Label(energy_cal_frame, text="energy calibration type:").grid(row=0, column=0)
+        ttk.Label(energy_cal_frame, text="adc counts").grid(row=1, column=1)
+        ttk.Label(energy_cal_frame, text="MeV").grid(row=1, column=2)
+        ttk.Label(energy_cal_frame, text="point 1").grid(row=2, column=0)
+        self.point1_adc_counts_entry = ttk.Entry(energy_cal_frame)
+        self.point1_adc_counts_entry.grid(row=2, column=1)
+        self.point1_MeV_entry = ttk.Entry(energy_cal_frame)
+        self.point1_MeV_entry.grid(row=2, column=2)
+        ttk.Label(energy_cal_frame, text="point 2").grid(row=3, column=0)
+        self.point2_adc_counts_entry = ttk.Entry(energy_cal_frame)
+        self.point2_adc_counts_entry.grid(row=3, column=1)
+        self.point2_MeV_entry = ttk.Entry(energy_cal_frame)
+        self.point2_MeV_entry.grid(row=3, column=2)
+        ttk.Button(energy_cal_frame, text="apply energy calibration", command=self.apply_energy_cal).grid(row=4, column=0)
+        energy_cal_frame.grid()
+
+        gain_match_frame = ttk.LabelFrame(self, text="pad gain match")
+        self.gain_match_label = ttk.Label(gain_match_frame, text="no gain match loaded")
+        self.gain_match_label.grid(row=0, column=0)
+        #do gain match will gain match on all currently selected events and save gain for each pad
+        #load gain match will load these gains for viewing events, but RvE histogram won't update until run is reprocessed
+        ttk.Button(gain_match_frame, text="do gain match", command=self.do_gain_match).grid(row=1, column=0)
+        ttk.Button(gain_match_frame, text="load gain match", command=self.load_gain_match).grid(row=1, column=1)
+        ttk.Button(gain_match_frame, text='unload gain match', command=self.unload_gain_match).grid(row=1, column=2)
+        gain_match_frame.grid()
 
         #widget setup in individual_event_Frame
         individual_event_frame = ttk.LabelFrame(self, text='Individual Events')
-
         ttk.Label(individual_event_frame, text='event #:').grid(row=0, column=0)
         self.event_number_entry = ttk.Entry(individual_event_frame)
         self.event_number_entry.insert(0, self.h5file.get_event_num_bounds()[0])
         self.event_number_entry.grid(row=0, column=1)
-
         ttk.Label(individual_event_frame, text='length ic threshold:').grid(row=1, column=0)
         self.length_threshold_entry = ttk.Entry(individual_event_frame)
         self.length_threshold_entry.insert(0, 100)
         self.length_threshold_entry.grid(row=1, column=1)
         self.length_threshold_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['length_ic_threshold']=self.length_threshold_entry
-
         ttk.Label(individual_event_frame, text='energy ic threshold:').grid(row=1, column=2)
         self.energy_threshold_entry = ttk.Entry(individual_event_frame)
         self.energy_threshold_entry.insert(0, 100)
         self.energy_threshold_entry.grid(row=1, column=3)
         self.energy_threshold_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['energy_ic_threshold']=self.energy_threshold_entry
-
         show_3d_button = ttk.Button(individual_event_frame, text='show', command = self.show_3d_cloud)
         show_3d_button.grid(row=2, column=0)
-
         next_button = ttk.Button(individual_event_frame, text='next', command=self.next)
         next_button.grid(row=2, column=1)
-
         show_2D_button = ttk.Button(individual_event_frame, text='x-y proj', command=self.show_xy_proj)
         show_2D_button.grid(row=3, column=0)
         show_traces_button = ttk.Button(individual_event_frame, text='pad traces', command=self.show_raw_traces)
         show_traces_button.grid(row=3, column=1)
-
         ttk.Button(individual_event_frame, text='trace w baseline', command=self.trace_w_baseline).grid(row=3, column=2)
         ttk.Button(individual_event_frame, text='1D proj on trac axis', command=self.project_to_principle_axis).grid(row=3, column=3)
-        
-
         ttk.Label(individual_event_frame, text='view threshold:').grid(row=4, column=0)
         self.view_threshold_entry = ttk.Entry(individual_event_frame)
         self.view_threshold_entry.insert(0, '100')
         self.view_threshold_entry.grid(row=4, column=1)
         self.settings_entry_map['view_threshold']=self.view_threshold_entry
-
         ttk.Label(individual_event_frame, text='use data from CoBos:').grid(row=5, column=0)
         self.cobos_entry = ttk.Entry(individual_event_frame)
         self.cobos_entry.insert(0, 'all')
@@ -123,7 +138,6 @@ class RawEventViewerFrame(ttk.Frame):
         self.pads_entry.grid(row=6, column=1)
         self.pads_entry.bind('<FocusOut>', self.entry_changed)
         self.settings_entry_map['include_pads']=self.pads_entry
-
         individual_event_frame.grid()
         
         hist_frame = ttk.LabelFrame(self, text='Histograms')
@@ -394,6 +408,18 @@ class RawEventViewerFrame(ttk.Frame):
         self.timestamps = np.load(os.path.join(directory_path, 'timestamps.npy'))
         #do zscale dependent calcuations of range and angle
         self.entry_changed(None)
+
+    def apply_energy_cal(self):
+        pass
+
+    def do_gain_match(self):
+        pass
+
+    def load_gain_match(self):
+        pass
+
+    def unload_gain_match(self):
+        pass
 
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
