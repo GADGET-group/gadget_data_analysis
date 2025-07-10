@@ -413,7 +413,11 @@ class RawEventViewerFrame(ttk.Frame):
         pass
 
     def do_gain_match(self):
-        pass
+        save_path =  tk.filedialog.asksaveasfilename(initialdir='./', title='gain match save path', filetypes=([("gain match", ".gain_match")]), defaultextension='.gain_match')
+        #TODO: save version number and gui config used
+        event_mask = self.get_processed_event_mask()
+        gain_match_events = self.h5file.get_event_num_bounds()[0] + np.where(event_mask)[0]
+        self.h5file.do_gain_match(gain_match_events, True, save_path)
 
     def load_gain_match(self):
         pass

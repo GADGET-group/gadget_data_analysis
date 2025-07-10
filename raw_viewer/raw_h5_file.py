@@ -485,8 +485,7 @@ class raw_h5_file:
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
     
     def do_gain_match(self, event_numbers:list, save_results:bool, save_path=''):
-        N = len(event_numbers)
-        print('gain matching using %d events'%N)
+        print('gain matching using %d events'%len(event_numbers))
         print('getting list of energy per pad for each event')
         pad_counts = []
         for event in tqdm.tqdm(event_numbers):
@@ -501,10 +500,12 @@ class raw_h5_file:
         pad_counts /= np.mean(event_adc_counts)
         print('performing minimization')
         def objective_function(gains):
-            return np.sum((np.einsum('ij,j->i', pad_counts, gains)-1)**2)
+            #print(np.shape(pad_counts), np.shape(gains))
+            adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
+            return np.sum((adc_counts_in_each_event - 1)**2)
         def callback(intermediate_result):
             print(intermediate_result)
-        res = opt.minimize(objective_function, np.ones(N), method='BFGS', callback=callback)
+        res = opt.minimize(objective_function, np.ones(NUM_PADS), method='BFGS', callback=callback)
         print(res)
         self.pad_gains = res.x
         if save_results:
