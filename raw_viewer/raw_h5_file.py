@@ -505,7 +505,10 @@ class raw_h5_file:
             return np.sum((adc_counts_in_each_event - 1)**2)
         def callback(intermediate_result):
             print(intermediate_result)
-        res = opt.minimize(objective_function, np.ones(NUM_PADS), method='BFGS', callback=callback)
+            gains = intermediate_result.x
+            print(np.std(gains), np.min(gains), np.max(gains), np.mean(gains))
+        res = opt.minimize(objective_function, np.ones(NUM_PADS), callback=callback, 
+                           bounds=[[0.1, 10]]*NUM_PADS, options={'maxfun':1000000})
         print(res)
         self.pad_gains = res.x
         if save_results:
