@@ -238,6 +238,7 @@ class raw_h5_file:
         #pad gain match is applied after baseline subtraction because a number of baseline subtraction
         #parameters are mostly driven by noise, which we don't expect to strongly correlate with pad gain
         if self.apply_gain_match:
+            data = np.array(data, copy=True)
             for line in data:
                 chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
