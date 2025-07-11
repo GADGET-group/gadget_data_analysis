@@ -10,7 +10,8 @@ veto_pads = [253,254,508,509,763,764,1018,1019]
 
 # data comes from first 100,000 events of Po-212 alpha peak, whose energy is 8.7849 MeV
 # f = h5py.File("/egr/research-tpc/dopferjo/pad_gainmatch_events.h5",'r')
-f = h5py.File("/egr/research-tpc/dopferjo/run_124_proton_pad_gainmatch_events.h5",'r')
+# f = h5py.File("/egr/research-tpc/dopferjo/run_124_proton_pad_gainmatch_events.h5",'r')
+f = h5py.File("/egr/research-tpc/dopferjo/run_121-128_proton_pad_gainmatch_events.h5",'r')
 
 real_events = []
 # change the range to the number of events in the h5 file; 100,000 is the number of events in the original pad_gainmatch_events.h5 file
@@ -88,7 +89,7 @@ def display_progress(intermediate_result):
 
 bnds = ((0, None),) * npads
 res = opt.minimize(to_minimize, init_guess*np.ones(npads), callback=display_progress, bounds=bnds)
-np.save('better_guess_run_124_proton_padgain_noveto_with_neg_constraint.npy',res.x)
+np.save('run_121-128_proton_padgain.npy',res.x)
 
 
 # Current minimization: 4.544050e+16

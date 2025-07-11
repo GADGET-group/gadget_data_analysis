@@ -14,7 +14,7 @@ from sklearn.cluster import DBSCAN
 # np.set_printoptions(threshold=sys.maxsize)
 
 # temporaty and bad way to implement pad gain correction
-PGM = False
+PGM = True
 
 USE_GPU = True
 if USE_GPU:
@@ -189,6 +189,7 @@ class raw_h5_file:
         if PGM:
             # padgain = np.load('/user/dopfer/padgain_noveto_with_neg_constraint.npy')
             padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
+            padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/run_121-128_proton_padgain.npy') # used for e21072
             padgain_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
             padgain_with_vetos = np.append(padgain_with_vetos,[1,1])
             padgain_with_vetos = 1000000 * np.asarray(padgain_with_vetos, dtype=cp.float32) # keV PGM and energy calibration
@@ -196,11 +197,18 @@ class raw_h5_file:
                 chnl_info = tuple(data[i][0:4])
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
+                else:
+                    print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+                    continue
                 # print(np.shape(data[i][FIRST_DATA_BIN:]))
                 # print(type(data[i][FIRST_DATA_BIN:]))
                 # print(type(padgain_with_vetos[pad]))
                 # print(padgain_with_vetos[pad])
                 data[i][FIRST_DATA_BIN:] = data[i][FIRST_DATA_BIN:] * padgain_with_vetos[pad]
+            
+            # TODO: test this code to see if it works
+            scale = np.max(data[:,FIRST_DATA_BIN:]) # scale to max value in data
+            data[:, FIRST_DATA_BIN:] = data[:, FIRST_DATA_BIN:] / scale * 4000 # normalize data to range of ADC counts (0-4000)
 
         #Loop over each pad, performing background subtraction and marking the pad in the pad image
         #which will be used for outlier removal.
@@ -395,12 +403,14 @@ class raw_h5_file:
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            slope, offset = np.polyfit(xs, ys, 1)
-            #baseline will be the trace except in the peak region,
-            #so that everything away from the peak is zero'd out
+            # slope, offset = np.polyfit(xs, ys, 1)
+            offset = np.mean(ys)
+            # baseline will be the trace except in the peak region,
+            # so that everything away from the peak is zero'd out
             baseline = np.array(trace, copy=True)
-            for i in range(peak_start, peak_end+1):
-                baseline[i] = slope*i + offset
+            # for i in range(peak_start, peak_end+1):
+            #     baseline[i] = slope*i + offset
+            baseline[np.arange(peak_start, peak_end+1)] = offset
             return baseline
         assert False #invalid mode
 
