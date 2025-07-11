@@ -242,7 +242,7 @@ class raw_h5_file:
                 chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
-                    line *= self.pad_gains[pad]  
+                    line[FIRST_DATA_BIN:] *= self.pad_gains[pad]  
 
         return data
 
@@ -506,7 +506,8 @@ class raw_h5_file:
         def callback(intermediate_result):
             print(intermediate_result)
             gains = intermediate_result.x
-            print(np.std(gains), np.min(gains), np.max(gains), np.mean(gains))
+            print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+
         res = opt.minimize(objective_function, np.ones(NUM_PADS), callback=callback, 
                            bounds=[[0.1, 10]]*NUM_PADS, options={'maxfun':1000000})
         print(res)
