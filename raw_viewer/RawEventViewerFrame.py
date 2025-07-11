@@ -3,6 +3,7 @@ import subprocess
 import configparser
 import csv
 import shutil
+import pickle
 
 import tkinter as tk
 from tkinter import ttk
@@ -79,12 +80,16 @@ class RawEventViewerFrame(ttk.Frame):
 
         gain_match_frame = ttk.LabelFrame(self, text="pad gain match")
         self.gain_match_label = ttk.Label(gain_match_frame, text="no gain match loaded")
-        self.gain_match_label.grid(row=0, column=0)
+        self.gain_match_label.grid(row=0, column=0, columnspan=4)
         #do gain match will gain match on all currently selected events and save gain for each pad
         #load gain match will load these gains for viewing events, but RvE histogram won't update until run is reprocessed
         ttk.Button(gain_match_frame, text="do gain match", command=self.do_gain_match).grid(row=1, column=0)
         ttk.Button(gain_match_frame, text="load gain match", command=self.load_gain_match).grid(row=1, column=1)
-        ttk.Button(gain_match_frame, text='unload gain match', command=self.unload_gain_match).grid(row=1, column=2)
+        ttk.Button(gain_match_frame, text='view gain match', command=self.show_gain_match).grid(row=1, column=2)
+        self.apply_gain_match_var = tk.IntVar()
+        ttk.Checkbutton(gain_match_frame, text='enable gain match', variable=self.apply_gain_match_var,
+                        command=self.check_state_changed).grid(row=2, column=0)
+        self.settings_checkbutton_map['enable_gain_match']=self.apply_gain_match_var
         gain_match_frame.grid()
 
         #widget setup in individual_event_Frame
@@ -274,7 +279,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
         rve_cut_frame = ttk.LabelFrame(self, text='RvE Cut')
-        ttk.Button(rve_cut_frame, text='define cut on gui', command=self.define_cut_on_gui).grid(row=0, column=0)
+        ttk.Button(rve_cut_frame, text='edit cut on gui', command=self.define_cut_on_gui).grid(row=0, column=0)
         self.enable_rve_cut_var = tk.IntVar()
         enable_rve_check = ttk.Checkbutton(rve_cut_frame, text='enable rve cut', variable=self.enable_rve_cut_var, 
                                                          command=self.check_state_changed)
@@ -284,6 +289,7 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Button(rve_cut_frame, text='browse', command=self.browse_for_rve_cut).grid(row=1, column=1)
         ttk.Button(rve_cut_frame, text='load', command=self.load_rve_cut).grid(row=1, column=2)
         ttk.Button(rve_cut_frame, text='save', command=self.save_rve_cut).grid(row=1, column=3)
+        self.rve_cut_verticies = []
         rve_cut_frame.grid()
 
 
@@ -418,12 +424,24 @@ class RawEventViewerFrame(ttk.Frame):
         event_mask = self.get_processed_event_mask()
         gain_match_events = self.h5file.get_event_num_bounds()[0] + np.where(event_mask)[0]
         self.h5file.do_gain_match(gain_match_events, True, save_path)
+        self.load_gain_match(save_path)
 
-    def load_gain_match(self):
-        pass
+    def load_gain_match(self, file_path=''):
+        if file_path == '':
+            file_path = tk.filedialog.askopenfilename(initialdir='./', title='gain match save path', 
+                                          filetypes=([("gain match", ".gain_match")]), defaultextension='.gain_match')
+        with open(file_path, 'rb') as f:
+            res = pickle.load(f)
+        print(res)
+        self.h5file.pad_gains = res.x
+        self.gain_match_label['text'] = 'gain match loaded: %s'%file_path
 
-    def unload_gain_match(self):
-        pass
+    def show_gain_match(self):
+        data = {}
+        for i in range(len(self.h5file.pad_gains)):
+            if i in self.h5file.pad_to_xy_index:
+                data[i] = self.h5file.pad_gains[i]
+        self.h5file.show_padplane_image(data)
 
     def show_3d_cloud(self):
         event_number = int(self.event_number_entry.get())
@@ -492,6 +510,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def check_state_changed(self):
         self.h5file.remove_outliers = (self.remove_outlier_var.get() == 1)
+        self.h5file.apply_gain_match = (self.apply_gain_match_var.get() == 1)
 
     def get_hist_data_from_name(self, name):
         if name == 'adc counts':
@@ -694,6 +713,8 @@ class RawEventViewerFrame(ttk.Frame):
         ax.set_xlabel('adc counts')
         ax.set_ylabel('range (mm)')
         self.poly_selector = matplotlib.widgets.PolygonSelector(ax,self.set_cut_polygon)
+        if len(self.rve_cut_verticies) > 0:
+            self.poly_selector.verts = self.rve_cut_verticies
         fig.show()
 
 
