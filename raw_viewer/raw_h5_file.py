@@ -240,10 +240,10 @@ class raw_h5_file:
             # padgain = np.load('/user/dopfer/padgain_noveto_with_neg_constraint.npy')
             padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
             padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/run_121-128_proton_padgain.npy') # used for e21072
+            padgain = 1/8.6e-6 * np.asarray(padgain, dtype=cp.float32) # scale the PGM so that the mean value is one
             padgain_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
             padgain_with_vetos = np.append(padgain_with_vetos,[1,1])
-            padgain_with_vetos = 1/8.6e-6 * np.asarray(padgain_with_vetos, dtype=cp.float32) # scale the PGM so that the mean value is one
-            print(data)
+            # padgain_with_vetos = 1/8.6e-6 * np.asarray(padgain_with_vetos, dtype=cp.float32) # scale the PGM so that the mean value is one
             for i in range(len(data)):
                 chnl_info = tuple(data[i][0:4])
                 if chnl_info in self.chnls_to_pad:
@@ -256,11 +256,9 @@ class raw_h5_file:
                 # print(type(padgain_with_vetos[pad]))
                 # print(padgain_with_vetos[pad])
                 data[i][FIRST_DATA_BIN:] *= padgain_with_vetos[pad]
-            print(data)
             # TODO: test this code to see if it works
             # scale = np.max(data[:,FIRST_DATA_BIN:]) # scale to max value in data
             # data[:, FIRST_DATA_BIN:] *=40000000/scale # normalize data to range of ADC counts (0-4000)
-            print(data)
         return data
 
     def label_data(self, event_number, threshold = -np.inf):
