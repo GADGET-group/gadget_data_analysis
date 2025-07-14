@@ -17,7 +17,11 @@ real_events = []
 # change the range to the number of events in the h5 file; 100,000 is the number of events in the original pad_gainmatch_events.h5 file
 # 449 is the number of events in the run_124_pad_gainmatch_events.h5 file
 # 3007 is the number of events in the run_124_proton_pad_gainmatch_events.h5 file
-for event in range(3007):
+first_event, last_event = int(f['meta']['meta'][0]), int(f['meta']['meta'][2])
+
+print("First event: %d, Last event: %d"%(first_event, last_event))
+for event in range(last_event - first_event):
+    # print(event)
     real_events.append(f['get/evt%d_pad_data'%event])
 
 # Removing veto pads (even though all of their data is 0, we dont want the minimizer to use them to calculate the gain on the measurements pads)
