@@ -485,7 +485,7 @@ class raw_h5_file:
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
     
-    def do_gain_match(self, event_numbers:list, save_results:bool, save_path=''):
+    def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False):
         print('gain matching using %d events'%len(event_numbers))
         print('getting list of energy per pad for each event')
         pad_counts = []
@@ -495,7 +495,15 @@ class raw_h5_file:
             for pad, trace in zip(pads, traces):
                 pad_counts[-1][pad] = np.sum(trace)
         pad_counts = np.array(pad_counts)
-        
+
+        if show_debug_figures:
+            all_events_image = np.sum(pad_counts, axis=0)
+            data = {}
+            for i in range(len(all_events_image)):
+                if i in self.pad_to_xy_index:
+                    data[i] = all_events_image[i]
+            self.show_padplane_image(data)
+
         event_adc_counts = np.sum(pad_counts, axis=1)
         print('average event adc counts:', np.mean(event_adc_counts))
         pad_counts /= np.mean(event_adc_counts)
@@ -503,14 +511,18 @@ class raw_h5_file:
         def objective_function(gains):
             #print(np.shape(pad_counts), np.shape(gains))
             adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
-            return np.sum((adc_counts_in_each_event - 1)**2)
+            return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2/len(adc_counts_in_each_event)))*2.355
         def callback(intermediate_result):
             print(intermediate_result)
             gains = intermediate_result.x
             print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
 
-        res = opt.minimize(objective_function, np.ones(NUM_PADS), callback=callback, 
-                           bounds=[[0.1, 10]]*NUM_PADS, options={'maxfun':1000000})
+        # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Powell",
+        #                    callback=callback, 
+        #                    bounds=[[0.5, 2]]*NUM_PADS)
+        res = opt.minimize(objective_function, np.ones(NUM_PADS), 
+                           callback=callback, 
+                           bounds=[[0.5, 2]]*NUM_PADS, options={'maxfun':1000000})
         print(res)
         self.pad_gains = res.x
         if save_results:

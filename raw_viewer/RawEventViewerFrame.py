@@ -423,7 +423,7 @@ class RawEventViewerFrame(ttk.Frame):
         #TODO: save version number and gui config used
         event_mask = self.get_processed_event_mask()
         gain_match_events = self.h5file.get_event_num_bounds()[0] + np.where(event_mask)[0]
-        self.h5file.do_gain_match(gain_match_events, True, save_path)
+        self.h5file.do_gain_match(gain_match_events, True, save_path, show_debug_figures=True)
         self.load_gain_match(save_path)
 
     def load_gain_match(self, file_path=''):
