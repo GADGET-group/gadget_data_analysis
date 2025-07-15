@@ -495,14 +495,44 @@ class raw_h5_file:
             for pad, trace in zip(pads, traces):
                 pad_counts[-1][pad] = np.sum(trace)
         pad_counts = np.array(pad_counts)
+        all_events_pad_counts = np.sum(pad_counts, axis=0)  
 
         if show_debug_figures:
-            all_events_image = np.sum(pad_counts, axis=0)
             data = {}
-            for i in range(len(all_events_image)):
+            for i in range(len(all_events_pad_counts)):
                 if i in self.pad_to_xy_index:
-                    data[i] = all_events_image[i]
-            self.show_padplane_image(data)
+                    data[i] = all_events_pad_counts[i]
+            self.show_padplane_image(data, title='without dead pad replacement')
+
+        #replace dead pixels with average of adjacent pixels
+        thresh_to_replace = 2000 #pads with fewer counts will be considered dead
+        for pad in range(len(all_events_pad_counts)):
+            if all_events_pad_counts[pad] < thresh_to_replace and pad in self.pad_to_xy_index:
+                #find good adjacent pads to use for average
+                adjacent_pads = []
+                pad_xy = self.pad_to_xy_index[pad]
+                adj_xy = [(pad_xy[0]+d[0], pad_xy[1] + d[1]) 
+                          for d in [(0,1), (0,-1), (1,0), (-1,0)]]
+                for xy in adj_xy:
+                    if xy in self.xy_index_to_pad:
+                        adj_pad = self.xy_index_to_pad[xy]
+                        if all_events_pad_counts[adj_pad] >= thresh_to_replace:
+                            adjacent_pads.append(adj_pad)
+                print('replace pad %d with average of pads '%pad, adjacent_pads)
+                #do replacement
+                if len(adjacent_pads) > 0:
+                    for i in range(len(pad_counts)):
+                        pad_counts[i, pad] = np.mean(pad_counts[i, adjacent_pads])
+                else:
+                    print("can't replace, no good adjacent pads")
+       
+        all_events_pad_counts = np.sum(pad_counts, axis=0)  
+        if show_debug_figures:
+            data = {}
+            for i in range(len(all_events_pad_counts)):
+                if i in self.pad_to_xy_index:
+                    data[i] = all_events_pad_counts[i]
+            self.show_padplane_image(data, title='with dead pad replacement')
 
         event_adc_counts = np.sum(pad_counts, axis=1)
         print('average event adc counts:', np.mean(event_adc_counts))
@@ -512,17 +542,25 @@ class raw_h5_file:
             #print(np.shape(pad_counts), np.shape(gains))
             adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
             return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2/len(adc_counts_in_each_event)))*2.355
+        
+        self.callback_counter = 0
         def callback(intermediate_result):
-            print(intermediate_result)
-            gains = intermediate_result.x
-            print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+            if self.callback_counter%4000 == 0:
+                print(intermediate_result)
+                gains = intermediate_result.x
+                print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+            self.callback_counter += 1
 
         # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Powell",
         #                    callback=callback, 
         #                    bounds=[[0.5, 2]]*NUM_PADS)
-        res = opt.minimize(objective_function, np.ones(NUM_PADS), 
+        # res = opt.minimize(objective_function, np.ones(NUM_PADS), 
+        #                    callback=callback, 
+        #                    #bounds=[[0.5, 2]]*NUM_PADS,
+        #                    options={'maxfun':1000000})
+        res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Nelder-Mead",
                            callback=callback, 
-                           bounds=[[0.5, 2]]*NUM_PADS, options={'maxfun':1000000})
+                           bounds=[[0.5, 2]]*NUM_PADS)
         print(res)
         self.pad_gains = res.x
         if save_results:
