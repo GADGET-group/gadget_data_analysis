@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import scipy.spatial.distance
 import scipy.optimize as opt
+import scipy.interpolate as interpolate
 import h5py
 import matplotlib.pylab as plt
 import matplotlib.colors as colors
@@ -543,21 +544,55 @@ class raw_h5_file:
             adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
             return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
         
-        self.callback_counter = 0
-        def callback(intermediate_result):
-            if self.callback_counter%4000 == 0:
-                print(intermediate_result)
-                gains = intermediate_result.x
-                print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
-            self.callback_counter += 1
+        num_interp_points = 100
+        pad_xy_index = np.array([self.pad_to_xy_index[pad] if pad in self.pad_to_xy_index else (0,0) for pad in range(NUM_PADS)])
+        min_xy, max_xy = np.min(pad_xy_index), np.max(pad_xy_index)
+        def get_interp_pad_gains(x):
+            #first 4 points should be fixed at outside of image
+            points = x[0:num_interp_points*2]
+            points = np.reshape(points, (num_interp_points, 2))
+            points[0] = np.array([min_xy, min_xy])
+            points[1] = np.array([min_xy, max_xy])
+            points[2] = np.array([max_xy, min_xy])
+            points[3] = np.array([max_xy, max_xy])
+            values = x[num_interp_points*2:]
+            interpolator = interpolate.CloughTocher2DInterpolator(points, values, fill_value=1)
+            return interpolator(pad_xy_index[:,0], pad_xy_index[:,1])
+        
+        def interp_obj_func(x):
+            gains = get_interp_pad_gains(x)
+            return objective_function(gains)
 
         # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Powell",
         #                    callback=callback, 
         #                    bounds=[[0.5, 2]]*NUM_PADS)
-        res = opt.minimize(objective_function, np.ones(NUM_PADS), 
-                           callback=callback, 
-                           bounds=[[0.5, 2]]*NUM_PADS,
+        guess = np.random.uniform(min_xy, max_xy, num_interp_points*3)
+        guess[num_interp_points*2:] = 1
+
+        plt.figure()
+        def callback(intermediate_result):
+                print(intermediate_result)
+                gains = intermediate_result.x[num_interp_points*2:]
+                print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+                points = intermediate_result.x[:num_interp_points*2]
+                points = np.reshape(points, (num_interp_points, 2))
+                points[0] = np.array([min_xy, min_xy])
+                points[1] = np.array([min_xy, max_xy])
+                points[2] = np.array([max_xy, min_xy])
+                points[3] = np.array([max_xy, max_xy])
+                plt.clf()
+                plt.scatter(points[:,0], points[:,1], c=gains)
+                plt.show(block=False)
+                plt.colorbar()
+                plt.pause(0.1)
+
+        res = opt.minimize(interp_obj_func, guess, 
+                           callback=callback,
                            options={'maxfun':1000000})
+        res.orig_x = res.x
+        res.x = get_interp_pad_gains(res.x)
+        for pad in VETO_PADS:
+            res.x[pad] = 1
         # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Nelder-Mead",
         #                    callback=callback, 
         #                    #bounds=[[0.5, 2]]*NUM_PADS,
