@@ -541,7 +541,7 @@ class raw_h5_file:
         def objective_function(gains):
             #print(np.shape(pad_counts), np.shape(gains))
             adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
-            return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2/len(adc_counts_in_each_event)))*2.355
+            return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
         
         self.callback_counter = 0
         def callback(intermediate_result):
@@ -554,14 +554,17 @@ class raw_h5_file:
         # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Powell",
         #                    callback=callback, 
         #                    bounds=[[0.5, 2]]*NUM_PADS)
-        # res = opt.minimize(objective_function, np.ones(NUM_PADS), 
+        res = opt.minimize(objective_function, np.ones(NUM_PADS), 
+                           callback=callback, 
+                           bounds=[[0.5, 2]]*NUM_PADS,
+                           options={'maxfun':1000000})
+        # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Nelder-Mead",
         #                    callback=callback, 
         #                    #bounds=[[0.5, 2]]*NUM_PADS,
-        #                    options={'maxfun':1000000})
-        res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Nelder-Mead",
-                           callback=callback, 
-                           bounds=[[0.5, 2]]*NUM_PADS)
+        #                    options={'adaptive':True,
+        #                             'maxiter':20*200*1024, 'maxfev':20*200*1024})
         print(res)
+        #TODO: set veto pad gains to 1
         self.pad_gains = res.x
         if save_results:
             res.events_used = event_numbers
