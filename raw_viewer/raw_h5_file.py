@@ -239,7 +239,7 @@ class raw_h5_file:
         if PGM:
             # padgain = np.load('/user/dopfer/padgain_noveto_with_neg_constraint.npy')
             padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/padgain_noveto_with_neg_constraint.npy')
-            padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/run_121-128_proton_padgain.npy') # used for e21072
+            # padgain = np.load('/egr/research-tpc/dopferjo/gadget_analysis/run_121-128_proton_padgain.npy') # used for e21072
             padgain = 1/8.6e-6 * np.asarray(padgain, dtype=cp.float32) # scale the PGM so that the mean value is one
             padgain_with_vetos = np.insert(padgain,[253,253,506,506,759,759],1)
             padgain_with_vetos = np.append(padgain_with_vetos,[1,1])

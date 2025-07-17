@@ -44,7 +44,7 @@ def get_detector_E_sigma(experiment:str, run:int, MeV):
             return (5631/86431)*0.779*(MeV/0.779)**0.5
     if experiment == 'e24joe':
         #using same process as e21072 for now
-        #TODO change this to better reflect the likely larger sigma in e24joe
+        # I think this is about right, 6% uncertainty
         # if run == 124:
         return (5631/86431)*0.779*(MeV/0.779)**0.5
     assert False, "Experiment not found for get_detector_E_sigma function"
@@ -179,7 +179,7 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         sim.zscale = get_zscale(experiment, run)
         pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.0706, 4.77
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.0700, 8.0 # TODO: adjust this to get reasonable uncertainties in MCMC fit
         sim.pad_threshold = 20.0
         if run == 124:
             sim.counts_per_MeV = 129600.

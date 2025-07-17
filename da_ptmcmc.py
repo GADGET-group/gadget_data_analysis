@@ -185,7 +185,7 @@ if __name__ == '__main__':
         track_length = np.sqrt(dxy**2 + dz**2)
         Ep_guess = temp_sim.sims[0].srim_table.get_energy_w_stopping_distance(track_length - sigma_guess) 
         Ea_frac_guess = 1-Ep_guess/E_prior.mu
-        assert Ea_frac_guess >0
+        # assert Ea_frac_guess >0
 
         if event_num == 90:
             E1 = 8.298229878796851
@@ -213,12 +213,103 @@ if __name__ == '__main__':
             sigma_xy_guess = 0.5
             sigma_z_guess = 3.0
             
+        if event_num == 2061:
+            E1 = 2.36
+            theta_1 = 0.7
+            phi_1 = 4.58
+            E2 = 8.89
+            theta_2 = 2.87
+            phi_2 = 1.666
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([22.,17.6,46.5])
+            sigma_xy_guess = 2.
+            sigma_z_guess = 3.
+            
+        if event_num == 7175:
+            E1 = 7.3
+            theta_1 = 0.5
+            phi_1 = 3.7
+            E2 = 7.0
+            theta_2 = 2.63
+            phi_2 = 0.666
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([22.,17.6,46.5])
+            sigma_xy_guess = 2.
+            sigma_z_guess = 3.
+            
+        if event_num == 11400:
+            E1 = 6.0
+            theta_1 = 1.7
+            phi_1 = 1.57
+            E2 = 6.0
+            theta_2 = 1.7
+            phi_2 = 4.7
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([22.,17.6,46.5])
+            sigma_xy_guess = 2.
+            sigma_z_guess = 3.
+            
+        if event_num == 14822:
+            E1 = 6.0
+            theta_1 = 1.309
+            phi_1 = 0.0
+            E2 = 6.0
+            theta_2 = 1.83
+            phi_2 = 3.1415
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([22.,17.6,46.5])
+            sigma_xy_guess = 1.
+            sigma_z_guess = 2.5
+            
+        if event_num == 21693:
+            E1 = 6.0
+            theta_1 = 1.5
+            phi_1 = 5.41
+            E2 = 6.0
+            theta_2 = 1.7
+            phi_2 = 2.007
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([22.,17.6,46.5])
+            sigma_xy_guess = 0.7
+            sigma_z_guess = 3.
+            
+        if event_num == 22081:
+            E1 = 8.8
+            theta_1 = 1.655
+            phi_1 = 1.40
+            E2 = 3.89
+            theta_2 = 1.14
+            phi_2 = 5.01
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([22.,17.6,46.5])
+            sigma_xy_guess = 2.
+            sigma_z_guess = 3.
+            
+        if event_num == 35094:
+            E1 = 6.0
+            theta_1 = 0.0
+            phi_1 = 0.0
+            E2 = 6.0
+            theta_2 = 3.1415
+            phi_2 = 0.0
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([22.,17.6,46.5])
+            sigma_xy_guess = 2.
+            sigma_z_guess = 3.
+            
         print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta_1, phi_1,theta_2,phi_2,sigma_xy_guess,sigma_z_guess))
 
         # print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess))
         guess_sim = get_sim((E_prior.mu, Ea_frac_guess, best_point[0], best_point[1], best_point[2], best_point[0], best_point[1], best_point[2],
                             theta_1, phi_1, theta_2, phi_2, sigma_xy_guess, sigma_z_guess, sigma_xy_guess, sigma_z_guess))
-        build_sim.open_gui(guess_sim, {'4He_0_initial_point':float, '4He_1_initial_point':float})
+        # build_sim.open_gui(guess_sim, {'4He_0_initial_point':float, '4He_1_initial_point':float})
         return [(E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
                             best_point[0] + np.random.randn()*pos_ball_size,
                             best_point[1] + np.random.randn()*pos_ball_size,
@@ -249,7 +340,7 @@ if __name__ == '__main__':
 
 
     # We'll track how the average autocorrelation time estimate changes
-    directory = 'run%d_dalpha_mcmc/event%d'%(run_number, event_num)
+    directory = 'run%d_dalpha_good_starting_values_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 

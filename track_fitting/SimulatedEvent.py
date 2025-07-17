@@ -327,7 +327,7 @@ class SimulatedEvent:
         zs = np.tile(z_axis, int(len(xs)/len(z_axis)))
         return xs, ys, zs, es
 
-    def log_likelihood(self):
+    def log_likelihood(self, check_valid=False):
         self.pad_ll = {}
         start_time = time.time()
         to_return = 0
@@ -338,7 +338,7 @@ class SimulatedEvent:
                 for i in range(self.num_trace_bins):
                     for j in range(self.num_trace_bins):
                         cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
-                        if i ==j:
+                        if i == j:
                             cov_matrix[i,j] += self.other_systematics**2
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
@@ -349,9 +349,21 @@ class SimulatedEvent:
                 else: #pad was simulated firing, but did not
                     #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
                     #than this value
-                    #TODO: is there a not to expensive way to account for correlations between time bins?
+                    #TODO: is there a not to expensive way to account for corralations between time bins?
                     sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
-                    pad_ll = np.sum(np.log(0.5 + 0.5*scipy.special.erf((self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma)))
+                    x = (self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma
+                    #make function which 
+                    #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
+                    #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
+                    #continuous everywhere.
+                    a, A = -4., 5.5
+                    x = np.where(x>a, x, A*x/(A-x) + a - A*a/(A-a))
+                    if check_valid:
+                        if np.any(x<a):
+                            raise ValueError()
+                    pad_ll = np.sum(np.log(0.5 + 0.5*scipy.special.erf(x)))
+                    # if not np.isfinite(pad_ll):
+                    #     print(x, pad_ll)
 
             elif pad in self.traces_to_fit: #pad was not simulated but did fire
                 assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading

@@ -181,7 +181,7 @@ else:
     steps = ['forward', 'backward']
     steps = ['forward']
     filenames = []
-    events = [90]
+    events = [90,1762,2061,7175,11400,14822,21693,22081,35094]
     labels = ['E', 'Ea_frac', 'x','y','z', 'xa','ya','za','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
     # labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_xy', 'sigma_z']
     # labels = ['E', 'x','y','z','theta_p', 'phi_p', 'sigma_xy', 'sigma_z']
@@ -191,10 +191,10 @@ else:
     Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z', 'xa','ya','za','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
     # Ea_Ep_labels = ['Ea', 'Ep', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_xy', 'sigma_z']
     # Ea_Ep_labels = ['Ea', 'x','y','z','theta_p', 'phi_p', 'sigma_xy', 'sigma_z']
-    summary_file_path = './run%d_dalpha_mcmc/summary.txt'%run_number
-    filepath_template = './run%d_dalpha_mcmc/event%d/%s.h5'
-    # summary_file_path = './run%d_single_alpha_sim_mcmc/summary.txt'%run_number
-    # filepath_template = './run%d_single_alpha_sim_mcmc/event%d/%s.h5'
+    # summary_file_path = './run%d_dalpha_mcmc/summary.txt'%run_number
+    # filepath_template = './run%d_dalpha_mcmc/event%d/%s.h5'
+    summary_file_path = './run%d_dalpha_good_starting_values_mcmc/summary.txt'%run_number
+    filepath_template = './run%d_dalpha_good_starting_values_mcmc/event%d/%s.h5'
 
 
 with open(summary_file_path, 'w') as summary_file:
