@@ -6,12 +6,15 @@ import cupy as cp
 
 #build images
 dim = 40
-num_events = 100000
+num_events = 10000
 threshold = 0
 counts_per_event=1000
 sigma_min, sigma_max = 3,5
 true_gains = np.random.normal(1, 0.05, (dim,dim))
-sigma_to_edge = 3
+sigma_to_edge = 0
+
+
+device = 0
 
 #build fake images
 pad_images = []
@@ -20,16 +23,15 @@ for evt in range(num_events):
     point = np.random.uniform(sigma_to_edge*sigma, dim - sigma_to_edge*sigma, 2)
     image = np.zeros((dim, dim))
     image[*point.astype(int)] = counts_per_event
-    image = scipy.ndimage.gaussian_filter(image, sigma, mode='constant')*true_gains
+    image = scipy.ndimage.gaussian_filter(image, sigma, mode='reflect')/true_gains
     image[image<threshold] = 0
     pad_images.append(image)
 
 plt.figure()
 plt.imshow(image)
 plt.colorbar()
+print(np.sum(image))
 plt.show()
-
-device = 3
 
 with cp.cuda.Device(device):
     pad_images_cp = cp.array(pad_images)
@@ -82,6 +84,7 @@ with cp.cuda.Device(device):
     
 counts_no_gain_match = get_energy_per_event(np.ones(dim*dim), pad_images_cp)
 counts_w_gain_match = get_energy_per_event(res.x, pad_images_cp)
+counts_w_true_gains = get_energy_per_event(cp.reshape(true_gains, (dim*dim,)), pad_images_cp)
 plt.figure()
 plt.title('energy spectrum: events use to fit pad gains')
 bins = np.linspace(np.min([counts_no_gain_match, counts_w_gain_match]), np.max([counts_no_gain_match, counts_w_gain_match]), 300)
@@ -96,18 +99,21 @@ for evt in range(num_events):
     point = np.random.uniform(sigma_to_edge*sigma, dim - sigma_to_edge*sigma, 2)
     image = np.zeros((dim, dim))
     image[*point.astype(int)] = counts_per_event
-    image = scipy.ndimage.gaussian_filter(image, sigma, mode='constant')*true_gains
+    image = scipy.ndimage.gaussian_filter(image, sigma, mode='constant')/true_gains
     image[image<threshold] = 0
     pad_images2.append(image)
+with cp.cuda.Device(device):
+    pad_images_cp2 = cp.array(pad_images2)
 
-pad_images_cp2 = cp.array(pad_images2)
 counts_no_gain_match = get_energy_per_event(np.ones(dim*dim), pad_images_cp2)
 counts_w_gain_match = get_energy_per_event(res.x, pad_images_cp2)
+counts_w_true_gains = get_energy_per_event(cp.reshape(true_gains, (dim*dim,)), pad_images_cp2)
 plt.figure()
 plt.title('energy spectrum: new set of events')
 bins = np.linspace(np.min([counts_no_gain_match, counts_w_gain_match]), np.max([counts_no_gain_match, counts_w_gain_match]), 300)
 plt.hist(counts_no_gain_match, bins, label='counts without gain match')
 plt.hist(counts_w_gain_match, bins, label='counts with gain match', alpha=0.5)
+plt.hist(counts_w_true_gains, bins, label='counts with true gains', alpha=0.5)
 plt.legend()
 
 plt.show()
