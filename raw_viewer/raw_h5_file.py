@@ -544,7 +544,7 @@ class raw_h5_file:
             adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
             return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
         
-        num_grid_points = 10
+        num_grid_points = 20
         pad_xy_index = np.array([self.pad_to_xy_index[pad] if pad in self.pad_to_xy_index else (0,0) for pad in range(NUM_PADS)])
         min_xy, max_xy = np.min(pad_xy_index), np.max(pad_xy_index)
         def get_interp_pad_gains(x):

@@ -5,12 +5,12 @@ import scipy.optimize as opt
 
 #build images
 dim = 40
-num_events = 100000
+num_events = 1000
 threshold = 6
 counts_per_event=1000
 sigma_min, sigma_max = 3,5
 true_gains = np.random.normal(1, 0.05, (dim,dim))
-sigma_to_edge = 2
+sigma_to_edge = 3
 
 #build fake images
 pad_images = []
@@ -28,9 +28,10 @@ plt.imshow(image)
 plt.colorbar()
 plt.show()
 
+observed_counts_per_event = np.sum(pad_images)/num_events
 def obj_func(x):
     gains = np.reshape(x, (dim, dim))
-    adc_counts_in_each_event = np.einsum('ikj,kj', pad_images, gains)/counts_per_event
+    adc_counts_in_each_event = np.einsum('ikj,kj', pad_images, gains)/observed_counts_per_event
     return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
 
 def callback(x):
