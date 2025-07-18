@@ -26,7 +26,8 @@ read_data_mode = 'unchanged'
 calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
                         {124:((90625 , 192102 ),(0.7856, 1.633))},
                     'e24joe':
-                        {124:((5.4e5, 6.9e5),(6.288, 8.7849))} # TODO: adjust these calibration points using fits to both peaks. the runs drift quite a bit as well, so chack on that
+                        {124:((7.33e5, 7.91e5, 1.01e6),(6.288, 6.778, 8.7849)),
+                         193:((7.33e5, 7.91e5, 1.01e6),(6.288, 6.778, 8.7849))} # TODO: adjust these calibration points using fits to both peaks. the runs drift quite a bit as well, so chack on that
                     }
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
@@ -92,8 +93,9 @@ def get_raw_h5_path(experiment:str, run:int):
             return "/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447.h5"
             return "/mnt/daqtesting/protondet2024/h5/" + ('run_%04d.h5'%run)
         if socket.gethostname() == 'tpcgpu':
-            return "/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447.h5"
-            return "/egr/research-tpc/shared/Run_Data/" + ('run_%04d.h5'%run)
+            if run == 124:
+                return "/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5"
+            return "/egr/research-tpc/dopferjo/" + ('run_%04d.h5'%run)
 
     assert False, "Experiment or hostname not found for get_raw_h5_path function"
 
@@ -117,19 +119,34 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.zscale = get_zscale(experiment, run)
         return h5file
     if experiment == 'e24joe':
-        h5file = raw_h5_file(file_path='/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5',
-                                    zscale=get_zscale(experiment, run),
-                                    flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
-        h5file.background_subtract_mode='fixed window'
-        h5file.data_select_mode='near peak' 
-        h5file.remove_outliers=True
-        h5file.near_peak_window_width = 50
-        h5file.require_peak_within= (-np.inf, np.inf)
-        h5file.ic_counts_threshold = 25
-        h5file.length_counts_threshold = 100
-        h5file.num_background_bins=(400, 500) #not used for "smart" background subtraction
-        h5file.zscale = get_zscale(experiment, run)
-        return h5file
+        if run == 124:
+            h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run),
+                                        zscale=get_zscale(experiment, run),
+                                        flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
+            h5file.background_subtract_mode='fixed window'
+            h5file.data_select_mode='near peak' 
+            h5file.remove_outliers=True
+            h5file.near_peak_window_width = 50
+            h5file.require_peak_within= (-np.inf, np.inf)
+            h5file.ic_counts_threshold = 25
+            h5file.length_counts_threshold = 100
+            h5file.num_background_bins=(400, 500) #not used for "smart" background subtraction
+            h5file.zscale = get_zscale(experiment, run)
+            return h5file
+        else:
+            h5file = raw_h5_file(file_path='/egr/research-tpc/dopferjo/run_%04d.h5'%run,
+                                        zscale=get_zscale(experiment, run),
+                                        flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
+            h5file.background_subtract_mode='fixed window'
+            h5file.data_select_mode='near peak' 
+            h5file.remove_outliers=True
+            h5file.near_peak_window_width = 50
+            h5file.require_peak_within= (-np.inf, np.inf)
+            h5file.ic_counts_threshold = 25
+            h5file.length_counts_threshold = 100
+            h5file.num_background_bins=(400, 500) #not used for "smart" background subtraction
+            h5file.zscale = get_zscale(experiment, run)
+            return h5file
     assert False, "Experiment not found for get_rawh5_object function"
     
 def apply_config_to_object(config_file, object):
@@ -183,6 +200,8 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         sim.pad_threshold = 20.0
         if run == 124:
             sim.counts_per_MeV = 129600.
+        if run == 193:
+            sim.counts_per_MeV = 129600. # TODO: fix this to be the right value for e24joe run 193
 
         with open('./raw_viewer/h5_utils/timing_offsets.pkl', 'rb') as f: # TODO: get specific timing offsets for e24joe
             sim.timing_offsets = pickle.load(f)

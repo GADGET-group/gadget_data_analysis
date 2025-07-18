@@ -17,13 +17,9 @@ from track_fitting import SingleParticleEvent, build_sim
 start_time = time.time()
 
 
-run_number = 124
+run_number = 193
 experiment = 'e24joe'
-<<<<<<< HEAD
-pickle_fname = '%s_run%d_results_objects_m%d_c%d.dat'%(experiment,run_number, m_guess, c_guess)
-
-h5file = build_sim.get_rawh5_object(experiment, run_number)
-=======
+multiprocessing.set_start_method('spawn')
 
 m_guess, c_guess = 0.1004, 22.5
 use_likelihood = False #if false, uses least squares
@@ -40,7 +36,6 @@ else:
         else:
             pickle_fname = '%s_run%d_energy_free.dat'%(experiment,run_number)
     
->>>>>>> alex_track_fitting
 
 h5file = build_sim.get_rawh5_object(experiment, run_number)
 
@@ -49,13 +44,6 @@ h5file = build_sim.get_rawh5_object(experiment, run_number)
 
 def fit_event(run, event, particle_type, include_recoil, direction, Eknown, return_key=None, 
               return_dict=None, debug_plots=False):
-<<<<<<< HEAD
-    trace_sim = build_sim.create_single_particle_sim(experiment, run, event, particle_type)
-    if trace_sim.num_trace_bins > 100:
-        print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
-        return 
-    #want max likilihood to just be least squares for this fit
-=======
     if include_recoil:
         if particle_type == '1H': 
             recoil_name, recoil_mass, product_mass = '19Ne', 19, 1
@@ -72,14 +60,13 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     #     return 
     
     #trace_sim.counts_per_MeV *= 1.058
->>>>>>> alex_track_fitting
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
     # print(trace_sim.traces_to_fit)
-    h5file.plot_3d_traces(9091, threshold=100)
+    # h5file.plot_3d_traces(9091, threshold=100)
     x_real, y_real, z_real, e_real = trace_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=trace_sim.traces_to_fit)
-    print("x_real, y_real, z_real, e_real: ",x_real, y_real, z_real, e_real)
-    print("len x_real, len y_real, len z_real, len e_real: ",len(x_real), len(y_real), len(z_real), len(e_real))
+    # print("x_real, y_real, z_real, e_real: ",x_real, y_real, z_real, e_real)
+    # print("len x_real, len y_real, len z_real, len e_real: ",len(x_real), len(y_real), len(z_real), len(e_real))
     zmin = 0
     #set zmax to length of trimmed traces
     zmax = trace_sim.num_trace_bins*trace_sim.zscale
@@ -88,22 +75,22 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     track_direction_vec = track_direction_vec[0]
 
     d_best, best_point_1, best_point_2 = np.inf, None, None #distance along track in direction of particle motion. Make as negative as possible
-    if self.remove_outliers:
-        labeled_image = skimage.measure.label(pad_image, background=0)
-        labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
-        bigest_label = labels[np.argmax(counts)]
-        new_data = []
-        for line in data: #only copy over pads in the bigest blob and veto pads
-            chnl_info = tuple(line[0:4])
-            if chnl_info in self.chnls_to_pad:
-                pad = self.chnls_to_pad[chnl_info]
-            else:
-                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                continue
-            x,y = self.pad_to_xy_index[pad]
-            if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
-                new_data.append(line)
-        data = np.array(new_data)
+    # if self.remove_outliers:
+    #     labeled_image = skimage.measure.label(pad_image, background=0)
+    #     labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
+    #     bigest_label = labels[np.argmax(counts)]
+    #     new_data = []
+    #     for line in data: #only copy over pads in the bigest blob and veto pads
+    #         chnl_info = tuple(line[0:4])
+    #         if chnl_info in self.chnls_to_pad:
+    #             pad = self.chnls_to_pad[chnl_info]
+    #         else:
+    #             #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
+    #             continue
+    #         x,y = self.pad_to_xy_index[pad]
+    #         if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
+    #             new_data.append(line)
+    #     data = np.array(new_data)
     for x, y, z in zip(x_real, y_real, z_real):
         delta = np.array([x,y,z]) - track_center
         dist = np.dot(delta, track_direction_vec*direction)
@@ -201,14 +188,14 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         plt.show()
     return res
 
-if True: #try fitting one event to make sure it looks ok
+if False: #try fitting one event to make sure it looks ok
     #fit_event(124,108, '1H', debug_plots=True)
     #fit_event(124,145, '4He', True, direction=1, debug_plots=True)
     print(fit_event(124,9091, particle_type=['4He','4He'], include_recoil=False, Eknown=6.2 ,direction=1, debug_plots=False))
     print('fitting took %f s'%(time.time() - start_time))
 
 
-events_in_catagory = [[] for i in range(8)]
+events_in_catagory = [[] for i in range(2)]
 events_per_catagory = 20
 processes = []
 
@@ -226,40 +213,55 @@ processes = []
 TODO: do a better job of outlier removal for adc gain fit
 
 '''
-def classify(range, counts):
-    if counts > 8.33e4 and  range > 16.93 and counts < 9.45e4 and range < 22.95:
-        return 0
-    elif counts > 1.738e5 and range>34.08 and counts < 2.032e5 and range < 59.33:
-        return 1
-    elif counts > 4.16e4 and range > 11.56 and counts < 5.37e4 and range < 13.12:
-        return 2
-    elif counts > 1.061e5 and range < 15.75 and counts < 1.188e5 and range > 13.99:
-        return 3
-    elif counts > 2.912e5 and range < 23.29 and counts < 3.365e5 and range > 18.03:
-        return 4
-    elif counts > 2.335e5 and range > 16.97 and counts < 2.721e5 and range < 21.64:
-        return 5
-    elif counts  > 5.91e5 and range < 46.8 and counts < 7.3e5 and range > 31:
-        return 6
-    elif counts > 4.7e5 and range > 24.1 and counts < 5.52e5 and range < 40.5:
-        return 7
+def classify(range, counts, experiment):
+    if experiment == 'e24joe':
+        if counts > 7.15e5 and  range > 27.1 and counts < 7.48e5 and range < 30.5:
+            return 0
+        elif counts > 7.7e5 and  range > 30.1 and counts < 8.18e5 and range < 33.7:
+            return 1
+        elif counts > 9.84e5 and  range > 39.29 and counts < 1.04e6 and range < 46.2:
+            return 2
+    elif experiment == 'e21072':    
+        if counts > 8.33e4 and  range > 16.93 and counts < 9.45e4 and range < 22.95:
+            return 0
+        elif counts > 1.738e5 and range>34.08 and counts < 2.032e5 and range < 59.33:
+            return 1
+        elif counts > 4.16e4 and range > 11.56 and counts < 5.37e4 and range < 13.12:
+            return 2
+        elif counts > 1.061e5 and range < 15.75 and counts < 1.188e5 and range > 13.99:
+            return 3
+        elif counts > 2.912e5 and range < 23.29 and counts < 3.365e5 and range > 18.03:
+            return 4
+        elif counts > 2.335e5 and range > 16.97 and counts < 2.721e5 and range < 21.64:
+            return 5
+        elif counts  > 5.91e5 and range < 46.8 and counts < 7.3e5 and range > 31:
+            return 6
+        elif counts > 4.7e5 and range > 24.1 and counts < 5.52e5 and range < 40.5:
+            return 7
     return -1 
 
+# ptype_and_recoil_dict = {
+#     0:('1H', True, 0.770),
+#     1:('1H', True, 1.590),
+#     2:('16O', False, 0.5384),
+#     3:('16O', False, 1.1087),
+#     4:('4He', True,2.1536),
+#     5:('4He', False, 2.1536),
+#     6:('4He', True, 4.4347),
+#     7:('4He', False, 4.4347)
+# }
+
+# For e24joe, we have three peaks, one at 6.288 MeV (Rn-220), one at 8.785 MeV (Po-212), and one at 6.78 MeV (Po-216). There also exists a small peak at ~6.05 MeV from Bi-212.
 ptype_and_recoil_dict = {
-    0:('1H', True, 0.770),
-    1:('1H', True, 1.590),
-    2:('16O', False, 0.5384),
-    3:('16O', False, 1.1087),
-    4:('4He', True,2.1536),
-    5:('4He', False, 2.1536),
-    6:('4He', True, 4.4347),
-    7:('4He', False, 4.4347)
+    0:('4He', False, 6.288),
+    1:('4He', False, 6.778),
+    2:('4He', False, 8.785)
 }
 
 veto_threshold = 300
 
 # if not load_previous_fit:
-if False:
+if True:
     n = h5file.get_event_num_bounds()[0]
     manager = multiprocessing.Manager()
     forward_fit_results_dict = manager.dict()
@@ -267,7 +269,8 @@ if False:
     while np.min([len(x) for x in events_in_catagory]) < events_per_catagory and n < h5file.get_event_num_bounds()[1]: # collect a number of events from each category
         max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n) # process event to extract length and ADC counts
         l = np.sqrt(dxy**2 + dz**2)
-        event_catagory = classify(l, counts) # classify event based on processed event
+        event_catagory = classify(l, counts, experiment) # classify event based on processed event
+        print('event %d classified as %d'%(n, event_catagory))
         # now fit the event forwards and backwards if it was not vetoed, was categorized properly, and we still need an event from that category
         if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory: 
             particle_type, include_recoil, E = ptype_and_recoil_dict[event_catagory]

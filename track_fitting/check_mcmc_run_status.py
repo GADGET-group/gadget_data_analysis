@@ -164,18 +164,20 @@ Ea_Ep_labels = ['Ea', 'Ep', 'x', 'y', 'z', 'theta_p', 'phi_p', 'theta_a', 'phi_a
 summary_file_path = './run%d_dalpha_sim_mcmc_init_walker_at_true_values/summary.txt'%run_number
 filepath_template = './run%d_dalpha_sim_mcmc_init_walker_at_true_values/event%d/%s.h5'
 
-if False: #change this to True for single particle fits
+if True: #change this to True for single particle fits
     run_number= 124
     steps = ['forward', 'backward']
     filenames = []
-    events = [3]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
+    events = [10418]#[4, 15 ,17 , 19, 20, 29, 31, 34, 43, 45, 55, 65, 71, 91, 108]
         #filenames.append('../run%d_mcmc/event%d/final_run.h5'%(run_number, event))
-    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z']
+    labels = ['E', 'x','y','z','theta', 'phi', 'sigma_xy', 'sigma_z', 'density_scale'] # for some reason, mcmc_single_particle.py uses density_scale as a parameter in the fit
     theta_index, phi_index = 4,5
     tau = [2]
     Ea_Ep_labels = None
     summary_file_path = './run%d_single_alpha_sim_mcmc/summary.txt'%run_number
     filepath_template = './run%d_single_alpha_sim_mcmc/event%d/%s.h5'
+    summary_file_path = './run%d_mcmc/summary.txt'%run_number
+    filepath_template = './run%d_mcmc/event%d/%s.h5'
 else:
     run_number= 124
     steps = ['forward', 'backward']

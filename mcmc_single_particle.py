@@ -17,7 +17,7 @@ if __name__ == '__main__':
     particle_type, run_number, event_num = sys.argv[1:]
     run_number = int(run_number)
     event_num = int(event_num)
-    experiment = 'e21072'
+    experiment = 'e24joe'
     if particle_type == '1H':
         particle_mass = 1
         recoil_mass = 19
@@ -41,8 +41,8 @@ if __name__ == '__main__':
     density_rescale_prior = GaussianVar(1, 0.05)
     nominal_gas_density = build_sim.get_gas_density(experiment, run_number)
 
-    h5file = build_sim.get_rawh5_object(experiment, run_number)
-    temp_sim = build_sim.create_single_particle_sim('e21072', run_number, event_num, particle_type)
+    h5file = build_sim.get_rawh5_object(experiment, 193)
+    temp_sim = build_sim.create_single_particle_sim(experiment, run_number, event_num, particle_type)
     x_real, y_real, z_real, e_real = temp_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=temp_sim.traces_to_fit)
     xmin, xmax = np.min(x_real), np.max(x_real)
     ymin, ymax = np.min(y_real), np.max(y_real)
@@ -57,15 +57,22 @@ if __name__ == '__main__':
 
     def get_sim(params):
         E, x, y, z, theta, phi, sigma_xy, sigma_z, density_scale = params
-        trace_sim = build_sim.create_multi_particle_decay(experiment, run_number, event_num, 
-                                                          [particle_type], [particle_mass],
-                                                          recoil_nuclues, recoil_mass)
-        for sim in trace_sim.sims:
-            sim.load_srim_table(sim.particle, sim.material, nominal_gas_density*density_scale)
-        trace_sim.products[0].initial_energy = E
+        # trace_sim = build_sim.create_multi_particle_decay(experiment, run_number, event_num, 
+        #                                                   [particle_type], [particle_mass],
+        #                                                   recoil_nuclues, recoil_mass)
+        trace_sim = build_sim.create_single_particle_sim(experiment, run_number, event_num, 
+                                                          particle_type)
+        
+        # for sim in trace_sim.sims:
+        #     sim.load_srim_table(sim.particle, sim.material, nominal_gas_density*density_scale)
+        trace_sim.load_srim_table(trace_sim.particle, trace_sim.material, nominal_gas_density*density_scale)
+        # trace_sim.products[0].initial_energy = E
+        trace_sim.initial_energy = E
         trace_sim.initial_point = (x,y,z)
-        trace_sim.products[0].theta = theta
-        trace_sim.products[0].phi = phi
+        # trace_sim.products[0].theta = theta
+        # trace_sim.products[0].phi = phi
+        trace_sim.theta = theta
+        trace_sim.phi = phi
         trace_sim.sigma_xy = sigma_xy
         trace_sim.sigma_z = sigma_z
         trace_sim.simulate_event()
@@ -130,7 +137,7 @@ if __name__ == '__main__':
         theta = np.arctan2( np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
         phi = np.arctan2(vhat[1], vhat[0])
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
-        sigma_guess = 7
+        sigma_guess = 2.5
         pos_ball_size = 1
         angle_ball_size = 1*np.pi/180
 
