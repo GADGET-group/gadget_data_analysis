@@ -2,11 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.ndimage
 import scipy.optimize as opt
+import cupy as cp
 
 #build images
 dim = 40
-num_events = 1000
-threshold = 6
+num_events = 10000
+threshold = 1
 counts_per_event=1000
 sigma_min, sigma_max = 3,5
 true_gains = np.random.normal(1, 0.05, (dim,dim))
@@ -28,11 +29,13 @@ plt.imshow(image)
 plt.colorbar()
 plt.show()
 
-observed_counts_per_event = np.sum(pad_images)/num_events
+pad_images_cp = cp.array(pad_images)
+observed_counts_per_event = cp.sum(pad_images_cp)/num_events
 def obj_func(x):
-    gains = np.reshape(x, (dim, dim))
-    adc_counts_in_each_event = np.einsum('ikj,kj', pad_images, gains)/observed_counts_per_event
-    return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
+    x = cp.array(x)
+    gains = cp.reshape(x, (dim, dim))
+    adc_counts_in_each_event = cp.einsum('ikj,kj', pad_images_cp, gains)/observed_counts_per_event
+    return cp.asnumpy(cp.sqrt(cp.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355)
 
 def callback(x):
     print(x, obj_func(x))
