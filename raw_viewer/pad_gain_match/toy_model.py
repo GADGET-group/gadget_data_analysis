@@ -4,15 +4,14 @@ import scipy.ndimage
 import scipy.optimize as opt
 import cupy as cp
 
-#build images
 dim = 40
-num_events = 10000
+num_events = 100
 threshold = 0
 counts_per_event=1000
 sigma_min, sigma_max = 3,5
 true_gains = np.random.normal(1, 0.05, (dim,dim))
 sigma_to_edge = 0
-
+convolution_mode = 'reflect'
 
 device = 0
 
@@ -23,7 +22,7 @@ for evt in range(num_events):
     point = np.random.uniform(sigma_to_edge*sigma, dim - sigma_to_edge*sigma, 2)
     image = np.zeros((dim, dim))
     image[*point.astype(int)] = counts_per_event
-    image = scipy.ndimage.gaussian_filter(image, sigma, mode='reflect')/true_gains
+    image = scipy.ndimage.gaussian_filter(image, sigma, mode=convolution_mode)/true_gains
     image[image<threshold] = 0
     pad_images.append(image)
 
@@ -90,6 +89,7 @@ plt.title('energy spectrum: events use to fit pad gains')
 bins = np.linspace(np.min([counts_no_gain_match, counts_w_gain_match]), np.max([counts_no_gain_match, counts_w_gain_match]), 300)
 plt.hist(counts_no_gain_match, bins, label='counts without gain match')
 plt.hist(counts_w_gain_match, bins, label='counts with gain match', alpha=0.5)
+plt.hist(counts_w_true_gains, bins, label='counts with true gains', alpha=0.5)
 plt.legend()
 
 #build a new set of fake images
@@ -99,7 +99,7 @@ for evt in range(num_events):
     point = np.random.uniform(sigma_to_edge*sigma, dim - sigma_to_edge*sigma, 2)
     image = np.zeros((dim, dim))
     image[*point.astype(int)] = counts_per_event
-    image = scipy.ndimage.gaussian_filter(image, sigma, mode='constant')/true_gains
+    image = scipy.ndimage.gaussian_filter(image, sigma, mode=convolution_mode)/true_gains
     image[image<threshold] = 0
     pad_images2.append(image)
 with cp.cuda.Device(device):
