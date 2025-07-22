@@ -9,18 +9,35 @@ import cupy as cp
 #image generation options
 dim = 20
 num_events = 10000
-threshold = 0.
+threshold = 0.5
 counts_per_event=1000
 sigma_min, sigma_max = 1.5,3
 gain_mu, gain_sigma = 1, 0.0
 true_gains = np.random.normal(gain_mu, gain_sigma, (dim,dim))
 sigma_to_edge = 0
 convolution_mode = 'reflect'
-save_name = 'dim%d_t%f_cpe%d_sig%f-%f_ste%f_gmu%fsig%f.pkl'%(dim, threshold, counts_per_event, sigma_min, sigma_max,
-                                                             sigma_to_edge, gain_mu, gain_sigma)
+enable_edge_correction = True
 load_res = False
 
+if enable_edge_correction:
+    save_name = 'dim%d_t%f_cpe%d_sig%f-%f_ste%f_gmu%fsig%f_edgecor.pkl'%(dim, threshold, counts_per_event, sigma_min, sigma_max,
+                                                             sigma_to_edge, gain_mu, gain_sigma)
+else:
+    save_name = 'dim%d_t%f_cpe%d_sig%f-%f_ste%f_gmu%fsig%f.pkl'%(dim, threshold, counts_per_event, sigma_min, sigma_max,
+                                                             sigma_to_edge, gain_mu, gain_sigma)
+
+
 device = 0
+
+def get_num_adj_pixels(images):
+    to_return = []
+    for image in images:
+        image_copy =np.pad(image, 1) #pad image so pixels which would be just outsie the image, if the existed, are included
+        image_copy[image_copy>0] = 1
+        edge_kernel = np.array([[0,-1,0],[-1,4,-1],[0,-1,0]])
+        adj_image = scipy.ndimage.convolve(image_copy, edge_kernel)
+        to_return.append(np.sum(adj_image<0)) #pixels ith negative values are edge pixels
+    return to_return
 
 #build fake images
 if load_res:
@@ -38,6 +55,7 @@ else:
         image[image<threshold] = 0
         pad_images.append(image)
 
+
 if False:
     plt.figure()
     plt.imshow(image)
@@ -46,25 +64,41 @@ if False:
     plt.show()
 
 with cp.cuda.Device(device):
+    adj_pixel_counts_cp = cp.array(get_num_adj_pixels(pad_images))
     pad_images_cp = cp.array(pad_images)
     observed_counts_per_event = cp.sum(pad_images_cp)/num_events
     def obj_func(x):
         x = cp.array(x)
-        gains = cp.reshape(x, (dim, dim))
+        if enable_edge_correction:
+            gains = cp.reshape(x[:-1], (dim, dim))
+        else:
+            gains = cp.reshape(x, (dim, dim))
         adc_counts_in_each_event = cp.einsum('ikj,kj', pad_images_cp, gains)/observed_counts_per_event
+        if enable_edge_correction:
+            edge_corrections = cp.array(x[-1])*adj_pixel_counts_cp
+            adc_counts_in_each_event += edge_corrections
+
         return cp.asnumpy(cp.sqrt(cp.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355)
 
     def callback(x):
-        print(x[:10], obj_func(x))
+        print(x[:10], x[-1], obj_func(x))
         print(np.mean(x), np.std(x), np.min(x), np.max(x))
     if not load_res:
-        res = opt.minimize(obj_func, np.ones(dim*dim), callback = callback)
+        if enable_edge_correction:
+            guess = np.ones(dim*dim+1)
+            guess[-1]=0
+        else:
+            guess = np.ones(dim*dim)
+        res = opt.minimize(obj_func, guess, callback = callback)
         with open(save_name, 'wb') as f:
             pickle.dump(pad_images, f)
             pickle.dump(res, f)
 
     
-gains = np.reshape(res.x, (dim, dim))
+if enable_edge_correction:
+    gains = cp.reshape(res.x[:-1], (dim, dim))
+else:
+    gains = cp.reshape(res.x, (dim, dim))
 print(res)
 
 plt.figure()
@@ -123,6 +157,7 @@ for evt in range(num_events):
     pad_images2.append(image)
 with cp.cuda.Device(device):
     pad_images_cp2 = cp.array(pad_images2)
+    adj_pixel_counts_cp = cp.array(get_num_adj_pixels(pad_images))
 
 counts_no_gain_match = get_energy_per_event(np.ones(dim*dim), pad_images_cp2)
 counts_w_gain_match = get_energy_per_event(res.x, pad_images_cp2)
@@ -139,7 +174,7 @@ plt.legend()
 #build a new set of fake images
 pad_images3 = []
 for evt in range(num_events):
-    sigma = (4,20)
+    sigma = np.random.uniform(sigma_min, sigma_max)
     point = np.random.uniform(0, dim,2)
     image = np.zeros((dim, dim))
     image[*point.astype(int)] = counts_per_event
@@ -149,6 +184,8 @@ for evt in range(num_events):
 with cp.cuda.Device(device):
     pad_images_cp3 = cp.array(pad_images3)
 
+plt.figure()
+plt.title('example new event')
 plt.imshow(pad_images3[2])
 plt.colorbar()
 
@@ -164,3 +201,11 @@ plt.hist(counts_w_true_gains, bins, label='counts with true gains, std=%f'%np.st
 #plt.yscale('log')
 plt.legend()
 plt.show()
+
+dim_min_max = [1,5]
+samples = 1000
+rec_dims = []
+for i in range(samples):
+    center = np.random.uniform(0, dim, 2)
+    w_nominal = np.random.uniform(*dim_min_max)
+    h_nominal = np.random.uniform(*dim_min_max)
