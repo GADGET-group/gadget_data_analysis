@@ -552,37 +552,6 @@ class raw_h5_file:
         #image[image<0]=0
         return image
 
-    # def show_padplane_image(self, data, trace_dict=None, block=False, fig_name=None, title=''):
-    #     '''
-    #     Shows a figure with pad plane displaying "data", above the sum of all "traces" (if not None).
-    #     Clicking on a pad will show the corresponding trace 
-    #     data: Dictionary of pixel brightnesses indexed by pad number
-    #     traces: optional. If passed, sould contain trace to dispay when a pad is clicked. Summed version of this 
-    #             will be shown below the pad plane.
-    #     '''
-    #     image = self.get_2d_image(data)
-
-    #     fig = plt.figure(fig_name, figsize=(6,6))
-    #     plt.clf()
-    #     plt.title(title)
-    #     plt.subplot(2,1,1)
-    #     plt.imshow(image, norm=colors.LogNorm())
-    #     plt.colorbar()
-    #     plt.subplot(2,1,2)
-    #     if type(trace_dict) != type(None):
-    #         plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
-    #         def onclick(event):
-    #             x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
-    #             pad = self.xy_index_to_pad[(x,y)]
-    #             if pad in trace_dict:
-    #                 plt.figure()
-    #                 plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
-    #                 plt.plot(trace_dict[pad])
-    #                 plt.show(block=False)
-
-    #         fig.canvas.mpl_connect('button_press_event', onclick)
-    #     plt.show(block=block)
-
     def show_padplane_image(self, data, trace_dict=None, block=False, fig_name=None, title=''):
         '''
         Shows a figure with pad plane displaying "data", above the sum of all "traces" (if not None).
