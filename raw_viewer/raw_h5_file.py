@@ -497,7 +497,7 @@ class raw_h5_file:
         '''
         Note: veto pads are plotted as dotted lines
         '''
-        plt.figure(fig_name)
+        plt.figure(fig_name, figsize=(8, 6))
         plt.clf()
         pads, pad_data = self.get_pad_traces(event_num)
         for pad, data in zip(pads, pad_data):
@@ -508,7 +508,8 @@ class raw_h5_file:
                 plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
             else:
                 plt.plot(data, color=(r,g,b), label='%d'%pad)
-        plt.legend(loc='upper right')
+        plt.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), title="Pad #", borderaxespad=0.1, ncol=2)
+        # plt.tight_layout()
         plt.show(block=block)
 
     def plot_3d_traces(self, event_num, threshold=-np.inf, block=True, fig_name=None):
@@ -551,6 +552,37 @@ class raw_h5_file:
         #image[image<0]=0
         return image
 
+    # def show_padplane_image(self, data, trace_dict=None, block=False, fig_name=None, title=''):
+    #     '''
+    #     Shows a figure with pad plane displaying "data", above the sum of all "traces" (if not None).
+    #     Clicking on a pad will show the corresponding trace 
+    #     data: Dictionary of pixel brightnesses indexed by pad number
+    #     traces: optional. If passed, sould contain trace to dispay when a pad is clicked. Summed version of this 
+    #             will be shown below the pad plane.
+    #     '''
+    #     image = self.get_2d_image(data)
+
+    #     fig = plt.figure(fig_name, figsize=(6,6))
+    #     plt.clf()
+    #     plt.title(title)
+    #     plt.subplot(2,1,1)
+    #     plt.imshow(image, norm=colors.LogNorm())
+    #     plt.colorbar()
+    #     plt.subplot(2,1,2)
+    #     if type(trace_dict) != type(None):
+    #         plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
+    #         def onclick(event):
+    #             x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
+    #             pad = self.xy_index_to_pad[(x,y)]
+    #             if pad in trace_dict:
+    #                 plt.figure()
+    #                 plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
+    #                 plt.plot(trace_dict[pad])
+    #                 plt.show(block=False)
+
+    #         fig.canvas.mpl_connect('button_press_event', onclick)
+    #     plt.show(block=block)
+
     def show_padplane_image(self, data, trace_dict=None, block=False, fig_name=None, title=''):
         '''
         Shows a figure with pad plane displaying "data", above the sum of all "traces" (if not None).
@@ -561,27 +593,34 @@ class raw_h5_file:
         '''
         image = self.get_2d_image(data)
 
-        fig = plt.figure(fig_name, figsize=(6,6))
-        plt.clf()
-        plt.title(title)
-        plt.subplot(2,1,1)
-        plt.imshow(image, norm=colors.LogNorm())
-        plt.colorbar()
-        plt.subplot(2,1,2)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 6), constrained_layout=True, num=fig_name, clear=True)
+        fig.suptitle(title)
+
+        # Top plot: padplane image
+        im = ax1.imshow(image, norm=colors.LogNorm())
+        fig.colorbar(im, ax=ax1)
+        ax1.set_title('Padplane Image')
+
+        # Bottom plot: sum of traces
+        summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
+        ax2.plot(summed_trace)
+        ax2.set_title('Summed Trace')
+        ax2.set_xlabel('Time')
+        ax2.set_ylabel('ADC Counts')
         if type(trace_dict) != type(None):
-            plt.plot(np.sum([trace_dict[pad] for pad in trace_dict], axis=0))
             def onclick(event):
                 x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
-                pad = self.xy_index_to_pad[(x,y)]
+                pad = self.xy_index_to_pad.get((x, y))
                 if pad in trace_dict:
                     plt.figure()
                     plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
                     plt.plot(trace_dict[pad])
+                    plt.xlabel('Time')
+                    plt.ylabel('ADC Counts')
                     plt.show(block=False)
 
-            fig.canvas.mpl_connect('button_press_event', onclick)
+        fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
-
 
     def show_2d_projection(self, event_number, block=True, fig_name=None):
         pads, traces = self.get_pad_traces(event_number)
@@ -589,7 +628,7 @@ class raw_h5_file:
         data = {pad:np.sum(trace_dict[pad]) for pad in trace_dict}
         should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
         length = np.sqrt(dxy**2 + dz**2)
-        title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
+        title='event %d, total counts=%d, length=%f mm,\n angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
         self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
         
 
@@ -621,3 +660,4 @@ class raw_h5_file:
         self.data_select_mode = old_mode
         plt.legend(loc='upper right')
         plt.show(block=block)
+
