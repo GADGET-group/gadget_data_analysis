@@ -16,7 +16,7 @@ from sklearn.cluster import DBSCAN
 # temporaty and bad way to implement pad gain correction
 PGM = True
 
-USE_GPU = True
+USE_GPU = False
 if USE_GPU:
     import cupy as cp
     import cupyx.scipy.special as cpspecial

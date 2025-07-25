@@ -13,13 +13,12 @@ import matplotlib as mpl
 import scipy.optimize as opt
 
 from track_fitting import SingleParticleEvent, build_sim
-
 start_time = time.time()
 
 
 run_number = 193
 experiment = 'e24joe'
-multiprocessing.set_start_method('spawn')
+#multiprocessing.set_start_method('spawn', force=True)
 
 m_guess, c_guess = 0.1004, 22.5
 use_likelihood = False #if false, uses least squares
@@ -195,7 +194,7 @@ if False: #try fitting one event to make sure it looks ok
     print('fitting took %f s'%(time.time() - start_time))
 
 
-events_in_catagory = [[] for i in range(2)]
+events_in_catagory = [[] for i in range(3)]
 events_per_catagory = 20
 processes = []
 

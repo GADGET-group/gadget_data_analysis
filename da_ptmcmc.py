@@ -91,11 +91,11 @@ if __name__ == '__main__':
             return -np.inf
         if xp**2 + yp**2 > 60**2:
             return -np.inf
-        if zp < zmin or zp >zmax:
+        if zp < 0.0 or zp >500.0:
             return -np.inf
         if xa**2 + ya**2 > 60**2:
             return -np.inf
-        if za < zmin or za >zmax:
+        if za < 0.0 or za >500.0:
             return -np.inf
         # vhat = np.array([np.sin(theta_p)*np.cos(phi_p), np.sin(theta_p)*np.sin(phi_p), np.cos(theta_p)])
         # if np.dot(vhat, direction*track_direction_vec) < 0 or theta_p > np.pi or theta_p < 0 or np.abs(phi_p)>np.pi:
@@ -192,7 +192,7 @@ if __name__ == '__main__':
             E2 = 3.3079535189141134
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([18.5,-18.8,20])
+            best_point = np.array([18.5,-18.8,17.0])
             theta_1 = 0.43
             phi_1 = 3.636
             theta_2 = 3.034
@@ -205,7 +205,7 @@ if __name__ == '__main__':
             E2 = 6
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([0,0,26])
+            best_point = np.array([0.7,0.1,26.8])
             theta_1 = 2.19
             phi_1 = 0.0
             theta_2 = 0.9608
@@ -222,7 +222,7 @@ if __name__ == '__main__':
             phi_2 = 1.666
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([22.,17.6,46.5])
+            best_point = np.array([22.0,17.6,46.5])
             sigma_xy_guess = 2.
             sigma_z_guess = 3.
             
@@ -235,7 +235,7 @@ if __name__ == '__main__':
             phi_2 = 0.666
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([22.,17.6,46.5])
+            best_point = np.array([-3.0,-18.8,32.7])
             sigma_xy_guess = 2.
             sigma_z_guess = 3.
             
@@ -248,7 +248,7 @@ if __name__ == '__main__':
             phi_2 = 4.7
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([22.,17.6,46.5])
+            best_point = np.array([6.7,-1.8,17.9])
             sigma_xy_guess = 2.
             sigma_z_guess = 3.
             
@@ -261,7 +261,7 @@ if __name__ == '__main__':
             phi_2 = 3.1415
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([22.,17.6,46.5])
+            best_point = np.array([11.0,2.0,15.0])
             sigma_xy_guess = 1.
             sigma_z_guess = 2.5
             
@@ -274,7 +274,7 @@ if __name__ == '__main__':
             phi_2 = 2.007
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([22.,17.6,46.5])
+            best_point = np.array([4.0,7.0,20.0])
             sigma_xy_guess = 0.7
             sigma_z_guess = 3.
             
@@ -287,23 +287,50 @@ if __name__ == '__main__':
             phi_2 = 5.01
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([22.,17.6,46.5])
+            best_point = np.array([12.9,-23.8,16.6])
+            sigma_xy_guess = 2.
+            sigma_z_guess = 3.
+            
+        if event_num == 27367:
+            E1 = 5.0
+            theta_1 = 2.38
+            phi_1 = 0.14
+            E2 = 5.0
+            theta_2 = 0.8
+            phi_2 = 3.2
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([19.8,-14.0,24.4])
             sigma_xy_guess = 2.
             sigma_z_guess = 3.
             
         if event_num == 35094:
             E1 = 6.0
-            theta_1 = 0.0
-            phi_1 = 0.0
+            theta_1 = 1.1
+            phi_1 = 2.4
             E2 = 6.0
-            theta_2 = 3.1415
-            phi_2 = 0.0
+            theta_2 = 2.3
+            phi_2 = 5.7
             E_prior.mu = E1 + E2
             Ea_frac_guess = E1/E_prior.mu
-            best_point = np.array([22.,17.6,46.5])
+            best_point = np.array([11.2,5.6,25.5])
             sigma_xy_guess = 2.
             sigma_z_guess = 3.
             
+        if event_num == 2:
+            E1 = 5.0
+            theta_1 = 1.57
+            phi_1 = 0.0
+            E2 = 5.0
+            theta_2 = 1.57
+            phi_2 = 3.14
+            E_prior.mu = E1 + E2
+            Ea_frac_guess = E1/E_prior.mu
+            best_point = np.array([3.0,0.0,15.0])
+            sigma_xy_guess = 2.
+            sigma_z_guess = 3.
+            
+        # TODO: missing events: 8920, 12808, 
         print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta_1, phi_1,theta_2,phi_2,sigma_xy_guess,sigma_z_guess))
 
         # print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess))
@@ -340,7 +367,7 @@ if __name__ == '__main__':
 
 
     # We'll track how the average autocorrelation time estimate changes
-    directory = 'run%d_dalpha_good_starting_values_mcmc/event%d'%(run_number, event_num)
+    directory = 'new_ll_run%d_da_mcmc/event%d'%(run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 

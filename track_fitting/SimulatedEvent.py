@@ -428,4 +428,5 @@ class SimulatedEvent:
         ys = ys[np.abs(es)>threshold]
         zs = zs[np.abs(es)>threshold]
         es = es[np.abs(es)>threshold]
+        print('total residual energy: %f'%(np.sum(np.abs(es))))
         self.plot_xyze(xs, ys, zs, es, title)
