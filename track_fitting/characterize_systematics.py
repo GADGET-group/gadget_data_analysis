@@ -20,7 +20,7 @@ run_number = 193
 experiment = 'e24joe'
 #multiprocessing.set_start_method('spawn', force=True)
 
-m_guess, c_guess = 0.1004, 22.5
+m_guess, c_guess = 0.0, 22.5
 use_likelihood = False #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
@@ -43,6 +43,7 @@ h5file = build_sim.get_rawh5_object(experiment, run_number)
 
 def fit_event(run, event, particle_type, include_recoil, direction, Eknown, return_key=None, 
               return_dict=None, debug_plots=False):
+    print('starting fit for event %d in run %d with particle %s'%(event, run, particle_type))
     if include_recoil:
         if particle_type == '1H': 
             recoil_name, recoil_mass, product_mass = '19Ne', 19, 1
@@ -169,7 +170,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         trace_sim.plot_residuals_3d(threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
-
+    print('starting optimization of event %d in run %d with particle %s'%(event, run, particle_type))
     res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,))
     if use_likelihood:
         res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))

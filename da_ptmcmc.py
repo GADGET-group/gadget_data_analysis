@@ -128,7 +128,7 @@ if __name__ == '__main__':
     fit_start_time = time.time()
     # ntemps = 20 # default increases temp by sqrt(2), so highest temp is 1024 (sigma_T = 32*sigma = 3.2)
     nwalkers = 400
-    steps = 500
+    steps = 1000
     ndim = 16
 
     def get_init_walker_pos(direction):
@@ -367,7 +367,7 @@ if __name__ == '__main__':
 
 
     # We'll track how the average autocorrelation time estimate changes
-    directory = 'new_ll_run%d_da_mcmc/event%d'%(run_number, event_num)
+    directory = 'new_ll_run%d_da_mcmc/1000_step_event%d'%(run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 
