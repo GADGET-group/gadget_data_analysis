@@ -116,7 +116,7 @@ with h5py.File("/egr/research-tpc/dopferjo/run_121-128_proton_pad_gainmatch_even
   
         print("First event: %d, Last event: %d"%(first_event, last_event))
 
-        # process settings are set the same as p10_2000torr config settings
+        # process settings are set the same as smart config settings
         h5file.length_ic_threshold = 100
         h5file.ic_counts_threshold = 9
         h5file.view_threshold = 100
