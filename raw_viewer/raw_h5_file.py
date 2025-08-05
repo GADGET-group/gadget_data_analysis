@@ -3,6 +3,7 @@ import os
 import numpy as np
 import scipy.spatial
 import scipy.spatial.distance
+import scipy.linalg
 import h5py
 import matplotlib.pylab as plt
 import matplotlib.colors as colors
@@ -481,7 +482,8 @@ class raw_h5_file:
             x, y, z, e = xyze
         points = cp.concatenate((x[:, cp.newaxis], y[:, cp.newaxis], z[:, cp.newaxis]), axis=1)
         points_mean = points.mean(axis=0)
-        uu, dd, vv = cp.linalg.svd(points - points_mean)
+        # uu, dd, vv = cp.linalg.svd(points - points_mean) # TODO: for some reason, this does not work with multiprocessing, so I am attempting to use scipy.linalg.svd instead
+        uu, dd, vv = scipy.linalg.svd(points - points_mean)
         if return_np:
             points_mean = cp.asnumpy(points_mean)
             uu, dd, vv = cp.asnumpy(uu), cp.asnumpy(dd), cp.asnumpy(vv)
@@ -523,7 +525,7 @@ class raw_h5_file:
     
     def get_track_length_angle(self, event_number, return_np=True):
         '''
-        1. Determin track principle axis, and use this to get azimuthal angle
+        1. Determine track principle axis, and use this to get azimuthal angle
         2. Find point furthest along this axis, in each direction
 
         Returns: length, angle from z-axis in radians

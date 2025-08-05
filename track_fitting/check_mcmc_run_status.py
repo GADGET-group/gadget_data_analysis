@@ -2,12 +2,16 @@ import os
 
 import emcee
 
-import matplotlib.pylab as plt
+import matplotlib.pyplot as plt
 import corner
 import numpy as np
 import sklearn.cluster as cluster
 
 from track_fitting import build_sim
+
+plt.rcParams['axes.labelsize'] = 20  # Global font size for axis labels
+plt.rcParams['xtick.labelsize'] = 20 # Global font size for x-tick labels
+plt.rcParams['ytick.labelsize'] = 20  # Global font size for y-tick labels
 
 def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_file=None):
     base_fname = os.path.splitext(mcmc_filepath)[0]
@@ -33,9 +37,9 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
                     to_plot = np.degrees(to_plot)
                 ax.plot(to_plot, "k", alpha=0.3)
                 ax.set_xlim(0, len(samples))
-                ax.set_ylabel(labels[i])
-                ax.yaxis.set_label_coords(-0.1, 0.5)
-            axes[-1].set_xlabel("step number")
+                ax.set_ylabel(labels[i], fontsize=22, rotation='horizontal')
+                ax.yaxis.set_label_coords(-0.1, 0.3)# was -0.1, 0.5
+            axes[-1].set_xlabel("step number", fontsize=22)
             plt.savefig(base_fname+'_chain.png')
 
             #show plot of ll vs phi in last step
@@ -73,9 +77,11 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
                     to_plot = np.degrees(to_plot)
                 ax.plot(to_plot, "k", alpha=0.3)
                 ax.set_xlim(0, len(Ea_Ep_samples))
-                ax.set_ylabel(Ea_Ep_labels[i])
+                ax.set_ylabel(Ea_Ep_labels[i], fontsize=30, rotation='horizontal')
                 ax.yaxis.set_label_coords(-0.1, 0.5)
-            axes[-1].set_xlabel("step number")
+            plt.subplots_adjust(hspace=0.9)
+            axes[-1].set_xlabel("step number", fontsize=30)
+            
 
             #scatter plot of Ea and Ep color coded by posterior
             Ea = Ea_Ep_samples[-1][:, 0]
@@ -123,14 +129,14 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
         
         # true_params = [12,0.5,0,0,20,0.785398,0.785398,2.35619,3.92699,2,3]
         # true_params = [6,0,0,20,0.785398,0.785398,2,3]   
-        corner.corner(flat_samples, labels=labels)# , truths=true_params)
+        corner.corner(flat_samples, labels=labels, label_kwargs={"fontsize":'x-large'}, labelpad = 0.1)# , truths=true_params)
         plt.savefig(base_fname+'_corner_plot.png')
         plt.close('all') 
         if Ea_Ep_labels != None:
             EaEp_flat = reader.get_chain(discard=burnin, thin=thin, flat=True)
             EaEp_flat[:,0] = flat_samples[:,0]*flat_samples[:,1]
             EaEp_flat[:,1] = flat_samples[:,0]*(1-flat_samples[:,1])
-            corner.corner(EaEp_flat, labels=Ea_Ep_labels)# , truths=true_params)
+            corner.corner(EaEp_flat, labels=Ea_Ep_labels, label_kwargs={"fontsize":'x-large'}, labelpad = 0.1)# , truths=true_params)
             plt.savefig(base_fname+'corner_plot_EaEp.png')
 
 
@@ -184,6 +190,8 @@ else:
     steps = ['forward']
     filenames = []
     events = [2,90,1762,2061,7175,11400,14822,21693,22081,27367,35094]
+    # Right now, we are set up to process 1,000 step mcmc runs
+    events = [2061, 11400, 14822, 21693, 27367, 35094]
     labels = ['E', 'Ea_frac', 'x','y','z', 'xa','ya','za','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'sigma_a_xy', 'sigma_a_z']
     # labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_xy', 'sigma_z']
     # labels = ['E', 'x','y','z','theta_p', 'phi_p', 'sigma_xy', 'sigma_z']
@@ -198,7 +206,7 @@ else:
     summary_file_path = './run%d_dalpha_good_starting_values_mcmc/summary.txt'%run_number
     filepath_template = './run%d_dalpha_good_starting_values_mcmc/event%d/%s.h5'
     summary_file_path = './new_ll_run%d_da_mcmc/summary.txt'%run_number
-    filepath_template = './new_ll_run%d_da_mcmc/event%d/%s.h5'
+    filepath_template = './new_ll_run%d_da_mcmc/1000_step_event%d/%s.h5'
 
 
 with open(summary_file_path, 'w') as summary_file:

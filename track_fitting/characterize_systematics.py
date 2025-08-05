@@ -1,7 +1,10 @@
 load_previous_fit = False
 
 import time
-import multiprocessing
+import multiprocessing, logging
+# logger = multiprocessing.log_to_stderr()
+# logger.setLevel(multiprocessing.SUBDEBUG)
+# multiprocessing.util.log_to_stderr(logging.DEBUG)
 import pickle
 import os
 # if not load_previous_fit:
@@ -43,7 +46,6 @@ h5file = build_sim.get_rawh5_object(experiment, run_number)
 
 def fit_event(run, event, particle_type, include_recoil, direction, Eknown, return_key=None, 
               return_dict=None, debug_plots=False):
-    print('starting fit for event %d in run %d with particle %s'%(event, run, particle_type))
     if include_recoil:
         if particle_type == '1H': 
             recoil_name, recoil_mass, product_mass = '19Ne', 19, 1
@@ -52,9 +54,14 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         trace_sim = build_sim.create_multi_particle_decay(experiment, run, event, [particle_type], [product_mass], recoil_name, recoil_mass)
         particle = trace_sim.sims[0]
     else:
-        print("Creating MultiParticle Event: ",particle_type)
         trace_sim = build_sim.create_multi_particle_event(experiment, run, event, particle_type)
         particle = trace_sim.sims[0]
+    # else:
+    #     print("Creating SingleParticle Event:",particle_type)
+    #     trace_sim = build_sim.create_single_particle_sim(experiment, run, event, particle_type)
+    #     print('Successfully created SingleParticle Sim')
+    #     particle = trace_sim.sims[0]
+    
     # if trace_sim.num_trace_bins > 100:
     #     print('evt ', return_key, ' has %d bins, not fitting event since this is unexpected'%trace_sim.num_trace_bins)
     #     return 
@@ -275,11 +282,11 @@ if True:
         if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory: 
             particle_type, include_recoil, E = ptype_and_recoil_dict[event_catagory]
             processes.append(multiprocessing.Process(target=fit_event, 
-                                                        args=(run_number, n, particle_type, include_recoil, 1, E,
+                                                        args=(run_number, n, [particle_type], include_recoil, 1, E,
                                                             n, forward_fit_results_dict)))
             processes[-1].start()
             processes.append(multiprocessing.Process(target=fit_event, 
-                                                        args=(run_number, n, particle_type, include_recoil, -1, E,
+                                                        args=(run_number, n, [particle_type], include_recoil, -1, E,
                                                         n, backward_fit_results_dict)))
             processes[-1].start()
             events_in_catagory[event_catagory].append(n)
@@ -366,7 +373,8 @@ for i in range(len(evts)):
     print(evts[i], max_residual_fraction)
     #only fit events with residuals no more than 40% of traces
     #and no more than 2x the median for the catagory
-    if  max_residual_fraction < 0.4:#higher energy proton #: 
+    # if  max_residual_fraction < 0.4:#higher energy proton #:
+    if True:
         trace_sims.append(sim)
         evts_to_fit.append(evts[i])
         cats_to_fit.append(cats[i])
@@ -377,7 +385,7 @@ print('catagories, counts:', np.unique(cats_to_fit, return_counts=True))
 
 peak_residuals_fraction = []
 peak_vals = []
-peak_threshold = 400
+peak_threshold = 10
 for evt, sim in zip(evts_to_fit, trace_sims):
     simulated_traces = sim.sim_traces
     for pad in simulated_traces:
