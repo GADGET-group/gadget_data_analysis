@@ -486,7 +486,8 @@ class raw_h5_file:
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
     
-    def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False):
+    def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False, 
+                      mode='raw', bounds=(0.5, 2), thresh_to_replace=2000):
         print('gain matching using %d events'%len(event_numbers))
         print('getting list of energy per pad for each event')
         pad_counts = []
@@ -506,7 +507,6 @@ class raw_h5_file:
             self.show_padplane_image(data, title='without dead pad replacement')
 
         #replace dead pixels with average of adjacent pixels
-        thresh_to_replace = 2000 #pads with fewer counts will be considered dead
         for pad in range(len(all_events_pad_counts)):
             if all_events_pad_counts[pad] < thresh_to_replace and pad in self.pad_to_xy_index:
                 #find good adjacent pads to use for average
@@ -539,7 +539,7 @@ class raw_h5_file:
         print('average event adc counts:', np.mean(event_adc_counts))
         pad_counts /= np.mean(event_adc_counts)
         print('performing minimization')
-        def objective_function(gains):
+        def raw_objective_function(gains):
             #print(np.shape(pad_counts), np.shape(gains))
             adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
             return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
@@ -556,32 +556,37 @@ class raw_h5_file:
         
         def interp_obj_func(x):
             gains = get_interp_pad_gains(x)
-            return objective_function(gains)
+            return raw_objective_function(gains)
 
         # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Powell",
         #                    callback=callback, 
         #                    bounds=[[0.5, 2]]*NUM_PADS)
-        guess = np.ones(num_grid_points**2)
+        if mode == 'interp':
+            guess = np.ones(num_grid_points**2)
+            to_min = interp_obj_func
+            min_bounds = [bounds]*num_grid_points**2
+        elif mode == 'raw':
+            guess = np.ones(NUM_PADS)
+            to_min = raw_objective_function
+            min_bounds = [bounds]*NUM_PADS
+
 
         def callback(intermediate_result):
                 print(intermediate_result)
                 gains = intermediate_result.x
                 print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
 
-        res = opt.minimize(interp_obj_func, guess, 
+        res = opt.minimize(to_min, guess, 
                            callback=callback,
-                           options={'maxfun':1000000})
-        res.orig_x = res.x
-        res.x = get_interp_pad_gains(res.x)
+                           options={'maxfun':1000000},
+                           bounds=min_bounds)
+        if mode == 'interp':
+            res.orig_x = res.x
+            res.x = get_interp_pad_gains(res.x)
         for pad in VETO_PADS:
             res.x[pad] = 1
-        # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Nelder-Mead",
-        #                    callback=callback, 
-        #                    #bounds=[[0.5, 2]]*NUM_PADS,
-        #                    options={'adaptive':True,
-        #                             'maxiter':20*200*1024, 'maxfev':20*200*1024})
+        res.gain_match_mode = mode
         print(res)
-        #TODO: set veto pad gains to 1
         self.pad_gains = res.x
         if save_results:
             res.events_used = event_numbers
