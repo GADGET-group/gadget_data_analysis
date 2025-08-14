@@ -29,7 +29,7 @@ NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
 NUM_PADS = 1024
 
 class raw_h5_file:
-    def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
+    def __init__(self, file_path, zscale, flat_lookup_csv):
         self.file_path = file_path
         self.h5_file = h5py.File(file_path, 'r')
         self.padxy = np.loadtxt(os.path.join(os.path.dirname(__file__), 'padxy.txt'), delimiter=',')
