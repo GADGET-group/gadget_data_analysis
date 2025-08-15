@@ -228,6 +228,7 @@ class SimGui(ttk.Frame):
                 entries_to_fit.append(entry)
         
         def to_minimize(vals):
+            print("vals, entries_to_fit: ",vals, entries_to_fit)
             for v, entry in zip(vals, entries_to_fit):
                 entry.delete(0, tk.END)
                 entry.insert(0, v)

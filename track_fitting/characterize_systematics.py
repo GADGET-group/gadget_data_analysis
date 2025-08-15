@@ -1,4 +1,4 @@
-load_previous_fit = False
+load_previous_fit = True
 
 import time
 import multiprocessing, logging
@@ -7,8 +7,8 @@ import multiprocessing, logging
 # multiprocessing.util.log_to_stderr(logging.DEBUG)
 import pickle
 import os
-# if not load_previous_fit:
-#     os.environ["OMP_NUM_THREADS"] = "1"
+if not load_previous_fit:
+    os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
 import matplotlib.pylab as plt
@@ -267,8 +267,7 @@ ptype_and_recoil_dict = {
 
 veto_threshold = 300
 
-# if not load_previous_fit:
-if True:
+if not load_previous_fit:
     n = h5file.get_event_num_bounds()[0]
     manager = multiprocessing.Manager()
     forward_fit_results_dict = manager.dict()

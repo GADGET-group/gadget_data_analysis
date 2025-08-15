@@ -26,6 +26,13 @@ def seq_decay_fit(x,a1,mu1,sigma1,a2,mu2,sigma2,m,b):
     line = m*x + b
     return gaus1 + gaus2 + line
 
+def emg_decay_fit(x,a1,mu1,sigma1,lambda1,a2,mu2,sigma2,lambda2,m,b):
+    emg1 = a1 * scipy.stats.exponnorm.pdf(x,lambda1,mu1,sigma1)
+    emg2 = a2 * scipy.stats.exponnorm.pdf(x,lambda2,mu2,sigma2)
+    line = m*x+b
+    return emg1 + emg2 + line
+    
+
 # popt, pcov = scipy.optimize.curve_fit(exponential_fit, bin_centers, bin_heights, p0=[45, 0.00031, 0.3], bounds=([-np.inf,-np.inf,0],[np.inf,np.inf, np.inf]))
 # x_fit = np.linspace(min(bin_borders), max(bin_borders), 500)
 # y_fit = exponential_fit(x_fit, *popt)
@@ -134,24 +141,28 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
         if event_type == 'RnPo Chain':
             for trace in traces:
                 # popt,pcov = scipy.optimize.curve_fit(seq_decay_fit,time_bins, trace, p0=[2000, 160, 8, 2000, 350, 8, 0, 0], bounds=([140,130,5,140,130,5,-np.inf,-np.inf],[4100,200,20,4100,512,20,np.inf,np.inf]))
-                popt,pcov = scipy.optimize.curve_fit(seq_decay_fit,time_bins, trace, bounds=([0,100,4.5,0,100,4.5,-np.inf,-np.inf],[4100,200,6.5,4100,512,6.5,np.inf,np.inf]))
-                y_fit = seq_decay_fit(time_bins, *popt)
+                popt_gaus,pcov_gaus = scipy.optimize.curve_fit(seq_decay_fit,time_bins, trace, bounds=([0,100,4.5,0,100,4.5,-np.inf,-np.inf],[4100,200,6.5,4100,512,6.5,np.inf,np.inf]))
+                popt_emg,pcov_emg = scipy.optimize.curve_fit(emg_decay_fit,time_bins, trace, bounds=([0,100,4.5,0,0,100,4.5,0,-np.inf,-np.inf],[40000,200,6.5,10,40000,512,6.5,10,np.inf,np.inf]), max_nfev = 10000)
+
+                y_fit_gaus = seq_decay_fit(time_bins, *popt_gaus)
+                y_fit_emg = emg_decay_fit(time_bins, *popt_emg)
                 # print(popt)
                 # print('gaus1: ',popt[:3])
                 # print('gaus2: ',popt[3:6])
                 # print('lin: ',popt[6:])
                 plt.clf()
-                plt.plot(time_bins, y_fit, color='red', label='Gaussian Fit on single pad trace')
+                plt.plot(time_bins, y_fit_gaus, color='red', label='Gaussian Fit on single pad trace')
+                plt.plot(time_bins, y_fit_emg, color='green', label='EMG Fit on single pad trace')
                 plt.plot(time_bins, trace, label='Single trace', color='skyblue')
-                plt.title('Gaussian Fit')
+                plt.title('Fit')
                 plt.xlabel('Time bins (20 ns)')
                 plt.ylabel('ADC Counts')
                 plt.legend()
-                # plt.show()
-                test_sigmas.append(popt[2])
-                test_sigmas.append(popt[5])
-                if popt[1] > 140 and popt[4] > 140:
-                    pad_time_diff.append(np.abs(popt[1] - popt[4]))
+                plt.show()
+                test_sigmas.append(popt_gaus[2])
+                test_sigmas.append(popt_gaus[5])
+                if popt_gaus[1] > 140 and popt_gaus[4] > 140:
+                    pad_time_diff.append(np.abs(popt_gaus[1] - popt_gaus[4]))
             
             # plt.clf()
             # plt.xlabel("Sigma (bins)")
