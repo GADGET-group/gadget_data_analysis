@@ -9,7 +9,7 @@ from raw_viewer import raw_h5_file
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def process_run(experiment, run_number):
+def get_processed_run(experiment, run_number):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a pickled version of this information isn't available.
@@ -17,7 +17,7 @@ def process_run(experiment, run_number):
     package_directory = os.path.dirname(os.path.abspath(__file__))
     fname = os.path.join(package_directory, '%s_run%d.pkl'%(experiment, run_number))
     if os.path.exists(fname):
-        print('run previously processed, loading previous results')
+        print('run %d previously processed, loading previous results'%run_number)
         with open(fname, 'rb') as file:
             return pickle.load(file)
     else:
@@ -40,7 +40,7 @@ def process_run(experiment, run_number):
             h5file.num_smart_background_ave_bins = 10
         else:
             raise ValueError
-        print('calculating quantities not saved by GUI process run')
+        print('processing run %d'%run_number)
         first_event, last_event = h5file.get_event_num_bounds()
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
         for evt in tqdm(range(first_event, last_event + 1)):
@@ -92,11 +92,28 @@ def process_run(experiment, run_number):
             pickle.dump(to_return, file)
         return to_return
 
-def get_runs(experiment, run_numbers):
-    info_dicts = []
-    for run in run_numbers:
-        info_dicts.append(process_run(experiment, run))
-    
+loaded_runs={}
+def get_quantity(qname, experiment, runs):
+    to_return = []
+    for run in runs:
+        if (experiment, run) not in loaded_runs:
+            loaded_runs[(experiment, run)] = get_processed_run(experiment, run)
+        to_return.append(loaded_runs[(experiment, run)][qname])
+    return np.concatenate(to_return, axis=0)
+
+
+def get_lengths(experiment, runs):
+    endpoints = np.array(get_quantity('endpoints', experiment, runs))
+    dr = endpoints[:, 0] - endpoints[:, 1]
+    return np.sqrt(np.sum(dr*dr, axis=1))
+
+def get_veto_counts(experiment, runs):
+    veto_pad_mask = np.zeros(1024)
+    for i in raw_h5_file.VETO_PADS:
+        veto_pad_mask[i] = 1
+    return np.einsum('ij, j', get_quantity('pad_charge', experiment, runs), veto_pad_mask)
+
+
 # import os
 
 # import numpy as np
