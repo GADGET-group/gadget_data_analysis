@@ -4,6 +4,8 @@ import random
 import tkinter as tk
 from tkinter import ttk
 import time
+import multiprocessing
+import pickle
 
 import matplotlib.pylab as plt
 import scipy.optimize as opt
@@ -85,16 +87,21 @@ def cluster_and_fit(data,points):
 use_likelihood = False #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
+load_previous_fit = False
+processes = []
+pickle_fname = "two_particle_decays_in_e24joe_energy_free.dat"
 
-def fit_event(event, best_point, best_point_end, Eknown = [6.288,6.288], particle_type = ['4He','4He'], direction = [0,0],
-              return_key=None, return_dict=None, debug_plots=False):
+def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type = ['4He','4He'], direction = [0,0],
+              return_key=None, return_dict=None, debug_plots=False): # currently only works with 2 particles
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
-    particle = trace_sim.sims[0]
-    
+    particle0 = trace_sim.sims[0]
+    particle1 = trace_sim.sims[1]
+    # print(trace_sim.__dict__)
+    # in order for the initial guesses fed from the clustering script to match the 
     #trace_sim.counts_per_MeV *= 1.058
-    # TODO: idk if i need these two lines yet, i dont think i do
-    # trace_sim.pad_gain_match_uncertainty = m_guess
-    # trace_sim.other_systematics = c_guess
+    m_guess, c_guess = 0.0, 22.5
+    trace_sim.pad_gain_match_uncertainty = m_guess
+    trace_sim.other_systematics = c_guess
     zmin = 0
     #set zmax to length of trimmed traces
     zmax = trace_sim.num_trace_bins*trace_sim.zscale
@@ -114,43 +121,56 @@ def fit_event(event, best_point, best_point_end, Eknown = [6.288,6.288], particl
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
         sigma_guess = np.append(sigma_guess, 2.5)
     
-    print(len(particle_type))
-    print(theta_guess)
-    print(phi_guess)
-    print(*best_point)
-    print(Eknown)
-    print(sigma_guess)
-    init_guess = np.array((theta_guess, phi_guess, best_point[:,0], best_point[:,1], best_point[:,1], Eknown, sigma_guess, sigma_guess))
+    init_guess = np.array((theta_guess[0], theta_guess[1], phi_guess[0], phi_guess[1], best_point[0][0], best_point[0][1], best_point[0][2], best_point[1][0], best_point[1][1], best_point[1][2], Eknown, Eknown, sigma_guess[0], sigma_guess[1]))
     print("Initial Guess: ", init_guess)
     def to_minimize(params, least_squares):
-        theta, phi, x, y, z, E_or_m, sigma_xy, sigma_z = params # note that each param is an array with length of the number of particles in the fit
+        print("params: ", params)
+        theta0, theta1, phi0, phi1, x0, y0, z0, x1, y1, z1, E_or_m0, E_or_m1, sigma_xy0, sigma_z0 = params # note that each param is an array with length of the number of particles in the fit
+        sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
         if fit_adc_count_per_MeV:
-            trace_sim.counts_per_MeV = E_or_m
-            particle.initial_energy = Eknown
+            trace_sim.counts_per_MeV = E_or_m0
+            particle0.initial_energy = Eknown
+            particle1.initial_energy = Eknown
         else:
             if fix_energy:
-                particle.initial_energy = Eknown
+                particle0.initial_energy = Eknown
+                particle1.initial_energy = Eknown
             else:
-                particle.initial_energy = E_or_m
+                particle0.initial_energy = E_or_m0
+                particle1.initial_energy = E_or_m1
             trace_sim.counts_per_MeV = 129600. #using mean value fit when this was a free parameter
         
 
         #enforce particle direction
-        vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
-        if np.dot(vhat, direction*track_direction_vec) < 0:
+        vhat0 = np.array([np.sin(theta0)*np.cos(phi0), np.sin(theta0)*np.sin(phi0), np.cos(theta0)])
+        vhat1 = np.array([np.sin(theta1)*np.cos(phi1), np.sin(theta1)*np.sin(phi1), np.cos(theta1)])
+        if np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])) < 0 \
+            or np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])) < 0:
+            print("returned inf because of particle direction: ", vhat0, vhat1)
+            print("track_direction_vec: ", track_direction_vec)
+            print("Dot product: ",  np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])), np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])))
             return np.inf
 
-        if z > trace_sim.num_trace_bins*trace_sim.zscale or z<0:
+        if z0 > trace_sim.num_trace_bins*trace_sim.zscale or z0<0 or z1 > trace_sim.num_trace_bins*trace_sim.zscale or z1<0:
+            print("returned inf because of z scale: ", z0, z1)
+            print("Boundary z-values calculated via the trimmed trace: ", trace_sim.num_trace_bins*trace_sim.zscale)
             return np.inf
-        if x**2 + y**2 > 40**2:
+        if x0**2 + y0**2 > 40**2 or x1**2 + y1**2 > 40**2:
+            print("returned inf because of xy plane boundary")
             return np.inf
-        if particle.initial_energy < 0 or particle.initial_energy  > 10: #stopping power tables currently only go to 10 MeV
+        if particle0.initial_energy < 0 or particle0.initial_energy  > 10 or particle1.initial_energy < 0 or particle1.initial_energy  > 10: #stopping power tables currently only go to 10 MeV
+            print("returned inf because of particle energy")
             return np.inf
         
-        particle.theta, particle.phi = theta, phi
-        trace_sim.initial_point = (x,y,z)
-        trace_sim.sigma_xy = sigma_xy
-        trace_sim.sigma_z = sigma_z
+        particle0.theta, particle0.phi, particle1.theta, particle1.phi = theta0, phi0, theta1, phi1
+        # TODO:   File "/egr/research-tpc/dopferjo/gadget_analysis/da_ll_fit.py", line 166, in to_minimize
+                # trace_sim[0].initial_point = (x0,y0,z0)
+                # ~~~~~~~~~^^^
+                # TypeError: 'MultiParticleEvent' object is not subscriptable
+        trace_sim.sims[0].initial_point = (x0,y0,z0)
+        trace_sim.sims[1].initial_point = (x1,y1,z1)
+        trace_sim.sims[0].sigma_xy, trace_sim.sims[1].sigma_xy = sigma_xy0, sigma_xy1
+        trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z0, sigma_z1
         
         trace_sim.simulate_event()
         if least_squares:
@@ -177,7 +197,7 @@ def fit_event(event, best_point, best_point_end, Eknown = [6.288,6.288], particl
         trace_sim.plot_residuals_3d(threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
-    print('starting optimization of event %d in run %d with particle %s'%(event, 124, particle_type))
+    print('starting optimization of event %d in run %d with particles %s in directions %d, %d'%(event, 124, particle_type, direction[0], direction[1]))
     res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,))
     if use_likelihood:
         res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
@@ -186,7 +206,7 @@ def fit_event(event, best_point, best_point_end, Eknown = [6.288,6.288], particl
         to_minimize(res.x, use_likelihood) #make sure sim is updated with best params
         return_dict[return_key] = (res, trace_sim)
         print(return_key, res)
-        print('total completed in direction %d:'%direction, len(return_dict.keys()))
+        print('total completed in direction [%d,%d]:'%(direction[0],direction[1]), len(return_dict.keys()))
     if debug_plots:
         print(res)
         trace_sim.plot_residuals_3d(title=[str(return_key),particle_type], threshold=20)
@@ -365,22 +385,62 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
                     # ax.legend()
                     # plt.show()
                     
-            print("Time to fit with k-means: ", time.time() - start_time)
+            print("Time to cluster with k-means: ", time.time() - start_time)
 
             # Once we extract the line along which each track travels, we use it to get the starting values for the fitter
+            
+            # scale the z value of our initial guess for use in the fitter with trimmed traces
+            best_lobf[:,:,2] -= np.min(best_lobf[:,:,2])
+            
             # Let's fit all combinations of forward and backward for the two clusters
-            point0f = best_lobf[0][0]
-            point1f = best_lobf[1][0]
-            point0b = best_lobf[0][-1]
-            point1b = best_lobf[1][-1]
-            directions = [[1,1],[1,-1],[-1,1],[-1,-1]] # fit all combinations of forward and backward and use the best fit
+            directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
             for direction in directions:
-                fit_event(event_number, 
-                          [best_lobf[0][direction[0]], best_lobf[1][direction[1]]], 
-                          [best_lobf[0][direction[0]], best_lobf[1][direction[1]]],
-                          direction=direction)
+                # fit_event(event_number, 
+                #           [best_lobf[0][0], best_lobf[1][0]], 
+                #           [best_lobf[0][-1], best_lobf[1][-1]],
+                #           direction=direction)
             
-            
+                if not load_previous_fit:
+                    # n = h5file.get_event_num_bounds()[0]
+                    manager = multiprocessing.Manager()
+                    forward_fit_results_dict = manager.dict()
+                    backward_fit_results_dict = manager.dict()
+                    # while np.min([len(x) for x in events_in_catagory]) < events_per_catagory and event_number < h5file.get_event_num_bounds()[1]: # collect a number of events from each category
+                    max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(event_number) # process event to extract length and ADC counts
+                    l = np.sqrt(dxy**2 + dz**2)
+                    # event_catagory = classify(l, counts, experiment) # classify event based on processed event
+                    # print('event %d classified as %d'%(n, event_catagory))
+                    
+                    # now fit the event forwards and backwards if it was not vetoed, was categorized properly, and we still need an event from that category
+                    # if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory: 
+                    # particle_type, include_recoil, E = ptype_and_recoil_dict[event_catagory]
+                    processes.append(multiprocessing.Process(target=fit_event, 
+                                                                args=(event_number, 
+                                                                [best_lobf[0][0], best_lobf[1][0]], 
+                                                                [best_lobf[0][-1], best_lobf[1][-1]],
+                                                                6.288,
+                                                                ['4He','4He'],
+                                                                direction,
+                                                                event_number,
+                                                                forward_fit_results_dict
+                                                                )
+                                                            )
+                                     )
+                    processes[-1].start()
+                #wait for all processes to end
+                for p in processes:
+                    p.join()
+                
+                print('fitting took %f s'%(time.time() - start_time))
+
+                #pick the best of each direction, and save it
+                fit_results_dict = {k:forward_fit_results_dict[k] for k in forward_fit_results_dict}
+                for k in backward_fit_results_dict:
+                    if (k in fit_results_dict and backward_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+                        fit_results_dict[k] = backward_fit_results_dict[k]
+                with open(pickle_fname, 'wb') as f:
+                    pickle.dump(fit_results_dict, f)
+          
             # initial_point_0 = 
             # initial_point_1 = 
             # energy_0 = 6.3
