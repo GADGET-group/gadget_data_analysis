@@ -17,8 +17,8 @@ class MultiParticleEvent(SimulatedEvent):
             else:
                 ptype_dict[sim.particle] += 1
             self.sim_names.append('%s_%d'%(sim.particle, ptype_dict[sim.particle]))
-        self.per_particle_params = ['initial_point', 'initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points'] 
-        self.shared_params = ['gas_density']
+        self.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points'] 
+        self.shared_params = ['initial_point', 'gas_density']
         
     
     def gui_after_sim(self):

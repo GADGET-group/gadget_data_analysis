@@ -96,6 +96,8 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
     particle0 = trace_sim.sims[0]
     particle1 = trace_sim.sims[1]
+    trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
+    trace_sim.shared_params = ['gas_density']
     # print(trace_sim.__dict__)
     # in order for the initial guesses fed from the clustering script to match the 
     #trace_sim.counts_per_MeV *= 1.058
@@ -116,15 +118,15 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         dx, dy, dz = best_point_end[i] - best_point[i]
         mag = np.sqrt(dx**2 + dy**2 + dz**2)
         track_direction_vec = np.append(track_direction_vec, (np.array([dx/mag, dy/mag, dz/mag])))
-        theta_guess = np.append(theta_guess, (np.arctan2(dy, dx)))
-        phi_guess = np.append(phi_guess, (np.arccos((dz) / mag)))
+        theta_guess = np.append(theta_guess, (np.arccos(dz/mag)))
+        phi_guess = np.append(phi_guess, (np.arctan2(dy,dx)))
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
         sigma_guess = np.append(sigma_guess, 2.5)
     
     init_guess = np.array((theta_guess[0], theta_guess[1], phi_guess[0], phi_guess[1], best_point[0][0], best_point[0][1], best_point[0][2], best_point[1][0], best_point[1][1], best_point[1][2], Eknown, Eknown, sigma_guess[0], sigma_guess[1]))
     print("Initial Guess: ", init_guess)
+    
     def to_minimize(params, least_squares):
-        print("params: ", params)
         theta0, theta1, phi0, phi1, x0, y0, z0, x1, y1, z1, E_or_m0, E_or_m1, sigma_xy0, sigma_z0 = params # note that each param is an array with length of the number of particles in the fit
         sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
         if fit_adc_count_per_MeV:
@@ -142,16 +144,16 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         
 
         #enforce particle direction
-        vhat0 = np.array([np.sin(theta0)*np.cos(phi0), np.sin(theta0)*np.sin(phi0), np.cos(theta0)])
-        vhat1 = np.array([np.sin(theta1)*np.cos(phi1), np.sin(theta1)*np.sin(phi1), np.cos(theta1)])
-        if np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])) < 0 \
-            or np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])) < 0:
-            print("returned inf because of particle direction: ", vhat0, vhat1)
-            print("track_direction_vec: ", track_direction_vec)
-            print("Dot product: ",  np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])), np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])))
-            return np.inf
+        # vhat0 = np.array([np.sin(theta0)*np.cos(phi0), np.sin(theta0)*np.sin(phi0), np.cos(theta0)])
+        # vhat1 = np.array([np.sin(theta1)*np.cos(phi1), np.sin(theta1)*np.sin(phi1), np.cos(theta1)])
+        # if np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])) < 0 \
+        #     or np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])) < 0:
+        #     print("returned inf because of particle direction: ", vhat0, vhat1)
+        #     print("track_direction_vec: ", track_direction_vec)
+        #     print("Dot product for clusters 0 & 1: ",  np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])), np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])))
+        #     return np.inf
 
-        if z0 > trace_sim.num_trace_bins*trace_sim.zscale or z0<0 or z1 > trace_sim.num_trace_bins*trace_sim.zscale or z1<0:
+        if z0 > trace_sim.num_trace_bins*trace_sim.zscale or z0<-1 or z1 > trace_sim.num_trace_bins*trace_sim.zscale or z1<-1:
             print("returned inf because of z scale: ", z0, z1)
             print("Boundary z-values calculated via the trimmed trace: ", trace_sim.num_trace_bins*trace_sim.zscale)
             return np.inf
@@ -161,7 +163,11 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         if particle0.initial_energy < 0 or particle0.initial_energy  > 10 or particle1.initial_energy < 0 or particle1.initial_energy  > 10: #stopping power tables currently only go to 10 MeV
             print("returned inf because of particle energy")
             return np.inf
-        
+        if theta0 < 0 or theta0 >= np.pi or phi0 < 0 or phi0 > 2*np.pi:
+            return -np.inf 
+        if theta1 < 0 or theta1 >= np.pi or phi1 < 0 or phi1 > 2*np.pi:
+            return -np.inf        
+
         particle0.theta, particle0.phi, particle1.theta, particle1.phi = theta0, phi0, theta1, phi1
         # TODO:   File "/egr/research-tpc/dopferjo/gadget_analysis/da_ll_fit.py", line 166, in to_minimize
                 # trace_sim[0].initial_point = (x0,y0,z0)
@@ -189,6 +195,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             print('%e'%to_return, params)
         if np.isnan(to_return):
             to_return = np.inf
+        print('%e'%to_return, params)
         return to_return
     if debug_plots:
         print('guess:', init_guess)
@@ -271,7 +278,7 @@ h5file.num_background_bins = (450,500)
 for event_number in range(len(array_of_categorized_events_of_interest)):
     if (array_of_categorized_events_of_interest[event_number] == 'RnPo Chain' or \
         array_of_categorized_events_of_interest[event_number] == 'Accidental Coin') and \
-            event_number == 4:
+            event_number == 22:
     # if array_of_categorized_events_of_interest[event_number] == "Large Energy Single Event":
         x,y,z,e = h5file.get_xyze(event_number, threshold=1000, include_veto_pads=False) # a threshold of 140 is pretty good
         
@@ -369,21 +376,21 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
                     print("Lowest sum of squares so far: ",sos)
 
                     # Plot results
-                    # fig = plt.figure()
-                    # ax = fig.add_subplot(projection='3d')
-                    # ax.scatter(*data[best_cluster == 0].T, color='teal', alpha=0.3, label="Cluster 0")
-                    # ax.scatter(*data[best_cluster == 1].T, color='pink', alpha=0.6, label="Cluster 1")
+                    fig = plt.figure()
+                    ax = fig.add_subplot(projection='3d')
+                    ax.scatter(*data[best_cluster == 0].T, color='teal', alpha=0.3, label="Cluster 0")
+                    ax.scatter(*data[best_cluster == 1].T, color='pink', alpha=0.6, label="Cluster 1")
                     # ax.scatter(*best_lobf[0][0].T, s=100)
                     # ax.scatter(*best_lobf[0][-1].T, s=100)
                     # ax.scatter(*best_lobf[1][0].T, s=100)
                     # ax.scatter(*best_lobf[1][-1].T, s=100)
-                    # ax.plot(*best_lobf[0].T, color='blue', linewidth=2)
-                    # ax.plot(*best_lobf[1].T, color='red', linewidth=2)
-                    # ax.set_xlim3d(-200, 200)
-                    # ax.set_ylim3d(-200, 200)
-                    # ax.set_zlim3d(0, 400)
-                    # ax.legend()
-                    # plt.show()
+                    ax.plot(*best_lobf[0].T, color='blue', linewidth=2)
+                    ax.plot(*best_lobf[1].T, color='red', linewidth=2)
+                    ax.set_xlim3d(-200, 200)
+                    ax.set_ylim3d(-200, 200)
+                    ax.set_zlim3d(0, 400)
+                    ax.legend()
+                    plt.show()
                     
             print("Time to cluster with k-means: ", time.time() - start_time)
 
