@@ -118,8 +118,13 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         dx, dy, dz = best_point_end[i] - best_point[i]
         mag = np.sqrt(dx**2 + dy**2 + dz**2)
         track_direction_vec = np.append(track_direction_vec, (np.array([dx/mag, dy/mag, dz/mag])))
-        theta_guess = np.append(theta_guess, (np.arccos(dz/mag)))
-        phi_guess = np.append(phi_guess, (np.arctan2(dy,dx)))
+        # theta_guess = np.append(theta_guess, (np.arccos(dz/mag)))
+        # phi_guess = np.append(phi_guess, (np.arctan2(dy,dx)))
+        theta_guess = np.append(theta_guess,np.arctan2(np.sqrt(dx**2 + dy**2), dz))
+        phi = np.arctan2(dy, dx)
+        if phi < 0:
+            phi += np.pi * 2 
+        phi_guess = np.append(phi_guess,phi)
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
         sigma_guess = np.append(sigma_guess, 2.5)
     
@@ -277,8 +282,7 @@ h5file.num_background_bins = (450,500)
 
 for event_number in range(len(array_of_categorized_events_of_interest)):
     if (array_of_categorized_events_of_interest[event_number] == 'RnPo Chain' or \
-        array_of_categorized_events_of_interest[event_number] == 'Accidental Coin') and \
-            event_number == 22:
+        array_of_categorized_events_of_interest[event_number] == 'Accidental Coin'):
     # if array_of_categorized_events_of_interest[event_number] == "Large Energy Single Event":
         x,y,z,e = h5file.get_xyze(event_number, threshold=1000, include_veto_pads=False) # a threshold of 140 is pretty good
         
@@ -376,21 +380,21 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
                     print("Lowest sum of squares so far: ",sos)
 
                     # Plot results
-                    fig = plt.figure()
-                    ax = fig.add_subplot(projection='3d')
-                    ax.scatter(*data[best_cluster == 0].T, color='teal', alpha=0.3, label="Cluster 0")
-                    ax.scatter(*data[best_cluster == 1].T, color='pink', alpha=0.6, label="Cluster 1")
-                    # ax.scatter(*best_lobf[0][0].T, s=100)
-                    # ax.scatter(*best_lobf[0][-1].T, s=100)
-                    # ax.scatter(*best_lobf[1][0].T, s=100)
-                    # ax.scatter(*best_lobf[1][-1].T, s=100)
-                    ax.plot(*best_lobf[0].T, color='blue', linewidth=2)
-                    ax.plot(*best_lobf[1].T, color='red', linewidth=2)
-                    ax.set_xlim3d(-200, 200)
-                    ax.set_ylim3d(-200, 200)
-                    ax.set_zlim3d(0, 400)
-                    ax.legend()
-                    plt.show()
+                    # fig = plt.figure()
+                    # ax = fig.add_subplot(projection='3d')
+                    # ax.scatter(*data[best_cluster == 0].T, color='teal', alpha=0.3, label="Cluster 0")
+                    # ax.scatter(*data[best_cluster == 1].T, color='pink', alpha=0.6, label="Cluster 1")
+                    # # ax.scatter(*best_lobf[0][0].T, s=100)
+                    # # ax.scatter(*best_lobf[0][-1].T, s=100)
+                    # # ax.scatter(*best_lobf[1][0].T, s=100)
+                    # # ax.scatter(*best_lobf[1][-1].T, s=100)
+                    # ax.plot(*best_lobf[0].T, color='blue', linewidth=2)
+                    # ax.plot(*best_lobf[1].T, color='red', linewidth=2)
+                    # ax.set_xlim3d(-200, 200)
+                    # ax.set_ylim3d(-200, 200)
+                    # ax.set_zlim3d(0, 400)
+                    # ax.legend()
+                    # plt.show()
                     
             print("Time to cluster with k-means: ", time.time() - start_time)
 
@@ -447,59 +451,4 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
                         fit_results_dict[k] = backward_fit_results_dict[k]
                 with open(pickle_fname, 'wb') as f:
                     pickle.dump(fit_results_dict, f)
-          
-            # initial_point_0 = 
-            # initial_point_1 = 
-            # energy_0 = 6.3
-            # energy_1 = 6.3
-            # theta_0 = 
-            # theta_1 = 
-            # phi_0 = 
-            # phi_1 = 
-            # sigma_xy = 2.0
-            # sigma_z = 3.0
-            
-            
-            # Hic Sunt Insectum
-            # is_peak = np.zeros(len(data), dtype=int)
-            # counter = 0
-            # print(points)
-            # for i in [0,1]:
-            #     print(points[2*(i)])
-            #     print(points[2*i+1])
-            #     midpoint = (points[2*i] - points[2*i+1]) / 2
-            #     for j in range(len(data[cluster == i])):
-            #         if cluster[j] == i and np.sum(direction[i] * (data[cluster == i][j] - midpoint)) > 0: # assign the point 'peak'
-            #             is_peak[counter] = 1
-            #         elif cluster[j] == i: # assign it 'tail'
-            #             is_peak[counter] = 0
-            #         counter += 1
-            #     print(np.shape(is_peak))
-            #     print(np.shape(cluster))
-                # now we determine which side is the true tail based on the summed charge in each region
-            # Plot results
-            # fig = plt.figure()
-            # ax = fig.add_subplot(projection='3d')
-            # ax.scatter(*data[np.logical_and.reduce((cluster == i, is_peak))].T, color='blue', alpha=0.6, label="Half 0")
-            # ax.scatter(*data[np.logical_and.reduce((cluster == i, ~is_peak))].T, color='red', alpha=0.6, label="Half 1")
-            # ax.plot(*linepts0.T, color='blue', linewidth=2)
-            # ax.plot(*linepts1.T, color='red', linewidth=2)
-            # ax.set_xlim3d(-200, 200)
-            # ax.set_ylim3d(-200, 200)
-            # ax.set_zlim3d(0, 400)
-            # ax.legend()
-            # plt.show() 
-            
-        # for x,y,z,e in zip(x,y,z,e):
-        #     data[cluster == 0]    
-        # initial_point_0 = 
-        # initial_point_1 = 
-        # energy_0 = 6.3
-        # energy_1 = 6.3
-        # theta_0 = 
-        # theta_1 = 
-        # phi_0 = 
-        # phi_1 = 
-        # sigma_xy = 2.0
-        # sigma_z = 3.0
-        # break
+
