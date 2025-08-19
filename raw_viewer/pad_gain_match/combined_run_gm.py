@@ -24,7 +24,7 @@ import matplotlib.colors
 
 from raw_viewer.pad_gain_match import process_runs
 
-gpu_device = 1
+gpu_device = 2
 
 if False:
     runs = (96, 97, 98, 100, 101, 102, 104, 105, 106)
@@ -34,11 +34,12 @@ if False:
     gm_cut1 = ((7.7e4, 18), (9.14e4,18),(1e5,21), (9.2e4,21.9),(8.3e4,21.1), (7.7e4, 18))
     gm_cut1_path = Path(gm_cut1, closed=True)
 else:
-    runs = (121,121, 122, 123, 124, 125, 126, 127, 128)
-    veto_thresh = 1.35e4
+    runs = (121, 122, 123, 124, 125, 126, 127, 128)
+    veto_thresh = 1.e4
     exp = 'e21072'
     rve_bins = 500
     gm_cut1 = ((2.023e5,56.8), (2.19e5,56.8), (2.188e5,33.52), (1.94e5, 34.41), (1.791e5, 45.28),(2.023e5,56.8))
+    true_energy = 1.634
     gm_cut1_path = Path(gm_cut1, closed=True)
 
 lengths = process_runs.get_lengths(exp, runs)
@@ -86,19 +87,23 @@ print('events in gm cut:', num_in_cut)
 def obj_func(gains):
     ics_gpu = get_gm_ic(gains, cpp_gm1cut_gpu, True)
     with cp.cuda.Device(gpu_device):
-        return np.sqrt(cp.asnumpy(cp.sum((ics_gpu - avg_ic_gm1cut_gpu)**2))/num_in_cut)/avg_ic_gm1cut*2.355
+        return np.sqrt(cp.asnumpy(cp.sum((ics_gpu - true_energy)**2))/num_in_cut)/true_energy*2.355
     
 def callback(intermediate_result):
     print(intermediate_result)
     gains = intermediate_result.x
     print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
-print(obj_func(np.ones(1024)))
-res = optimize.minimize(obj_func, np.ones(1024), bounds=[(0.5,2)]*1024, callback=callback, options={'maxfun':1000000})
+
+init_guess = np.ones(1024)*true_energy/avg_ic_gm1cut
+print(obj_func(init_guess))
+res = optimize.minimize(obj_func, init_guess, bounds=[(0, np.inf)]*1024, callback=callback, options={'maxfun':1000000})
 print(res)
 
 gm_ic = get_gm_ic(res.x)
-fig = plt.figure()
+plt.figure()
 plt.title('gain match applied, runs: '+str(runs))
 plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
+plt.xlabel('Energy (MeV)')
+plt.ylabel('range (mm)')
 plt.show()
