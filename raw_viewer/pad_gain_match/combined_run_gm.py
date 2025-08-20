@@ -1,6 +1,7 @@
 USE_GPU = True
 
 import time
+import pickle
 
 import numpy as np
 if USE_GPU:
@@ -27,22 +28,14 @@ import matplotlib.colors
 from raw_viewer.pad_gain_match import process_runs
 
 gpu_device = 2
+load_first_result = False
+load_second_result = True
 
-if False:
-    runs = (96, 97, 98, 100, 101, 102, 104, 105, 106)
-    veto_thresh = 7600
-    exp = 'e21072'
-    rve_bins = 500
-    gm_cut1 = ((7.7e4, 18), (9.14e4,18),(1e5,21), (9.2e4,21.9),(8.3e4,21.1), (7.7e4, 18))
-    gm_cut1_path = Path(gm_cut1, closed=True)
-else:
-    runs = (121, 122, 123, 124, 125, 126, 127, 128)
-    veto_thresh = 6000
-    exp = 'e21072'
-    rve_bins = 500
-    gm_cut1 = ((2.023e5,56.8), (2.19e5,56.8), (2.188e5,33.52), (1.94e5, 34.41), (1.791e5, 45.28),(2.023e5,56.8))
-    true_energy = 1.634
-    gm_cut1_path = Path(gm_cut1, closed=True)
+
+runs = (121, 122, 123, 124, 125, 126, 127, 128)
+veto_thresh = 10000
+exp = 'e21072'
+rve_bins = 500
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
@@ -50,6 +43,10 @@ veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_mask = veto_counts < veto_thresh
 with cp.cuda.Device(gpu_device):
     cpp_gpu = cp.array(cpp)
+
+
+
+
 
 def get_gm_ic(gains, counts_per_pad=cpp_gpu, return_gpu=False):
     #counts per pad needs to already be on the gpu
@@ -61,44 +58,84 @@ def get_gm_ic(gains, counts_per_pad=cpp_gpu, return_gpu=False):
     else:
         return cp.asnumpy(to_return)
 
+no_gm_ic = get_gm_ic(np.ones(1024))
+
+#set up initial gain match cuts
+cuts1 = []
+true_energies = [1.633, 0.7856]# only includes energy deposited as ionization
+cuts1.append((no_gm_ic>1.9e5) & (no_gm_ic<2.1e5) & (lengths>30) & (lengths<55) & veto_mask)
+cuts1.append((no_gm_ic>8.8e4) & (no_gm_ic<1.025e5) & (lengths>16.5) & (lengths<20.2) & veto_mask)
+
+
+
 plt.figure()
 plt.hist(veto_counts, 100)
 
 fig = plt.figure()
 plt_mask = veto_mask&(lengths<100)
 plt.title('without gain match, runs: '+str(runs))
-ax = fig.add_subplot(111)
-no_gm_ic = get_gm_ic(np.ones(1024))
 plt.hist2d(no_gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-ax.add_patch(patches.PathPatch(gm_cut1_path, fill=False))
+
+fig = plt.figure()
+plt.title('gain match cuts')
+plt.hist2d(no_gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+for cut in cuts1:
+    plt.scatter(no_gm_ic[cut],lengths[cut], marker='.')
 plt.colorbar()
 plt.show()
 
-gm_cut_mask = gm_cut1_path.contains_points(np.vstack((no_gm_ic, lengths)).transpose()) & veto_mask
 
-with cp.cuda.Device(gpu_device):
-    cpp_gm_cut_gpu = cpp_gpu[gm_cut_mask, :]
-    print('cpp_gm1cut shape: ', cp.shape(cpp_gm_cut_gpu))
-    print(cp.mean(get_gm_ic(np.ones(1024), cpp_gm_cut_gpu)), cp.std(get_gm_ic(np.ones(1024), cpp_gm_cut_gpu)))
-    avg_ic_gm_cut_gpu = cp.mean(get_gm_ic(np.ones(1024), cpp_gm_cut_gpu, True))
-    avg_ic_gm_cut = cp.asnumpy(avg_ic_gm_cut_gpu)
-
-print(avg_ic_gm_cut)
-num_in_cut = cp.shape(cpp_gm_cut_gpu)[0]
-print('events in gm cut:', num_in_cut)
-def obj_func(gains):
-    ics_gpu = get_gm_ic(gains, cpp_gm_cut_gpu, True)
+def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
+    gm_slices = []
+    default_guess = []
+    num_in_slice = []
     with cp.cuda.Device(gpu_device):
-        return np.sqrt(cp.asnumpy(cp.sum((ics_gpu - true_energy)**2))/num_in_cut)/true_energy*2.355
-    
-def callback(intermediate_result):
-    print(intermediate_result)
-    gains = intermediate_result.x
-    print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+        for cut_mask, true_energy in zip(cut_masks, true_energies):
+            gm_slices.append(cpp_gpu[cut_mask, :])
+            default_guess.append(cp.asnumpy(true_energy/cp.mean(cp.sum(gm_slices[-1], axis=1))))
+            num_in_slice.append(cp.shape(gm_slices[-1])[0])
+            print('cut with true energy of %f MeV has %d events'%(true_energy, num_in_slice[-1]))
+        if offset == 'none':
+            default_guess = np.ones(1024)*np.average(default_guess)
+        elif offset == 'constant':
+            default_guess = np.ones(1024)*np.average(default_guess)
+            default_guess[-1] = 0
+        if init_guess == None:
+            init_guess = default_guess
+        
+        def obj_func(x):
+            if offset == 'none':
+                gains = x
+            elif offset == 'constant':
+                gains = x[:-1]
+                offset_constant = x[-1]
+            e_list = []
+            for gm_slice in gm_slices:
+                e_list.append(get_gm_ic(gains, gm_slice, True))
+                if offset == 'constant':
+                    e_list[-1] += offset_constant
+            to_return = 0
+            with cp.cuda.Device(gpu_device):
+                for es, true_e, num in zip(e_list, true_energies, num_in_slice):
+                    to_return += np.sqrt(cp.asnumpy(cp.sum((es - true_energy)**2))/num)/true_energy*2.355
+            return to_return
+        
+        def callback(intermediate_result):
+            print(intermediate_result)
+            gains = intermediate_result.x
+            print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+        start_time = time.time()
+        res =  optimize.minimize(obj_func, init_guess, bounds=[(0, np.inf)]*1024, callback=callback, options={'maxfun':1000000})
+        print('time to perform minimization: %f s'%(time.time() - start_time))
 
-init_guess = np.ones(1024)*true_energy/avg_ic_gm_cut
-print(obj_func(init_guess))
-res = optimize.minimize(obj_func, init_guess, bounds=[(0, np.inf)]*1024, callback=callback, options={'maxfun':1000000})
+
+if load_first_result:
+    with open('res1.pkl', 'rb') as f:
+        res = pickle.load(f)
+else:
+    res = do_gain_match(cuts1, true_energies)
+    with open('res1.pkl', 'wb') as f:
+        pickle.dump(f, res)
 print(res)
 
 def show_plots():
@@ -149,6 +186,16 @@ print('events in gm cut:', num_in_cut)
 res1 = res
 init_guess = res1.x
 print(obj_func(init_guess))
+start_time = time.time()
 res = optimize.minimize(obj_func, init_guess, bounds=[(0, np.inf)]*1024, callback=callback, options={'maxfun':1000000})
 print(res)
+print('minimization took %f s'%time.time() - start_time)
+if load_second_result:
+    with open('res2.pkl', 'rb') as f:
+        res = pickle.load(f)
+else:
+    res = optimize.minimize(obj_func, init_guess, bounds=[(0, np.inf)]*1024, callback=callback, options={'maxfun':1000000})
+    with open('res2.pkl', 'wb') as f:
+        pickle.dump(f, res)
+
 show_plots()
