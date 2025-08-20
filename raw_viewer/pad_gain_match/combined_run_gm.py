@@ -1,5 +1,7 @@
 USE_GPU = True
 
+import time
+
 import numpy as np
 if USE_GPU:
     import cupy as cp
@@ -72,7 +74,7 @@ ax.add_patch(patches.PathPatch(gm_cut1_path, fill=False))
 plt.colorbar()
 plt.show()
 
-gm_cut_mask = gm_cut1_path.contains_points(np.vstack((no_gm_ic, lengths)).transpose())
+gm_cut_mask = gm_cut1_path.contains_points(np.vstack((no_gm_ic, lengths)).transpose()) & veto_mask
 
 with cp.cuda.Device(gpu_device):
     cpp_gm_cut_gpu = cpp_gpu[gm_cut_mask, :]
@@ -133,7 +135,7 @@ def show_plots():
 show_plots()
 
 gm_ic = get_gm_ic(res.x)
-gm_cut_mask = (lengths>25)&(lengths<56)&(gm_ic > 1.6)&(gm_ic<1.7)
+gm_cut_mask = (lengths>25)&(lengths<56)&(gm_ic > 1.6)&(gm_ic<1.7)  & veto_mask
 with cp.cuda.Device(gpu_device):
     cpp_gm_cut_gpu = cpp_gpu[gm_cut_mask, :]
     print('cpp_gm_cut shape: ', cp.shape(cpp_gm_cut_gpu))
