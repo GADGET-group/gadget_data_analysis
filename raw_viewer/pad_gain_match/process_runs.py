@@ -7,6 +7,27 @@ import numpy as np
 from raw_viewer import raw_h5_file
 
 
+def get_h5_file(experiment, run_number):
+    if experiment == 'e21072':
+        raw_h5_path = '/egr/research-tpc/shared/Run_Data/run_%04d.h5'%run_number
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        h5file.length_counts_threshold = 100
+        h5file.ic_counts_threshold = 0
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 10
+        h5file.num_smart_background_ave_bins = 10
+    elif experiment == 'e23035_prep':
+        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/run_%04d.h5'%run_number
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
+        h5file.length_counts_threshold = 25
+        h5file.ic_counts_threshold = 0
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 25
+        h5file.num_smart_background_ave_bins = 10
+    else:
+        raise ValueError
+    return h5file
+
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
 def get_processed_run(experiment, run_number):
@@ -22,24 +43,7 @@ def get_processed_run(experiment, run_number):
             return pickle.load(file)
     else:
         # h5file = build_sim.get_rawh5_object(experiment, run_number)
-        if experiment == 'e21072':
-            raw_h5_path = '/egr/research-tpc/shared/Run_Data/run_%04d.h5'%run_number
-            h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-            h5file.length_counts_threshold = 100
-            h5file.ic_counts_threshold = 0
-            h5file.background_subtract_mode = 'smart'
-            h5file.smart_bins_away_to_check = 10
-            h5file.num_smart_background_ave_bins = 10
-        elif experiment == 'e23035_prep':
-            raw_h5_path = '/egr/research-tpc/shared/e23035_prep/run_%04d.h5'%run_number
-            h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
-            h5file.length_counts_threshold = 25
-            h5file.ic_counts_threshold = 0
-            h5file.background_subtract_mode = 'smart'
-            h5file.smart_bins_away_to_check = 25
-            h5file.num_smart_background_ave_bins = 10
-        else:
-            raise ValueError
+        h5file = get_h5_file(experiment, run_number)
         print('processing run %d'%run_number)
         first_event, last_event = h5file.get_event_num_bounds()
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
