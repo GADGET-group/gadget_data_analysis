@@ -117,16 +117,19 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
             to_return = 0
             with cp.cuda.Device(gpu_device):
                 for es, true_e, num in zip(e_list, true_energies, num_in_slice):
-                    to_return += np.sqrt(cp.asnumpy(cp.sum((es - true_energy)**2))/num)/true_energy*2.355
+                    to_return += np.sqrt(cp.asnumpy(cp.sum((es - true_e)**2))/num)/true_energy*2.355
             return to_return
         
         def callback(intermediate_result):
             print(intermediate_result)
             gains = intermediate_result.x
             print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+        print('objective function for initial guess: ', obj_func(init_guess))
         start_time = time.time()
+        print('starting minimization')
         res =  optimize.minimize(obj_func, init_guess, bounds=[(0, np.inf)]*1024, callback=callback, options={'maxfun':1000000})
         print('time to perform minimization: %f s'%(time.time() - start_time))
+        return res
 
 
 if load_first_result:
@@ -135,7 +138,7 @@ if load_first_result:
 else:
     res = do_gain_match(cuts1, true_energies)
     with open('res1.pkl', 'wb') as f:
-        pickle.dump(f, res)
+        pickle.dump(res, f)
 print(res)
 
 def show_plots():
