@@ -91,8 +91,9 @@ load_previous_fit = False
 processes = []
 pickle_fname = "two_particle_decays_in_e24joe_energy_free.dat"
 
-def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type = ['4He','4He'], direction = [0,0],
+def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type = ['4He','4He'], direction = [1,1],
               return_key=None, return_dict=None, debug_plots=False): # currently only works with 2 particles
+    print(event, best_point, best_point_end, Eknown, particle_type, direction, return_key,return_dict, debug_plots)
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
     particle0 = trace_sim.sims[0]
     particle1 = trace_sim.sims[1]
@@ -115,7 +116,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     
     for i in range(len(particle_type)):
         #start theta, phi in a small ball around track direction from svd
-        dx, dy, dz = direction[i] * (best_point_end[i] - best_point[i])
+        dx, dy, dz = (best_point_end[i] - best_point[i])
         mag = np.sqrt(dx**2 + dy**2 + dz**2)
         track_direction_vec = np.append(track_direction_vec, (np.array([dx/mag, dy/mag, dz/mag])))
         # theta_guess = np.append(theta_guess, (np.arccos(dz/mag)))
@@ -181,6 +182,8 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z0, sigma_z1
         
         trace_sim.simulate_event()
+        # trace_sim.plot_simulated_3d_data(threshold=100)
+        # plt.show()
         if least_squares:
             residuals_dict = trace_sim.get_residuals()
             for pad in residuals_dict:
@@ -402,8 +405,8 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
             best_lobf[:,:,2] -= np.min(best_lobf[:,:,2]) - 10 # where 10 is the trim_pad variable set in build_sim used in set_real_data
             
             # Let's fit all combinations of forward and backward for the two clusters
-            directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
-            # directions = [[1,-1],[-1,1],[-1,-1]]
+            # directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
+            directions = [[1,-1]]
             for direction in directions:
                 # fit_event(event_number, 
                 #           [best_lobf[0][0], best_lobf[1][0]], 
@@ -415,31 +418,43 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
                     manager = multiprocessing.Manager()
                     forward_fit_results_dict = manager.dict()
                     backward_fit_results_dict = manager.dict()
-                    # while np.min([len(x) for x in events_in_catagory]) < events_per_catagory and event_number < h5file.get_event_num_bounds()[1]: # collect a number of events from each category
-                    max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(event_number) # process event to extract length and ADC counts
-                    l = np.sqrt(dxy**2 + dz**2)
-                    # event_catagory = classify(l, counts, experiment) # classify event based on processed event
-                    # print('event %d classified as %d'%(n, event_catagory))
-                    
+                    if direction[0] == 1:
+                        cluster0_start = best_lobf[0][0]
+                        cluster0_end = best_lobf[0][-1]
+                    elif direction[0] == -1:
+                        cluster0_start = best_lobf[0][-1]
+                        cluster0_end = best_lobf[0][0]
+                    if direction[1] == 1:
+                        cluster1_start = best_lobf[1][0]
+                        cluster1_end = best_lobf[1][-1]
+                    elif direction[1] == -1:
+                        cluster1_start = best_lobf[1][-1]
+                        cluster1_end = best_lobf[1][0]
+                        
                     # now fit the event forwards and backwards if it was not vetoed, was categorized properly, and we still need an event from that category
                     # if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory: 
                     # particle_type, include_recoil, E = ptype_and_recoil_dict[event_catagory]
-                    processes.append(multiprocessing.Process(target=fit_event, 
-                                                                args=(event_number, 
-                                                                [best_lobf[0][0], best_lobf[1][0]], 
-                                                                [best_lobf[0][-1], best_lobf[1][-1]],
-                                                                6.288,
-                                                                ['4He','4He'],
+                    fit_event(event_number, [cluster0_start, cluster1_start], [cluster0_end, cluster1_end], 6.288,['4He','4He'],
                                                                 direction,
                                                                 event_number,
                                                                 forward_fit_results_dict
                                                                 )
-                                                            )
-                                     )
-                    processes[-1].start()
-                #wait for all processes to end
-                for p in processes:
-                    p.join()
+                #     processes.append(multiprocessing.Process(target=fit_event, 
+                #                                                 args=(event_number, 
+                #                                                 [cluster0_start, cluster1_start], 
+                #                                                 [cluster0_end, cluster1_end],
+                #                                                 6.288,
+                #                                                 ['4He','4He'],
+                #                                                 direction,
+                #                                                 event_number,
+                #                                                 forward_fit_results_dict
+                #                                                 )
+                #                                             )
+                #                      )
+                #     processes[-1].start()
+                # #wait for all processes to end
+                # for p in processes:
+                #     p.join()
                 
                 print('fitting took %f s'%(time.time() - start_time))
 
