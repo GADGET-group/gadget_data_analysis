@@ -198,11 +198,11 @@ cuts2 = []
 verticies = [(1.75,57.13),(1.434,44.66),(1.615,26.58),(1.736,27)]
 path = matplotlib.path.Path(verticies)
 rve_points = np.vstack((gm_ic, lengths)).transpose()
-cuts2.append(path.contains_points(rve_points))&veto_mask
+cuts2.append(path.contains_points(rve_points)&veto_mask)
 verticies = [(0.837,13.9),(0.8782,21.53),(0.8007, 21.84),(0.7192, 17.78),(0.7676, 13.86)]
 path = matplotlib.path.Path(verticies)
 rve_points = np.vstack((gm_ic, lengths)).transpose()
-cuts2.append(path.contains_points(rve_points))&veto_mask
+cuts2.append(path.contains_points(rve_points)&veto_mask)
 
 fig = plt.figure()
 plt.title('gain match cuts')
