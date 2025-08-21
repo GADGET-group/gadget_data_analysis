@@ -58,7 +58,7 @@ def cluster_and_fit(data,points):
         # direction[clust_id] = vv[0]
 
         # Line for plotting
-        t = np.linspace(-10, 10, 20)[:, np.newaxis]
+        t = np.linspace(-15, 15, 20)[:, np.newaxis]
         linepts = mean + t * direction
 
         if clust_id == 0:
@@ -402,7 +402,7 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
             # Once we extract the line along which each track travels, we use it to get the starting values for the fitter
             
             # scale the z value of our initial guess for use in the fitter with trimmed traces TODO: fix how events are trimmed to match SingleParticleEvent.py
-            best_lobf[:,:,2] -= np.min(best_lobf[:,:,2]) - 10 # where 10 is the trim_pad variable set in build_sim used in set_real_data
+            best_lobf[:,:,2] -= np.min(best_lobf[:,:,2]) - 6.0 # where 10 is the trim_pad variable set in build_sim used in set_real_data
             
             # Let's fit all combinations of forward and backward for the two clusters
             # directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
