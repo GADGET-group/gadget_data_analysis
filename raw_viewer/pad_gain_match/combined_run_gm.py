@@ -29,7 +29,7 @@ from raw_viewer.pad_gain_match import process_runs
 
 gpu_device = 1
 load_first_result = True
-load_second_result = False
+load_second_result = True
 
 
 runs = (121, 122, 123, 124, 125, 126, 127, 128)
@@ -149,7 +149,7 @@ else:
         pickle.dump(res1, f)
 print(res1)
 
-def show_plots(res):
+def show_plots(res, cuts):
     if offset == 'none':
         gm_ic = get_gm_ic(res.x)
     elif offset == 'constant':
@@ -168,7 +168,7 @@ def show_plots(res):
     plt.title('events used in gain match')
     plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.colorbar()
-    for cut in cuts1:
+    for cut in cuts:
         plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
     plt.xlabel('Energy (MeV)')
     plt.ylabel('range (mm)')
@@ -186,7 +186,7 @@ def show_plots(res):
     plt.colorbar()
     plt.show()
 
-show_plots(res1)
+show_plots(res1, cuts1)
 
 if offset == 'none':
     gm_ic = get_gm_ic(res1.x)
@@ -218,4 +218,20 @@ else:
     with open('res2_%s.pkl'%offset, 'wb') as f:
         pickle.dump(res2, f)
 print(res2)
-show_plots(res2)
+show_plots(res2, cuts2)
+
+if offset == 'none':
+    gm_ic = get_gm_ic(res2.x)
+elif offset == 'constant':
+    gm_ic = get_gm_ic(res2.x[:-1]) + 1e4*res2.x[-1]
+
+to_save = {}
+to_save['length'] = lengths
+to_save['energy'] = gm_ic
+to_save['endpoints'] = process_runs.get_quantity('endpoints', exp, runs)
+to_save['charge_width'] = process_runs.get_quantity('charge_width', exp, runs)
+to_save['counts_per_pad'] = cpp
+to_save['veto_pad_counts'] = veto_counts
+save_fname = 'e21072_121to128.pkl'
+with open(save_fname, 'wb') as f:
+    pickle.dump(to_save, f)

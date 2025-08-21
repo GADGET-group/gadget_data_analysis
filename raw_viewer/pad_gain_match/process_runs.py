@@ -6,6 +6,7 @@ import numpy as np
 
 from raw_viewer import raw_h5_file
 
+loaded_runs={}
 
 def get_h5_file(experiment, run_number):
     if experiment == 'e21072':
@@ -28,6 +29,10 @@ def get_h5_file(experiment, run_number):
         raise ValueError
     return h5file
 
+def get_processed_run_name(experiment, run_number):
+    package_directory = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(package_directory, '%s_run%d.pkl'%(experiment, run_number))
+
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
 def get_processed_run(experiment, run_number):
@@ -35,8 +40,7 @@ def get_processed_run(experiment, run_number):
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a pickled version of this information isn't available.
     '''
-    package_directory = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(package_directory, '%s_run%d.pkl'%(experiment, run_number))
+    fname = get_processed_run_name(experiment, run_number)
     if os.path.exists(fname):
         print('run %d previously processed, loading previous results'%run_number)
         with open(fname, 'rb') as file:
@@ -96,7 +100,16 @@ def get_processed_run(experiment, run_number):
             pickle.dump(to_return, file)
         return to_return
 
-loaded_runs={}
+def modify_processed_run(experiment, run_number, key, value, overwrite=False):
+    run = get_processed_run(experiment, run_number)
+    if not overwrite and key in run:
+        raise ValueError
+    run[key] = value
+    if (experiment, run_number) in loaded_runs:
+        loaded_runs[(experiment, run_number)][key]=value
+
+    #modify cached run if loaded
+
 def get_quantity(qname, experiment, runs):
     to_return = []
     for run in runs:
