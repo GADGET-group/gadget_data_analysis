@@ -124,7 +124,7 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
                                         zscale=get_zscale(experiment, run),
                                         flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
             h5file.background_subtract_mode='fixed window'
-            h5file.data_select_mode='near peak' 
+            h5file.data_select_mode='all data' 
             h5file.remove_outliers=True
             h5file.near_peak_window_width = 50
             h5file.require_peak_within= (-np.inf, np.inf)

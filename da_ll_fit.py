@@ -115,7 +115,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     
     for i in range(len(particle_type)):
         #start theta, phi in a small ball around track direction from svd
-        dx, dy, dz = best_point_end[i] - best_point[i]
+        dx, dy, dz = direction[i] * (best_point_end[i] - best_point[i])
         mag = np.sqrt(dx**2 + dy**2 + dz**2)
         track_direction_vec = np.append(track_direction_vec, (np.array([dx/mag, dy/mag, dz/mag])))
         # theta_guess = np.append(theta_guess, (np.arccos(dz/mag)))
@@ -174,10 +174,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             return -np.inf        
 
         particle0.theta, particle0.phi, particle1.theta, particle1.phi = theta0, phi0, theta1, phi1
-        # TODO:   File "/egr/research-tpc/dopferjo/gadget_analysis/da_ll_fit.py", line 166, in to_minimize
-                # trace_sim[0].initial_point = (x0,y0,z0)
-                # ~~~~~~~~~^^^
-                # TypeError: 'MultiParticleEvent' object is not subscriptable
+        
         trace_sim.sims[0].initial_point = (x0,y0,z0)
         trace_sim.sims[1].initial_point = (x1,y1,z1)
         trace_sim.sims[0].sigma_xy, trace_sim.sims[1].sigma_xy = sigma_xy0, sigma_xy1
@@ -282,9 +279,10 @@ h5file.num_background_bins = (450,500)
 
 for event_number in range(len(array_of_categorized_events_of_interest)):
     if (array_of_categorized_events_of_interest[event_number] == 'RnPo Chain' or \
-        array_of_categorized_events_of_interest[event_number] == 'Accidental Coin'):
+        array_of_categorized_events_of_interest[event_number] == 'Accidental Coin') and \
+            event_number == 4:
     # if array_of_categorized_events_of_interest[event_number] == "Large Energy Single Event":
-        x,y,z,e = h5file.get_xyze(event_number, threshold=1000, include_veto_pads=False) # a threshold of 140 is pretty good
+        x,y,z,e = h5file.get_xyze(event_number, threshold=1500, include_veto_pads=False) # a threshold of 140 is pretty good
         
         print("Number of Points in Event %d, (%s): "%(event_number,array_of_categorized_events_of_interest[event_number]),len(x))
         
@@ -400,11 +398,12 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
 
             # Once we extract the line along which each track travels, we use it to get the starting values for the fitter
             
-            # scale the z value of our initial guess for use in the fitter with trimmed traces
-            best_lobf[:,:,2] -= np.min(best_lobf[:,:,2])
+            # scale the z value of our initial guess for use in the fitter with trimmed traces TODO: fix how events are trimmed to match SingleParticleEvent.py
+            best_lobf[:,:,2] -= np.min(best_lobf[:,:,2]) - 10 # where 10 is the trim_pad variable set in build_sim used in set_real_data
             
             # Let's fit all combinations of forward and backward for the two clusters
             directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
+            # directions = [[1,-1],[-1,1],[-1,-1]]
             for direction in directions:
                 # fit_event(event_number, 
                 #           [best_lobf[0][0], best_lobf[1][0]], 
