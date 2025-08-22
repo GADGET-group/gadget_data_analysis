@@ -236,7 +236,7 @@ verticies = [(1.51,19.3),(9.17,86.9), (9.41,47.1), (1.51, 3)]
 path = matplotlib.path.Path(verticies)
 alpha_cut_mask = path.contains_points(rve_points)&veto_mask
 
-if False:
+if True:
 
     ##########################################
     #do polynomial field distortion correction
@@ -247,6 +247,7 @@ if False:
     #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
     peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p1596', 'a2153')]
 
+    N=1
     use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
     exploit_symmetry = False #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
     phi_dependence = False #currently only works if exploit symetry is True
@@ -259,7 +260,7 @@ if False:
     offset_endpoints = True
 
     #include up to 4 particles to make scatter plots and histograms for
-    particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
+    particles_to_plot = ['p1596', 'p770', 'protons', 'alphas']
 
     endpoints = process_runs.get_quantity('endpoints', exp, runs)
 
@@ -317,22 +318,26 @@ if False:
     label_dict['a2153wor'] = '2153 keV alpha without recoil'
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
     label_dict['p1927']='>1900 keV protons'
+    label_dict['protons']=proton_cut_mask
+    label_dict['alphas']=alpha_cut_mask
 
     cut_mask_dict['p1596'] = cuts2[0]
     cut_mask_dict['p770'] = cuts2[1]
-    cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
-    cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
-    cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
-    cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
-    cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
-    cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
-    #cuts within 20 degrees of pad plan
-    cut_mask_dict['p1596pp'] = cut_mask_dict['p1596']&(angles>np.radians(70))
-    cut_mask_dict['p770pp'] = cut_mask_dict['p770']&(angles>np.radians(70))
-    cut_mask_dict['a4434pp'] = cut_mask_dict['a4434']&(angles>np.radians(70))
+    cut_mask_dict['protons']=proton_cut_mask
+    cut_mask_dict['alphas']=alpha_cut_mask
+    # cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (MeV > 4.434) & (counts < 7e5) & veto_mask
+    # cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+    # cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
+    # cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
+    # cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
+    # cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
+    # #cuts within 20 degrees of pad plan
+    # cut_mask_dict['p1596pp'] = cut_mask_dict['p1596']&(angles>np.radians(70))
+    # cut_mask_dict['p770pp'] = cut_mask_dict['p770']&(angles>np.radians(70))
+    # cut_mask_dict['a4434pp'] = cut_mask_dict['a4434']&(angles>np.radians(70))
 
     if offset_endpoints:
-        total_track_widths = np.array(track_info_dict['width_above_threshold'])
+        total_track_widths = np.array(process_runs.get_quantity('width_above_threshold', exp, runs))
         endpoints_offset_dir1 = endpoints[:, 0, :] - endpoints[:, 1, :]
         endpoints_offset_dir1 /= np.linalg.norm(endpoints_offset_dir1, axis=1)[:, np.newaxis]
         endpoints[:, 0, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir1
@@ -341,7 +346,7 @@ if False:
         endpoints[:, 1, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir2
 
     #plot showing selected events of each type
-    rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask&(MeV<8)
+    rve_plt_mask = (ranges>0)&(ranges<150)&veto_mask&(MeV<10)
     fig, axs = plt.subplots(2,2)
     fig.set_figheight(10)
     fig.set_figwidth(10)
@@ -533,7 +538,7 @@ if False:
         fname_template = 'offset_points_'+fname_template
     fname_template = opt_method + '_' +fname_template
     package_directory = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(package_directory,fname_template%(experiment, run, N))
+    fname = os.path.join(package_directory,fname_template%(exp, run, N))
     print('pickle file name: ', fname)
     if os.path.exists(fname):
         print('optimizer previously run, loading saved result')
@@ -541,7 +546,7 @@ if False:
             res =  pickle.load(file)
     else:
         print('optimizing a_ijk parameters')
-        previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
+        previous_fname = os.path.join(package_directory, fname_template%(exp, run, N-1))
         #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
         guess = [0 for i in range(len(ijk_array))]
         if exploit_symmetry:
@@ -592,14 +597,14 @@ if False:
             bounds.append([-10, 10])
             bounds.append([-10, 10])
         if opt_method == 'shgo':
-            res = opt.shgo(f_to_min, bounds, sampling_method='halton')
+            res = optimize.shgo(f_to_min, bounds, sampling_method='halton')
         elif opt_method == 'annealing':
             def callback(x, f, context):
                 print(x, f, context)
                 return False
-            res = opt.dual_annealing(f_to_min, bounds, x0=guess, maxiter=10000, callback=callback)
+            res = optimize.dual_annealing(f_to_min, bounds, x0=guess, maxiter=10000, callback=callback)
         elif opt_method == 'local':
-            res = opt.minimize(f_to_min, guess, callback=callback)
+            res = optimize.minimize(f_to_min, guess, callback=callback)
         with open(fname, 'wb') as file:
             pickle.dump(res, file)
     if allow_beam_off_axis:
