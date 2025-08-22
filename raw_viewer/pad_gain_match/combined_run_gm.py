@@ -1,6 +1,5 @@
 USE_GPU = True
 
-import tqdm
 import os
 import time
 import pickle
@@ -27,11 +26,13 @@ import matplotlib.patches as patches
 from matplotlib.path import Path
 import matplotlib.colors
 
+from  tqdm import tqdm
+
 from raw_viewer.pad_gain_match import process_runs
 
 gpu_device = 1
 load_first_result = True
-load_second_result = False
+load_second_result = True
 
 
 runs = (121, 122, 123, 124, 125, 126, 127, 128)
@@ -236,8 +237,8 @@ verticies = [(1.51,19.3),(9.17,86.9), (9.41,47.1), (1.51, 3)]
 path = matplotlib.path.Path(verticies)
 alpha_cut_mask = path.contains_points(rve_points)&veto_mask
 
-if True:
 
+if False:
     ##########################################
     #do polynomial field distortion correction
     ##########################################
@@ -245,7 +246,7 @@ if True:
     peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
     #list of (weight, peak 1, peak 2) tuples.
     #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-    peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p1596', 'a2153')]
+    peak_spacings_to_preserve = [(1, 'p770', 'p1596'), (1,'p770', 'a2153'), (1,'p770', 'a4434')]
 
     N=1
     use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
@@ -257,10 +258,10 @@ if True:
     t_lower = 0.0
     t_upper = 0.02
 
-    offset_endpoints = True
+    offset_endpoints = False
 
     #include up to 4 particles to make scatter plots and histograms for
-    particles_to_plot = ['p1596', 'p770', 'protons', 'alphas']
+    particles_to_plot = ['p1596', 'p770','a2153', 'a4434']
 
     endpoints = process_runs.get_quantity('endpoints', exp, runs)
 
@@ -325,8 +326,8 @@ if True:
     cut_mask_dict['p770'] = cuts2[1]
     cut_mask_dict['protons']=proton_cut_mask
     cut_mask_dict['alphas']=alpha_cut_mask
-    # cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (MeV > 4.434) & (counts < 7e5) & veto_mask
-    # cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+    cut_mask_dict['a2153'] = (ranges>14) & (ranges<25) & (MeV > 2.0) & (MeV < 2.75) & veto_mask
+    cut_mask_dict['a4434'] = (ranges>22) & (ranges<43) & (MeV>4.36) & (MeV<5.59) & veto_mask
     # cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
     # cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
     # cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
@@ -359,48 +360,48 @@ if True:
         ax.set(xlabel='track width (mm)', ylabel='range (mm)')
         fig.colorbar(plot, ax=ax)
 
-    plt.figure()
-    width_hist_bins = np.linspace(1,5,100)
-    plt.hist(track_widths[veto_mask], bins=width_hist_bins)
-    for ptype in particles_to_plot:
-        plt.hist(track_widths[cut_mask_dict[ptype]], label=label_dict[ptype], alpha=0.75, bins=width_hist_bins)
-    plt.legend()
-    plt.xlabel('track_width (mm)')
+    # plt.figure()
+    # width_hist_bins = np.linspace(1,5,100)
+    # plt.hist(track_widths[veto_mask], bins=width_hist_bins)
+    # for ptype in particles_to_plot:
+    #     plt.hist(track_widths[cut_mask_dict[ptype]], label=label_dict[ptype], alpha=0.75, bins=width_hist_bins)
+    # plt.legend()
+    # plt.xlabel('track_width (mm)')
 
-    fig, axs = plt.subplots(2,2)
-    fig.set_figheight(10)
-    fig.set_figwidth(10)
-    fig.suptitle('uncorrected, all angles')
-    for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
-        ax.set_title(label_dict[ptype])
-        mask = cut_mask_dict[ptype]
-        plot = ax.scatter(track_widths[mask], ranges[mask], c=times_since_start_of_window[mask], marker='.')
-        ax.set(xlabel='track width (mm)', ylabel='range (mm)')
-        fig.colorbar(plot, ax=ax)
+    # fig, axs = plt.subplots(2,2)
+    # fig.set_figheight(10)
+    # fig.set_figwidth(10)
+    # fig.suptitle('uncorrected, all angles')
+    # for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    #     ax.set_title(label_dict[ptype])
+    #     mask = cut_mask_dict[ptype]
+    #     plot = ax.scatter(track_widths[mask], ranges[mask], c=times_since_start_of_window[mask], marker='.')
+    #     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    #     fig.colorbar(plot, ax=ax)
 
-    fig, axs = plt.subplots(2,2)
-    fig.set_figheight(10)
-    fig.set_figwidth(10)
-    fig.suptitle('uncorrected, within 20 deg of pad plane')
-    theta_mask = angles>np.radians(70)
-    for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
-        ax.set_title(label_dict[ptype])
-        mask = cut_mask_dict[ptype]
-        plot = ax.scatter(track_widths[mask&theta_mask], ranges[mask&theta_mask], c=times_since_start_of_window[mask&theta_mask], marker='.')
-        ax.set(xlabel='track width (mm)', ylabel='range (mm)')
-        fig.colorbar(plot, ax=ax)
+    # fig, axs = plt.subplots(2,2)
+    # fig.set_figheight(10)
+    # fig.set_figwidth(10)
+    # fig.suptitle('uncorrected, within 20 deg of pad plane')
+    # theta_mask = angles>np.radians(70)
+    # for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    #     ax.set_title(label_dict[ptype])
+    #     mask = cut_mask_dict[ptype]
+    #     plot = ax.scatter(track_widths[mask&theta_mask], ranges[mask&theta_mask], c=times_since_start_of_window[mask&theta_mask], marker='.')
+    #     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    #     fig.colorbar(plot, ax=ax)
 
-    fig, axs = plt.subplots(2,2)
-    fig.set_figheight(10)
-    fig.set_figwidth(10)
-    fig.suptitle('uncorrected, within 20 deg of beam axis')
-    theta_mask = angles<np.radians(20)
-    for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
-        ax.set_title(label_dict[ptype])
-        mask = cut_mask_dict[ptype]
-        plot = ax.scatter(track_widths[mask&theta_mask], ranges[mask&theta_mask], c=times_since_start_of_window[mask&theta_mask], marker='.')
-        ax.set(xlabel='track width (mm)', ylabel='range (mm)')
-        fig.colorbar(plot, ax=ax)
+    # fig, axs = plt.subplots(2,2)
+    # fig.set_figheight(10)
+    # fig.set_figwidth(10)
+    # fig.suptitle('uncorrected, within 20 deg of beam axis')
+    # theta_mask = angles<np.radians(20)
+    # for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
+    #     ax.set_title(label_dict[ptype])
+    #     mask = cut_mask_dict[ptype]
+    #     plot = ax.scatter(track_widths[mask&theta_mask], ranges[mask&theta_mask], c=times_since_start_of_window[mask&theta_mask], marker='.')
+    #     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    #     fig.colorbar(plot, ax=ax)
 
 
     rscale, wscale, tscale = 20, 3, 0.05
@@ -538,13 +539,14 @@ if True:
         fname_template = 'offset_points_'+fname_template
     fname_template = opt_method + '_' +fname_template
     package_directory = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(package_directory,fname_template%(exp, run, N))
-    print('pickle file name: ', fname)
-    if os.path.exists(fname):
-        print('optimizer previously run, loading saved result')
-        with open(fname, 'rb') as file:
-            res =  pickle.load(file)
-    else:
+    #fname = os.path.join(package_directory,fname_template%(exp, run, N))
+    # print('pickle file name: ', fname)
+    # if os.path.exists(fname):
+    #     print('optimizer previously run, loading saved result')
+    #     with open(fname, 'rb') as file:
+    #         res =  pickle.load(file)
+    # else:
+    if True:
         print('optimizing a_ijk parameters')
         previous_fname = os.path.join(package_directory, fname_template%(exp, run, N-1))
         #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
@@ -605,8 +607,8 @@ if True:
             res = optimize.dual_annealing(f_to_min, bounds, x0=guess, maxiter=10000, callback=callback)
         elif opt_method == 'local':
             res = optimize.minimize(f_to_min, guess, callback=callback)
-        with open(fname, 'wb') as file:
-            pickle.dump(res, file)
+        # with open(fname, 'wb') as file:
+        #     pickle.dump(res, file)
     if allow_beam_off_axis:
         a_ijk_best = res.x[:-2]
         beam_xy_best = res.x[-2:]
@@ -627,7 +629,7 @@ if True:
     mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best)
     plt.figure()
     plt.title('run %d RvE corrected using r-map'%run)
-    rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
+    rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(MeV>0)&(MeV<8)  & veto_mask
     plt.hist2d(MeV[rve_plt_mask], mapped_ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm())
     plt.xlabel('Energy (MeV)')
     plt.ylabel('Range (mm)')
@@ -696,24 +698,18 @@ if True:
         print('D, v, charge spreading width = ',a_ijk_best[-3:])
     print('a_ijk', a_ijk_best)
 
-    track_centers = track_info_dict['track_center']
-    rad_dist = np.sqrt(track_centers[:,0]**2 + track_centers[:,1]**2)
-    plt.figure()
-    mask = cut_mask_dict['p1596'] & (angles < np.radians(20)) & (track_widths < 3.2)
-    plt.scatter(rad_dist[mask], ranges[mask], c=track_widths[mask], vmin=2., vmax=2.75)#c=times_since_start_of_window[mask])
-    plt.colorbar()
-    plt.xlabel('track centroid radial distance from beam axis (mm)')
-    plt.ylabel('track length (mm)')
     plt.show(block=False)
 
-    #save results
-    to_save = {}
-    to_save['length'] = lengths
-    to_save['energy'] = gm_ic
-    to_save['endpoints'] = endpoints
-    to_save['charge_width'] = process_runs.get_quantity('charge_width', exp, runs)
-    to_save['counts_per_pad'] = cpp
-    to_save['veto_pad_counts'] = veto_counts
-    save_fname = 'e21072_121to128.pkl'
-    with open(save_fname, 'wb') as f:
-        pickle.dump(to_save, f)
+#save results
+to_save = {}
+to_save['length'] = lengths
+to_save['energy'] = gm_ic
+#to_save['endpoints'] = endpoints
+to_save['charge_width'] = process_runs.get_quantity('charge_width', exp, runs)
+to_save['counts_per_pad'] = cpp
+to_save['veto_pad_counts'] = veto_counts
+save_fname = 'e21072_121to128.pkl'
+#to_save['corrected_range'] = mapped_ranges
+with open(save_fname, 'wb') as f:
+    pickle.dump(to_save, f)
+
