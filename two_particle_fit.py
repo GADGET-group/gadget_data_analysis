@@ -1,3 +1,9 @@
+import os
+
+load_previous_fit = False
+if not load_previous_fit:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
 import numpy as np
 import scipy
 import random
@@ -84,10 +90,9 @@ def cluster_and_fit(data,points):
 
     return cluster, lines_of_best_fit, sum_of_squares
 
-use_likelihood = False #if false, uses least squares
+use_likelihood = True #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
-load_previous_fit = False
 processes = []
 pickle_fname = "all_two_particle_decays_in_e24joe_energy_free.dat"
 
@@ -251,12 +256,14 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             # print('mean, std:', np.mean(changed_res), np.std(changed_res))
             print(np.min(changed_res), np.max(changed_res))
         counter += 1
-    res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=display_progress)
+    if not use_likelihood:
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=display_progress)
     if use_likelihood:
-        res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,))
 
     if return_dict != None:
         to_minimize(res.x, use_likelihood) #make sure sim is updated with best params
+        print("Direction: ",direction)
         return_dict[return_key] = (res, trace_sim)
         # print(return_key, res)
         # print('total completed in direction [%d,%d]:'%(direction[0],direction[1]), len(return_dict.keys()))
@@ -321,9 +328,14 @@ h5file.data_select_mode = 'all data'
 h5file.remove_outliers = 1
 h5file.num_background_bins = (450,500)
 
+process_counter = 0
+
 for event_number in range(len(array_of_categorized_events_of_interest)):
     if (array_of_categorized_events_of_interest[event_number] == 'RnPo Chain' or \
-        array_of_categorized_events_of_interest[event_number] == 'Accidental Coin'):
+        array_of_categorized_events_of_interest[event_number] == 'Accidental Coin') and \
+            process_counter < 1:
+        process_counter += 1
+        print("Number of events currently being processed: ",process_counter)
     # if array_of_categorized_events_of_interest[event_number] == "Large Energy Single Event":
         # x,y,z,e = h5file.get_xyze(event_number, threshold=1500, include_veto_pads=False) # a threshold of 140 is pretty good
         
@@ -463,8 +475,10 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
                 if not load_previous_fit:
                     # n = h5file.get_event_num_bounds()[0]
                     manager = multiprocessing.Manager()
-                    forward_fit_results_dict = manager.dict()
-                    backward_fit_results_dict = manager.dict()
+                    ff_fit_results_dict = manager.dict()
+                    fb_fit_results_dict = manager.dict()
+                    bf_fit_results_dict = manager.dict()
+                    bb_fit_results_dict = manager.dict()
                     if direction[0] == 1:
                         cluster0_start = best_lobf[0][0]
                         cluster0_end = best_lobf[0][-1]
@@ -486,19 +500,63 @@ for event_number in range(len(array_of_categorized_events_of_interest)):
                     #                                             event_number,
                     #                                             forward_fit_results_dict
                     #                                             )
-                    processes.append(multiprocessing.Process(target=fit_event, 
-                                                                args=(event_number, 
-                                                                [cluster0_start, cluster1_start], 
-                                                                [cluster0_end, cluster1_end],
-                                                                6.288,
-                                                                ['4He','4He'],
-                                                                direction,
-                                                                event_number,
-                                                                forward_fit_results_dict
+                    if direction == [1,1]:
+                        processes.append(multiprocessing.Process(target=fit_event, 
+                                                                    args=(event_number, 
+                                                                    [cluster0_start, cluster1_start], 
+                                                                    [cluster0_end, cluster1_end],
+                                                                    6.288,
+                                                                    ['4He','4He'],
+                                                                    direction,
+                                                                    event_number,
+                                                                    ff_fit_results_dict
+                                                                    )
                                                                 )
-                                                            )
-                                     )
-                    processes[-1].start()
+                                        )
+                        processes[-1].start()
+                    elif direction == [1,-1]:
+                        processes.append(multiprocessing.Process(target=fit_event, 
+                                                                    args=(event_number, 
+                                                                    [cluster0_start, cluster1_start], 
+                                                                    [cluster0_end, cluster1_end],
+                                                                    6.288,
+                                                                    ['4He','4He'],
+                                                                    direction,
+                                                                    event_number,
+                                                                    fb_fit_results_dict
+                                                                    )
+                                                                )
+                                        )
+                        processes[-1].start()
+                    elif direction == [-1,1]:
+                        processes.append(multiprocessing.Process(target=fit_event, 
+                                                                    args=(event_number, 
+                                                                    [cluster0_start, cluster1_start], 
+                                                                    [cluster0_end, cluster1_end],
+                                                                    6.288,
+                                                                    ['4He','4He'],
+                                                                    direction,
+                                                                    event_number,
+                                                                    bf_fit_results_dict
+                                                                    )
+                                                                )
+                                        )
+                        processes[-1].start()
+                    elif direction == [-1,-1]:
+                        processes.append(multiprocessing.Process(target=fit_event, 
+                                                                    args=(event_number, 
+                                                                    [cluster0_start, cluster1_start], 
+                                                                    [cluster0_end, cluster1_end],
+                                                                    6.288,
+                                                                    ['4He','4He'],
+                                                                    direction,
+                                                                    event_number,
+                                                                    bb_fit_results_dict
+                                                                    )
+                                                                )
+                                        )                
+                        processes[-1].start()
+                    print('Processes: ',processes)
             
 #wait for all processes to end
 for p in processes:
@@ -507,10 +565,18 @@ print('fitting took %f s'%(time.time() - start_time))
 
 
 #pick the best of each direction, and save it
-fit_results_dict = {k:forward_fit_results_dict[k] for k in forward_fit_results_dict}
-for k in backward_fit_results_dict:
-    if (k in fit_results_dict and backward_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
-        fit_results_dict[k] = backward_fit_results_dict[k]
+fit_results_dict = {k:ff_fit_results_dict[k] for k in ff_fit_results_dict}
+mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin'])
+events = np.where(mask)[0]
+for k in events:
+    if (k in fit_results_dict and bb_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+        fit_results_dict[k] = bb_fit_results_dict[k]
+    if (k in fit_results_dict and fb_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+        fit_results_dict[k] = fb_fit_results_dict[k]
+    if (k in fit_results_dict and bf_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+        fit_results_dict[k] = bf_fit_results_dict[k]
+    elif k not in fit_results_dict:
+        fit_results_dict[k] = 'Event not fitted'
 with open(pickle_fname, 'wb') as f:
     pickle.dump(fit_results_dict, f)
 
