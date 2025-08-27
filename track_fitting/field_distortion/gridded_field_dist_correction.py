@@ -25,7 +25,7 @@ load_intermediate_result = True # if True, then load saved pickle file of best r
 '''
 Configuration for fit.
 '''
-experiment, run = 'e21072', 212
+experiment, run = 'e21072', 124
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.

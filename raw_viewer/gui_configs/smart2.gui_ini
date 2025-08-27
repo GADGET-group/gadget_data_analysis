@@ -1,0 +1,32 @@
+[ttk.Entry]
+length_ic_threshold = 100
+energy_ic_threshold = 0
+view_threshold = 100
+include_cobos = all
+include_asads = all
+include_pads = all
+veto_threshold = 400
+range_min = 0
+range_max = 100
+min_ic = 0
+max_ic = inf
+angle_min = 0
+angle_max = 90
+background_bin_start = 160
+background_bin_stop = 250
+moving_average_include_width = 40
+moving_average_exclude_width = 20
+zscale = .9
+near_peak_window_width = 50
+peak_first_allowed_bin = -inf
+peak_last_allowed_bin = inf
+smart_bins_away_to_check = 10
+smart_num_background_bins = 10
+
+[ttk.OptionMenu]
+background_mode = smart
+peak_mode = all data
+
+[ttk.CheckButton]
+remove_outliers = 1
+
