@@ -12,13 +12,14 @@ import scipy.optimize as opt
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 121, 1
+experiment, run, N = 'e21072', 124, 7
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
+# peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 peak_widths_to_minimize = [(1, 'p1596'),  (1, 'a4434'), (1, 'p770'), (1, 'a2153')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p1596', 'a2153')]
+peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596')]#, (1, 'p1596', 'a2153')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = False #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
@@ -53,8 +54,7 @@ h5file = build_sim.get_rawh5_object(experiment, run)
 dzs = dts*h5file.zscale
 MeV = build_sim.get_integrated_charge_energy_offset(experiment, run) + counts/build_sim.get_adc_counts_per_MeV(experiment, run)
 #ranges = np.sqrt(dzs**2 + dxys**2) #why is this different than ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)?
-ds = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
-ranges = ds
+ranges = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 
 if run == 124:
     veto_mask = max_veto_counts<300
@@ -117,13 +117,13 @@ if experiment == 'e21072':
     label_dict['p1927']='>1900 keV protons'
     if run==124:
         cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
-        cut_mask_dict['p770'] = (ranges>19) & (ranges<26) & (counts>8.67e4) & (counts<9.5e4) & veto_mask
+        cut_mask_dict['p770'] = (ranges>15) & (ranges<26) & (counts>8.67e4) & (MeV<0.87) & veto_mask
         cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
-        cut_mask_dict['a2153'] = (ranges>18) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+        cut_mask_dict['a2153'] = (ranges>16) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
         cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
         cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
-        cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
-        cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
+        cut_mask_dict['a2153wr'] = (ranges>16) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
+        cut_mask_dict['a2153wor'] = (ranges>16) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
         cut_mask_dict['p1927'] = (ranges>70) &(MeV>1.9) & veto_mask
     elif run==212:
         cut_mask_dict['p1596'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
@@ -144,6 +144,7 @@ if offset_endpoints:
     endpoints_offset_dir2 = endpoints[:, 1, :] - endpoints[:, 0, :]
     endpoints_offset_dir2 /= np.linalg.norm(endpoints_offset_dir2, axis=1)[:, np.newaxis]
     endpoints[:, 1, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir2
+    ranges_w_offset_endpoints = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 
 #plot showing selected events of each type
 rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask&(MeV<8)
@@ -441,6 +442,8 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
     ax.set_title(label)
     ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%g'%np.std(ranges[mask]))
+    if offset_endpoints:
+        ax.hist(ranges_w_offset_endpoints[mask], bins=range_hist_bins, alpha=0.6, label='offset endpoint range; std=%g'%np.std(ranges_w_offset_endpoints[mask]))
     ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
     ax.legend()
 
@@ -488,7 +491,7 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
 
-#plt.show(block=False)
+plt.show(block=False)
 
 if allow_beam_off_axis:
     print('beam axis at:', beam_xy_best)
@@ -504,4 +507,3 @@ plt.scatter(rad_dist[mask], ranges[mask], c=track_widths[mask], vmin=2., vmax=2.
 plt.colorbar()
 plt.xlabel('track centroid radial distance from beam axis (mm)')
 plt.ylabel('track length (mm)')
-plt.show(block=False)
