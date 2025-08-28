@@ -95,9 +95,10 @@ fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free
 fix_energy = False
 processes = []
 flast = 0
+start_time = time.time()
 
 def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type = ['4He','4He'], direction = [1,1],
-              return_key=None, return_dict=None, debug_plots=False): # currently only works with 2 particles
+              return_key=None, return_dict=None, debug_plots=False, fit = True): # currently only works with 2 particles
     # print(event, best_point, best_point_end, Eknown, particle_type, direction, return_key,return_dict, debug_plots)
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
     trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
@@ -264,14 +265,17 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         if np.abs(flast - intermediate_result.fun) < ftol:
             raise StopIteration
         flast = intermediate_result.fun
-    if not use_likelihood:
-        print('direction, guess, least_squares:', direction, init_guess, to_minimize(scaled_init_guess, True))
-        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback)
-    if use_likelihood:
-        print('direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
+    if not use_likelihood and fit:
+        print('Fitting event: direction, guess, least_squares:', direction, init_guess, to_minimize(scaled_init_guess, True))
+        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0,1),(0,1),(0,0.5),(0,0.5))
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback, bounds = bnds)
+    if use_likelihood and fit:
+        print('Fitting event: direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
         bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0,1),(0,1),(0,0.5),(0,0.5))
         res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds)
-
+    if not fit:
+        # just return the residuals of the least squares fit for the initial guess params
+        return to_minimize(scaled_init_guess,True)
     if return_dict != None:
         to_minimize(res.x, use_likelihood) #make sure sim is updated with best params
         # print("Direction: ",direction)
@@ -290,6 +294,302 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
 event_type = 'RnPo Chain'  # Change to 'Accidental Coin' to look at random events
 fit_type = 'kmeans'
 zscale = 0.65
+
+def process_two_particle_event(event_number):
+    print("Processing Event %d"%event_number)
+    # instead of using the raw xyze values, extract those values from the simulation so that the trimmed trace is consistent from the clustering to the fitter
+    temp_sim = build_sim.create_multi_particle_event('e24joe', 124, event_number, ['4He','4He'])
+    # zmax = temp_sim.num_trace_bins*temp_sim.zscale
+    x, y, z, e = temp_sim.get_xyze(threshold=1500, traces=temp_sim.traces_to_fit)
+    
+    # print("Number of Points in Event %d, (%s): "%(event_number,array_of_categorized_events_of_interest[event_number]),len(x))
+    data = np.stack((x,y,z),axis=1)
+    if fit_type == 'hough':
+        # Determines how many tesselations of the icosahedron
+        # to perform; larger number means more fine direction
+        # discretization, but larger computation time.
+        # See genIcosahedron docs for exact numbers.
+        directionGranularity = 4
+        directionVectors = hough3d.utils.genIcosahedron(directionGranularity)
+        # use 3dhough to find the track axis for the 2 particles
+
+        # hist_data = []
+        # nDs = np.linspace(0,1,21)
+        # mPPL = np.linspace(1,1300,21)
+        # for i in range(len(nDs)):
+        #     print(i)
+        #     for j in range(len(mPPL)):
+        #         linePoints = hough3D(data, directionVectors, latticeSize=128,
+        #                             neighborDistance = nDs[i], minPointsPerLine = mPPL[j])
+        #         for k in range(len(linePoints)):
+        #             hist_data.append([nDs[i],mPPL[j]])
+        # hist_data = np.array(hist_data)
+        # plt.hist2d(hist_data.T[0], hist_data.T[1], bins = 20)
+        # plt.show()
+        bounds = np.zeros((2, 3))
+        for i in range(3):
+            bounds[:,i] = [np.min(data[:,i]), np.max(data[:,i])]
+        
+        systemLengthScale = np.sqrt(np.sum((bounds[1] - bounds[0])**2))
+        print("systemLengthScale = ", systemLengthScale)
+        
+        linePoints = hough3D(data, directionVectors, latticeSize=128,
+                            neighborDistance = 4*2.2/systemLengthScale, minPointsPerLine = 360)       
+        print(np.shape(linePoints))
+        fig = plt.figure()
+        plt.clf()
+        ax = plt.axes(projection='3d')
+        for i in range(int(len(linePoints[0::]))):
+            ax.plot(linePoints[i,:,0],linePoints[i,:,1],linePoints[i,:,2], label = 'Line %d'%i)
+        ax.scatter(x,y,z, label='TPC Data for Event %d (%s)'%(event_number,event_type), alpha = 0.07, color = 'gray')
+        ax.set_xlim3d(-200, 200)
+        ax.set_ylim3d(-200, 200)
+        ax.set_zlim3d(0, 400)
+        ax.legend()
+        plt.show()
+    
+    if fit_type == 'ransac': # not used as it has the possibility of getting stuck in both the bragg peaks of two alphas at 90 degrees from one another
+        line = pyrsc.Line()
+        A,B,inliers = line.fit(data,thresh=9)
+    
+    if fit_type =='kmeans':            
+        # Iterate the clusters and lines
+        best_sos = np.inf
+        # Use a combination of k-means++ and varying the random point to get the best clustering
+        for j in range(20):
+
+            # Pick a random initial point, then the point farthest from that, 
+            # then the point farthest from those two, then the point farthest from those three
+            ip0 = np.random.randint(len(data))
+            points = [data[ip0]]
+            dists = np.linalg.norm(data - points[0], axis=1)
+            ip1 = np.argmax(dists)
+            points.append(data[ip1])
+            dists_to_set = np.min(
+                np.vstack([np.linalg.norm(data - p, axis=1) for p in points]),
+                axis=0
+            )
+            ip2 = np.argmax(dists_to_set)
+            points.append(data[ip2])
+            dists_to_set = np.min(
+                np.vstack([np.linalg.norm(data - p, axis=1) for p in points]),
+                axis=0
+            )
+            ip3 = np.argmax(dists_to_set)
+            points.append(data[ip3])
+            points = [data[ip0],data[ip3],data[ip1],data[ip2]]
+            points = sorted(points, key=lambda points: points[2])
+
+            # points_index = random.sample(range(0,len(data)), 4)
+            # points = data[points_index]
+            # print(points_index)
+            
+            cluster, lobf, sos = cluster_and_fit(data,points)
+            if sos < best_sos:
+                best_sos = sos
+                best_cluster = cluster
+                best_lobf = lobf
+                # print("Iteration: ",j)
+                # print("Lowest sum of squares so far: ",sos)
+
+                # Plot results
+                if False:
+                    fig = plt.figure()
+                    ax = fig.add_subplot(projection='3d')
+                    ax.scatter(*data[best_cluster == 0].T, color='teal', alpha=0.3, label="Cluster 0")
+                    ax.scatter(*data[best_cluster == 1].T, color='pink', alpha=0.6, label="Cluster 1")
+                    # ax.scatter(*best_lobf[0][0].T, s=100)
+                    # ax.scatter(*best_lobf[0][-1].T, s=100)
+                    # ax.scatter(*best_lobf[1][0].T, s=100)
+                    # ax.scatter(*best_lobf[1][-1].T, s=100)
+                    ax.plot(*best_lobf[0].T, color='blue', linewidth=2)
+                    ax.plot(*best_lobf[1].T, color='red', linewidth=2)
+                    ax.set_xlim3d(-200, 200)
+                    ax.set_ylim3d(-200, 200)
+                    ax.set_zlim3d(0, 400)
+                    ax.legend()
+                    plt.show()
+                
+        print("Time to cluster with k-means: ", time.time() - start_time)
+
+        # Once we extract the line along which each track travels, we use it to get the starting values for the fitter
+        
+        # scale the z value of our initial guess for use in the fitter with trimmed traces (this is no longer needed if the new x,y,z,e values are consistent)
+        # best_lobf[:,:,2] -= np.min(best_lobf[:,:,2])
+        
+        # Let's fit all combinations of forward and backward for the two clusters
+        directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
+        # directions = [[1,-1]]
+        cluster0_start = best_lobf[0][0]
+        cluster0_end = best_lobf[0][-1]
+        cluster1_start = best_lobf[1][0]
+        cluster1_end = best_lobf[1][-1]
+        for direction in directions:
+            if not load_previous_fit:
+                if direction == [1,1]:
+                    direction1_residuals = fit_event(event_number, 
+                                                     [cluster0_start, cluster1_start], 
+                                                     [cluster0_end, cluster1_end],
+                                                     6.288,
+                                                     ['4He','4He'],
+                                                     direction,
+                                                     event_number,
+                                                     None,
+                                                     False,
+                                                     fit=False)
+                    # processes.append(multiprocessing.Process(target=fit_event, 
+                    #                                             args=(event_number, 
+                    #                                             [cluster0_start, cluster1_start], 
+                    #                                             [cluster0_end, cluster1_end],
+                    #                                             6.288,
+                    #                                             ['4He','4He'],
+                    #                                             direction,
+                    #                                             event_number,
+                    #                                             ff_fit_results_dict,
+                    #                                             False
+                    #                                             )
+                    #                                         )
+                    #                 )
+                    # processes[-1].start()
+                elif direction == [1,-1]:
+                    direction2_residuals = fit_event(event_number, 
+                                                     [cluster0_start, cluster1_end], 
+                                                     [cluster0_end, cluster1_start],
+                                                     6.288,
+                                                     ['4He','4He'],
+                                                     direction,
+                                                     event_number,
+                                                     None,
+                                                     False,
+                                                     fit=False)
+                    # processes.append(multiprocessing.Process(target=fit_event, 
+                    #                                             args=(event_number, 
+                    #                                             [cluster0_start, cluster1_end], 
+                    #                                             [cluster0_end, cluster1_start],
+                    #                                             6.288,
+                    #                                             ['4He','4He'],
+                    #                                             direction,
+                    #                                             event_number,
+                    #                                             fb_fit_results_dict,
+                    #                                             False
+                    #                                             )
+                    #                                         )
+                    #                 )
+                    # processes[-1].start()
+                elif direction == [-1,1]:
+                    direction3_residuals = fit_event(event_number, 
+                                                     [cluster0_end, cluster1_start], 
+                                                     [cluster0_start, cluster1_end],
+                                                     6.288,
+                                                     ['4He','4He'],
+                                                     direction,
+                                                     event_number,
+                                                     None,
+                                                     False,
+                                                     fit=False)
+                    # processes.append(multiprocessing.Process(target=fit_event, 
+                    #                                             args=(event_number, 
+                    #                                             [cluster0_end, cluster1_start], 
+                    #                                             [cluster0_start, cluster1_end],
+                    #                                             6.288,
+                    #                                             ['4He','4He'],
+                    #                                             direction,
+                    #                                             event_number,
+                    #                                             bf_fit_results_dict,
+                    #                                             False
+                    #                                             )
+                    #                                         )
+                    #                 )
+                    # processes[-1].start()
+                elif direction == [-1,-1]:
+                    direction4_residuals = fit_event(event_number, 
+                                                     [cluster0_end, cluster1_end], 
+                                                     [cluster0_start, cluster1_start],
+                                                     6.288,
+                                                     ['4He','4He'],
+                                                     direction,
+                                                     event_number,
+                                                     None,
+                                                     False,
+                                                     fit=False)
+                    # processes.append(multiprocessing.Process(target=fit_event, 
+                    #                                             args=(event_number, 
+                    #                                             [cluster0_end, cluster1_end], 
+                    #                                             [cluster0_start, cluster1_start],
+                    #                                             6.288,
+                    #                                             ['4He','4He'],
+                    #                                             direction,
+                    #                                             event_number,
+                    #                                             bb_fit_results_dict,
+                    #                                             False
+                    #                                             )
+                    #                                         )
+                    #                 )                
+                    # processes[-1].start()
+        print("Results of each direction's least squares residuals for the initial guess based on clustering: ",direction1_residuals, direction2_residuals, direction3_residuals, direction4_residuals)
+        if direction1_residuals < direction2_residuals and direction1_residuals < direction3_residuals and direction1_residuals < direction4_residuals:
+            print("Direction 1 is best!")
+            fit_event(event_number, 
+                    [cluster0_start, cluster1_start], 
+                    [cluster0_end, cluster1_end],
+                    6.288,
+                    ['4He','4He'],
+                    [1,1],
+                    event_number,
+                    ff_fit_results_dict,
+                    False,
+                    fit=True)
+            fit_results_dict[event_number] = ff_fit_results_dict[event_number]
+            return "Event %d finished fitting in Direction 1"%event_number
+            
+        if direction2_residuals < direction1_residuals and direction2_residuals < direction3_residuals and direction2_residuals < direction4_residuals:
+            print("Direction 2 is best!")            
+            fit_event(event_number,
+                    [cluster0_start, cluster1_end], 
+                    [cluster0_end, cluster1_start],
+                    6.288,
+                    ['4He','4He'],
+                    [1,-1],
+                    event_number,
+                    fb_fit_results_dict,
+                    False,
+                    fit=True)
+            print("fb_fit_results_dict", fb_fit_results_dict)
+            fit_results_dict[event_number] = fb_fit_results_dict[event_number]
+            print("fit_results_dict",fit_results_dict)
+            return "Event %d finished fitting in Direction 2"%event_number
+
+        if direction3_residuals < direction1_residuals and direction3_residuals < direction2_residuals and direction3_residuals < direction4_residuals:
+            print("Direction 3 is best!")
+            fit_event(event_number,
+                    [cluster0_end, cluster1_start], 
+                    [cluster0_start, cluster1_end],
+                    6.288,
+                    ['4He','4He'],
+                    [-1,1],
+                    event_number,
+                    bf_fit_results_dict,
+                    False,
+                    fit=True)
+            fit_results_dict[event_number] = bf_fit_results_dict[event_number]
+            return "Event %d finished fitting in Direction 3"%event_number
+            
+        if direction4_residuals < direction1_residuals and direction4_residuals < direction2_residuals and direction4_residuals < direction3_residuals:
+            print("Direction 4 is best!")
+            fit_event(event_number, 
+                        [cluster0_end, cluster1_end], 
+                        [cluster0_start, cluster1_start],
+                        6.288,
+                        ['4He','4He'],
+                        [-1,-1],
+                        event_number,
+                        bb_fit_results_dict,
+                        False,
+                        fit=True)
+            fit_results_dict[event_number] = bb_fit_results_dict[event_number]
+            return "Event %d finished fitting in Direction 4"%event_number
+        return "Something went wrong"
+
 
 categorized_events_of_interest = pd.read_csv('./complete_categorized_events_of_interest.csv',\
     encoding='utf-8-sig', skip_blank_lines = False, nrows = 36164, header=None)
@@ -337,262 +637,40 @@ h5file.data_select_mode = 'all data'
 h5file.remove_outliers = 1
 h5file.num_background_bins = (450,500)
 
-process_counter = 0
+# events_to_fit = []
+ff_fit_results_dict = {}
+fb_fit_results_dict = {}
+bf_fit_results_dict = {}
+bb_fit_results_dict = {}
 
-with multiprocessing.Manager() as manager:
-    ff_fit_results_dict = manager.dict()
-    fb_fit_results_dict = manager.dict()
-    bf_fit_results_dict = manager.dict()
-    bb_fit_results_dict = manager.dict()
+fit_results_dict = {}
+n_workers = 10
+mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
+events = np.where(mask)[0]
+events = [4]
+if __name__ == "__main__":
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        for result in pool.imap_unordered(process_two_particle_event,events):
+            print(result)
 
-    for event_number in range(len(array_of_categorized_events_of_interest)):
-        if (array_of_categorized_events_of_interest[event_number] == 'RnPo Chain' or \
-            array_of_categorized_events_of_interest[event_number] == 'Accidental Coin' or \
-            array_of_categorized_events_of_interest[event_number] == 'Double Alpha Candidate') and \
-                process_counter < 1:
-            process_counter += 1
-            # print("Number of events currently being processed: ",process_counter)
-            print("Processing Event %d"%event_number)
-        # if array_of_categorized_events_of_interest[event_number] == "Large Energy Single Event":
-            # x,y,z,e = h5file.get_xyze(event_number, threshold=1500, include_veto_pads=False) # a threshold of 140 is pretty good
-            
-            # instead of using the raw xyze values, extract those values from the simulation so that the trimmed trace is consistent from the clustering to the fitter
-            temp_sim = build_sim.create_multi_particle_event('e24joe', 124, event_number, ['4He','4He'])
-            # zmax = temp_sim.num_trace_bins*temp_sim.zscale
-            x, y, z, e = temp_sim.get_xyze(threshold=1500, traces=temp_sim.traces_to_fit)
-            
-            # print("Number of Points in Event %d, (%s): "%(event_number,array_of_categorized_events_of_interest[event_number]),len(x))
-            
-            data = np.stack((x,y,z),axis=1)
-            if fit_type == 'hough':
-                # Determines how many tesselations of the icosahedron
-                # to perform; larger number means more fine direction
-                # discretization, but larger computation time.
-                # See genIcosahedron docs for exact numbers.
-                directionGranularity = 4
-                directionVectors = hough3d.utils.genIcosahedron(directionGranularity)
-                # use 3dhough to find the track axis for the 2 particles
-
-                # hist_data = []
-                # nDs = np.linspace(0,1,21)
-                # mPPL = np.linspace(1,1300,21)
-                # for i in range(len(nDs)):
-                #     print(i)
-                #     for j in range(len(mPPL)):
-                #         linePoints = hough3D(data, directionVectors, latticeSize=128,
-                #                             neighborDistance = nDs[i], minPointsPerLine = mPPL[j])
-                #         for k in range(len(linePoints)):
-                #             hist_data.append([nDs[i],mPPL[j]])
-                # hist_data = np.array(hist_data)
-                # plt.hist2d(hist_data.T[0], hist_data.T[1], bins = 20)
-                # plt.show()
-                bounds = np.zeros((2, 3))
-                for i in range(3):
-                    bounds[:,i] = [np.min(data[:,i]), np.max(data[:,i])]
-                
-                systemLengthScale = np.sqrt(np.sum((bounds[1] - bounds[0])**2))
-                print("systemLengthScale = ", systemLengthScale)
-                
-                linePoints = hough3D(data, directionVectors, latticeSize=128,
-                                    neighborDistance = 4*2.2/systemLengthScale, minPointsPerLine = 360)       
-                print(np.shape(linePoints))
-                fig = plt.figure()
-                plt.clf()
-                ax = plt.axes(projection='3d')
-                for i in range(int(len(linePoints[0::]))):
-                    ax.plot(linePoints[i,:,0],linePoints[i,:,1],linePoints[i,:,2], label = 'Line %d'%i)
-                ax.scatter(x,y,z, label='TPC Data for Event %d (%s)'%(event_number,event_type), alpha = 0.07, color = 'gray')
-                ax.set_xlim3d(-200, 200)
-                ax.set_ylim3d(-200, 200)
-                ax.set_zlim3d(0, 400)
-                ax.legend()
-                plt.show()
-            
-            if fit_type == 'ransac': # not used as it has the possibility of getting stuck in both the bragg peaks of two alphas at 90 degrees from one another
-                line = pyrsc.Line()
-                A,B,inliers = line.fit(data,thresh=9)
-            
-            if fit_type =='kmeans':
-                start_time = time.time()
-                    
-                # Iterate the clusters and lines
-                best_sos = np.inf
-                # Use a combination of k-means++ and varying the random point to get the best clustering
-                for j in range(20):
-
-                    # Pick a random initial point, then the point farthest from that, 
-                    # then the point farthest from those two, then the point farthest from those three
-                    ip0 = np.random.randint(len(data))
-                    points = [data[ip0]]
-                    dists = np.linalg.norm(data - points[0], axis=1)
-                    ip1 = np.argmax(dists)
-                    points.append(data[ip1])
-                    dists_to_set = np.min(
-                        np.vstack([np.linalg.norm(data - p, axis=1) for p in points]),
-                        axis=0
-                    )
-                    ip2 = np.argmax(dists_to_set)
-                    points.append(data[ip2])
-                    dists_to_set = np.min(
-                        np.vstack([np.linalg.norm(data - p, axis=1) for p in points]),
-                        axis=0
-                    )
-                    ip3 = np.argmax(dists_to_set)
-                    points.append(data[ip3])
-                    points = [data[ip0],data[ip3],data[ip1],data[ip2]]
-                    points = sorted(points, key=lambda points: points[2])
-
-                    # points_index = random.sample(range(0,len(data)), 4)
-                    # points = data[points_index]
-                    # print(points_index)
-                    
-                    cluster, lobf, sos = cluster_and_fit(data,points)
-                    if sos < best_sos:
-                        best_sos = sos
-                        best_cluster = cluster
-                        best_lobf = lobf
-                        # print("Iteration: ",j)
-                        # print("Lowest sum of squares so far: ",sos)
-
-                        # Plot results
-                        # fig = plt.figure()
-                        # ax = fig.add_subplot(projection='3d')
-                        # ax.scatter(*data[best_cluster == 0].T, color='teal', alpha=0.3, label="Cluster 0")
-                        # ax.scatter(*data[best_cluster == 1].T, color='pink', alpha=0.6, label="Cluster 1")
-                        # # ax.scatter(*best_lobf[0][0].T, s=100)
-                        # # ax.scatter(*best_lobf[0][-1].T, s=100)
-                        # # ax.scatter(*best_lobf[1][0].T, s=100)
-                        # # ax.scatter(*best_lobf[1][-1].T, s=100)
-                        # ax.plot(*best_lobf[0].T, color='blue', linewidth=2)
-                        # ax.plot(*best_lobf[1].T, color='red', linewidth=2)
-                        # ax.set_xlim3d(-200, 200)
-                        # ax.set_ylim3d(-200, 200)
-                        # ax.set_zlim3d(0, 400)
-                        # ax.legend()
-                        # plt.show()
-                        
-                print("Time to cluster with k-means: ", time.time() - start_time)
-
-                # Once we extract the line along which each track travels, we use it to get the starting values for the fitter
-                
-                # scale the z value of our initial guess for use in the fitter with trimmed traces (this is no longer needed if the new x,y,z,e values are consistent)
-                # best_lobf[:,:,2] -= np.min(best_lobf[:,:,2])
-                
-                # Let's fit all combinations of forward and backward for the two clusters
-                directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
-                # directions = [[1,-1]]
-                for direction in directions:
-                    # print("Starting fit of event %d with direction "%(event_number),direction)
-                    # fit_event(event_number, 
-                    #           [best_lobf[0][0], best_lobf[1][0]], 
-                    #           [best_lobf[0][-1], best_lobf[1][-1]],
-                    #           direction=direction)
-                
-                    if not load_previous_fit:
-                        # n = h5file.get_event_num_bounds()[0]
-                        cluster0_start = best_lobf[0][0]
-                        cluster0_end = best_lobf[0][-1]
-                        # elif direction[0] == -1:
-                        #     cluster0_start = best_lobf[0][-1]
-                        #     cluster0_end = best_lobf[0][0]
-                        # if direction[1] == 1:
-                        cluster1_start = best_lobf[1][0]
-                        cluster1_end = best_lobf[1][-1]
-                        # elif direction[1] == -1:
-                        #     cluster1_start = best_lobf[1][-1]
-                        #     cluster1_end = best_lobf[1][0]
-                            
-                        # fit_event(event_number, [cluster0_start, cluster1_start], [cluster0_end, cluster1_end], 6.288,['4He','4He'],
-                        #                                             direction,
-                        #                                             event_number,
-                        #                                             forward_fit_results_dict
-                        #                                             )
-                        if direction == [1,1]:
-                            processes.append(multiprocessing.Process(target=fit_event, 
-                                                                        args=(event_number, 
-                                                                        [cluster0_start, cluster1_start], 
-                                                                        [cluster0_end, cluster1_end],
-                                                                        6.288,
-                                                                        ['4He','4He'],
-                                                                        direction,
-                                                                        event_number,
-                                                                        ff_fit_results_dict,
-                                                                        False
-                                                                        )
-                                                                    )
-                                            )
-                            processes[-1].start()
-                        elif direction == [1,-1]:
-                            processes.append(multiprocessing.Process(target=fit_event, 
-                                                                        args=(event_number, 
-                                                                        [cluster0_start, cluster1_end], 
-                                                                        [cluster0_end, cluster1_start],
-                                                                        6.288,
-                                                                        ['4He','4He'],
-                                                                        direction,
-                                                                        event_number,
-                                                                        fb_fit_results_dict,
-                                                                        False
-                                                                        )
-                                                                    )
-                                            )
-                            processes[-1].start()
-                        elif direction == [-1,1]:
-                            processes.append(multiprocessing.Process(target=fit_event, 
-                                                                        args=(event_number, 
-                                                                        [cluster0_end, cluster1_start], 
-                                                                        [cluster0_start, cluster1_end],
-                                                                        6.288,
-                                                                        ['4He','4He'],
-                                                                        direction,
-                                                                        event_number,
-                                                                        bf_fit_results_dict,
-                                                                        False
-                                                                        )
-                                                                    )
-                                            )
-                            processes[-1].start()
-                        elif direction == [-1,-1]:
-                            processes.append(multiprocessing.Process(target=fit_event, 
-                                                                        args=(event_number, 
-                                                                        [cluster0_end, cluster1_end], 
-                                                                        [cluster0_start, cluster1_start],
-                                                                        6.288,
-                                                                        ['4He','4He'],
-                                                                        direction,
-                                                                        event_number,
-                                                                        bb_fit_results_dict,
-                                                                        False
-                                                                        )
-                                                                    )
-                                            )                
-                            processes[-1].start()
-                
-    #wait for all processes to end
-    for p in processes:
-        p.join()
-    print('fitting took %f s'%(time.time() - start_time))
-
-    print(ff_fit_results_dict, fb_fit_results_dict, bf_fit_results_dict, bb_fit_results_dict)
-    #pick the best of each direction, and save it
-    fit_results_dict = {k:ff_fit_results_dict[k] for k in ff_fit_results_dict}
-    mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin'])
-    events = np.where(mask)[0]
-    yac = 0
-    for k in events:
-        if yac < process_counter:
-            print(k)
-            if (k in fit_results_dict and bb_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
-                fit_results_dict[k] = bb_fit_results_dict[k]
-            if (k in fit_results_dict and fb_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
-                fit_results_dict[k] = fb_fit_results_dict[k]
-            if (k in fit_results_dict and bf_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
-                fit_results_dict[k] = bf_fit_results_dict[k]
-            elif k not in fit_results_dict:
-                fit_results_dict[k] = 'Event not fitted'
-            yac += 1
-    # pickle_fname = "two_particle_decays_in_e24joe_energy_free_%d.dat"%process_counter
-    pickle_fname = "two_particle_decays_in_e24joe_test.dat"
-    with open(pickle_fname, 'wb') as f:
-        pickle.dump(fit_results_dict, f)
-
+#wait for all processes to end
+print('fitting took %f s'%(time.time() - start_time))
+print(fit_results_dict)
+# print(ff_fit_results_dict, fb_fit_results_dict, bf_fit_results_dict, bb_fit_results_dict)
+#pick the best of each direction, and save it
+# fit_results_dict = {k:ff_fit_results_dict[k] for k in ff_fit_results_dict}
+# yac = 0
+# for k in events:
+#     if (k in fit_results_dict and bb_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+#         fit_results_dict[k] = bb_fit_results_dict[k]
+#     if (k in fit_results_dict and fb_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+#         fit_results_dict[k] = fb_fit_results_dict[k]
+#     if (k in fit_results_dict and bf_fit_results_dict[k][0].fun < fit_results_dict[k][0].fun) or k not in fit_results_dict: 
+#         fit_results_dict[k] = bf_fit_results_dict[k]
+#     elif k not in fit_results_dict:
+#         fit_results_dict[k] = 'Event not fitted'
+#     yac += 1
+# pickle_fname = "two_particle_decays_in_e24joe_energy_free_%d.dat"%process_counter
+pickle_fname = "two_particle_decays_in_e24joe_test.dat"
+with open(pickle_fname, 'wb') as f:
+    pickle.dump(fit_results_dict, f)
