@@ -20,7 +20,7 @@ import scipy.sparse.linalg
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-load_intermediate_result = True # if True, then load saved pickle file of best result found so far, and display data with no further optimization
+load_intermediate_result = False # if True, then load saved pickle file of best result found so far, and display data with no further optimization
 
 '''
 Configuration for fit.
@@ -43,7 +43,7 @@ if False:
     zgrid_len = 2
     wgrid_len = 5
     tgrid_len = 7
-elif False:
+elif True:
     xgrid_len = ygrid_len = 4
     zgrid_len = 2
     wgrid_len = 4
@@ -72,7 +72,7 @@ Load data and do pre-processing
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
 endpoints = np.array(track_info_dict['endpoints'])
 
-processed_directory = '/egr/research-tpc/shared/Run_Data/run_%04d_raw_viewer/run_%04dsmart'%(run, run)
+processed_directory = '/egr/research-tpc/shared/Run_Data/run_%04d_raw_viewer/run_%04dsmart2'%(run, run)
 
 #load histogram arrays
 counts = np.load(os.path.join(processed_directory, 'counts.npy'))
@@ -144,20 +144,21 @@ if experiment == 'e21072':
     label_dict['a2153wor'] = '2153 keV alpha without recoil'
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
     if run==124:
-        cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 60) & (counts > 1.69e5) & (counts < 2.08e5) & veto_mask
-        cut_mask_dict['p770'] = (ranges>16.8) & (ranges<23) & (counts>8.2e4) & (counts<9.5e4) & veto_mask
-        cut_mask_dict['a4434'] = (ranges>21) & (ranges<47) & (counts>4.5e5) & (counts < 7e5) & veto_mask
-        cut_mask_dict['a2153'] = (ranges>16) & (ranges<26) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
-        #TODO: need to update these
-        # cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
-        # cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
-        # cut_mask_dict['a2153wr'] = (ranges>18) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
-        # cut_mask_dict['a2153wor'] = (ranges>18) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
+        cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
+        cut_mask_dict['p770'] = (ranges>15) & (ranges<26) & (counts>8.67e4) & (MeV<0.87) & veto_mask
+        cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
+        cut_mask_dict['a2153'] = (ranges>16) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
+        cut_mask_dict['a4434wr'] = (ranges>25) & (ranges<50) & (counts>5.9e5) & (counts < 7e5) & veto_mask
+        cut_mask_dict['a4434wor'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 5.7e5) & veto_mask
+        cut_mask_dict['a2153wr'] = (ranges>16) & (ranges<28) & (counts>2.83e5) & (counts<3.4e5) & veto_mask
+        cut_mask_dict['a2153wor'] = (ranges>16) & (ranges<26) & (counts>2.3e5) & (counts<2.7e5) & veto_mask
+        cut_mask_dict['p1927'] = (ranges>70) &(MeV>1.9) & veto_mask
     elif run==212:
-        cut_mask_dict['p1596'] = (ranges > 30) & (ranges < 61) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
-        cut_mask_dict['p770'] = (ranges>16.5) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
+        cut_mask_dict['p1596'] = (ranges > 32) & (ranges < 65) & (counts > 3.05e5) & (counts < 3.5e5) & veto_mask
+        cut_mask_dict['p770'] = (ranges>20) & (ranges<26) & (counts>1.45e5) & (counts< 1.67e5)&veto_mask
         cut_mask_dict['a4434'] = (ranges>22) & (ranges<50) & (counts>0.6e6) & (counts <1.1e6) & veto_mask
-        cut_mask_dict['a2153'] = (ranges>17) & (ranges<26) & (counts>2.8e5) & (counts<5.1e5) & veto_mask
+        cut_mask_dict['a2153'] = (ranges>19) & (ranges<26) & (counts>3e5) & (counts<5e5) & veto_mask
+        cut_mask_dict['a2153wor'] = (ranges>20.5) & (ranges<23) & (counts>3.15e5) & (counts<3.5e5) & veto_mask
         #TODO: update this one
         #cut_mask_dict['a2153wor'] = (ranges>20.5) & (ranges<23) & (counts>3.15e5) & (counts<3.5e5) & veto_mask
     #cuts within 20 degrees of pad plan
@@ -262,7 +263,6 @@ def map_type_range(x_interp, y_interp, z_interp, ptype):
                                    x_interp, y_interp, z_interp)
     return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1)
 
-
 def convert_fit_params(params):
     '''
     Takes 1D array of parameters used for fitting, and maps to xparams, yparams, zparams used by range mapping.
@@ -285,6 +285,34 @@ def convert_fit_params(params):
     zparams = np.reshape(zparams_flat, (xgrid_len, ygrid_len, zgrid_len, wgrid_len, tgrid_len))
     return xparams, yparams, zparams
 
+def get_xmapped(params, x_index, y_index, w_index, t_index):
+    return params[t_index + w_index*tgrid_len + y_index*wgrid_len*tgrid_len + x_index*ygrid_len*wgrid_len*tgrid_len]*pos_scale
+
+def get_ymapped(params, x_index, y_index, w_index, t_index):
+    offset = xgrid_len*ygrid_len*wgrid_len*tgrid_len
+    return params[offset + t_index + w_index*tgrid_len + y_index*wgrid_len*tgrid_len + x_index*ygrid_len*wgrid_len*tgrid_len]*pos_scale
+
+#constraints to add:
+#charge deposited inside detector
+#end points relative to adjacent cells (cell left  has to originate to the left of current cell)
+constraints = []
+for x_index in range(len(x_grid)):
+    for y_index in range(len(y_grid)):
+        for w_index in range(len(w_grid)):
+            for t_index in range(len(t_grid)):
+                #check originates within field cage (6.1 cm radius)
+                x_here = lambda params: get_xmapped(params, x_index, y_index, w_index, t_index)
+                y_here = lambda params: get_ymapped(params, x_index, y_index, w_index, t_index)
+                r = lambda params: np.sqrt(x_here(params)**2 + y_here(params)**2)
+                constraints.append({'type':'ineq', 'fun':(lambda params: 61 - r(params))})
+                if x_index > 0: #confirm charge originating to the left of charge deposited here will be deposited to the left
+                    x_left = lambda params:get_xmapped(params, x_index-1, y_index, w_index, t_index)
+                    constraints.append({'type':'ineq', 'fun':(lambda params: x_here(params) - x_left(params))})
+                if y_index > 0: #confirm charge originating to the left of charge deposited here will be deposited to the left
+                    y_above = lambda params:get_xmapped(params, x_index, y_index-1, w_index, t_index)
+                    constraints.append({'type':'ineq', 'fun':(lambda params: y_here(params) - y_above(params))})
+
+
 xguess = np.zeros((xgrid_len, ygrid_len, wgrid_len, tgrid_len))
 yguess = np.zeros((xgrid_len, ygrid_len, wgrid_len, tgrid_len))
 zguess = np.zeros((xgrid_len, ygrid_len, zgrid_len, wgrid_len, tgrid_len))
@@ -303,6 +331,15 @@ for i in range(xgrid_len):
                 zguess[i,j, :,k, l] = z_grid
 guess = np.concatenate([xguess.flatten()/pos_scale, yguess.flatten()/pos_scale, zguess.flatten()/pos_scale])
 
+print(get_xmapped(guess, 0,0,0,0), get_xmapped(guess, 1,0,0,0))
+
+#check that guess satisifies constraints
+for i, constraint in enumerate(constraints[:10]):
+    if constraint['fun'](guess) <= 0:
+        print('constraint %d not satisfied'%i, constraint['fun'](guess))
+
+print('there are %d constraints'%len(constraints))
+
 def to_minimize(params):
     range_hist_dict = {} #dict to avoid doing the same rmap twice
     to_return = 0
@@ -316,12 +353,11 @@ def to_minimize(params):
         if ptype2 not in range_hist_dict:
             range_hist_dict[ptype2] = map_type_range(x_interp, y_interp, z_interp, ptype2) 
         to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
-    #print(to_return)
+    #print(params, to_return)
     return to_return
 
-#constraints to add:
-#charge deposited inside detector
-#end points relative to adjacent cells (cell left  has to originate to the left of current cell)
+
+
 
 fname_template = 'gridcor_%s_run%d_x%d_y%d_z%d_w%d_t%d.pkl'
 if t_bounds:
@@ -369,8 +405,12 @@ else:
     print('performing optimization')   
     callback(guess, '%s init')
     print('number of parameters to fit:', len(guess))
+    num_evts_used = 0
+    for ptype in peak_widths_to_minimize:
+        num_evts_used += len(ranges[cut_mask_dict[ptype[1]]])
+    print('using a total of %d events'%num_evts_used)
 
-    res = opt.minimize(to_minimize, guess, callback=callback)
+    res = opt.minimize(to_minimize, guess, callback=callback, constraints=constraints)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
     print(res)
