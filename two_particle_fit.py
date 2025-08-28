@@ -90,7 +90,7 @@ def cluster_and_fit(data,points):
 
     return cluster, lines_of_best_fit, sum_of_squares
 
-use_likelihood = True #if false, uses least squares
+use_likelihood = False #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
 processes = []
@@ -100,8 +100,6 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
               return_key=None, return_dict=None, debug_plots=False): # currently only works with 2 particles
     # print(event, best_point, best_point_end, Eknown, particle_type, direction, return_key,return_dict, debug_plots)
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
-    trace_sim.sims[0] = trace_sim.sims[0]
-    trace_sim.sims[1] = trace_sim.sims[1]
     trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
     trace_sim.shared_params = ['gas_density']
     # print(trace_sim.__dict__)
@@ -168,7 +166,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         E_or_m0 = E_or_m0 * 10
         E_or_m1 = E_or_m1 * 10
         sigma_xy0, sigma_z0 = sigma_xy0 * 10, sigma_z0 * 10
-        sigma_xy1, sigma_z1 = sigma_xy0 * 10, sigma_z0 * 10
+        sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
         # comment the above block out if you use the original parameters instead of the scaled parameters
         # sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
         if fit_adc_count_per_MeV:
@@ -182,7 +180,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             else:
                 trace_sim.sims[0].initial_energy = E_or_m0
                 trace_sim.sims[1].initial_energy = E_or_m1
-            trace_sim.counts_per_MeV = 129600. #using mean value fit when this was a free parameter
+            trace_sim.counts_per_MeV = 77000. #using rough value from run 193 in e24joe
         
 
         #enforce particle direction
@@ -218,8 +216,6 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z0, sigma_z1
         
         trace_sim.simulate_event()
-        trace_sim.plot_simulated_3d_data(threshold=100)
-        plt.show()
         if least_squares:
             residuals_dict = trace_sim.get_residuals()
             for pad in residuals_dict:
@@ -239,11 +235,11 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         # print('%e'%to_return, params)
         return to_return
     
-    print('direction, guess:', direction, init_guess)
-    print(to_minimize(scaled_init_guess, True))
     if debug_plots:
         print('guess:', init_guess)
         print(to_minimize(scaled_init_guess, True))
+        # build_sim.open_gui(trace_sim.sims[0])
+        # build_sim.open_gui(trace_sim.sims[1])
         trace_sim.plot_residuals()
         trace_sim.plot_residuals_3d(threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
@@ -269,9 +265,12 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             raise StopIteration
         flast = intermediate_result.fun
     if not use_likelihood:
+        print('direction, guess, least_squares:', direction, init_guess, to_minimize(scaled_init_guess, True))
         res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback)
     if use_likelihood:
-        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback)
+        print('direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
+        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0,1),(0,1),(0,0.5),(0,0.5))
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds)
 
     if return_dict != None:
         to_minimize(res.x, use_likelihood) #make sure sim is updated with best params
@@ -481,7 +480,7 @@ with multiprocessing.Manager() as manager:
                 
                 # Let's fit all combinations of forward and backward for the two clusters
                 directions = [[1,1],[1,-1],[-1,1],[-1,-1]]
-                directions = [[1,-1]]
+                # directions = [[1,-1]]
                 for direction in directions:
                     # print("Starting fit of event %d with direction "%(event_number),direction)
                     # fit_event(event_number, 
@@ -533,7 +532,7 @@ with multiprocessing.Manager() as manager:
                                                                         direction,
                                                                         event_number,
                                                                         fb_fit_results_dict,
-                                                                        True
+                                                                        False
                                                                         )
                                                                     )
                                             )
@@ -574,7 +573,7 @@ with multiprocessing.Manager() as manager:
         p.join()
     print('fitting took %f s'%(time.time() - start_time))
 
-
+    print(ff_fit_results_dict, fb_fit_results_dict, bf_fit_results_dict, bb_fit_results_dict)
     #pick the best of each direction, and save it
     fit_results_dict = {k:ff_fit_results_dict[k] for k in ff_fit_results_dict}
     mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin'])
