@@ -85,7 +85,7 @@ MeV = build_sim.get_integrated_charge_energy_offset(experiment, run) + counts/bu
 ranges = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
 
 if run == 124:
-    veto_mask = max_veto_counts<200
+    veto_mask = max_veto_counts<300
 elif run == 212:
     veto_mask = max_veto_counts<150
 
@@ -301,16 +301,16 @@ for x_index in range(len(x_grid)):
         for w_index in range(len(w_grid)):
             for t_index in range(len(t_grid)):
                 #check originates within field cage (6.1 cm radius)
-                x_here = lambda params: get_xmapped(params, x_index, y_index, w_index, t_index)
-                y_here = lambda params: get_ymapped(params, x_index, y_index, w_index, t_index)
-                r = lambda params: np.sqrt(x_here(params)**2 + y_here(params)**2)
-                constraints.append({'type':'ineq', 'fun':(lambda params: 61 - r(params))})
+                x_here = lambda params, x_index=x_index, y_index=y_index, w_index=w_index, t_index=t_index: get_xmapped(params, x_index, y_index, w_index, t_index)
+                y_here = lambda params, x_index=x_index, y_index=y_index, w_index=w_index, t_index=t_index: get_ymapped(params, x_index, y_index, w_index, t_index)
+                r = lambda params, x_here=x_here, y_here=y_here: np.sqrt(x_here(params)**2 + y_here(params)**2)
+                constraints.append({'type':'ineq', 'fun':(lambda params, r=r: 61 - r(params))})
                 if x_index > 0: #confirm charge originating to the left of charge deposited here will be deposited to the left
-                    x_left = lambda params:get_xmapped(params, x_index-1, y_index, w_index, t_index)
-                    constraints.append({'type':'ineq', 'fun':(lambda params: x_here(params) - x_left(params))})
+                    x_left = lambda params, x_index=x_index, y_index=y_index, w_index=w_index, t_index=t_index:get_xmapped(params, x_index-1, y_index, w_index, t_index)
+                    constraints.append({'type':'ineq', 'fun':(lambda params, x_here=x_here, x_left=x_left: x_here(params) - x_left(params))})
                 if y_index > 0: #confirm charge originating to the left of charge deposited here will be deposited to the left
-                    y_above = lambda params:get_xmapped(params, x_index, y_index-1, w_index, t_index)
-                    constraints.append({'type':'ineq', 'fun':(lambda params: y_here(params) - y_above(params))})
+                    y_above = lambda params, x_index=x_index, y_index=y_index, w_index=w_index, t_index=t_index:get_xmapped(params, x_index, y_index-1, w_index, t_index)
+                    constraints.append({'type':'ineq', 'fun':(lambda params, y_here=y_here, y_above=y_above: y_here(params) - y_above(params))})
 
 
 xguess = np.zeros((xgrid_len, ygrid_len, wgrid_len, tgrid_len))
@@ -410,7 +410,7 @@ else:
         num_evts_used += len(ranges[cut_mask_dict[ptype[1]]])
     print('using a total of %d events'%num_evts_used)
 
-    res = opt.minimize(to_minimize, guess, callback=callback, constraints=constraints)
+    res = opt.minimize(to_minimize, guess, callback=callback, constraints=constraints, method='slsqp')
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
     print(res)
