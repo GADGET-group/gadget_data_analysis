@@ -285,7 +285,13 @@ class SimulatedEvent:
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
                     pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
-                    pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
+                    #use cholesky decomposition to get log(det(cov_matrix)) and avoid overlow issues when trace is long
+                    #https://math.stackexchange.com/questions/2001041/logarithm-of-the-determinant-of-a-positive-definite-matrix
+                    #used to do: pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
+                    L = np.linalg.cholesky(cov_matrix)
+                    diag_elements = np.diagonal(L)
+                    pad_ll -= np.sum(np.log(diag_elements))
+
                     residuals = np.matrix(residuals)
                     pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0,0]
                 else: #pad was simulated firing, but did not

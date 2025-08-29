@@ -237,7 +237,7 @@ class SimGui(ttk.Frame):
                 to_return = np.inf
             #print(vals, to_return)
             return to_return
-        def callback(intermediate_result:OptimizeResult):
+        def callback(intermediate_result:opt.OptimizeResult):
             print(intermediate_result)
 
         starting_guess = [float(entry.get()) for entry in entries_to_fit]
