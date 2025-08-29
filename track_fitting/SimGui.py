@@ -235,9 +235,11 @@ class SimGui(ttk.Frame):
             to_return = -self.sim.log_likelihood()
             if np.isnan(to_return):
                 to_return = np.inf
-            print(vals, to_return)
+            #print(vals, to_return)
             return to_return
+        def callback(intermediate_result:OptimizeResult):
+            print(intermediate_result)
 
         starting_guess = [float(entry.get()) for entry in entries_to_fit]
-        print(opt.minimize(to_minimize, starting_guess, options={'maxiter':float(self.max_iter_entry.get())}))
+        print(opt.minimize(to_minimize, starting_guess, options={'maxiter':float(self.max_iter_entry.get())}, callback=callback))
         self.update_entries_to_reflect_sim()
