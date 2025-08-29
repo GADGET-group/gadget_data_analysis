@@ -90,7 +90,7 @@ def cluster_and_fit(data,points):
 
     return cluster, lines_of_best_fit, sum_of_squares
 
-use_likelihood = False #if false, uses least squares
+use_likelihood = True #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
 processes = []
@@ -112,6 +112,11 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     zmin = 0
     #set zmax to length of trimmed traces
     zmax = trace_sim.num_trace_bins*trace_sim.zscale
+    
+    trace_sim.sims[0].adaptive_stopping_power = False
+    trace_sim.sims[1].adaptive_stopping_power = False
+    trace_sim.sims[0].num_stopping_power_points = trace_sim.sims[0].get_num_stopping_points_for_energy(Eknown)
+    trace_sim.sims[1].num_stopping_power_points = trace_sim.sims[1].get_num_stopping_points_for_energy(Eknown)
     
     track_direction_vec = np.array([])
     theta_guess = np.array([])
@@ -151,6 +156,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     scaled_init_guess[11] = init_guess[11] / 10
     scaled_init_guess[12] = init_guess[12] / 10
     scaled_init_guess[13] = init_guess[13] / 10
+    
     def to_minimize(params, least_squares):
         theta0, theta1, phi0, phi1, x0, y0, z0, x1, y1, z1, E_or_m0, E_or_m1, sigma_xy0, sigma_z0 = params # note that each param is an array with length of the number of particles in the fit
         # unscale the parameters
@@ -194,20 +200,20 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         #     print("Dot product for clusters 0 & 1: ",  np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])), np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])))
         #     return np.inf
 
-        if z0 > trace_sim.num_trace_bins*trace_sim.zscale or z0<-1 or z1 > trace_sim.num_trace_bins*trace_sim.zscale or z1<-1:
-            print("returned inf because of z range: ", z0, z1)
-            print("Boundary z-values calculated via the trimmed trace: ", trace_sim.num_trace_bins*trace_sim.zscale)
-            return np.inf
-        if x0**2 + y0**2 > 40**2 or x1**2 + y1**2 > 40**2:
-            print("returned inf because of xy plane boundary")
-            return np.inf
-        if trace_sim.sims[0].initial_energy < 0 or trace_sim.sims[0].initial_energy  > 10 or trace_sim.sims[1].initial_energy < 0 or trace_sim.sims[1].initial_energy  > 10: #stopping power tables currently only go to 10 MeV
-            print("returned inf because of particle energy")
-            return np.inf
-        if theta0 < 0 or theta0 >= np.pi or phi0 < 0 or phi0 > 2*np.pi:
-            return np.inf 
-        if theta1 < 0 or theta1 >= np.pi or phi1 < 0 or phi1 > 2*np.pi:
-            return np.inf        
+        # if z0 > trace_sim.num_trace_bins*trace_sim.zscale or z0<-1 or z1 > trace_sim.num_trace_bins*trace_sim.zscale or z1<-1:
+        #     print("returned inf because of z range: ", z0, z1)
+        #     print("Boundary z-values calculated via the trimmed trace: ", trace_sim.num_trace_bins*trace_sim.zscale)
+        #     return np.inf
+        # if x0**2 + y0**2 > 40**2 or x1**2 + y1**2 > 40**2:
+        #     print("returned inf because of xy plane boundary")
+        #     return np.inf
+        # if trace_sim.sims[0].initial_energy < 0 or trace_sim.sims[0].initial_energy  > 10 or trace_sim.sims[1].initial_energy < 0 or trace_sim.sims[1].initial_energy  > 10: #stopping power tables currently only go to 10 MeV
+        #     print("returned inf because of particle energy")
+        #     return np.inf
+        # if theta0 < 0 or theta0 >= np.pi or phi0 < 0 or phi0 > 2*np.pi:
+        #     return np.inf 
+        # if theta1 < 0 or theta1 >= np.pi or phi1 < 0 or phi1 > 2*np.pi:
+        #     return np.inf        
 
         trace_sim.sims[0].theta, trace_sim.sims[0].phi, trace_sim.sims[1].theta, trace_sim.sims[1].phi = theta0, phi0, theta1, phi1
         
@@ -235,6 +241,12 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             to_return = np.inf
         # print('%e'%to_return, params)
         return to_return
+    
+    # print("f(x0) =", to_minimize(scaled_init_guess,True))
+    # for i in range(len(scaled_init_guess)):
+    #     x_perturbed = scaled_init_guess.copy()
+    #     x_perturbed[i] += 1e-3
+    #     print(f"f(x0 + perturb in {i}) =", to_minimize(x_perturbed,True))
     
     if debug_plots:
         print('guess:', init_guess)
@@ -267,12 +279,12 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         flast = intermediate_result.fun
     if not use_likelihood and fit:
         print('Fitting event: direction, guess, least_squares:', direction, init_guess, to_minimize(scaled_init_guess, True))
-        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0,1),(0,1),(0,0.5),(0,0.5))
-        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback, bounds = bnds)
+        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback, bounds = bnds, options={'gtol': 1e-5,'ftol':1e-5})
     if use_likelihood and fit:
         print('Fitting event: direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
-        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0,1),(0,1),(0,0.5),(0,0.5))
-        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds)
+        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds, options={'gtol': 1e-5,'ftol':1e-5})
     if not fit:
         # just return the residuals of the least squares fit for the initial guess params
         return to_minimize(scaled_init_guess,True)
@@ -637,18 +649,17 @@ h5file.data_select_mode = 'all data'
 h5file.remove_outliers = 1
 h5file.num_background_bins = (450,500)
 
-# events_to_fit = []
-ff_fit_results_dict = {}
-fb_fit_results_dict = {}
-bf_fit_results_dict = {}
-bb_fit_results_dict = {}
-
-fit_results_dict = {}
 n_workers = 10
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
 events = [4]
 if __name__ == "__main__":
+    manager = multiprocessing.Manager()
+    fit_results_dict = manager.dict()  # shared dictionary
+    ff_fit_results_dict = manager.dict()
+    fb_fit_results_dict = manager.dict()
+    bf_fit_results_dict = manager.dict()
+    bb_fit_results_dict = manager.dict()    
     with multiprocessing.Pool(processes=n_workers) as pool:
         for result in pool.imap_unordered(process_two_particle_event,events):
             print(result)
@@ -672,5 +683,6 @@ print(fit_results_dict)
 #     yac += 1
 # pickle_fname = "two_particle_decays_in_e24joe_energy_free_%d.dat"%process_counter
 pickle_fname = "two_particle_decays_in_e24joe_test.dat"
+fit_results_dict = dict(fit_results_dict)
 with open(pickle_fname, 'wb') as f:
     pickle.dump(fit_results_dict, f)
