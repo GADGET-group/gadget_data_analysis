@@ -13,7 +13,7 @@ import cupy as cp
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 7
+experiment, run, N = 'e21072', 124, 2
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),(1, 'a4434'),(1, 'p770'),  (1, 'a2153')]
@@ -458,8 +458,8 @@ r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
 for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]): 
     ax.set_title('r map for tracks at t=%g s'%t)
     for w in np.arange(2, 3.51, 0.25):
-        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f mm'%w)
-    ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
+        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) , label='%f mm'%w)#- r_obs
+    ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep')# - r_obs (mm)
     ax.legend()
 
 plt.figure()
