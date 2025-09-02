@@ -118,7 +118,11 @@ class SimulatedEvent:
                 dy = self.pad_to_xy[pad][1] - point[1]
                 yfrac = 0.5*(erf((dy + self.pad_width/2)/np.sqrt(2)/sigma_xy) - \
                              erf((dy - self.pad_width/2)/np.sqrt(2)/sigma_xy))
+                if not np.all(np.isfinite(edep)):
+                    assert False
                 self.sim_traces[pad] += edep *xfrac*yfrac*zfrac*self.counts_per_MeV
+                if not np.all(np.isfinite(self.sim_traces[pad])):
+                    assert False
             #adc_correction_factor = 1+1.558e-1 - 2.968e-5*trace
         for pad in self.pads_to_sim:
             self.sim_traces[pad][self.sim_traces[pad]<self.zero_traces_less_than] = 0
@@ -340,6 +344,9 @@ class SimulatedEvent:
                         cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
                         if i == j:
                             cov_matrix[i,j] += self.other_systematics**2
+                if not np.all(np.isfinite(cov_matrix)):
+                    assert False
+                # print('cov_matrix',cov_matrix)
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
                     pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)

@@ -29,6 +29,8 @@ from hough3d import hough3D
 import pyransac3d as pyrsc # not used atm
 from track_fitting import SingleParticleEvent, build_sim
 
+np.seterr(over='raise')
+
 def cluster_and_fit(data,points):
     '''
     Categorizes data into two clusters based on how close they are to the lines created by 2 sets of 2 chosen points.
@@ -90,7 +92,7 @@ def cluster_and_fit(data,points):
 
     return cluster, lines_of_best_fit, sum_of_squares
 
-use_likelihood = True #if false, uses least squares
+use_likelihood = False #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
 processes = []
@@ -106,7 +108,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     # print(trace_sim.__dict__)
     # in order for the initial guesses fed from the clustering script to match the 
     #trace_sim.counts_per_MeV *= 1.058
-    m_guess, c_guess = 0.0, 22.5
+    m_guess, c_guess = 0.0, 2.5
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
     zmin = 0
@@ -173,9 +175,8 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         E_or_m0 = E_or_m0 * 10
         E_or_m1 = E_or_m1 * 10
         sigma_xy0, sigma_z0 = sigma_xy0 * 10, sigma_z0 * 10
-        sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
         # comment the above block out if you use the original parameters instead of the scaled parameters
-        # sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
+        sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
         if fit_adc_count_per_MeV:
             trace_sim.counts_per_MeV = E_or_m0
             trace_sim.sims[0].initial_energy = Eknown
@@ -649,10 +650,10 @@ h5file.data_select_mode = 'all data'
 h5file.remove_outliers = 1
 h5file.num_background_bins = (450,500)
 
-n_workers = 10
+n_workers = 220
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
-events = [4]
+# events = [4]
 if __name__ == "__main__":
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()  # shared dictionary
@@ -682,7 +683,7 @@ print(fit_results_dict)
 #         fit_results_dict[k] = 'Event not fitted'
 #     yac += 1
 # pickle_fname = "two_particle_decays_in_e24joe_energy_free_%d.dat"%process_counter
-pickle_fname = "two_particle_decays_in_e24joe_test.dat"
+pickle_fname = "two_particle_decays_in_e24joe_least_squares.dat"
 fit_results_dict = dict(fit_results_dict)
 with open(pickle_fname, 'wb') as f:
     pickle.dump(fit_results_dict, f)
