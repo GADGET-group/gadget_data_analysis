@@ -92,7 +92,7 @@ def cluster_and_fit(data,points):
 
     return cluster, lines_of_best_fit, sum_of_squares
 
-use_likelihood = False #if false, uses least squares
+use_likelihood = True #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
 processes = []
@@ -108,7 +108,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     # print(trace_sim.__dict__)
     # in order for the initial guesses fed from the clustering script to match the 
     #trace_sim.counts_per_MeV *= 1.058
-    m_guess, c_guess = 0.0, 2.5
+    m_guess, c_guess = 0.0, 22.5
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
     zmin = 0
@@ -273,7 +273,6 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     flast = np.inf
     def callback(intermediate_result: opt.OptimizeResult):
         global flast
-        print('flast = ', flast)
         print(intermediate_result.x, intermediate_result.fun)
         if np.abs(flast - intermediate_result.fun) < ftol:
             raise StopIteration
@@ -301,7 +300,6 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.plot_simulated_3d_data(title=[str(return_key),particle_type], threshold=20)
         trace_sim.plot_residuals()
         plt.show()
-    print(res)
     return res
 
 event_type = 'RnPo Chain'  # Change to 'Accidental Coin' to look at random events
@@ -567,9 +565,7 @@ def process_two_particle_event(event_number):
                     fb_fit_results_dict,
                     False,
                     fit=True)
-            print("fb_fit_results_dict", fb_fit_results_dict)
             fit_results_dict[event_number] = fb_fit_results_dict[event_number]
-            print("fit_results_dict",fit_results_dict)
             return "Event %d finished fitting in Direction 2"%event_number
 
         if direction3_residuals < direction1_residuals and direction3_residuals < direction2_residuals and direction3_residuals < direction4_residuals:
@@ -663,7 +659,7 @@ if __name__ == "__main__":
     bb_fit_results_dict = manager.dict()    
     with multiprocessing.Pool(processes=n_workers) as pool:
         for result in pool.imap_unordered(process_two_particle_event,events):
-            print(result)
+            print("Finished Fitting")
 
 #wait for all processes to end
 print('fitting took %f s'%(time.time() - start_time))
