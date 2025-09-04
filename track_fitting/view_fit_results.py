@@ -6,6 +6,7 @@ evts, theta0,theta1, phi0,phi1, x0,y0,z0, x1,y1,z1, lls, cats, E0,E1, Erecs, nfe
 trace_sims = []
 
 file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_test.dat' #TODO: double-check this is the right file name
+file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_100_events.dat' 
 with open(file_path, 'rb') as file:
     fit_results_dict = pickle.load(file)
     for key in fit_results_dict:

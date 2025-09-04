@@ -240,7 +240,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             print('%e'%to_return, params)
         if np.isnan(to_return):
             to_return = np.inf
-        # print('%e'%to_return, params)
+        print('%e'%to_return, params)
         return to_return
     
     # print("f(x0) =", to_minimize(scaled_init_guess,True))
@@ -268,7 +268,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     #         # print('mean, std:', np.mean(changed_res), np.std(changed_res))
     #         print(np.min(changed_res), np.max(changed_res))
     #     counter += 1
-    ftol = 0.01
+    ftol = 0.0001
     global flast
     flast = np.inf
     def callback(intermediate_result: opt.OptimizeResult):
@@ -649,7 +649,7 @@ h5file.num_background_bins = (450,500)
 n_workers = 220
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
-# events = [4]
+events = [4]
 if __name__ == "__main__":
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()  # shared dictionary
@@ -659,7 +659,7 @@ if __name__ == "__main__":
     bb_fit_results_dict = manager.dict()    
     with multiprocessing.Pool(processes=n_workers) as pool:
         for result in pool.imap_unordered(process_two_particle_event,events):
-            print("Finished Fitting")
+            print("Done Fitting")
 
 #wait for all processes to end
 print('fitting took %f s'%(time.time() - start_time))
@@ -679,7 +679,7 @@ print(fit_results_dict)
 #         fit_results_dict[k] = 'Event not fitted'
 #     yac += 1
 # pickle_fname = "two_particle_decays_in_e24joe_energy_free_%d.dat"%process_counter
-pickle_fname = "two_particle_decays_in_e24joe_least_squares.dat"
+pickle_fname = "two_particle_decays_in_e24joe_best_direction_test.dat"
 fit_results_dict = dict(fit_results_dict)
 with open(pickle_fname, 'wb') as f:
     pickle.dump(fit_results_dict, f)
