@@ -284,8 +284,10 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     if use_likelihood and fit:
         print('Fitting event: direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
         bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
-        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds, options={'gtol': 1e-5,'ftol':1e-5})
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds, method="Powell")#options={'gtol': 1e-5,'ftol':1e-5})
+        print(res)
     if not fit:
+        fit_results_dict[event] = init_guess
         # just return the residuals of the least squares fit for the initial guess params
         return to_minimize(scaled_init_guess,True)
     if return_dict != None:
@@ -447,21 +449,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=False)
-                    # processes.append(multiprocessing.Process(target=fit_event, 
-                    #                                             args=(event_number, 
-                    #                                             [cluster0_start, cluster1_start], 
-                    #                                             [cluster0_end, cluster1_end],
-                    #                                             6.288,
-                    #                                             ['4He','4He'],
-                    #                                             direction,
-                    #                                             event_number,
-                    #                                             ff_fit_results_dict,
-                    #                                             False
-                    #                                             )
-                    #                                         )
-                    #                 )
-                    # processes[-1].start()
+                                                     fit=True)
                 elif direction == [1,-1]:
                     direction2_residuals = fit_event(event_number, 
                                                      [cluster0_start, cluster1_end], 
@@ -472,21 +460,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=False)
-                    # processes.append(multiprocessing.Process(target=fit_event, 
-                    #                                             args=(event_number, 
-                    #                                             [cluster0_start, cluster1_end], 
-                    #                                             [cluster0_end, cluster1_start],
-                    #                                             6.288,
-                    #                                             ['4He','4He'],
-                    #                                             direction,
-                    #                                             event_number,
-                    #                                             fb_fit_results_dict,
-                    #                                             False
-                    #                                             )
-                    #                                         )
-                    #                 )
-                    # processes[-1].start()
+                                                     fit=True)
                 elif direction == [-1,1]:
                     direction3_residuals = fit_event(event_number, 
                                                      [cluster0_end, cluster1_start], 
@@ -497,21 +471,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=False)
-                    # processes.append(multiprocessing.Process(target=fit_event, 
-                    #                                             args=(event_number, 
-                    #                                             [cluster0_end, cluster1_start], 
-                    #                                             [cluster0_start, cluster1_end],
-                    #                                             6.288,
-                    #                                             ['4He','4He'],
-                    #                                             direction,
-                    #                                             event_number,
-                    #                                             bf_fit_results_dict,
-                    #                                             False
-                    #                                             )
-                    #                                         )
-                    #                 )
-                    # processes[-1].start()
+                                                     fit=True)
                 elif direction == [-1,-1]:
                     direction4_residuals = fit_event(event_number, 
                                                      [cluster0_end, cluster1_end], 
@@ -522,21 +482,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=False)
-                    # processes.append(multiprocessing.Process(target=fit_event, 
-                    #                                             args=(event_number, 
-                    #                                             [cluster0_end, cluster1_end], 
-                    #                                             [cluster0_start, cluster1_start],
-                    #                                             6.288,
-                    #                                             ['4He','4He'],
-                    #                                             direction,
-                    #                                             event_number,
-                    #                                             bb_fit_results_dict,
-                    #                                             False
-                    #                                             )
-                    #                                         )
-                    #                 )                
-                    # processes[-1].start()
+                                                     fit=True)
         print("Results of each direction's least squares residuals for the initial guess based on clustering: ",direction1_residuals, direction2_residuals, direction3_residuals, direction4_residuals)
         if direction1_residuals < direction2_residuals and direction1_residuals < direction3_residuals and direction1_residuals < direction4_residuals:
             print("Direction 1 is best!")
@@ -549,8 +495,8 @@ def process_two_particle_event(event_number):
                     event_number,
                     ff_fit_results_dict,
                     False,
-                    fit=True)
-            fit_results_dict[event_number] = ff_fit_results_dict[event_number]
+                    fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+            # fit_results_dict[event_number] = ff_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 1"%event_number
             
         if direction2_residuals < direction1_residuals and direction2_residuals < direction3_residuals and direction2_residuals < direction4_residuals:
@@ -564,8 +510,8 @@ def process_two_particle_event(event_number):
                     event_number,
                     fb_fit_results_dict,
                     False,
-                    fit=True)
-            fit_results_dict[event_number] = fb_fit_results_dict[event_number]
+                    fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+            # fit_results_dict[event_number] = fb_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 2"%event_number
 
         if direction3_residuals < direction1_residuals and direction3_residuals < direction2_residuals and direction3_residuals < direction4_residuals:
@@ -579,8 +525,8 @@ def process_two_particle_event(event_number):
                     event_number,
                     bf_fit_results_dict,
                     False,
-                    fit=True)
-            fit_results_dict[event_number] = bf_fit_results_dict[event_number]
+                    fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+            # fit_results_dict[event_number] = bf_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 3"%event_number
             
         if direction4_residuals < direction1_residuals and direction4_residuals < direction2_residuals and direction4_residuals < direction3_residuals:
@@ -594,8 +540,8 @@ def process_two_particle_event(event_number):
                         event_number,
                         bb_fit_results_dict,
                         False,
-                        fit=True)
-            fit_results_dict[event_number] = bb_fit_results_dict[event_number]
+                        fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+            # fit_results_dict[event_number] = bb_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 4"%event_number
         return "Something went wrong"
 
@@ -679,7 +625,8 @@ print(fit_results_dict)
 #         fit_results_dict[k] = 'Event not fitted'
 #     yac += 1
 # pickle_fname = "two_particle_decays_in_e24joe_energy_free_%d.dat"%process_counter
-pickle_fname = "two_particle_decays_in_e24joe_best_direction_test.dat"
+# pickle_fname = "two_particle_decays_in_e24joe_best_direction_test.dat"
+pickle_fname = "two_particle_decays_in_e24joe_no_fit.dat"
 fit_results_dict = dict(fit_results_dict)
 with open(pickle_fname, 'wb') as f:
     pickle.dump(fit_results_dict, f)

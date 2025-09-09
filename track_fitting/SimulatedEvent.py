@@ -369,6 +369,12 @@ class SimulatedEvent:
                     #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
                     #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
                     #continuous everywhere.
+                    a, A = -20., 15
+                    # a, A = -4., 5.5
+                    x = np.where(x>a, x, A*x/(A-x) + a - A*a/(A-a))
+                    if check_valid:
+                        if np.any(x<a):
+                            raise ValueError()
                     pad_ll = np.sum(np.log(0.5*scipy.special.erfc(-x)))
                     # if not np.isfinite(pad_ll):
                     #     print(x, pad_ll)
