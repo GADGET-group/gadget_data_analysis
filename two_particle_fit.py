@@ -26,8 +26,17 @@ import h5py
 import pandas as pd
 import hough3d
 from hough3d import hough3D
-import pyransac3d as pyrsc # not used atm
+# import pyransac3d as pyrsc # not used atm
 from track_fitting import SingleParticleEvent, build_sim
+
+USE_GPU = False
+if USE_GPU:
+    import cupy as cp
+    import cupyx.scipy.special as cpspecial
+else:
+    cp = np
+    import scipy.special as cpspecial
+    cp.asnumpy = lambda x: x
 
 np.seterr(over='raise')
 
@@ -222,7 +231,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.sims[1].initial_point = (x1,y1,z1)
         trace_sim.sims[0].sigma_xy, trace_sim.sims[1].sigma_xy = sigma_xy0, sigma_xy1
         trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z0, sigma_z1
-        
+        trace_sim.enable_print_statements = True
         trace_sim.simulate_event()
         if least_squares:
             residuals_dict = trace_sim.get_residuals()
@@ -449,7 +458,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=True)
+                                                     fit=False)
                 elif direction == [1,-1]:
                     direction2_residuals = fit_event(event_number, 
                                                      [cluster0_start, cluster1_end], 
@@ -460,7 +469,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=True)
+                                                     fit=False)
                 elif direction == [-1,1]:
                     direction3_residuals = fit_event(event_number, 
                                                      [cluster0_end, cluster1_start], 
@@ -471,7 +480,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=True)
+                                                     fit=False)
                 elif direction == [-1,-1]:
                     direction4_residuals = fit_event(event_number, 
                                                      [cluster0_end, cluster1_end], 
@@ -482,7 +491,7 @@ def process_two_particle_event(event_number):
                                                      event_number,
                                                      None,
                                                      False,
-                                                     fit=True)
+                                                     fit=False)
         print("Results of each direction's least squares residuals for the initial guess based on clustering: ",direction1_residuals, direction2_residuals, direction3_residuals, direction4_residuals)
         if direction1_residuals < direction2_residuals and direction1_residuals < direction3_residuals and direction1_residuals < direction4_residuals:
             print("Direction 1 is best!")
@@ -596,16 +605,22 @@ n_workers = 220
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
 events = [4]
-if __name__ == "__main__":
-    manager = multiprocessing.Manager()
-    fit_results_dict = manager.dict()  # shared dictionary
-    ff_fit_results_dict = manager.dict()
-    fb_fit_results_dict = manager.dict()
-    bf_fit_results_dict = manager.dict()
-    bb_fit_results_dict = manager.dict()    
-    with multiprocessing.Pool(processes=n_workers) as pool:
-        for result in pool.imap_unordered(process_two_particle_event,events):
-            print("Done Fitting")
+fit_results_dict = {}  # shared dictionary
+ff_fit_results_dict = {}
+fb_fit_results_dict = {}
+bf_fit_results_dict = {}
+bb_fit_results_dict = {}  
+process_two_particle_event(4)
+# if __name__ == "__main__":
+#     manager = multiprocessing.Manager()
+#     fit_results_dict = manager.dict()  # shared dictionary
+#     ff_fit_results_dict = manager.dict()
+#     fb_fit_results_dict = manager.dict()
+#     bf_fit_results_dict = manager.dict()
+#     bb_fit_results_dict = manager.dict()    
+#     with multiprocessing.Pool(processes=n_workers) as pool:
+#         for result in pool.imap_unordered(process_two_particle_event,events):
+#             print("Done Fitting")
 
 #wait for all processes to end
 print('fitting took %f s'%(time.time() - start_time))

@@ -2,6 +2,7 @@
 import time
 
 import numpy as np
+import cupy as cp
 import matplotlib.pylab as plt
 import scipy
 
@@ -49,6 +50,8 @@ class SimulatedEvent:
                 pad = self.pad_plane[x,y]
                 if pad != -1:
                     self.pad_to_xy_index[int(pad)] = (x,y)
+                    
+        self.gpu_device_id = 0
 
     def gui_before_sim(self):
         '''
@@ -129,7 +132,7 @@ class SimulatedEvent:
         time2 = time.time()
         
         if self.enable_print_statements:
-            print("Time to compute traces: ", time1 - time2)
+            print("Time to compute traces: ", time2 - time1)
 
     def simulate_test_event(self):
             '''
@@ -335,62 +338,58 @@ class SimulatedEvent:
         self.pad_ll = {}
         start_time = time.time()
         to_return = 0
-        for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
-            pad_ll = 0
-            if pad in self.sim_traces: #if the pad trace was simulated
-                cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
-                for i in range(self.num_trace_bins):
-                    for j in range(self.num_trace_bins):
-                        cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
-                        if i == j:
-                            cov_matrix[i,j] += self.other_systematics**2
+        #move traces to GPU
+        traces = np.zeros((len(self.sim_traces.keys()), self.num_trace_bins))
+        for i, pad in enumerate(self.sim_traces):
+            traces[i] = self.sim_traces[pad]
+        with cp.cuda.Device(self.gpu_device_id):
+            traces_gpu = cp.array(traces)
+            sigma_m = self.pad_gain_match_uncertainty
+            sigma_c = self.other_systematics
+            for pad in range(len(traces_gpu)):
+                pad_ll = 0
+                outer = cp.outer(traces_gpu[pad],traces_gpu[pad])
+                cov_matrix = sigma_m**2 * outer + sigma_c**2 * cp.eye(self.num_trace_bins)
                 if not np.all(np.isfinite(cov_matrix)):
                     assert False
-                # print('cov_matrix',cov_matrix)
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
+                    residuals = cp.array(residuals)
                     pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
                     #use cholesky decomposition to get log(det(cov_matrix)) and avoid overlow issues when trace is long
                     #https://math.stackexchange.com/questions/2001041/logarithm-of-the-determinant-of-a-positive-definite-matrix
                     #used to do: pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
-                    L = np.linalg.cholesky(cov_matrix)
-                    diag_elements = np.diagonal(L)
-                    pad_ll -= np.sum(np.log(diag_elements))
+                    L = cp.linalg.cholesky(cov_matrix)
+                    diag_elements = cp.diagonal(L)
+                    pad_ll -= cp.sum(cp.log(diag_elements))
 
-                    residuals = np.matrix(residuals)
+                    residuals = cp.array(residuals)
                     pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0,0]
                 else: #pad was simulated firing, but did not
                     #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
                     #than this value
                     #TODO: is there a not to expensive way to account for corralations between time bins?
-                    sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
-                    x = (self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma
+                    sigma = cp.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*traces_gpu[pad])**2)
+                    x = (self.pad_threshold - traces_gpu[pad])/2**0.5/sigma
                     #make function which 
                     #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
                     #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
                     #continuous everywhere.
                     a, A = -20., 15
                     # a, A = -4., 5.5
-                    x = np.where(x>a, x, A*x/(A-x) + a - A*a/(A-a))
+                    x = cp.where(x>a, x, A*x/(A-x) + a - A*a/(A-a))
                     if check_valid:
-                        if np.any(x<a):
+                        if cp.any(x<a):
                             raise ValueError()
-                    pad_ll = np.sum(np.log(0.5*scipy.special.erfc(-x)))
+                    pad_ll = cp.sum(cp.log(0.5*scipy.special.erfc(-x)))
                     # if not np.isfinite(pad_ll):
                     #     print(x, pad_ll)
-
-            elif pad in self.traces_to_fit: #pad was not simulated but did fire
-                assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading
-                pad_ll -= 0.5*self.num_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
-                if pad in self.traces_to_fit: #pad fired, but was not simulated
-                    residuals = np.matrix(-self.traces_to_fit[pad])
-                    pad_ll -= 0.5*(residuals*residuals.T)[0]/self.other_systematics**2
-            to_return += pad_ll
-            self.pad_ll[pad] = pad_ll
+                to_return += pad_ll
+                self.pad_ll[pad] = pad_ll
 
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
-        return to_return
+        return to_return.item()
     
     #######################
     # Visualization Tools #
