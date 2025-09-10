@@ -182,6 +182,9 @@ class raw_h5_file:
         else:
             data = np.array(data, copy=True, dtype=float)
 
+        if len(data) == 0:
+            return data
+
         if self.remove_outliers:
             pad_image = np.zeros(np.shape(self.pad_plane))
 
