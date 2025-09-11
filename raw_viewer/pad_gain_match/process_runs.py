@@ -16,10 +16,18 @@ def get_h5_file(experiment, run_number):
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 10
-    elif experiment == 'e23035_prep':
-        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/run_%04d.h5'%run_number
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
+    elif experiment == 'e23035_prep_2cobo':
+        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/2cobo/run_%04d.h5'%run_number
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
         h5file.length_counts_threshold = 25
+        h5file.ic_counts_threshold = 0
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 25
+        h5file.num_smart_background_ave_bins = 10
+    elif experiment == 'e23035_prep_4cobo':
+        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.544, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 25

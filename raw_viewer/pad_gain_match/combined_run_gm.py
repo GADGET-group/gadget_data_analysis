@@ -27,16 +27,16 @@ import matplotlib.colors
 
 from raw_viewer.pad_gain_match import process_runs
 
-gpu_device = 1
-load_first_result = True
+gpu_device = 3
+load_first_result = False
 load_second_result = False
 
 
-runs = (121, 122, 123, 124, 125, 126, 127, 128)
-veto_thresh = 10000
-exp = 'e21072'
+runs = (6,)
+veto_thresh = 400
+exp = 'e23035_prep_4cobo'
 rve_bins = 1000
-offset = 'constant'
+offset = 'none'
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
@@ -63,9 +63,9 @@ no_gm_ic = get_gm_ic(np.ones(1024))
 
 #set up initial gain match cuts
 cuts1 = []
-true_energies = [1.633, 0.7856]# only includes energy deposited as ionization
+true_energies = [6.28808]#, 0.7856]# only includes energy deposited as ionization
 cuts1.append((no_gm_ic>1.9e5) & (no_gm_ic<2.1e5) & (lengths>30) & (lengths<55) & veto_mask)
-cuts1.append((no_gm_ic>8.8e4) & (no_gm_ic<1.025e5) & (lengths>16.5) & (lengths<20.2) & veto_mask)
+#cuts1.append((no_gm_ic>8.8e4) & (no_gm_ic<1.025e5) & (lengths>16.5) & (lengths<20.2) & veto_mask)
 
 
 

@@ -15,6 +15,7 @@ USE_GPU = True
 if USE_GPU:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
+    cp.cuda.runtime.setDevice(3)
 else:
     cp = np
     import scipy.special as cpspecial
@@ -489,6 +490,8 @@ class raw_h5_file:
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
     
+
+
     def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False, 
                       mode='raw', bounds=(0.5, 2), thresh_to_replace=2000):
         print('gain matching using %d events'%len(event_numbers))
