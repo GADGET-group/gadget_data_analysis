@@ -8,26 +8,26 @@ from track_fitting. MultiParticleEvent import MultiParticleEvent
 import raw_viewer.raw_h5_file as raw_h5_file
 from track_fitting import SingleParticleEvent, build_sim
 
-fitted = True
+fitted = False
 
 evts, theta0,theta1, phi0,phi1, x0,y0,z0, x1,y1,z1, lls, cats, E0,E1, Erecs, nfev, sigma_xy, sigma_z = [], [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[]
 trace_sims = []
 
 file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_test.dat' #TODO: double-check this is the right file name
 file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_best_direction_20_events.dat'
-# file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_no_fit.dat'
+file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_no_fit.dat'
 with open(file_path, 'rb') as file:
     fit_results_dict = pickle.load(file)
     for key in fit_results_dict:
-        if key < 10:
-            print("Event ", key)
-            print(fit_results_dict[key])
+        # if key < 10:
+        #     print("Event ", key)
+        #     print(fit_results_dict[key])
         if fitted:
             res, sim = fit_results_dict[key]
             if res.fun == np.inf:
                 print("Event %d exited with inf ll!"%key)
             # if res.success == True:
-            print(res.message)
+            # print(res.message)
             # elif res.success == True:
             theta0.append(res.x[0] * np.pi)
             theta1.append(res.x[1] * np.pi)
@@ -110,14 +110,19 @@ with open(file_path, 'rb') as file:
         # print(E0)
         # print(E1)
 dxy = np.zeros_like(x0)
-dz = np.zeros_like(z0)
+dzs = np.zeros_like(z0)
+print(len(dxy))
+print(len(dzs))
 for i in range(len(x0)):
     dxy[i] = np.sqrt((x0[i] - x1[i])**2 + (y0[i] - y1[i])**2)
-    dz[i] = np.abs(z0[i]-z1[i])
+    dzs[i] = np.abs(z0[i]-z1[i])
+angles = []
+for i in range(len(theta0)):
+    angles.append(np.arccos(np.sin(theta0[i]) * np.sin(theta1[i]) * np.cos(phi0[i] - phi1[i]) + np.cos(theta0[i]) * np.cos(theta1[i])))
 
 # Create 2D histogram (counts in bins)
 bins = 20 # Number of bins for both x and y
-hist, xedges, yedges = np.histogram2d(dxy, dz, bins=bins)
+hist, xedges, yedges = np.histogram2d(dxy, dzs, bins=bins)
 
 # Prepare data for bar3d
 # Construct arrays for the anchor positions of the bars
@@ -142,20 +147,21 @@ min_height = np.min(dz)
 rgba = [cmap((k-min_height)/max_height) for k in dz] 
 
 # Plot the 3D bars
-ax.bar3d(xpos, ypos, zpos, dx, dy, dz, color = rgba, zsort='average')
+# ax.bar3d(xpos, ypos, zpos, dx, dy, dz, color = rgba, zsort='average')
 
 # Set labels
-ax.set_xlabel('dxy')
-ax.set_ylabel('dz')
-ax.set_zlabel('Counts')
-ax.set_title('Distance Between Origins')
-plt.show()
-
-
-# plt.hist2d(dxy,dz, bins=(10,20))# , cmap='viridis')
-# plt.xlabel('dxy')
-# plt.ylabel('dz')
-# # plt.plot(z1, color = 'red')
-# # plt.plot(z0, color = 'blue')
-# plt.colorbar()
+# ax.set_xlabel('dxy')
+# ax.set_ylabel('dz')
+# ax.set_zlabel('Counts')
+# ax.set_title('Distance Between Origins')
 # plt.show()
+
+print(len(dxy))
+print(len(dzs))
+plt.hist2d(dxy,dzs, bins=(10,20))# , cmap='viridis')
+plt.xlabel('dxy')
+plt.ylabel('dz')
+# plt.plot(z1, color = 'red')
+# plt.plot(z0, color = 'blue')
+plt.colorbar()
+plt.show()

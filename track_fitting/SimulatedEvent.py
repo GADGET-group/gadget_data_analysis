@@ -3,6 +3,7 @@ import time
 
 import numpy as np
 import cupy as cp
+import cupyx
 import matplotlib.pylab as plt
 import scipy
 
@@ -334,6 +335,64 @@ class SimulatedEvent:
         zs = np.tile(z_axis, int(len(xs)/len(z_axis)))
         return xs, ys, zs, es
 
+    def log_likelihood_old(self, check_valid=False):
+        self.pad_ll = {}
+        start_time = time.time()
+        to_return = 0
+        for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
+            pad_ll = 0
+            if pad in self.sim_traces: #if the pad trace was simulated
+                cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
+                for i in range(self.num_trace_bins):
+                    for j in range(self.num_trace_bins):
+                        cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
+                        if i == j:
+                            cov_matrix[i,j] += self.other_systematics**2
+                if pad in self.traces_to_fit: #pad fired and was simulated
+                    residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
+                    pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
+                    #use cholesky decomposition to get log(det(cov_matrix)) and avoid overlow issues when trace is long
+                    #https://math.stackexchange.com/questions/2001041/logarithm-of-the-determinant-of-a-positive-definite-matrix
+                    #used to do: pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
+                    L = np.linalg.cholesky(cov_matrix)
+                    diag_elements = np.diagonal(L)
+                    pad_ll -= np.sum(np.log(diag_elements))
+
+                    residuals = np.matrix(residuals)
+                    pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0,0]
+                else: #pad was simulated firing, but did not
+                    #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
+                    #than this value
+                    #TODO: is there a not to expensive way to account for corralations between time bins?
+                    sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
+                    x = (self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma
+                    #make function which 
+                    #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
+                    #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
+                    #continuous everywhere.
+                    a, A = -20., 15
+                    # a, A = -4., 5.5
+                    x = np.where(x>a, x, A*x/(A-x) + a - A*a/(A-a))
+                    if check_valid:
+                        if np.any(x<a):
+                            raise ValueError()
+                    pad_ll = np.sum(np.log(0.5*scipy.special.erfc(-x)))
+                    # if not np.isfinite(pad_ll):
+                    #     print(x, pad_ll)
+
+            elif pad in self.traces_to_fit: #pad was not simulated but did fire
+                assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading
+                pad_ll -= 0.5*self.num_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
+                if pad in self.traces_to_fit: #pad fired, but was not simulated
+                    residuals = np.matrix(-self.traces_to_fit[pad])
+                    pad_ll -= 0.5*(residuals*residuals.T)[0]/self.other_systematics**2
+            to_return += pad_ll
+            self.pad_ll[pad] = pad_ll
+
+        if self.enable_print_statements:
+            print('old likelihood compute time: %f s'%(time.time() - start_time))
+        return to_return
+
     def log_likelihood(self, check_valid=False):
         self.pad_ll = {}
         start_time = time.time()
@@ -346,11 +405,11 @@ class SimulatedEvent:
             traces_gpu = cp.array(traces)
             sigma_m = self.pad_gain_match_uncertainty
             sigma_c = self.other_systematics
-            for pad in range(len(traces_gpu)):
+            for i, pad in enumerate(self.sim_traces):
                 pad_ll = 0
-                outer = cp.outer(traces_gpu[pad],traces_gpu[pad])
+                outer = cp.outer(traces_gpu[i],traces_gpu[i])
                 cov_matrix = sigma_m**2 * outer + sigma_c**2 * cp.eye(self.num_trace_bins)
-                if not np.all(np.isfinite(cov_matrix)):
+                if not cp.all(cp.isfinite(cov_matrix)):
                     assert False
                 if pad in self.traces_to_fit: #pad fired and was simulated
                     residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
@@ -364,13 +423,13 @@ class SimulatedEvent:
                     pad_ll -= cp.sum(cp.log(diag_elements))
 
                     residuals = cp.array(residuals)
-                    pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0,0]
+                    pad_ll -= 0.5*(residuals@(cp.linalg.inv(cov_matrix))@residuals.T)# [0,0]
                 else: #pad was simulated firing, but did not
                     #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
                     #than this value
                     #TODO: is there a not to expensive way to account for corralations between time bins?
-                    sigma = cp.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*traces_gpu[pad])**2)
-                    x = (self.pad_threshold - traces_gpu[pad])/2**0.5/sigma
+                    sigma = cp.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*traces_gpu[i])**2)
+                    x = (self.pad_threshold - traces_gpu[i])/2**0.5/sigma
                     #make function which 
                     #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
                     #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
@@ -381,7 +440,7 @@ class SimulatedEvent:
                     if check_valid:
                         if cp.any(x<a):
                             raise ValueError()
-                    pad_ll = cp.sum(cp.log(0.5*scipy.special.erfc(-x)))
+                    pad_ll = cp.sum(cp.log(0.5*cupyx.scipy.special.erfc(-x)))
                     # if not np.isfinite(pad_ll):
                     #     print(x, pad_ll)
                 to_return += pad_ll
@@ -390,6 +449,86 @@ class SimulatedEvent:
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
         return to_return.item()
+
+    def log_likelihood_test(self, check_valid = False):
+        """
+        traces_sim: shape (num_pads, num_bins)  -> simulated traces
+        traces_obs: dict {pad: observed_trace}  -> only for pads that fired
+        pad_gain_unc: scalar
+        other_sys: scalar
+        pad_threshold: scalar
+        """
+        start_time = time.time()
+        traces_sim = np.zeros((len(self.sim_traces.keys()), self.num_trace_bins))
+        traces_obs = np.zeros((len(self.sim_traces.keys()), self.num_trace_bins))
+        for i, pad in enumerate(self.sim_traces):
+            traces_sim[i] = self.sim_traces[pad]
+            if pad in self.traces_to_fit:
+                traces_obs[i] = self.traces_to_fit[pad]
+        with cp.cuda.Device(self.gpu_device_id):
+            num_pads, num_bins = traces_sim.shape
+            # num_pads = cp.asarray(num_pads)
+            # num_bins = cp.asarray(num_bins)
+            pad_gain_unc = cp.asarray(self.pad_gain_match_uncertainty)
+            other_sys = cp.asarray(self.other_systematics)
+            # Move to GPU
+            traces_sim = cp.asarray(traces_sim)
+            traces_obs = cp.array(traces_obs)
+            # --- 1. Build covariance matrices for all pads ---
+            traces_expanded = traces_sim[:, :, None]       # (num_pads, num_bins, 1)
+            traces_transpose = traces_sim[:, None, :]      # (num_pads, 1, num_bins)
+            outer_all = traces_expanded * traces_transpose # (num_pads, num_bins, num_bins)
+
+            cov_matrices = pad_gain_unc**2 * outer_all + other_sys**2 * cp.eye(num_bins)[None, :, :]
+
+            # --- 2. Residuals for pads that fired ---
+            # Build observed traces matrix with zeros for pads that didn't fire
+            # traces_obs_mat = cp.zeros_like(traces_sim)
+            # fired_mask = cp.zeros(num_pads, dtype=bool)
+            # for i, row in enumerate(traces_obs):
+            #     if sum(row) == 0:
+            #         fired_mask[i] = False
+            #     else:
+            #         fired_mask[i] = True
+
+            residuals = traces_sim - traces_obs
+            # fired_mask = True if any bin is nonzero in observed traces
+            fired_mask = cp.any(traces_obs != 0, axis=1)
+            print(fired_mask.shape)
+            print(fired_mask)
+            print(traces_sim.shape)
+            # --- 3. Cholesky decomposition for all pads ---
+            L = cp.linalg.cholesky(cov_matrices)  # (num_pads, num_bins, num_bins)
+            log_det = 2 * cp.sum(cp.log(cp.diagonal(L, axis1=1, axis2=2)), axis=1)  # per-pad log(det)
+
+            # --- 4. Quadratic term residualᵀ Σ⁻¹ residual ---
+            # Solve L * y = residuals.T → then yᵀ y = residualᵀ Σ⁻¹ residual
+            y = cp.linalg.solve(L, residuals[:, :, None])  # (num_pads, num_bins, 1)
+            quad_term = cp.sum(y**2, axis=(1, 2))          # per-pad sum
+
+            # --- 5. Log-likelihood for pads that fired ---
+            ll_fired = -0.5 * (num_bins * cp.log(2 * cp.pi) + log_det + quad_term)
+
+            # --- 6. Pads that didn’t fire: use erf approximation ---
+            not_fired_mask = ~fired_mask
+            sigma_nf = cp.sqrt(other_sys**2 + (pad_gain_unc * traces_sim[not_fired_mask])**2)
+            x_nf = (self.pad_threshold - traces_sim[not_fired_mask]) / (cp.sqrt(2) * sigma_nf)
+
+            a, A = -20., 15
+            x_nf = cp.where(x_nf > a, x_nf, A * x_nf / (A - x_nf) + a - A * a / (A - a))
+            if check_valid and cp.any(x_nf < a):
+                raise ValueError("Invalid x in erf calculation")
+
+            ll_not_fired = cp.sum(cp.log(0.5 * cp.asarray(scipy.special.erfc(-x_nf))), axis=1)
+
+            # --- 7. Combine all results ---
+            ll_total = cp.zeros(len(fired_mask))
+            # ll_total[fired_mask] = ll_fired
+            # ll_total[not_fired_mask] = ll_not_fired
+            ll_total = ll_fired + ll_not_fired
+        if self.enable_print_statements:
+            print('test likelihood compute time: %f s'%(time.time() - start_time))
+        return ll_total.sum().item()  # scalar log-likelihood
     
     #######################
     # Visualization Tools #

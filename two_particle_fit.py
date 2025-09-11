@@ -110,11 +110,13 @@ start_time = time.time()
 
 def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type = ['4He','4He'], direction = [1,1],
               return_key=None, return_dict=None, debug_plots=False, fit = True): # currently only works with 2 particles
-    # print(event, best_point, best_point_end, Eknown, particle_type, direction, return_key,return_dict, debug_plots)
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
+    if event % 2 == 0:
+        trace_sim.gpu_device_id = 0
+    else:
+        trace_sim.gpu_device_id = 1
     trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
     trace_sim.shared_params = ['gas_density']
-    # print(trace_sim.__dict__)
     # in order for the initial guesses fed from the clustering script to match the 
     #trace_sim.counts_per_MeV *= 1.058
     m_guess, c_guess = 0.0, 22.5
@@ -149,7 +151,6 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         sigma_guess = np.append(sigma_guess, 2.5)
     
     init_guess = np.array((theta_guess[0], theta_guess[1], phi_guess[0], phi_guess[1], best_point[0][0], best_point[0][1], best_point[0][2], best_point[1][0], best_point[1][1], best_point[1][2], Eknown, Eknown, sigma_guess[0], sigma_guess[1]))
-    # print("Initial Guess: ", init_guess)
     scaled_init_guess = np.zeros_like(init_guess)
 
     # condition the parameters so the fitter can move in the parameter space and converge faster (each parameter should approx go from -1 to 1)
@@ -197,33 +198,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             else:
                 trace_sim.sims[0].initial_energy = E_or_m0
                 trace_sim.sims[1].initial_energy = E_or_m1
-            trace_sim.counts_per_MeV = 77000. #using rough value from run 193 in e24joe
-        
-
-        #enforce particle direction
-        # vhat0 = np.array([np.sin(theta0)*np.cos(phi0), np.sin(theta0)*np.sin(phi0), np.cos(theta0)])
-        # vhat1 = np.array([np.sin(theta1)*np.cos(phi1), np.sin(theta1)*np.sin(phi1), np.cos(theta1)])
-        # if np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])) < 0 \
-        #     or np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])) < 0:
-        #     print("returned inf because of particle direction: ", vhat0, vhat1)
-        #     print("track_direction_vec: ", track_direction_vec)
-        #     print("Dot product for clusters 0 & 1: ",  np.dot(vhat0, direction[0]*np.array([track_direction_vec[0], track_direction_vec[1], track_direction_vec[2]])), np.dot(vhat1, direction[1]*np.array([track_direction_vec[3], track_direction_vec[4], track_direction_vec[5]])))
-        #     return np.inf
-
-        # if z0 > trace_sim.num_trace_bins*trace_sim.zscale or z0<-1 or z1 > trace_sim.num_trace_bins*trace_sim.zscale or z1<-1:
-        #     print("returned inf because of z range: ", z0, z1)
-        #     print("Boundary z-values calculated via the trimmed trace: ", trace_sim.num_trace_bins*trace_sim.zscale)
-        #     return np.inf
-        # if x0**2 + y0**2 > 40**2 or x1**2 + y1**2 > 40**2:
-        #     print("returned inf because of xy plane boundary")
-        #     return np.inf
-        # if trace_sim.sims[0].initial_energy < 0 or trace_sim.sims[0].initial_energy  > 10 or trace_sim.sims[1].initial_energy < 0 or trace_sim.sims[1].initial_energy  > 10: #stopping power tables currently only go to 10 MeV
-        #     print("returned inf because of particle energy")
-        #     return np.inf
-        # if theta0 < 0 or theta0 >= np.pi or phi0 < 0 or phi0 > 2*np.pi:
-        #     return np.inf 
-        # if theta1 < 0 or theta1 >= np.pi or phi1 < 0 or phi1 > 2*np.pi:
-        #     return np.inf        
+            trace_sim.counts_per_MeV = 77000. #using rough value from run 193 in e24joe      
 
         trace_sim.sims[0].theta, trace_sim.sims[0].phi, trace_sim.sims[1].theta, trace_sim.sims[1].phi = theta0, phi0, theta1, phi1
         
@@ -231,7 +206,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.sims[1].initial_point = (x1,y1,z1)
         trace_sim.sims[0].sigma_xy, trace_sim.sims[1].sigma_xy = sigma_xy0, sigma_xy1
         trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z0, sigma_z1
-        trace_sim.enable_print_statements = True
+        # trace_sim.enable_print_statements = True
         trace_sim.simulate_event()
         if least_squares:
             residuals_dict = trace_sim.get_residuals()
@@ -249,7 +224,6 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             print('%e'%to_return, params)
         if np.isnan(to_return):
             to_return = np.inf
-        print('%e'%to_return, params)
         return to_return
     
     # print("f(x0) =", to_minimize(scaled_init_guess,True))
@@ -267,17 +241,8 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.plot_residuals_3d(threshold=25)
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
-    # print('starting optimization of event %d in run %d with particles %s in directions %d, %d'%(event, 124, particle_type, direction[0], direction[1]))
-    # def display_progress(intermediate_result):
-    #     global counter
-    #     if (counter % 10)==0:
-    #         print('step', counter)
-    #         print(intermediate_result)
-    #         changed_res = intermediate_result.x[intermediate_result.x != init_guess]
-    #         # print('mean, std:', np.mean(changed_res), np.std(changed_res))
-    #         print(np.min(changed_res), np.max(changed_res))
-    #     counter += 1
-    ftol = 0.0001
+
+    ftol = 0.01
     global flast
     flast = np.inf
     def callback(intermediate_result: opt.OptimizeResult):
@@ -293,7 +258,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     if use_likelihood and fit:
         print('Fitting event: direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
         bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
-        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds, method="Powell")#options={'gtol': 1e-5,'ftol':1e-5})
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds)#options={'gtol': 1e-5,'ftol':1e-5})
         print(res)
     if not fit:
         fit_results_dict[event] = init_guess
@@ -402,17 +367,12 @@ def process_two_particle_event(event_number):
             points = [data[ip0],data[ip3],data[ip1],data[ip2]]
             points = sorted(points, key=lambda points: points[2])
 
-            # points_index = random.sample(range(0,len(data)), 4)
-            # points = data[points_index]
-            # print(points_index)
             
             cluster, lobf, sos = cluster_and_fit(data,points)
             if sos < best_sos:
                 best_sos = sos
                 best_cluster = cluster
                 best_lobf = lobf
-                # print("Iteration: ",j)
-                # print("Lowest sum of squares so far: ",sos)
 
                 # Plot results
                 if False:
@@ -432,7 +392,7 @@ def process_two_particle_event(event_number):
                     ax.legend()
                     plt.show()
                 
-        print("Time to cluster with k-means: ", time.time() - start_time)
+        # print("Time to cluster with k-means: ", time.time() - start_time)
 
         # Once we extract the line along which each track travels, we use it to get the starting values for the fitter
         
@@ -504,7 +464,7 @@ def process_two_particle_event(event_number):
                     event_number,
                     ff_fit_results_dict,
                     False,
-                    fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+                    fit=True) 
             # fit_results_dict[event_number] = ff_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 1"%event_number
             
@@ -519,7 +479,7 @@ def process_two_particle_event(event_number):
                     event_number,
                     fb_fit_results_dict,
                     False,
-                    fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+                    fit=True) 
             # fit_results_dict[event_number] = fb_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 2"%event_number
 
@@ -534,7 +494,7 @@ def process_two_particle_event(event_number):
                     event_number,
                     bf_fit_results_dict,
                     False,
-                    fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+                    fit=True) 
             # fit_results_dict[event_number] = bf_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 3"%event_number
             
@@ -549,7 +509,7 @@ def process_two_particle_event(event_number):
                         event_number,
                         bb_fit_results_dict,
                         False,
-                        fit=True) #TODO change this back to True for actual fitting once the ll is fixed
+                        fit=True) 
             # fit_results_dict[event_number] = bb_fit_results_dict[event_number]
             return "Event %d finished fitting in Direction 4"%event_number
         return "Something went wrong"
@@ -566,7 +526,6 @@ h5file = raw_h5_file.raw_h5_file('/egr/research-tpc/dopferjo/interesting_events_
 
 f = h5py.File('/egr/research-tpc/dopferjo/interesting_events_without_run_number_in_event_name_without_event_447.h5', 'r')
 first_event, last_event = int(f['meta']['meta'][0]), int(f['meta']['meta'][2])
-print("First event: %d, Last event: %d"%(first_event, last_event))
 
 # process settings
 h5file.length_ic_threshold = 100
@@ -601,31 +560,29 @@ h5file.data_select_mode = 'all data'
 h5file.remove_outliers = 1
 h5file.num_background_bins = (450,500)
 
-n_workers = 220
+n_workers = 100
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
-events = [4]
-fit_results_dict = {}  # shared dictionary
-ff_fit_results_dict = {}
-fb_fit_results_dict = {}
-bf_fit_results_dict = {}
-bb_fit_results_dict = {}  
-process_two_particle_event(4)
-# if __name__ == "__main__":
-#     manager = multiprocessing.Manager()
-#     fit_results_dict = manager.dict()  # shared dictionary
-#     ff_fit_results_dict = manager.dict()
-#     fb_fit_results_dict = manager.dict()
-#     bf_fit_results_dict = manager.dict()
-#     bb_fit_results_dict = manager.dict()    
-#     with multiprocessing.Pool(processes=n_workers) as pool:
-#         for result in pool.imap_unordered(process_two_particle_event,events):
-#             print("Done Fitting")
+# events = [4]
+# fit_results_dict = {}  # shared dictionary
+# ff_fit_results_dict = {}
+# fb_fit_results_dict = {}
+# bf_fit_results_dict = {}
+# bb_fit_results_dict = {}  
+# process_two_particle_event(4)
+if __name__ == "__main__":
+    manager = multiprocessing.Manager()
+    fit_results_dict = manager.dict()  # shared dictionary
+    ff_fit_results_dict = manager.dict()
+    fb_fit_results_dict = manager.dict()
+    bf_fit_results_dict = manager.dict()
+    bb_fit_results_dict = manager.dict()    
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        for result in pool.imap_unordered(process_two_particle_event,events):
+            print("Done Fitting")
 
 #wait for all processes to end
 print('fitting took %f s'%(time.time() - start_time))
-print(fit_results_dict)
-# print(ff_fit_results_dict, fb_fit_results_dict, bf_fit_results_dict, bb_fit_results_dict)
 #pick the best of each direction, and save it
 # fit_results_dict = {k:ff_fit_results_dict[k] for k in ff_fit_results_dict}
 # yac = 0
@@ -640,8 +597,8 @@ print(fit_results_dict)
 #         fit_results_dict[k] = 'Event not fitted'
 #     yac += 1
 # pickle_fname = "two_particle_decays_in_e24joe_energy_free_%d.dat"%process_counter
-# pickle_fname = "two_particle_decays_in_e24joe_best_direction_test.dat"
-pickle_fname = "two_particle_decays_in_e24joe_no_fit.dat"
+pickle_fname = "ll_fit_two_particle_decays_in_e24joe.dat"
+# pickle_fname = "two_particle_decays_in_e24joe_no_fit.dat"
 fit_results_dict = dict(fit_results_dict)
 with open(pickle_fname, 'wb') as f:
     pickle.dump(fit_results_dict, f)
