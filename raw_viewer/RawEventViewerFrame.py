@@ -80,6 +80,7 @@ class RawEventViewerFrame(ttk.Frame):
 
         gain_match_frame = ttk.LabelFrame(self, text="pad gain match")
         self.gain_match_label = ttk.Label(gain_match_frame, text="no gain match loaded")
+        self.gain_match_path = 'no gain match loaded'
         self.gain_match_label.grid(row=0, column=0, columnspan=4)
         #do gain match will gain match on all currently selected events and save gain for each pad
         #load gain match will load these gains for viewing events, but RvE histogram won't update until run is reprocessed
@@ -327,6 +328,10 @@ class RawEventViewerFrame(ttk.Frame):
             var_to_update = self.settings_checkbutton_map[checkbox_name]
             var_to_update.set(config['ttk.CheckButton'][checkbox_name])
 
+        if 'other' in config:
+            if config['other']['gain_match_path'] != 'no gain match loaded':
+                self.load_gain_match(config['other']['gain_match_path'])
+
         #apply settings to raw data object
         self.entry_changed(None)
         self.check_state_changed()
@@ -351,6 +356,8 @@ class RawEventViewerFrame(ttk.Frame):
             check_buttons_to_save[check_name] = self.settings_checkbutton_map[check_name].get()
         config['ttk.CheckButton']=check_buttons_to_save
 
+        config['other'] = {'gain_match_path': self.gain_match_path}
+
         with open(file_path, 'w') as configfile:
             config.write(configfile)
 
@@ -368,6 +375,12 @@ class RawEventViewerFrame(ttk.Frame):
                 return
         else:
             os.mkdir(directory_path)
+
+        #copy gain match over if needed
+        if self.gain_match_label.cget("text") != 'no gain match loaded':
+            shutil.copy(self.gain_match_path, directory_path)
+            new_path = os.path.join(directory_path, os.path.split(self.gain_match_path)[-1])
+            self.load_gain_match(new_path)
 
         self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
         #save git version info and modified files
@@ -436,6 +449,7 @@ class RawEventViewerFrame(ttk.Frame):
         print(res)
         self.h5file.pad_gains = res.x
         self.gain_match_label['text'] = 'gain match loaded: %s'%file_path
+        self.gain_match_path = file_path
 
     def show_gain_match(self):
         data = {}
