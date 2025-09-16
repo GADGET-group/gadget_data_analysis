@@ -28,20 +28,21 @@ import matplotlib.colors
 from raw_viewer.pad_gain_match import process_runs
 
 gpu_device = 3
-load_first_result = False
+load_first_result = True
 load_second_result = False
 
 
 runs = (6,)
-veto_thresh = 400
+veto_thresh = 10e3
 exp = 'e23035_prep_4cobo'
-rve_bins = 1000
+rve_bins = 200
 offset = 'none'
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
 veto_counts = process_runs.get_veto_counts(exp, runs)
-veto_mask = veto_counts < veto_thresh
+charge_widths = process_runs.get_quantity('charge_width', exp,runs)
+veto_mask = (veto_counts < veto_thresh)&(charge_widths>2.5)
 with cp.cuda.Device(gpu_device):
     cpp_gpu = cp.array(cpp)
 
@@ -63,9 +64,9 @@ no_gm_ic = get_gm_ic(np.ones(1024))
 
 #set up initial gain match cuts
 cuts1 = []
-true_energies = [6.28808]#, 0.7856]# only includes energy deposited as ionization
-cuts1.append((no_gm_ic>1.9e5) & (no_gm_ic<2.1e5) & (lengths>30) & (lengths<55) & veto_mask)
-#cuts1.append((no_gm_ic>8.8e4) & (no_gm_ic<1.025e5) & (lengths>16.5) & (lengths<20.2) & veto_mask)
+true_energies = [6.28808, 6.7883]#, 0.7856]# only includes energy deposited as ionization
+cuts1.append((no_gm_ic>1.042e6) & (no_gm_ic<1.295e6) & (lengths>54.7) & (lengths<60.7) & veto_mask)
+cuts1.append((no_gm_ic>1.13e6) & (no_gm_ic<1.4e6) & (lengths>61.8) & (lengths<69.43) & veto_mask)
 
 
 
@@ -73,7 +74,7 @@ plt.figure()
 plt.hist(veto_counts, 100)
 
 fig = plt.figure()
-plt_mask = veto_mask&(lengths<100)
+plt_mask = veto_mask&(lengths<100)&(lengths>1)
 plt.title('without gain match, runs: '+str(runs))
 plt.hist2d(no_gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 
@@ -188,34 +189,35 @@ def show_plots(res):
 
 show_plots(res1)
 
-if offset == 'none':
-    gm_ic = get_gm_ic(res1.x)
-elif offset == 'constant':
-    gm_ic = get_gm_ic(res1.x[:-1]) + 1e4*res1.x[-1]
-cuts2 = []
-verticies = [(1.75,57.13),(1.434,44.66),(1.615,26.58),(1.736,27)]
-path = matplotlib.path.Path(verticies)
-rve_points = np.vstack((gm_ic, lengths)).transpose()
-cuts2.append(path.contains_points(rve_points))
-verticies = [(0.837,13.9),(0.8782,21.53),(0.8007, 21.84),(0.7192, 17.78),(0.7676, 13.86)]
-path = matplotlib.path.Path(verticies)
-rve_points = np.vstack((gm_ic, lengths)).transpose()
-cuts2.append(path.contains_points(rve_points))
+if False:
+    if offset == 'none':
+        gm_ic = get_gm_ic(res1.x)
+    elif offset == 'constant':
+        gm_ic = get_gm_ic(res1.x[:-1]) + 1e4*res1.x[-1]
+    cuts2 = []
+    verticies = [(1.75,57.13),(1.434,44.66),(1.615,26.58),(1.736,27)]
+    path = matplotlib.path.Path(verticies)
+    rve_points = np.vstack((gm_ic, lengths)).transpose()
+    cuts2.append(path.contains_points(rve_points))
+    verticies = [(0.837,13.9),(0.8782,21.53),(0.8007, 21.84),(0.7192, 17.78),(0.7676, 13.86)]
+    path = matplotlib.path.Path(verticies)
+    rve_points = np.vstack((gm_ic, lengths)).transpose()
+    cuts2.append(path.contains_points(rve_points))
 
-fig = plt.figure()
-plt.title('gain match cuts')
-plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-for cut in cuts2:
-    plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
-plt.colorbar()
-plt.show()
+    fig = plt.figure()
+    plt.title('gain match cuts')
+    plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+    for cut in cuts2:
+        plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
+    plt.colorbar()
+    plt.show()
 
-if load_second_result:
-    with open('res2_%s.pkl'%offset, 'rb') as f:
-        res2 = pickle.load(f)
-else:
-    res2 = do_gain_match(cuts2, true_energies, offset=offset)
-    with open('res2_%s.pkl'%offset, 'wb') as f:
-        pickle.dump(res2, f)
-print(res2)
-show_plots(res2)
+    if load_second_result:
+        with open('res2_%s.pkl'%offset, 'rb') as f:
+            res2 = pickle.load(f)
+    else:
+        res2 = do_gain_match(cuts2, true_energies, offset=offset)
+        with open('res2_%s.pkl'%offset, 'wb') as f:
+            pickle.dump(res2, f)
+    print(res2)
+    show_plots(res2)

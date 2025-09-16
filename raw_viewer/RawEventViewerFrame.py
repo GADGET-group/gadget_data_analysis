@@ -467,6 +467,9 @@ class RawEventViewerFrame(ttk.Frame):
             return True
         if max_veto_counts >= float(self.veto_threshold_entry.get()):
             return True
+        if self.enable_rve_cut_var.get():
+            if not self.selected_rve_path.contains_point((energy, length)):
+                return True
         return False
 
 
@@ -698,9 +701,9 @@ class RawEventViewerFrame(ttk.Frame):
         '''
         print(verticies)
         self.rve_cut_verticies = verticies
-        selected_path = matplotlib.path.Path(self.rve_cut_verticies)
+        self.selected_rve_path = matplotlib.path.Path(self.rve_cut_verticies)
         rve_points = np.vstack((self.counts, self.ranges)).transpose()
-        self.rve_cut_select_mask = selected_path.contains_points(rve_points)
+        self.rve_cut_select_mask = self.selected_rve_path.contains_points(rve_points)
 
 
 
