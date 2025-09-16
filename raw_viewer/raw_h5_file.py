@@ -713,6 +713,7 @@ class raw_h5_file:
 
             fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
+        return fig
 
 
     def show_2d_projection(self, event_number, block=True, fig_name=None):
@@ -722,8 +723,8 @@ class raw_h5_file:
         should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
         length = np.sqrt(dxy**2 + dz**2)
         title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
-        self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
-        
+        return self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+
 
     def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
         '''

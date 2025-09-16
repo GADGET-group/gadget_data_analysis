@@ -113,6 +113,7 @@ class RawEventViewerFrame(ttk.Frame):
         show_3d_button = ttk.Button(individual_event_frame, text='show', command = self.show_3d_cloud)
         show_3d_button.grid(row=2, column=0)
         next_button = ttk.Button(individual_event_frame, text='next', command=self.next)
+        self.next_button_fig = None
         next_button.grid(row=2, column=1)
         show_2D_button = ttk.Button(individual_event_frame, text='x-y proj', command=self.show_xy_proj)
         show_2D_button.grid(row=3, column=0)
@@ -448,13 +449,14 @@ class RawEventViewerFrame(ttk.Frame):
         self.h5file.plot_3d_traces(event_number, threshold=float(self.view_threshold_entry.get()),block=False)
     
     def next(self):
-        plt.close()
+        if self.next_button_fig != None:
+            plt.close(self.next_button_fig)
         event_number = int(self.event_number_entry.get())+1
         while self.should_veto(event_number):
             event_number += 1
         self.event_number_entry.delete(0, tk.END)
         self.event_number_entry.insert(0, event_number)
-        self.show_3d_cloud()
+        self.next_button_fig = self.show_xy_proj()
 
     def should_veto(self, event_num):
         max_veto_counts, dxy, dz, energy, angle, pads_railed = self.h5file.process_event(event_num)
@@ -479,7 +481,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def show_xy_proj(self):
         event_number = int(self.event_number_entry.get())
-        self.h5file.show_2d_projection(event_number, False)
+        return self.h5file.show_2d_projection(event_number, False)
 
     def single_event_noise_button_clicked(self):
         event_number = int(self.event_number_entry.get())
