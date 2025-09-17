@@ -113,9 +113,9 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
               return_key=None, return_dict=None, debug_plots=False, fit = True): # currently only works with 2 particles
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
     if event % 2 == 0:
-        trace_sim.gpu_device_id = 0
+        trace_sim.gpu_device_id = 3
     else:
-        trace_sim.gpu_device_id = 1
+        trace_sim.gpu_device_id = 3
     trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
     trace_sim.shared_params = ['gas_density']
     # in order for the initial guesses fed from the clustering script to match the 
@@ -207,7 +207,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.sims[1].initial_point = (x1,y1,z1)
         trace_sim.sims[0].sigma_xy, trace_sim.sims[1].sigma_xy = sigma_xy0, sigma_xy1
         trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z0, sigma_z1
-        # trace_sim.enable_print_statements = True
+        trace_sim.enable_print_statements = True
         trace_sim.simulate_event()
         if least_squares:
             residuals_dict = trace_sim.get_residuals()
@@ -220,6 +220,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             to_return  = np.sum(residuals*residuals)
         else:
             to_return = -trace_sim.log_likelihood()
+            trace_sim.log_likelihood_old()
         #to_return = -trace_sim.log_likelihood()
         if debug_plots:
             print('%e'%to_return, params)
@@ -565,7 +566,7 @@ h5file.data_select_mode = 'all data'
 h5file.remove_outliers = 1
 h5file.num_background_bins = (450,500)
 
-n_workers = 100
+n_workers = 1
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
 
@@ -574,13 +575,13 @@ results_directory = os.fsencode("/egr/research-tpc/dopferjo/gadget_analysis/fit_
 pattern = re.compile(r"event_(\d+)_ll_fit_two_particle_decays_in_e24joe.dat$")
 completed_fit_events = []
 for filename in os.listdir(results_directory):
-    match = pattern.match(filename)
+    match = pattern.match(filename.decode('utf-8'))
     if match:
         event_num = int(match.group(1))
         completed_fit_events.append(event_num)
 # TODO: TEST THIS BEFORE RUNNING AGAIN
 events = [item for item in events if item not in completed_fit_events]
-for i 
+# for i 
 # events = [4]
 # fit_results_dict = {}  # shared dictionary
 # ff_fit_results_dict = {}

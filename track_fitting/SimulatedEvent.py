@@ -370,7 +370,7 @@ class SimulatedEvent:
                     #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
                     #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
                     #continuous everywhere.
-                    a, A = -20., 15
+                    a, A = -9., 7
                     # a, A = -4., 5.5
                     x = np.where(x>a, x, A*x/(A-x) + a - A*a/(A-a))
                     if check_valid:
@@ -390,7 +390,7 @@ class SimulatedEvent:
             self.pad_ll[pad] = pad_ll
 
         if self.enable_print_statements:
-            print('old likelihood compute time: %f s'%(time.time() - start_time))
+            print('old likelihood compute time: %f s'%(time.time() - start_time), to_return)
         return to_return
 
     def log_likelihood(self, check_valid=False):
@@ -399,23 +399,31 @@ class SimulatedEvent:
         to_return = 0
         #move traces to GPU
         traces = np.zeros((len(self.sim_traces.keys()), self.num_trace_bins))
+        traces_to_fit = np.zeros((len(self.sim_traces.keys()), self.num_trace_bins))
+        traces_to_fit.fill(np.inf)
+        num_trace_bins = cp.array(self.num_trace_bins)
         for i, pad in enumerate(self.sim_traces):
             traces[i] = self.sim_traces[pad]
+            if pad in self.traces_to_fit:
+                traces_to_fit[i] = self.traces_to_fit[pad]
+            else:
+                continue
         with cp.cuda.Device(self.gpu_device_id):
             traces_gpu = cp.array(traces, dtype=cp.float32)
-            sim_traces_gpu = cp.array(self.sim_traces)
+            traces_to_fit_gpu = cp.array(traces_to_fit, dtype=cp.float32)
             sigma_m = self.pad_gain_match_uncertainty
             sigma_c = self.other_systematics
             for i, pad in enumerate(self.sim_traces):
                 pad_ll = 0
                 outer = cp.outer(traces_gpu[i],traces_gpu[i])
-                cov_matrix = sigma_m**2 * outer + sigma_c**2 * cp.eye(self.num_trace_bins)
+                cov_matrix = sigma_m**2 * outer + sigma_c**2 * cp.eye(num_trace_bins.item())
                 if not cp.all(cp.isfinite(cov_matrix)):
                     assert False
-                if pad in self.traces_to_fit: #pad fired and was simulated
-                    residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
-                    residuals = cp.array(residuals)
-                    pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
+                if np.isfinite(np.sum(traces_to_fit_gpu[i])): #pad fired and was simulated
+                # if pad in self.traces_to_fit: #pad fired and was simulated
+                    residuals = traces_gpu[i] - traces_to_fit_gpu[i]
+                    # residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
+                    pad_ll -= num_trace_bins.item()*0.5*np.log(2*np.pi)
                     #use cholesky decomposition to get log(det(cov_matrix)) and avoid overlow issues when trace is long
                     #https://math.stackexchange.com/questions/2001041/logarithm-of-the-determinant-of-a-positive-definite-matrix
                     #used to do: pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
@@ -435,7 +443,7 @@ class SimulatedEvent:
                     #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
                     #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
                     #continuous everywhere.
-                    a, A = -20., 15
+                    a, A = -9., 7
                     # a, A = -4., 5.5
                     x = cp.where(x>a, x, A*x/(A-x) + a - A*a/(A-a))
                     if check_valid:
@@ -448,7 +456,7 @@ class SimulatedEvent:
                 self.pad_ll[pad] = pad_ll
 
         if self.enable_print_statements:
-            print('likelihood time: %f s'%(time.time() - start_time))
+            print('likelihood time: %f s'%(time.time() - start_time), to_return.item())
         return to_return.item()
 
     def log_likelihood_test(self, check_valid = False):
