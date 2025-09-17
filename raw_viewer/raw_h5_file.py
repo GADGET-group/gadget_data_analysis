@@ -1,7 +1,10 @@
 import os
+import pickle
 
 import numpy as np
 import scipy.spatial.distance
+import scipy.optimize as opt
+import scipy.interpolate as interpolate
 import h5py
 import matplotlib.pylab as plt
 import matplotlib.colors as colors
@@ -12,6 +15,7 @@ USE_GPU = True
 if USE_GPU:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
+    cp.cuda.runtime.setDevice(3)
 else:
     cp = np
     import scipy.special as cpspecial
@@ -23,9 +27,10 @@ import skimage.measure
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
+NUM_PADS = 1024
 
 class raw_h5_file:
-    def __init__(self, file_path, zscale = 400./512, flat_lookup_csv=None):
+    def __init__(self, file_path, zscale, flat_lookup_csv):
         self.file_path = file_path
         self.h5_file = h5py.File(file_path, 'r')
         self.padxy = np.loadtxt(os.path.join(os.path.dirname(__file__), 'padxy.txt'), delimiter=',')
@@ -106,6 +111,9 @@ class raw_h5_file:
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
+        self.apply_gain_match = False
+        self.pad_gains=np.ones(NUM_PADS)
+
         #cobo and asad selction. Can be "all" or a list of ints
         self.asads='all'
         self.cobos='all'
@@ -175,6 +183,9 @@ class raw_h5_file:
         else:
             data = np.array(data, copy=True, dtype=float)
 
+        if len(data) == 0:
+            return data
+
         if self.remove_outliers:
             pad_image = np.zeros(np.shape(self.pad_plane))
 
@@ -229,6 +240,16 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
         #for smart baseline subtraction, zeroing traces outside thepeak window is handled by baseline subtraction
         
+        #pad gain match is applied after baseline subtraction because a number of baseline subtraction
+        #parameters are mostly driven by noise, which we don't expect to strongly correlate with pad gain
+        if self.apply_gain_match:
+            data = np.array(data, copy=True)
+            for line in data:
+                chnl_info = tuple(line[0:4])
+                if chnl_info in self.chnls_to_pad:
+                    pad = self.chnls_to_pad[chnl_info]
+                    line[FIRST_DATA_BIN:] *= self.pad_gains[pad]  
+
         return data
 
     def calculate_background(self, trace):
@@ -468,6 +489,117 @@ class raw_h5_file:
                 pads_railed.append(pad)
         dxy, dz, angle = self.get_track_length_angle(event_num)
         return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
+    
+
+
+    def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False, 
+                      mode='raw', bounds=(0.5, 2), thresh_to_replace=2000):
+        print('gain matching using %d events'%len(event_numbers))
+        print('getting list of energy per pad for each event')
+        pad_counts = []
+        for event in tqdm.tqdm(event_numbers):
+            pads, traces = self.get_pad_traces(event, include_veto_pads=False)
+            pad_counts.append(np.zeros(NUM_PADS))
+            for pad, trace in zip(pads, traces):
+                pad_counts[-1][pad] = np.sum(trace)
+        pad_counts = np.array(pad_counts)
+        all_events_pad_counts = np.sum(pad_counts, axis=0)  
+
+        if show_debug_figures:
+            data = {}
+            for i in range(len(all_events_pad_counts)):
+                if i in self.pad_to_xy_index:
+                    data[i] = all_events_pad_counts[i]
+            self.show_padplane_image(data, title='without dead pad replacement')
+
+        #replace dead pixels with average of adjacent pixels
+        for pad in range(len(all_events_pad_counts)):
+            if all_events_pad_counts[pad] < thresh_to_replace and pad in self.pad_to_xy_index:
+                #find good adjacent pads to use for average
+                adjacent_pads = []
+                pad_xy = self.pad_to_xy_index[pad]
+                adj_xy = [(pad_xy[0]+d[0], pad_xy[1] + d[1]) 
+                          for d in [(0,1), (0,-1), (1,0), (-1,0)]]
+                for xy in adj_xy:
+                    if xy in self.xy_index_to_pad:
+                        adj_pad = self.xy_index_to_pad[xy]
+                        if all_events_pad_counts[adj_pad] >= thresh_to_replace:
+                            adjacent_pads.append(adj_pad)
+                print('replace pad %d with average of pads '%pad, adjacent_pads)
+                #do replacement
+                if len(adjacent_pads) > 0:
+                    for i in range(len(pad_counts)):
+                        pad_counts[i, pad] = np.mean(pad_counts[i, adjacent_pads])
+                else:
+                    print("can't replace, no good adjacent pads")
+       
+        all_events_pad_counts = np.sum(pad_counts, axis=0)  
+        if show_debug_figures:
+            data = {}
+            for i in range(len(all_events_pad_counts)):
+                if i in self.pad_to_xy_index:
+                    data[i] = all_events_pad_counts[i]
+            self.show_padplane_image(data, title='with dead pad replacement')
+
+        event_adc_counts = np.sum(pad_counts, axis=1)
+        print('average event adc counts:', np.mean(event_adc_counts))
+        pad_counts /= np.mean(event_adc_counts)
+        print('performing minimization')
+        def raw_objective_function(gains):
+            #print(np.shape(pad_counts), np.shape(gains))
+            adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
+            return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
+        
+        num_grid_points = 20
+        pad_xy_index = np.array([self.pad_to_xy_index[pad] if pad in self.pad_to_xy_index else (0,0) for pad in range(NUM_PADS)])
+        min_xy, max_xy = np.min(pad_xy_index), np.max(pad_xy_index)
+        def get_interp_pad_gains(x):
+            #first 4 points should be fixed at outside of image
+            points = np.linspace(min_xy, max_xy, num_grid_points)
+            values = np.reshape(x, (num_grid_points, num_grid_points))
+            interpolator = interpolate.RegularGridInterpolator((points, points), values, method='cubic')
+            return interpolator(pad_xy_index)
+        
+        def interp_obj_func(x):
+            gains = get_interp_pad_gains(x)
+            return raw_objective_function(gains)
+
+        # res = opt.minimize(objective_function, np.ones(NUM_PADS), method="Powell",
+        #                    callback=callback, 
+        #                    bounds=[[0.5, 2]]*NUM_PADS)
+        if mode == 'interp':
+            guess = np.ones(num_grid_points**2)
+            to_min = interp_obj_func
+            min_bounds = [bounds]*num_grid_points**2
+        elif mode == 'raw':
+            guess = np.ones(NUM_PADS)
+            to_min = raw_objective_function
+            min_bounds = [bounds]*NUM_PADS
+
+
+        def callback(intermediate_result):
+                print(intermediate_result)
+                gains = intermediate_result.x
+                print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+
+        res = opt.minimize(to_min, guess, 
+                           callback=callback,
+                           options={'maxfun':1000000},
+                           bounds=min_bounds)
+        if mode == 'interp':
+            res.orig_x = res.x
+            res.x = get_interp_pad_gains(res.x)
+        for pad in VETO_PADS:
+            res.x[pad] = 1
+        res.gain_match_mode = mode
+        print(res)
+        self.pad_gains = res.x
+        if save_results:
+            res.events_used = event_numbers
+            with open(save_path, 'wb') as f:
+                pickle.dump(res, f)
+
+
 
     def show_pad_backgrounds(self, fig_name=None, block=True):
         ave_image = np.zeros(np.shape(self.pad_plane))
@@ -590,6 +722,7 @@ class raw_h5_file:
 
         fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
+        return fig
 
     def show_2d_projection(self, event_number, block=True, fig_name=None):
         pads, traces = self.get_pad_traces(event_number)
@@ -597,9 +730,10 @@ class raw_h5_file:
         data = {pad:np.sum(trace_dict[pad]) for pad in trace_dict}
         should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
         length = np.sqrt(dxy**2 + dz**2)
-        title='event %d, total counts=%d, length=%f mm,\n angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
-        self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
-        
+        title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
+        return self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+
+
 
     def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
         '''
