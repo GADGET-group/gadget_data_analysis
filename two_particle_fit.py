@@ -1,4 +1,5 @@
 import os
+import re
 
 load_previous_fit = False
 if not load_previous_fit:
@@ -268,6 +269,10 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         to_minimize(res.x, use_likelihood) #make sure sim is updated with best params
         # print("Direction: ",direction)
         return_dict[return_key] = (res, trace_sim)
+        # Dump contents of fit into a pickle file to be retrieved later
+        pickle_fname = "./fit_results/event_%05d_ll_fit_two_particle_decays_in_e24joe.dat"%return_key
+        with open(pickle_fname, 'wb') as f:
+            pickle.dump(return_dict[return_key], f)
         # print(return_key, res)
         # print('total completed in direction [%d,%d]:'%(direction[0],direction[1]), len(return_dict.keys()))
     if debug_plots:
@@ -563,6 +568,19 @@ h5file.num_background_bins = (450,500)
 n_workers = 100
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
+
+# Get a list of events already fitted and remove them from the array of events to be fit
+results_directory = os.fsencode("/egr/research-tpc/dopferjo/gadget_analysis/fit_results")
+pattern = re.compile(r"event_(\d+)_ll_fit_two_particle_decays_in_e24joe.dat$")
+completed_fit_events = []
+for filename in os.listdir(results_directory):
+    match = pattern.match(filename)
+    if match:
+        event_num = int(match.group(1))
+        completed_fit_events.append(event_num)
+# TODO: TEST THIS BEFORE RUNNING AGAIN
+events = [item for item in events if item not in completed_fit_events]
+for i 
 # events = [4]
 # fit_results_dict = {}  # shared dictionary
 # ff_fit_results_dict = {}

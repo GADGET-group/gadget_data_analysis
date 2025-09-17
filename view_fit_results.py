@@ -111,18 +111,33 @@ with open(file_path, 'rb') as file:
         # print(E1)
 dxy = np.zeros_like(x0)
 dzs = np.zeros_like(z0)
+dxy_gate = np.array([])
+dz_gate = np.array([])
 print(len(dxy))
 print(len(dzs))
+
+angles = []
+for i in range(len(theta0)):
+    # if dxy[i] < 8 and dzs[i] < 12:
+    # both of these angle calculations are the same
+    # print("old - new angle calc: ", (np.arccos(np.sin(theta0[i]) * np.sin(theta1[i]) * np.cos(phi0[i] - phi1[i]) + np.cos(theta0[i]) * np.cos(theta1[i])) - \
+    #     np.arccos(np.sin(theta0[i]) * np.sin(theta1[i]) * np.cos(phi0[i]) * np.cos(phi1[i]) + np.sin(theta0[i]) * np.sin(theta1[i]) * np.sin(phi0[i]) * np.sin(phi1[i]) + np.cos(theta0[i]) * np.cos(theta1[i]))))
+    angles.append(np.arccos(np.sin(theta0[i]) * np.sin(theta1[i]) * np.cos(phi0[i]) * np.cos(phi1[i]) + np.sin(theta0[i]) * np.sin(theta1[i]) * np.sin(phi0[i]) * np.sin(phi1[i]) + np.cos(theta0[i]) * np.cos(theta1[i])))
+
 for i in range(len(x0)):
     dxy[i] = np.sqrt((x0[i] - x1[i])**2 + (y0[i] - y1[i])**2)
     dzs[i] = np.abs(z0[i]-z1[i])
-angles = []
-for i in range(len(theta0)):
-    angles.append(np.arccos(np.sin(theta0[i]) * np.sin(theta1[i]) * np.cos(phi0[i] - phi1[i]) + np.cos(theta0[i]) * np.cos(theta1[i])))
+    if angles[i] > 2.8:
+        dxy_gate = np.append(dxy_gate,dxy[i])
+        dz_gate = np.append(dz_gate,dzs[i])
+
+print(len(dxy_gate))
+print(len(dz_gate))
+
 
 # Create 2D histogram (counts in bins)
 bins = 20 # Number of bins for both x and y
-hist, xedges, yedges = np.histogram2d(dxy, dzs, bins=bins)
+hist, xedges, yedges = np.histogram2d(dxy_gate, dz_gate, bins=bins)
 
 # Prepare data for bar3d
 # Construct arrays for the anchor positions of the bars
@@ -147,21 +162,33 @@ min_height = np.min(dz)
 rgba = [cmap((k-min_height)/max_height) for k in dz] 
 
 # Plot the 3D bars
-# ax.bar3d(xpos, ypos, zpos, dx, dy, dz, color = rgba, zsort='average')
+ax.bar3d(xpos, ypos, zpos, dx, dy, dz, color = rgba, zsort='average')
 
 # Set labels
-# ax.set_xlabel('dxy')
-# ax.set_ylabel('dz')
-# ax.set_zlabel('Counts')
-# ax.set_title('Distance Between Origins')
-# plt.show()
+ax.set_xlabel('dxy')
+ax.set_ylabel('dz')
+ax.set_zlabel('Counts')
+ax.set_title('Distance Between Origins')
+plt.show()
 
+# 2D Histogram
 print(len(dxy))
 print(len(dzs))
-plt.hist2d(dxy,dzs, bins=(10,20))# , cmap='viridis')
+plt.hist2d(dxy_gate,dz_gate, bins=(10,20))# , cmap='viridis')
 plt.xlabel('dxy')
 plt.ylabel('dz')
 # plt.plot(z1, color = 'red')
 # plt.plot(z0, color = 'blue')
+plt.title('Distance between Two Particles')
 plt.colorbar()
+plt.show()
+
+print(len(angles))
+# 2D Histogram
+plt.hist(angles)# , cmap='viridis')
+plt.xlabel('Angle Between Events (Gated)')
+plt.ylabel('Counts')
+# plt.plot(z1, color = 'red')
+# plt.plot(z0, color = 'blue')
+# plt.colorbar()
 plt.show()

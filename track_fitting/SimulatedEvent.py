@@ -402,7 +402,8 @@ class SimulatedEvent:
         for i, pad in enumerate(self.sim_traces):
             traces[i] = self.sim_traces[pad]
         with cp.cuda.Device(self.gpu_device_id):
-            traces_gpu = cp.array(traces)
+            traces_gpu = cp.array(traces, dtype=cp.float32)
+            sim_traces_gpu = cp.array(self.sim_traces)
             sigma_m = self.pad_gain_match_uncertainty
             sigma_c = self.other_systematics
             for i, pad in enumerate(self.sim_traces):
@@ -472,16 +473,16 @@ class SimulatedEvent:
             pad_gain_unc = cp.asarray(self.pad_gain_match_uncertainty)
             other_sys = cp.asarray(self.other_systematics)
             # Move to GPU
-            traces_sim = cp.asarray(traces_sim)
-            traces_obs = cp.array(traces_obs)
-            # --- 1. Build covariance matrices for all pads ---
+            traces_sim = cp.asarray(traces_sim, dtype=cp.float32)
+            traces_obs = cp.array(traces_obs, dtype=cp.float32)
+            # Build covariance matrices for all pads
             traces_expanded = traces_sim[:, :, None]       # (num_pads, num_bins, 1)
             traces_transpose = traces_sim[:, None, :]      # (num_pads, 1, num_bins)
-            outer_all = traces_expanded * traces_transpose # (num_pads, num_bins, num_bins)
+            outer_all = traces_expanded @ traces_transpose # (num_pads, num_bins, num_bins)
 
             cov_matrices = pad_gain_unc**2 * outer_all + other_sys**2 * cp.eye(num_bins)[None, :, :]
 
-            # --- 2. Residuals for pads that fired ---
+            # Residuals for pads that fired
             # Build observed traces matrix with zeros for pads that didn't fire
             # traces_obs_mat = cp.zeros_like(traces_sim)
             # fired_mask = cp.zeros(num_pads, dtype=bool)
@@ -497,19 +498,18 @@ class SimulatedEvent:
             print(fired_mask.shape)
             print(fired_mask)
             print(traces_sim.shape)
-            # --- 3. Cholesky decomposition for all pads ---
+            # Cholesky decomposition for all pads
             L = cp.linalg.cholesky(cov_matrices)  # (num_pads, num_bins, num_bins)
             log_det = 2 * cp.sum(cp.log(cp.diagonal(L, axis1=1, axis2=2)), axis=1)  # per-pad log(det)
 
-            # --- 4. Quadratic term residualᵀ Σ⁻¹ residual ---
-            # Solve L * y = residuals.T → then yᵀ y = residualᵀ Σ⁻¹ residual
+            # Solve
             y = cp.linalg.solve(L, residuals[:, :, None])  # (num_pads, num_bins, 1)
             quad_term = cp.sum(y**2, axis=(1, 2))          # per-pad sum
 
-            # --- 5. Log-likelihood for pads that fired ---
+            # Log-likelihood for pads that fired
             ll_fired = -0.5 * (num_bins * cp.log(2 * cp.pi) + log_det + quad_term)
 
-            # --- 6. Pads that didn’t fire: use erf approximation ---
+            # Pads that didn’t fire: use erf approximation
             not_fired_mask = ~fired_mask
             sigma_nf = cp.sqrt(other_sys**2 + (pad_gain_unc * traces_sim[not_fired_mask])**2)
             x_nf = (self.pad_threshold - traces_sim[not_fired_mask]) / (cp.sqrt(2) * sigma_nf)
@@ -521,7 +521,6 @@ class SimulatedEvent:
 
             ll_not_fired = cp.sum(cp.log(0.5 * cp.asarray(scipy.special.erfc(-x_nf))), axis=1)
 
-            # --- 7. Combine all results ---
             ll_total = cp.zeros(len(fired_mask))
             # ll_total[fired_mask] = ll_fired
             # ll_total[not_fired_mask] = ll_not_fired
