@@ -5,13 +5,15 @@ load_previous_fit = False
 if not load_previous_fit:
     os.environ["OMP_NUM_THREADS"] = "1"
 
+import multiprocessing
+# multiprocessing.set_start_method('spawn', force=True)
+
 import numpy as np
 import scipy
 import random
 import tkinter as tk
 from tkinter import ttk
 import time
-import multiprocessing
 import pickle
 
 import matplotlib.pylab as plt
@@ -30,15 +32,7 @@ from hough3d import hough3D
 # import pyransac3d as pyrsc # not used atm
 from track_fitting import SingleParticleEvent, build_sim
 
-USE_GPU = False
-if USE_GPU:
-    import cupy as cp
-    import cupyx.scipy.special as cpspecial
-else:
-    cp = np
-    import scipy.special as cpspecial
-    cp.asnumpy = lambda x: x
-
+gpus_to_use = [0,1,3]
 np.seterr(over='raise')
 
 def cluster_and_fit(data,points):
@@ -112,10 +106,11 @@ start_time = time.time()
 def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type = ['4He','4He'], direction = [1,1],
               return_key=None, return_dict=None, debug_plots=False, fit = True): # currently only works with 2 particles
     trace_sim = build_sim.create_multi_particle_event('e24joe', 124, event, particle_type)
-    if event % 2 == 0:
-        trace_sim.gpu_device_id = 3
-    else:
-        trace_sim.gpu_device_id = 3
+    trace_sim.gpu_device_id = gpus_to_use[event%len(gpus_to_use)]
+    # if event % 3 == 0:
+    #     trace_sim.gpu_device_id = 0
+    # else:
+    #     trace_sim.gpu_device_id = 1
     trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
     trace_sim.shared_params = ['gas_density']
     # in order for the initial guesses fed from the clustering script to match the 
@@ -207,7 +202,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         trace_sim.sims[1].initial_point = (x1,y1,z1)
         trace_sim.sims[0].sigma_xy, trace_sim.sims[1].sigma_xy = sigma_xy0, sigma_xy1
         trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z0, sigma_z1
-        trace_sim.enable_print_statements = True
+        trace_sim.enable_print_statements = False
         trace_sim.simulate_event()
         if least_squares:
             residuals_dict = trace_sim.get_residuals()
@@ -220,7 +215,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             to_return  = np.sum(residuals*residuals)
         else:
             to_return = -trace_sim.log_likelihood()
-            trace_sim.log_likelihood_old()
+            # trace_sim.log_likelihood_old()
         #to_return = -trace_sim.log_likelihood()
         if debug_plots:
             print('%e'%to_return, params)
@@ -566,7 +561,7 @@ h5file.data_select_mode = 'all data'
 h5file.remove_outliers = 1
 h5file.num_background_bins = (450,500)
 
-n_workers = 1
+n_workers = 100
 mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
 events = np.where(mask)[0]
 
@@ -579,10 +574,9 @@ for filename in os.listdir(results_directory):
     if match:
         event_num = int(match.group(1))
         completed_fit_events.append(event_num)
-# TODO: TEST THIS BEFORE RUNNING AGAIN
 events = [item for item in events if item not in completed_fit_events]
 # for i 
-# events = [4]
+# events = [97]
 # fit_results_dict = {}  # shared dictionary
 # ff_fit_results_dict = {}
 # fb_fit_results_dict = {}
@@ -595,7 +589,7 @@ if __name__ == "__main__":
     ff_fit_results_dict = manager.dict()
     fb_fit_results_dict = manager.dict()
     bf_fit_results_dict = manager.dict()
-    bb_fit_results_dict = manager.dict()    
+    bb_fit_results_dict = manager.dict()
     with multiprocessing.Pool(processes=n_workers) as pool:
         for result in pool.imap_unordered(process_two_particle_event,events):
             print("Done Fitting")

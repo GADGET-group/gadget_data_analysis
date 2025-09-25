@@ -401,7 +401,6 @@ class SimulatedEvent:
         traces = np.zeros((len(self.sim_traces.keys()), self.num_trace_bins))
         traces_to_fit = np.zeros((len(self.sim_traces.keys()), self.num_trace_bins))
         traces_to_fit.fill(np.inf)
-        num_trace_bins = cp.array(self.num_trace_bins)
         for i, pad in enumerate(self.sim_traces):
             traces[i] = self.sim_traces[pad]
             if pad in self.traces_to_fit:
@@ -409,21 +408,28 @@ class SimulatedEvent:
             else:
                 continue
         with cp.cuda.Device(self.gpu_device_id):
-            traces_gpu = cp.array(traces, dtype=cp.float32)
-            traces_to_fit_gpu = cp.array(traces_to_fit, dtype=cp.float32)
-            sigma_m = self.pad_gain_match_uncertainty
-            sigma_c = self.other_systematics
+            float_type = cp.float64
+            traces_gpu = cp.array(traces, dtype=float_type)
+            traces_to_fit_gpu = cp.array(traces_to_fit, dtype=float_type)
+            sigma_m2 = float_type(self.pad_gain_match_uncertainty**2)
+            residuals = traces_gpu - traces_to_fit_gpu
+            sigma_c2 = float_type(self.other_systematics**2)
+            outer = cp.zeros((self.num_trace_bins, self.num_trace_bins), dtype=float_type)
+            cov_matrix = cp.zeros((self.num_trace_bins, self.num_trace_bins), dtype=float_type)
+            eye = cp.eye(self.num_trace_bins, dtype=float_type)
             for i, pad in enumerate(self.sim_traces):
                 pad_ll = 0
-                outer = cp.outer(traces_gpu[i],traces_gpu[i])
-                cov_matrix = sigma_m**2 * outer + sigma_c**2 * cp.eye(num_trace_bins.item())
+                cp.outer(traces_gpu[i],traces_gpu[i], outer)
+                cp.multiply(sigma_m2, outer, out=outer)
+                cp.multiply(sigma_c2, eye, out=cov_matrix)
+                cp.add(cov_matrix, outer, out=cov_matrix)
+                #print(cov_matrix.dtype)
                 if not cp.all(cp.isfinite(cov_matrix)):
                     assert False
-                if np.isfinite(np.sum(traces_to_fit_gpu[i])): #pad fired and was simulated
+                if cp.isfinite(cp.sum(traces_to_fit_gpu[i])): #pad fired and was simulated
                 # if pad in self.traces_to_fit: #pad fired and was simulated
-                    residuals = traces_gpu[i] - traces_to_fit_gpu[i]
                     # residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
-                    pad_ll -= num_trace_bins.item()*0.5*np.log(2*np.pi)
+                    pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
                     #use cholesky decomposition to get log(det(cov_matrix)) and avoid overlow issues when trace is long
                     #https://math.stackexchange.com/questions/2001041/logarithm-of-the-determinant-of-a-positive-definite-matrix
                     #used to do: pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
@@ -431,13 +437,12 @@ class SimulatedEvent:
                     diag_elements = cp.diagonal(L)
                     pad_ll -= cp.sum(cp.log(diag_elements))
 
-                    residuals = cp.array(residuals)
-                    pad_ll -= 0.5*(residuals@(cp.linalg.inv(cov_matrix))@residuals.T)# [0,0]
+                    pad_ll -= 0.5*(residuals[i]@(cp.linalg.inv(cov_matrix))@residuals[i].T)# [0,0]
                 else: #pad was simulated firing, but did not
                     #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
                     #than this value
                     #TODO: is there a not to expensive way to account for corralations between time bins?
-                    sigma = cp.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*traces_gpu[i])**2)
+                    sigma = cp.sqrt(sigma_c2 + sigma_m2*(traces_gpu[i])**2)
                     x = (self.pad_threshold - traces_gpu[i])/2**0.5/sigma
                     #make function which 
                     #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
@@ -455,9 +460,9 @@ class SimulatedEvent:
                 to_return += pad_ll
                 self.pad_ll[pad] = pad_ll
 
-        if self.enable_print_statements:
-            print('likelihood time: %f s'%(time.time() - start_time), to_return.item())
-        return to_return.item()
+            if self.enable_print_statements:
+                print('likelihood time: %f s'%(time.time() - start_time), to_return.item())
+            return to_return.item()
 
     def log_likelihood_test(self, check_valid = False):
         """
@@ -481,8 +486,8 @@ class SimulatedEvent:
             pad_gain_unc = cp.asarray(self.pad_gain_match_uncertainty)
             other_sys = cp.asarray(self.other_systematics)
             # Move to GPU
-            traces_sim = cp.asarray(traces_sim, dtype=cp.float32)
-            traces_obs = cp.array(traces_obs, dtype=cp.float32)
+            traces_sim = cp.asarray(traces_sim, dtype=cp.float64)
+            traces_obs = cp.array(traces_obs, dtype=cp.float64)
             # Build covariance matrices for all pads
             traces_expanded = traces_sim[:, :, None]       # (num_pads, num_bins, 1)
             traces_transpose = traces_sim[:, None, :]      # (num_pads, 1, num_bins)

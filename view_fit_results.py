@@ -7,15 +7,17 @@ from track_fitting.SimulatedEvent import SimulatedEvent
 from track_fitting. MultiParticleEvent import MultiParticleEvent
 import raw_viewer.raw_h5_file as raw_h5_file
 from track_fitting import SingleParticleEvent, build_sim
+import pandas as pd
 
 fitted = False
 
 evts, theta0,theta1, phi0,phi1, x0,y0,z0, x1,y1,z1, lls, cats, E0,E1, Erecs, nfev, sigma_xy, sigma_z = [], [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[]
 trace_sims = []
 
-file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_test.dat' #TODO: double-check this is the right file name
+file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_test.dat'
 file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_best_direction_20_events.dat'
-file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_no_fit.dat'
+if not fitted:
+    file_path = '/egr/research-tpc/dopferjo/gadget_analysis/two_particle_decays_in_e24joe_no_fit.dat'
 with open(file_path, 'rb') as file:
     fit_results_dict = pickle.load(file)
     for key in fit_results_dict:
@@ -61,8 +63,8 @@ with open(file_path, 'rb') as file:
             trace_sim.sims[1].initial_point = (x1[-1],y1[-1],z1[-1])
             trace_sim.sims[0].sigma_xy, trace_sim.sims[1].sigma_xy = sigma_xy[-1], sigma_xy[-1]
             trace_sim.sims[0].sigma_z, trace_sim.sims[1].sigma_z = sigma_z[-1], sigma_z[-1]
-            print(trace_sim.sims[0].sigma_xy)
-            print(trace_sim.sims[1].sigma_xy) 
+            # print(trace_sim.sims[0].sigma_xy)
+            # print(trace_sim.sims[1].sigma_xy) 
             # trace_sim.plot_residuals()
             # trace_sim.plot_residuals_3d(threshold=25)
             # trace_sim.plot_simulated_3d_data(threshold=25)
@@ -113,8 +115,7 @@ dxy = np.zeros_like(x0)
 dzs = np.zeros_like(z0)
 dxy_gate = np.array([])
 dz_gate = np.array([])
-print(len(dxy))
-print(len(dzs))
+events_to_check = []
 
 angles = []
 for i in range(len(theta0)):
@@ -127,12 +128,26 @@ for i in range(len(theta0)):
 for i in range(len(x0)):
     dxy[i] = np.sqrt((x0[i] - x1[i])**2 + (y0[i] - y1[i])**2)
     dzs[i] = np.abs(z0[i]-z1[i])
-    if angles[i] > 2.8:
+    if angles[i] < 0.3:
         dxy_gate = np.append(dxy_gate,dxy[i])
         dz_gate = np.append(dz_gate,dzs[i])
+        if dxy[i] < 8 and dzs[i] < 12:
+            events_to_check.append(i)
 
-print(len(dxy_gate))
-print(len(dz_gate))
+categorized_events_of_interest = pd.read_csv('./complete_categorized_events_of_interest.csv',\
+    encoding='utf-8-sig', skip_blank_lines = False, nrows = 36164, header=None)
+
+array_of_categorized_events_of_interest = categorized_events_of_interest[0].to_numpy()
+mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accidental Coin', 'Double Alpha Candidate'])
+events = np.where(mask)[0]
+print(events[:20])
+print(events_to_check)
+for index in events_to_check:
+    print(index, events[index], angles[index], dxy[index], dzs[index])
+    print("Individual Angle Calc.: ", theta0[index],phi0[index], theta1[index],phi1[index])
+
+# print(len(dxy_gate))
+# print(len(dz_gate))
 
 
 # Create 2D histogram (counts in bins)
@@ -172,8 +187,6 @@ ax.set_title('Distance Between Origins')
 plt.show()
 
 # 2D Histogram
-print(len(dxy))
-print(len(dzs))
 plt.hist2d(dxy_gate,dz_gate, bins=(10,20))# , cmap='viridis')
 plt.xlabel('dxy')
 plt.ylabel('dz')
@@ -183,7 +196,6 @@ plt.title('Distance between Two Particles')
 plt.colorbar()
 plt.show()
 
-print(len(angles))
 # 2D Histogram
 plt.hist(angles)# , cmap='viridis')
 plt.xlabel('Angle Between Events (Gated)')
