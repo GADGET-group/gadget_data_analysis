@@ -26,7 +26,6 @@ import skimage.measure
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
-NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
 NUM_PADS = 1024
 
 class raw_h5_file:
@@ -118,6 +117,10 @@ class raw_h5_file:
         self.asads='all'
         self.cobos='all'
         self.pads='all'
+
+        #look at first event and figure out number of time bins
+        first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
+        self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
 
     def get_pad_from_xy(self, xy):
         '''
@@ -329,13 +332,12 @@ class raw_h5_file:
             ys.append(y)
             es.append(pad_data[FIRST_DATA_BIN:])
         #reshape as needed to get to final format for x,y,e
-        NUM_TIME_BINS = 512+5-FIRST_DATA_BIN
-        xs = np.repeat(xs, NUM_TIME_BINS)
-        ys = np.repeat(ys, NUM_TIME_BINS)
+        xs = np.repeat(xs, self.num_time_bins)
+        ys = np.repeat(ys, self.num_time_bins)
         es = np.array(es).flatten()
 
         #make time bins data
-        ts = np.tile(np.arange(0, NUM_TIME_BINS), int(len(xs)/NUM_TIME_BINS))
+        ts = np.tile(np.arange(0, self.num_time_bins), int(len(xs)/self.num_time_bins))
 
         #apply thresholding
         if threshold != -np.inf:
