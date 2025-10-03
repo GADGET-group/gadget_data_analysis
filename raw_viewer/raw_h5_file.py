@@ -449,7 +449,7 @@ class raw_h5_file:
             first_point = points[cp.argmin(rdotv)]
             last_point = points[cp.argmax(rdotv)]
             dr = last_point - first_point
-            dxy, dz = cp.sqrt(dr[0]**2 + dr[1]**2), dr[2]
+            dxy, dz = cp.sqrt(dr[0]**2 + dr[1]**2), np.abs(dr[2])
             if return_np:
                 dxy, dz, angle = cp.asnumpy(dxy), cp.asnumpy(dz), cp.asnumpy(angle)
         return dxy, dz, angle
@@ -705,24 +705,25 @@ class raw_h5_file:
         ax1.set_title('Padplane Image')
 
         # Bottom plot: sum of traces
-        summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
-        ax2.plot(summed_trace)
-        ax2.set_title('Summed Trace')
-        ax2.set_xlabel('Time')
-        ax2.set_ylabel('ADC Counts')
-        if type(trace_dict) != type(None):
-            def onclick(event):
-                x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
-                pad = self.xy_index_to_pad.get((x, y))
-                if pad in trace_dict:
-                    plt.figure()
-                    plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
-                    plt.plot(trace_dict[pad])
-                    plt.xlabel('Time')
-                    plt.ylabel('ADC Counts')
-                    plt.show(block=False)
+        if trace_dict != None:
+            summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
+            ax2.plot(summed_trace)
+            ax2.set_title('Summed Trace')
+            ax2.set_xlabel('Time')
+            ax2.set_ylabel('ADC Counts')
+            if type(trace_dict) != type(None):
+                def onclick(event):
+                    x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
+                    pad = self.xy_index_to_pad.get((x, y))
+                    if pad in trace_dict:
+                        plt.figure()
+                        plt.title('cobo %d, asad %d, aget %d, chnl %d, pad %d'%(*self.pad_to_chnl[pad], pad))
+                        plt.plot(trace_dict[pad])
+                        plt.xlabel('Time')
+                        plt.ylabel('ADC Counts')
+                        plt.show(block=False)
 
-        fig.canvas.mpl_connect('button_press_event', onclick)
+            fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
         return fig
 

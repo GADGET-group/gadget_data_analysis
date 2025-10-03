@@ -423,7 +423,7 @@ class RawEventViewerFrame(ttk.Frame):
         #load histogram arrays
         self.counts = np.load(os.path.join(directory_path, 'counts.npy'))
         self.dxys = np.load(os.path.join(directory_path, 'dxy.npy'))
-        self.dts = np.load(os.path.join(directory_path, 'dt.npy'))
+        self.dts = np.abs(np.load(os.path.join(directory_path, 'dt.npy')))
         self.max_veto_counts = np.load(os.path.join(directory_path, 'veto.npy'))
         self.timestamps = np.load(os.path.join(directory_path, 'timestamps.npy'))
         #do zscale dependent calcuations of range and angle
@@ -515,13 +515,13 @@ class RawEventViewerFrame(ttk.Frame):
         veto_maxs = self.max_veto_counts
 
         #return veto_maxs < float(self.veto_threshold_entry.get())
-        to_return =  np.logical_and.reduce((veto_maxs < float(self.veto_threshold_entry.get()),
-                                      self.angles < float(self.angle_max_entry.get()),
-                                      self.angles > float(self.angle_min_entry.get()),
-                                      self.ranges > float(self.range_min_entry.get()),
-                                      self.ranges < float(self.range_max_entry.get()),
-                                      self.counts < float(self.ic_max_entry.get()),
-                                      self.counts > float(self.ic_min_entry.get())
+        to_return =  np.logical_and.reduce((veto_maxs <= float(self.veto_threshold_entry.get()),
+                                      self.angles <= float(self.angle_max_entry.get()),
+                                      self.angles >= float(self.angle_min_entry.get()),
+                                      self.ranges >= float(self.range_min_entry.get()),
+                                      self.ranges <= float(self.range_max_entry.get()),
+                                      self.counts <= float(self.ic_max_entry.get()),
+                                      self.counts >= float(self.ic_min_entry.get())
                                     ))
         if self.enable_rve_cut_var.get():
             to_return &= self.rve_cut_select_mask
