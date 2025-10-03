@@ -96,7 +96,7 @@ def cluster_and_fit(data,points):
 
     return cluster, lines_of_best_fit, sum_of_squares
 
-use_likelihood = True #if false, uses least squares
+use_likelihood = False #if false, uses least squares
 fit_adc_count_per_MeV = False #use known energy rather than fitting it as a free parameter, and instead fit adc_counts_per_MeV
 fix_energy = False
 processes = []
@@ -121,6 +121,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     zmin = 0
     #set zmax to length of trimmed traces
     zmax = trace_sim.num_trace_bins*trace_sim.zscale
+    counts_p_mev = np.mean([120862,127228,121620,116460])
     
     trace_sim.sims[0].adaptive_stopping_power = False
     trace_sim.sims[1].adaptive_stopping_power = False
@@ -146,7 +147,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         #start sigma_xy, sigma_z, and c in a small ball around an initial guess
         sigma_guess = np.append(sigma_guess, 2.5)
     
-    init_guess = np.array((theta_guess[0], theta_guess[1], phi_guess[0], phi_guess[1], best_point[0][0], best_point[0][1], best_point[0][2], best_point[1][0], best_point[1][1], best_point[1][2], Eknown, Eknown, sigma_guess[0], sigma_guess[1]))
+    init_guess = np.array((theta_guess[0], theta_guess[1], phi_guess[0], phi_guess[1], best_point[0][0], best_point[0][1], best_point[0][2], best_point[1][0], best_point[1][1], best_point[1][2], Eknown, Eknown, sigma_guess[0], sigma_guess[1],counts_p_mev))
     scaled_init_guess = np.zeros_like(init_guess)
 
     # condition the parameters so the fitter can move in the parameter space and converge faster (each parameter should approx go from -1 to 1)
@@ -164,9 +165,10 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     scaled_init_guess[11] = init_guess[11] / 10
     scaled_init_guess[12] = init_guess[12] / 10
     scaled_init_guess[13] = init_guess[13] / 10
+    scaled_init_guess[14] = init_guess[14] / 1e6 # counts per mev are typically around 1e5, so divinding by 1e6 should put the scaled value around 0.12
     
     def to_minimize(params, least_squares):
-        theta0, theta1, phi0, phi1, x0, y0, z0, x1, y1, z1, E_or_m0, E_or_m1, sigma_xy0, sigma_z0 = params # note that each param is an array with length of the number of particles in the fit
+        theta0, theta1, phi0, phi1, x0, y0, z0, x1, y1, z1, E_or_m0, E_or_m1, sigma_xy0, sigma_z0,counts_per_mev = params # note that each param is an array with length of the number of particles in the fit
         # unscale the parameters
         theta0 = theta0 * np.pi
         theta1 = theta1 * np.pi
@@ -181,6 +183,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         E_or_m0 = E_or_m0 * 10
         E_or_m1 = E_or_m1 * 10
         sigma_xy0, sigma_z0 = sigma_xy0 * 10, sigma_z0 * 10
+        trace_sim.counts_per_MeV = counts_per_mev * 1e6
         # comment the above block out if you use the original parameters instead of the scaled parameters
         sigma_xy1, sigma_z1 = sigma_xy0, sigma_z0
         if fit_adc_count_per_MeV:
@@ -194,8 +197,7 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
             else:
                 trace_sim.sims[0].initial_energy = E_or_m0
                 trace_sim.sims[1].initial_energy = E_or_m1
-            trace_sim.counts_per_MeV = 77000. #using rough value from run 193 in e24joe      
-
+            # trace_sim.counts_per_MeV = 75805.41 #using value from run 193 in e24joe, fitting 8.7 MeV peak   
         trace_sim.sims[0].theta, trace_sim.sims[0].phi, trace_sim.sims[1].theta, trace_sim.sims[1].phi = theta0, phi0, theta1, phi1
         
         trace_sim.sims[0].initial_point = (x0,y0,z0)
@@ -250,11 +252,11 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         flast = intermediate_result.fun
     if not use_likelihood and fit:
         print('Fitting event: direction, guess, least_squares:', direction, init_guess, to_minimize(scaled_init_guess, True))
-        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
-        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback, bounds = bnds, options={'gtol': 1e-5,'ftol':1e-5})
+        bnds = ((0,1),(0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
+        res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback, bounds = bnds)# , options={'gtol': 1e-5,'ftol':1e-5})
     if use_likelihood and fit:
         print('Fitting event: direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
-        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
+        bnds = ((0,1),(0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
         res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds)#options={'gtol': 1e-5,'ftol':1e-5})
         print(res)
     if not fit:
@@ -267,6 +269,15 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
         return_dict[return_key] = (res, trace_sim)
         # Dump contents of fit into a pickle file to be retrieved later
         pickle_fname = "./fit_results/event_%05d_ll_fit_two_particle_decays_in_e24joe.dat"%return_key
+        pickle_fname = "./event_22_least_squares_test.dat"
+        if direction == [1,1]:
+            pickle_fname = "./fit_results/least_squares/ff/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%return_key
+        if direction == [1,-1]:
+            pickle_fname = "./fit_results/least_squares/fb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%return_key
+        if direction == [-1,1]:
+            pickle_fname = "./fit_results/least_squares/bf/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%return_key
+        if direction == [-1,-1]:
+            pickle_fname = "./fit_results/least_squares/bb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%return_key
         with open(pickle_fname, 'wb') as f:
             pickle.dump(return_dict[return_key], f)
         # print(return_key, res)
@@ -417,9 +428,9 @@ def process_two_particle_event(event_number):
                                                      ['4He','4He'],
                                                      direction,
                                                      event_number,
-                                                     None,
+                                                     ff_fit_results_dict,
                                                      False,
-                                                     fit=False)
+                                                     fit=True)
                 elif direction == [1,-1]:
                     direction2_residuals = fit_event(event_number, 
                                                      [cluster0_start, cluster1_end], 
@@ -428,9 +439,9 @@ def process_two_particle_event(event_number):
                                                      ['4He','4He'],
                                                      direction,
                                                      event_number,
-                                                     None,
+                                                     fb_fit_results_dict,
                                                      False,
-                                                     fit=False)
+                                                     fit=True)
                 elif direction == [-1,1]:
                     direction3_residuals = fit_event(event_number, 
                                                      [cluster0_end, cluster1_start], 
@@ -439,9 +450,9 @@ def process_two_particle_event(event_number):
                                                      ['4He','4He'],
                                                      direction,
                                                      event_number,
-                                                     None,
+                                                     bf_fit_results_dict,
                                                      False,
-                                                     fit=False)
+                                                     fit=True)
                 elif direction == [-1,-1]:
                     direction4_residuals = fit_event(event_number, 
                                                      [cluster0_end, cluster1_end], 
@@ -450,69 +461,69 @@ def process_two_particle_event(event_number):
                                                      ['4He','4He'],
                                                      direction,
                                                      event_number,
-                                                     None,
+                                                     bb_fit_results_dict, # TODO: change these return_dicts back to 'None' when you do not want to fit every direction
                                                      False,
-                                                     fit=False)
-        print("Results of each direction's least squares residuals for the initial guess based on clustering: ",direction1_residuals, direction2_residuals, direction3_residuals, direction4_residuals)
-        if direction1_residuals < direction2_residuals and direction1_residuals < direction3_residuals and direction1_residuals < direction4_residuals:
-            print("Direction 1 is best!")
-            fit_event(event_number, 
-                    [cluster0_start, cluster1_start], 
-                    [cluster0_end, cluster1_end],
-                    6.288,
-                    ['4He','4He'],
-                    [1,1],
-                    event_number,
-                    ff_fit_results_dict,
-                    False,
-                    fit=True) 
-            # fit_results_dict[event_number] = ff_fit_results_dict[event_number]
-            return "Event %d finished fitting in Direction 1"%event_number
+                                                     fit=True)
+        # print("Results of each direction's least squares residuals for the initial guess based on clustering: ",direction1_residuals, direction2_residuals, direction3_residuals, direction4_residuals)
+        # if direction1_residuals < direction2_residuals and direction1_residuals < direction3_residuals and direction1_residuals < direction4_residuals:
+        #     print("Direction 1 is best!")
+        #     fit_event(event_number, 
+        #             [cluster0_start, cluster1_start], 
+        #             [cluster0_end, cluster1_end],
+        #             6.288,
+        #             ['4He','4He'],
+        #             [1,1],
+        #             event_number,
+        #             ff_fit_results_dict,
+        #             False,
+        #             fit=True) 
+        #     # fit_results_dict[event_number] = ff_fit_results_dict[event_number]
+        #     return "Event %d finished fitting in Direction 1"%event_number
             
-        if direction2_residuals < direction1_residuals and direction2_residuals < direction3_residuals and direction2_residuals < direction4_residuals:
-            print("Direction 2 is best!")            
-            fit_event(event_number,
-                    [cluster0_start, cluster1_end], 
-                    [cluster0_end, cluster1_start],
-                    6.288,
-                    ['4He','4He'],
-                    [1,-1],
-                    event_number,
-                    fb_fit_results_dict,
-                    False,
-                    fit=True) 
-            # fit_results_dict[event_number] = fb_fit_results_dict[event_number]
-            return "Event %d finished fitting in Direction 2"%event_number
+        # if direction2_residuals < direction1_residuals and direction2_residuals < direction3_residuals and direction2_residuals < direction4_residuals:
+        #     print("Direction 2 is best!")            
+        #     fit_event(event_number,
+        #             [cluster0_start, cluster1_end], 
+        #             [cluster0_end, cluster1_start],
+        #             6.288,
+        #             ['4He','4He'],
+        #             [1,-1],
+        #             event_number,
+        #             fb_fit_results_dict,
+        #             False,
+        #             fit=True) 
+        #     # fit_results_dict[event_number] = fb_fit_results_dict[event_number]
+        #     return "Event %d finished fitting in Direction 2"%event_number
 
-        if direction3_residuals < direction1_residuals and direction3_residuals < direction2_residuals and direction3_residuals < direction4_residuals:
-            print("Direction 3 is best!")
-            fit_event(event_number,
-                    [cluster0_end, cluster1_start], 
-                    [cluster0_start, cluster1_end],
-                    6.288,
-                    ['4He','4He'],
-                    [-1,1],
-                    event_number,
-                    bf_fit_results_dict,
-                    False,
-                    fit=True) 
-            # fit_results_dict[event_number] = bf_fit_results_dict[event_number]
-            return "Event %d finished fitting in Direction 3"%event_number
+        # if direction3_residuals < direction1_residuals and direction3_residuals < direction2_residuals and direction3_residuals < direction4_residuals:
+        #     print("Direction 3 is best!")
+        #     fit_event(event_number,
+        #             [cluster0_end, cluster1_start], 
+        #             [cluster0_start, cluster1_end],
+        #             6.288,
+        #             ['4He','4He'],
+        #             [-1,1],
+        #             event_number,
+        #             bf_fit_results_dict,
+        #             False,
+        #             fit=True) 
+        #     # fit_results_dict[event_number] = bf_fit_results_dict[event_number]
+        #     return "Event %d finished fitting in Direction 3"%event_number
             
-        if direction4_residuals < direction1_residuals and direction4_residuals < direction2_residuals and direction4_residuals < direction3_residuals:
-            print("Direction 4 is best!")
-            fit_event(event_number, 
-                        [cluster0_end, cluster1_end], 
-                        [cluster0_start, cluster1_start],
-                        6.288,
-                        ['4He','4He'],
-                        [-1,-1],
-                        event_number,
-                        bb_fit_results_dict,
-                        False,
-                        fit=True) 
-            # fit_results_dict[event_number] = bb_fit_results_dict[event_number]
-            return "Event %d finished fitting in Direction 4"%event_number
+        # if direction4_residuals < direction1_residuals and direction4_residuals < direction2_residuals and direction4_residuals < direction3_residuals:
+        #     print("Direction 4 is best!")
+        #     fit_event(event_number, 
+        #                 [cluster0_end, cluster1_end], 
+        #                 [cluster0_start, cluster1_start],
+        #                 6.288,
+        #                 ['4He','4He'],
+        #                 [-1,-1],
+        #                 event_number,
+        #                 bb_fit_results_dict,
+        #                 False,
+        #                 fit=True) 
+        #     # fit_results_dict[event_number] = bb_fit_results_dict[event_number]
+        #     return "Event %d finished fitting in Direction 4"%event_number
         return "Something went wrong"
 
 
@@ -566,7 +577,7 @@ mask = np.isin(array_of_categorized_events_of_interest, ['RnPo Chain', 'Accident
 events = np.where(mask)[0]
 
 # Get a list of events already fitted and remove them from the array of events to be fit
-results_directory = os.fsencode("/egr/research-tpc/dopferjo/gadget_analysis/fit_results")
+results_directory = os.fsencode("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/ff")
 pattern = re.compile(r"event_(\d+)_ll_fit_two_particle_decays_in_e24joe.dat$")
 completed_fit_events = []
 for filename in os.listdir(results_directory):
@@ -582,7 +593,7 @@ events = [item for item in events if item not in completed_fit_events]
 # fb_fit_results_dict = {}
 # bf_fit_results_dict = {}
 # bb_fit_results_dict = {}  
-# process_two_particle_event(4)
+# process_two_particle_event(22)
 if __name__ == "__main__":
     manager = multiprocessing.Manager()
     fit_results_dict = manager.dict()  # shared dictionary

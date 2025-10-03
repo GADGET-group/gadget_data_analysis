@@ -1,4 +1,4 @@
-load_previous_fit = True
+load_previous_fit = False
 
 import time
 import multiprocessing, logging
@@ -36,7 +36,7 @@ else:
         if fix_energy:
             pickle_fname = '%s_run%d_results_objects.dat'%(experiment,run_number)
         else:
-            pickle_fname = '%s_run%d_energy_free.dat'%(experiment,run_number)
+            pickle_fname = '%s_run%d_energy_free_test.dat'%(experiment,run_number)
     
 
 h5file = build_sim.get_rawh5_object(experiment, run_number)
@@ -55,7 +55,6 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         particle = trace_sim.sims[0]
     else:
         trace_sim = build_sim.create_multi_particle_event(experiment, run, event, particle_type)
-        particle = trace_sim.sims[0]
     # else:
     #     print("Creating SingleParticle Event:",particle_type)
     #     trace_sim = build_sim.create_single_particle_sim(experiment, run, event, particle_type)
@@ -98,21 +97,76 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     #         if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
     #             new_data.append(line)
     #     data = np.array(new_data)
-    for x, y, z in zip(x_real, y_real, z_real):
-        delta = np.array([x,y,z]) - track_center
-        dist = np.dot(delta, track_direction_vec*direction)
-        if  dist < d_best:
-            d_best= dist
-            best_point = np.array([x,y,z])
-            print("Best Point: ", best_point)
-    #start theta, phi in a small ball around track direction from svd
-    vhat = track_direction_vec*direction
-    #print('vhat:',vhat)
-    theta_guess = np.arctan2(np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
-    phi_guess = np.arctan2(vhat[1], vhat[0])
+    pts = []
+    for i in range(len(x_real)):
+        pts.append((x_real[i],y_real[i],z_real[i]))
+    pts = np.array(pts)
+    mean = pts.mean(axis=0)
+    uu, dd, vv = np.linalg.svd(pts - mean)
+    lob_direction = vv[0]
+    # direction[clust_id] = vv[0]
+
+    # Line for plotting
+    t = np.linspace(-10, 10, 20)[:, np.newaxis]
+    linepts = mean + t * lob_direction
+
+    linepts0 = linepts
+
+    # lines_of_best_fit = linepts0
+    if direction == 1:
+        best_point = linepts0[0]
+        dx, dy, dz = (linepts0[-1] - best_point)
+        mag = np.sqrt(dx**2 + dy**2 + dz**2)
+        track_direction_vec = np.append(track_direction_vec, (np.array([dx/mag, dy/mag, dz/mag])))
+        # theta_guess = np.append(theta_guess, (np.arccos(dz/mag)))
+        # phi_guess = np.append(phi_guess, (np.arctan2(dy,dx)))
+        theta_guess = np.arctan2(np.sqrt(dx**2 + dy**2), dz)
+        if theta_guess < 0:
+            theta_guess += np.pi * 2
+        phi_guess = np.arctan2(dy, dx)
+        if phi_guess < 0:
+            phi_guess += np.pi * 2 
+    elif direction == -1:
+        best_point = linepts0[-1]
+        dx, dy, dz = (linepts0[0] - best_point)
+        mag = np.sqrt(dx**2 + dy**2 + dz**2)
+        track_direction_vec = np.append(track_direction_vec, (np.array([dx/mag, dy/mag, dz/mag])))
+        # theta_guess = np.append(theta_guess, (np.arccos(dz/mag)))
+        # phi_guess = np.append(phi_guess, (np.arctan2(dy,dx)))
+        theta_guess = np.arctan2(np.sqrt(dx**2 + dy**2), dz)
+        if theta_guess < 0:
+            theta_guess += np.pi * 2
+        phi_guess = np.arctan2(dy, dx)
+        if phi_guess < 0:
+            phi_guess += np.pi * 2 
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(projection='3d')
+    # ax.scatter(*pts.T, color='teal', alpha=0.3, label="Cluster")
+    # ax.scatter(*linepts0[0].T, s=100)
+    # ax.scatter(*linepts0[-1].T, s=100)
+    # # ax.scatter(*best_lobf[1][0].T, s=100)
+    # # ax.scatter(*best_lobf[1][-1].T, s=100)
+    # ax.plot(*linepts0.T, color='blue', linewidth=2)
+    # ax.set_title(f"origin: {best_point} angle: {theta_guess,phi_guess}")
+    # # ax.plot(*best_lobf[1].T, color='red', linewidth=2)
+    # ax.set_xlim3d(-200, 200)
+    # ax.set_ylim3d(-200, 200)
+    # ax.set_xlabel('X-axis')
+    # ax.set_ylabel('Y-axis')
+    # ax.set_zlabel('Z-axis')
+    # ax.set_zlim3d(0, 400)
+    # ax.legend()
+    # plt.show(block=True)
+
+    # #start theta, phi in a small ball around track direction from svd
+    # vhat = track_direction_vec*direction
+    # #print('vhat:',vhat)
+    # theta_guess = np.arctan2(np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
+    # phi_guess = np.arctan2(vhat[1], vhat[0])
 
     #start sigma_xy, sigma_z, and c in a small ball around an initial guess
-    sigma_guess = 3
+    sigma_guess = 2.5
     
     if fit_adc_count_per_MeV:
         init_guess = np.array((theta_guess, phi_guess, *best_point, trace_sim.counts_per_MeV, sigma_guess, sigma_guess))
@@ -123,31 +177,31 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         theta, phi, x,y,z, E_or_m, sigma_xy, sigma_z = params
         if fit_adc_count_per_MeV:
             trace_sim.counts_per_MeV = E_or_m
-            particle.initial_energy = Eknown
+            trace_sim.sims[0].initial_energy = Eknown
         else:
             if fix_energy:
-                particle.initial_energy = Eknown
+                trace_sim.sims[0].initial_energy = Eknown
             else:
-                particle.initial_energy = E_or_m
+                trace_sim.sims[0].initial_energy = E_or_m
             trace_sim.counts_per_MeV = 129600. #using mean value fit when this was a free parameter
         
 
-        #enforce particle direction
-        vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
-        if np.dot(vhat, direction*track_direction_vec) < 0:
-            return np.inf
+        # #enforce particle direction
+        # vhat = np.array([np.sin(theta)*np.cos(phi), np.sin(theta)*np.sin(phi), np.cos(theta)])
+        # if np.dot(vhat, direction*track_direction_vec) < 0:
+        #     return np.inf
 
-        if z > trace_sim.num_trace_bins*trace_sim.zscale or z<0:
-            return np.inf
-        if x**2 + y**2 > 40**2:
-            return np.inf
-        if particle.initial_energy < 0 or particle.initial_energy  > 10: #stopping power tables currently only go to 10 MeV
-            return np.inf
+        # if z > trace_sim.num_trace_bins*trace_sim.zscale or z<0:
+        #     return np.inf
+        # if x**2 + y**2 > 40**2:
+        #     return np.inf
+        # if particle.initial_energy < 2 or particle.initial_energy  > 10: #stopping power tables currently only go to 10 MeV
+        #     return np.inf
         
-        particle.theta, particle.phi = theta, phi
+        trace_sim.sims[0].theta, trace_sim.sims[0].phi = theta, phi
         trace_sim.initial_point = (x,y,z)
-        trace_sim.sigma_xy = sigma_xy
-        trace_sim.sigma_z = sigma_z
+        trace_sim.sims[0].sigma_xy = sigma_xy
+        trace_sim.sims[0].sigma_z = sigma_z
         
         trace_sim.simulate_event()
         if least_squares:
@@ -178,12 +232,13 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
     print('starting optimization of event %d in run %d with particle %s'%(event, run, particle_type))
-    res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,))
+    bnds = ((0,3.2),(0,6.3),(0,40),(0,40),(0,400),(1.0,10.0),(0.1,6.0),(0.1,6.0))
+    res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,),bounds = bnds)
     if use_likelihood:
         res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
 
     if return_dict != None:
-        to_minimize(res.x, use_likelihood) #make sure sim is updated with best params
+        to_minimize(res.x, True) #make sure sim is updated with best params
         return_dict[return_key] = (res, trace_sim)
         print(return_key, res)
         print('total completed in direction %d:'%direction, len(return_dict.keys()))
@@ -311,7 +366,7 @@ else:
     for evt in fit_results_dict:
         max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(evt)
         l = np.sqrt(dxy**2 + dz**2)
-        event_catagory = classify(l, counts)
+        event_catagory = classify(l, counts, experiment=experiment)
         events_in_catagory[event_catagory].append(evt)
 
 evts, thetas, phis,xs,ys,zs, lls, cats, Es, Erecs, nfev, sigma_xys, sigma_zs = [], [],[],[],[],[],[],[],[],[],[],[],[]
@@ -342,10 +397,13 @@ Es = np.array(Es)
 lls = np.array(lls)
 evts = np.array(evts)
 cats = np.array(cats)
-
+print(Es)
 def show_fit(evt):
     i = np.where(evt==evts)[0][0]
     sim = trace_sims[i]
+    # for var, value in vars(sim).items():
+    #     print(f"{var}")
+    sim.simulate_event()
     sim.plot_simulated_3d_data(threshold=25)
     sim.plot_residuals_3d(threshold=25)
     sim.plot_residuals()
@@ -369,7 +427,7 @@ for i in range(len(evts)):
         val = np.max(np.abs(residuals_dict[pad]))/max_trace
         if  val > max_residual_fraction:
             max_residual_fraction = val
-    print(evts[i], max_residual_fraction)
+    # print(evts[i], max_residual_fraction)
     #only fit events with residuals no more than 40% of traces
     #and no more than 2x the median for the catagory
     # if  max_residual_fraction < 0.4:#higher energy proton #:
@@ -387,6 +445,7 @@ peak_vals = []
 peak_threshold = 10
 for evt, sim in zip(evts_to_fit, trace_sims):
     simulated_traces = sim.sim_traces
+    show_fit(evt)
     for pad in simulated_traces:
         if pad not in sim.traces_to_fit:
             continue

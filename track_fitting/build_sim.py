@@ -23,13 +23,18 @@ read_data_mode = 'unchanged'
 #detector settings
 #list of 2 point calibrations, inexed by experiment and then run number.
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
+# calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
+#                         {124:((90625 , 192102 ),(0.7856, 1.633))},
+#                     'e24joe':
+#                         {124:((7.33e5, 7.91e5, 1.01e6),(6.288, 6.778, 8.7849)),
+#                          193:((7.33e5, 7.91e5, 1.01e6),(6.288, 6.778, 8.7849))} # TODO: adjust these calibration points using fits to both peaks. the runs drift quite a bit as well, so chack on that
+#                     }
 calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
                         {124:((90625 , 192102 ),(0.7856, 1.633))},
                     'e24joe':
-                        {124:((7.33e5, 7.91e5, 1.01e6),(6.288, 6.778, 8.7849)),
-                         193:((7.33e5, 7.91e5, 1.01e6),(6.288, 6.778, 8.7849))} # TODO: adjust these calibration points using fits to both peaks. the runs drift quite a bit as well, so chack on that
+                        {124:((0,665943),(0,8.7849)),
+                         193:((0,665943),(0,8.7849))}
                     }
-
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
     adc_counts, MeV = calibration_points[experiment][run]
     return (adc_counts[1] - adc_counts[0])/(MeV[1] - MeV[0])
