@@ -13,25 +13,26 @@ import cupy as cp
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 5
+experiment, run, N = 'e21072', 124, 4
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),(1, 'a4434'),(1, 'p770'),  (1, 'a2153')]
 # peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596')]#, (1, 'p1596', 'a2153')]
+peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p770', 'a2153')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
-exploit_symmetry = False #Assumes positive ions spread out quickly: f(r,w,t)=f0(r, sqrt(w^2 - kt))
+exploit_symmetry = False #f(r,w,t)=f0(r, sqrt(w^2 - kt))
 phi_dependence = False #currently only works if exploit symetry is True
 allow_beam_off_axis = True #if false, will assume electric field is centered at (0,0)
 opt_method = 'local'#annealing, shgo, or local
 t_bounds = False
 t_lower = 0.0
-t_upper = 0.02
+t_upper = 0.1
 force_0_to_0 = True
 offset_endpoints = True
+absolute = False
 
 
 
@@ -137,16 +138,17 @@ if experiment == 'e21072':
     cut_mask_dict['p770pp'] = cut_mask_dict['p770']&(angles>np.radians(70))
     cut_mask_dict['a4434pp'] = cut_mask_dict['a4434']&(angles>np.radians(70))
 
-if offset_endpoints:
-    total_track_widths = np.array(track_info_dict['width_above_threshold'])
-    endpoints_offset_dir1 = endpoints[:, 0, :] - endpoints[:, 1, :]
-    endpoints_offset_dir1 /= np.linalg.norm(endpoints_offset_dir1, axis=1)[:, np.newaxis]
-    endpoints[:, 0, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir1
-    endpoints_offset_dir2 = endpoints[:, 1, :] - endpoints[:, 0, :]
-    endpoints_offset_dir2 /= np.linalg.norm(endpoints_offset_dir2, axis=1)[:, np.newaxis]
-    endpoints[:, 1, :] -= (total_track_widths[:, np.newaxis]/2)*endpoints_offset_dir2
-    ranges_w_offset_endpoints = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
-
+# if offset_endpoints:
+#     offset_multiplier = 0.25
+#     total_track_widths = np.array(track_info_dict['width_above_threshold'])
+#     endpoints_offset_dir1 = endpoints[:, 0, :] - endpoints[:, 1, :]
+#     endpoints_offset_dir1 /= np.linalg.norm(endpoints_offset_dir1, axis=1)[:, np.newaxis]
+#     endpoints[:, 0, :] -= (total_track_widths[:, np.newaxis]*offset_multiplier)*endpoints_offset_dir1
+#     endpoints_offset_dir2 = endpoints[:, 1, :] - endpoints[:, 0, :]
+#     endpoints_offset_dir2 /= np.linalg.norm(endpoints_offset_dir2, axis=1)[:, np.newaxis]
+#     endpoints[:, 1, :] -= (total_track_widths[:, np.newaxis]*offset_multiplier)*endpoints_offset_dir2
+#     ranges_w_offset_endpoints = np.linalg.norm(endpoints[:,0] - endpoints[:,1], axis=1)
+    
 #plot showing selected events of each type
 rve_plt_mask = (ranges>0)&(ranges<150)&(counts>0)&veto_mask&(MeV<8)
 fig, axs = plt.subplots(2,2)
@@ -160,6 +162,8 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
                                        norm=matplotlib.colors.LogNorm(), alpha=1, cmin=np.min(hist), cmax=np.max(hist))
     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
+
+
 
 plt.figure()
 width_hist_bins = np.linspace(1,5,100)
@@ -271,13 +275,21 @@ else:
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
 
-def map_endpoints(a_ijk, event_select_mask, beam_xy=(0,0)):
+def map_endpoints(a_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
     beam_xy = np.array(beam_xy)
     selected_endpoints = endpoints[event_select_mask]
-    p1_init = selected_endpoints[:,0,:2] - beam_xy
-    p2_init = selected_endpoints[:,1,:2] - beam_xy
     t = times_since_start_of_window[event_select_mask]
     w = track_widths[event_select_mask]
+    if offset_endpoints:
+        endpoints_offset_dir1 = selected_endpoints[:, 0, :] - selected_endpoints[:, 1, :]
+        endpoints_offset_dir1 /= np.linalg.norm(endpoints_offset_dir1, axis=1)[:, np.newaxis]
+        selected_endpoints[:, 0, :] -= (w[:, np.newaxis]*offset_multiplier)*endpoints_offset_dir1
+        endpoints_offset_dir2 = selected_endpoints[:, 1, :] - selected_endpoints[:, 0, :]
+        endpoints_offset_dir2 /= np.linalg.norm(endpoints_offset_dir2, axis=1)[:, np.newaxis]
+        selected_endpoints[:, 1, :] -= (w[:, np.newaxis]*offset_multiplier)*endpoints_offset_dir2
+    
+    p1_init = selected_endpoints[:,0,:2] - beam_xy
+    p2_init = selected_endpoints[:,1,:2] - beam_xy
     r1_init = np.einsum('ij,ij->i', p1_init, p1_init)**0.5
     r2_init = np.einsum('ij,ij->i', p2_init, p2_init)**0.5
     cosphi1 = p1_init[:,0]/r1_init
@@ -294,24 +306,29 @@ def map_endpoints(a_ijk, event_select_mask, beam_xy=(0,0)):
     return to_return
 
 
-def map_ranges(a_ijk, event_select_mask, beam_xy=(0,0)):
+def map_ranges(a_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
     #map ranges as range -> range_from_mapped_r - c*width
-    new_endpoints = map_endpoints(a_ijk, event_select_mask, beam_xy)
+    new_endpoints = map_endpoints(a_ijk, event_select_mask, beam_xy, offset_multiplier)
     return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) #track_widths[event_select_mask]
 
 
-def to_minimize(a_ijk, beam_xy=(0,0)):
+def to_minimize(a_ijk, beam_xy=(0,0), offset_multiplier=0):
     range_hist_dict = {} #dict to avoid doing the same rmap twice
     to_return = 0
-    for weight, ptype in peak_widths_to_minimize:
-        range_hist_dict[ptype] = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy)
-        to_return += weight*np.std(range_hist_dict[ptype])**2
-    for weight, ptype1, ptype2 in peak_spacings_to_preserve:
-        if ptype1 not in range_hist_dict:
-            range_hist_dict[ptype1] = map_ranges(a_ijk, cut_mask_dict[ptype1], beam_xy)
-        if ptype2 not in range_hist_dict:
-            range_hist_dict[ptype2] = map_ranges(a_ijk, cut_mask_dict[ptype2], beam_xy)
-        to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
+    if absolute:
+        for weight, ptype in peak_widths_to_minimize:
+            ranges = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy, offset_multiplier)
+            to_return += np.mean((ranges - true_range_dict[ptype])**2)
+    else:
+        for weight, ptype in peak_widths_to_minimize:
+            range_hist_dict[ptype] = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy, offset_multiplier)
+            to_return += weight*np.std(range_hist_dict[ptype])**2
+        for weight, ptype1, ptype2 in peak_spacings_to_preserve:
+            if ptype1 not in range_hist_dict:
+                range_hist_dict[ptype1] = map_ranges(a_ijk, cut_mask_dict[ptype1], beam_xy, offset_multiplier)
+            if ptype2 not in range_hist_dict:
+                range_hist_dict[ptype2] = map_ranges(a_ijk, cut_mask_dict[ptype2], beam_xy, offset_multiplier)
+            to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
     return to_return
 
 fname_template = '%s_run%d_rmap_order%d.pkl'
@@ -340,6 +357,8 @@ if offset_endpoints:
     fname_template = 'offset_points_'+fname_template
 if force_0_to_0:
     fname_template = '0to0_' + fname_template
+if absolute:
+    fname_template = 'abs_' + fname_template
 fname_template = opt_method + '_' +fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
@@ -360,6 +379,8 @@ else:
     if allow_beam_off_axis:
         guess.append(0)
         guess.append(0)
+    if offset_endpoints:
+        guess.append(0)
 
     
     # if os.path.exists(previous_fname):
@@ -377,11 +398,20 @@ else:
     #             for new_index, ijk in enumerate(ijk_array):
     #                 if np.all(ijk == prev_ijk):
     #                     guess[new_index] = prev_a_ijk
-    if allow_beam_off_axis:
-        f_to_min = lambda x: to_minimize(x[:-2], x[-2:])
+    def f_to_min(x):
+        if offset_endpoints:
+            offset_multiplier = x[-1]
+            x = x[:-1]
+        else:
+            offset_multiplier = 0
+        if allow_beam_off_axis:
+            beam_xy = x[-2:]
+            x = x[:-2]
+        else:
+            beam_xy = (0,0)
+        a_ijk = x
+        return to_minimize(a_ijk, beam_xy, offset_multiplier)
         
-    else:
-        f_to_min = lambda x: to_minimize(x)
 
     bounds = [[-50, 50] for i in range(len(ijk_array))]
     if exploit_symmetry:
@@ -394,7 +424,7 @@ else:
     tlast = time.time()
     def callback(x, fig='%s update', save_intermediate_res=True):
         global tlast
-        print(x, to_minimize(x))
+        print(x, f_to_min(x))
         print('%f s'%(time.time() - tlast))
         tlast = time.time()
     if allow_beam_off_axis:
@@ -411,12 +441,19 @@ else:
         res = opt.minimize(f_to_min, guess, callback=callback)
     with open(fname, 'wb') as file:
         pickle.dump(res, file)
-if allow_beam_off_axis:
-    a_ijk_best = res.x[:-2]
-    beam_xy_best = res.x[-2:]
+x = res.x
+if offset_endpoints:
+    offset_multiplier_best = x[-1]
+    x = x[:-1]
 else:
-    a_ijk_best = res.x
-    beam_xy_best = np.zeros(2)
+    offset_multiplier_best = 0
+if allow_beam_off_axis:
+    beam_xy_best = x[-2:]
+    x = x[:-2]
+else:
+    beam_xy_best = (0,0)
+a_ijk_best = x
+
 print(res)
 
         
@@ -428,7 +465,7 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
-mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best)
+mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best, offset_multiplier_best)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
@@ -445,8 +482,8 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     range_hist_bins = np.linspace(true_range-25, true_range+25, 100)
     ax.set_title(label)
     ax.hist(ranges[mask], bins=range_hist_bins, alpha=0.6, label='uncorrected range; std=%g'%np.std(ranges[mask]))
-    if offset_endpoints:
-        ax.hist(ranges_w_offset_endpoints[mask], bins=range_hist_bins, alpha=0.6, label='offset endpoint range; std=%g'%np.std(ranges_w_offset_endpoints[mask]))
+    # if offset_endpoints:
+    #     ax.hist(ranges_w_offset_endpoints[mask], bins=range_hist_bins, alpha=0.6, label='offset endpoint range; std=%g'%np.std(ranges_w_offset_endpoints[mask]))
     ax.hist(mapped_ranges[mask], bins=range_hist_bins, alpha=0.6, label='corrected range; std=%g'%np.std(mapped_ranges[mask]))
     ax.legend()
 
