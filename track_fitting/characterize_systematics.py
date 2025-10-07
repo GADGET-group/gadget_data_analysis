@@ -68,8 +68,8 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     #trace_sim.counts_per_MeV *= 1.058
     trace_sim.pad_gain_match_uncertainty = m_guess
     trace_sim.other_systematics = c_guess
-    # print(trace_sim.traces_to_fit)
-    # h5file.plot_3d_traces(9091, threshold=100)
+    trace_sim.sims[0].adaptive_stopping_power = False
+    trace_sim.sims[0].num_stopping_power_points = trace_sim.sims[0].get_num_stopping_points_for_energy(Eknown)
     x_real, y_real, z_real, e_real = trace_sim.get_xyze(threshold=h5file.length_counts_threshold, traces=trace_sim.traces_to_fit)
     # print("x_real, y_real, z_real, e_real: ",x_real, y_real, z_real, e_real)
     # print("len x_real, len y_real, len z_real, len e_real: ",len(x_real), len(y_real), len(z_real), len(e_real))
@@ -77,9 +77,9 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     #set zmax to length of trimmed traces
     zmax = trace_sim.num_trace_bins*trace_sim.zscale
 
-    track_center, track_direction_vec = h5file.get_track_axis(event)
-    track_direction_vec = track_direction_vec[0]
-
+    # track_center, track_direction_vec = h5file.get_track_axis(event)
+    # track_direction_vec = track_direction_vec[0]
+    track_direction_vec = []
     d_best, best_point_1, best_point_2 = np.inf, None, None #distance along track in direction of particle motion. Make as negative as possible
     # if self.remove_outliers:
     #     labeled_image = skimage.measure.label(pad_image, background=0)
@@ -169,9 +169,9 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     sigma_guess = 2.5
     
     if fit_adc_count_per_MeV:
-        init_guess = np.array((theta_guess, phi_guess, *best_point, trace_sim.counts_per_MeV, sigma_guess, sigma_guess))
+        init_guess = np.array((theta_guess, phi_guess, best_point[0], best_point[1], best_point[2], trace_sim.counts_per_MeV, sigma_guess, sigma_guess))
     else:
-        init_guess = np.array((theta_guess, phi_guess, *best_point, Eknown, sigma_guess, sigma_guess))
+        init_guess = np.array((theta_guess, phi_guess, best_point[0], best_point[1], best_point[2], Eknown, sigma_guess, sigma_guess))
 
     def to_minimize(params, least_squares):
         theta, phi, x,y,z, E_or_m, sigma_xy, sigma_z = params
@@ -232,7 +232,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         trace_sim.plot_simulated_3d_data(threshold=25)
         plt.show(block=True)
     print('starting optimization of event %d in run %d with particle %s'%(event, run, particle_type))
-    bnds = ((0,3.2),(0,6.3),(0,40),(0,40),(0,400),(1.0,10.0),(0.1,6.0),(0.1,6.0))
+    bnds = ((0,3.2),(0,6.3),(-40,40),(-40,40),(0,400),(1.0,10.0),(0.1,6.0),(0.1,6.0))
     res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,),bounds = bnds)
     if use_likelihood:
         res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
@@ -241,7 +241,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         to_minimize(res.x, True) #make sure sim is updated with best params
         return_dict[return_key] = (res, trace_sim)
         print(return_key, res)
-        print('total completed in direction %d:'%direction, len(return_dict.keys()))
+        print('total fits completed in direction %d:'%direction, len(return_dict.keys()))
     if debug_plots:
         print(res)
         trace_sim.plot_residuals_3d(title=[str(return_key),particle_type], threshold=20)
@@ -331,7 +331,7 @@ if not load_previous_fit:
         max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(n) # process event to extract length and ADC counts
         l = np.sqrt(dxy**2 + dz**2)
         event_catagory = classify(l, counts, experiment) # classify event based on processed event
-        print('event %d classified as %d'%(n, event_catagory))
+        # print('event %d classified as %d'%(n, event_catagory))
         # now fit the event forwards and backwards if it was not vetoed, was categorized properly, and we still need an event from that category
         if max_veto_counts < veto_threshold and event_catagory >= 0 and len(events_in_catagory[event_catagory]) < events_per_catagory: 
             particle_type, include_recoil, E = ptype_and_recoil_dict[event_catagory]
@@ -344,7 +344,7 @@ if not load_previous_fit:
                                                         n, backward_fit_results_dict)))
             processes[-1].start()
             events_in_catagory[event_catagory].append(n)
-            print(n, event_catagory, [len(x) for x in events_in_catagory])
+            print("Event %d classified as %d. Events in each category: "%(n, event_catagory), [len(x) for x in events_in_catagory])
         n += 1
     #wait for all processes to end
     for p in processes:
@@ -362,7 +362,7 @@ if not load_previous_fit:
 else:
     with open(pickle_fname, 'rb') as f:
         fit_results_dict = pickle.load(f)
-    events_in_catagory =  [[] for i in range(8)]
+    events_in_catagory =  [[] for i in range(3)]
     for evt in fit_results_dict:
         max_veto_counts, dxy, dz, counts, angle, pads_railed = h5file.process_event(evt)
         l = np.sqrt(dxy**2 + dz**2)

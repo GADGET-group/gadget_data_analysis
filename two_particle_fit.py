@@ -244,19 +244,33 @@ def fit_event(event, best_point, best_point_end, Eknown = 6.288, particle_type =
     ftol = 0.01
     global flast
     flast = np.inf
+    global stuck_counter
+    stuck_counter = 0
+    stuck_tol = 1e-6
+    global max_stuck_iters
+    max_stuck_iters = 3
     def callback(intermediate_result: opt.OptimizeResult):
         global flast
         print(intermediate_result.x, intermediate_result.fun)
         if np.abs(flast - intermediate_result.fun) < ftol:
             raise StopIteration
         flast = intermediate_result.fun
+        at_lower = np.any(np.isclose(intermediate_result.x, [b[0] for b in bnds], atol = stuck_tol))
+        at_upper = np.any(np.isclose(intermediate_result.x, [b[1] for b in bnds], atol = stuck_tol))
+        if at_lower or at_upper:
+            stuck_counter += 1
+        else:
+            stuck_counter = 0
+        if stuck_counter >= max_stuck_iters:
+            raise RuntimeError("Minimizer Stopped: params stuck on bounds.")
+            
     if not use_likelihood and fit:
         print('Fitting event: direction, guess, least_squares:', direction, init_guess, to_minimize(scaled_init_guess, True))
-        bnds = ((0,1),(0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
+        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5),(0,1))
         res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,), callback=callback, bounds = bnds)# , options={'gtol': 1e-5,'ftol':1e-5})
     if use_likelihood and fit:
         print('Fitting event: direction, guess, likelihood:', direction, init_guess, to_minimize(scaled_init_guess, False))
-        bnds = ((0,1),(0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5))
+        bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5),(0,1))
         res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(False,), callback=callback, bounds = bnds)#options={'gtol': 1e-5,'ftol':1e-5})
         print(res)
     if not fit:
