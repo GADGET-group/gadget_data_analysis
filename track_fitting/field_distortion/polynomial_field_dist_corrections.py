@@ -13,7 +13,7 @@ import cupy as cp
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 2
+experiment, run, N = 'e21072', 124, 5
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),(1, 'a4434'),(1, 'p770'),  (1, 'a2153')]
@@ -31,7 +31,7 @@ t_bounds = False
 t_lower = 0.0
 t_upper = 0.02
 force_0_to_0 = True
-offset_endpoints = False
+offset_endpoints = True
 
 
 
