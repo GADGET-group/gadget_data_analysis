@@ -13,13 +13,14 @@ import cupy as cp
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 4
+experiment, run, N = 'e21072', 124, 3
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1596'),(1, 'a4434'),(1, 'p770'),  (1, 'a2153')]
+peak_widths_to_minimize = [(1, 'p1596'),(1, 'a2153'),(1, 'a4434'),(1, 'p770')]
 # peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
+#peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'absolute', 'a2153'), (1, 'p770', 'absolute')]
 peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p770', 'a2153')]
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
@@ -32,7 +33,6 @@ t_lower = 0.0
 t_upper = 0.1
 force_0_to_0 = True
 offset_endpoints = True
-absolute = False
 
 
 
@@ -104,7 +104,8 @@ label_dict = {}
 if experiment == 'e21072':
     true_range_dict = {'p1596': 51.6, 'p1596pp': 51.6, 'p770':16.8, 'p770pp':16.8, 
                        'a4434wr':30.6, 'a4434wor':30.6, 'a4434':30.6,'a4434pp':30.6,
-                        'a2153':11.8, 'a2153wr':11.8, 'a2153wor':11., 'p1927':0}
+                        'a2153':11.8, 'a2153wr':11.8, 'a2153wor':11., 
+                        'absolute': 0}
     label_dict['p770'] = '770 keV protons'
     label_dict['p770pp'] = '770 keV protons within 20 deg of pad plane'
     label_dict['p1596'] = '~1596 keV protons'
@@ -118,7 +119,7 @@ if experiment == 'e21072':
     label_dict['a2153wr'] = '2153 keV alpha with recoil'
     label_dict['p1927']='>1900 keV protons'
     if run==124:
-        cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (counts > 1.64e5) & (counts < 2.15e5) & veto_mask
+        cut_mask_dict['p1596'] = (ranges > 31) & (ranges < 65) & (MeV > 1.52) & (MeV < 1.77) & veto_mask
         cut_mask_dict['p770'] = (ranges>15) & (ranges<26) & (counts>8.67e4) & (MeV<0.87) & veto_mask
         cut_mask_dict['a4434'] = (ranges>25) & (ranges<50) & (counts>4.5e5) & (counts < 7e5) & veto_mask
         cut_mask_dict['a2153'] = (ranges>16) & (ranges<28) & (counts>2.25e5) & (counts<3.4e5) & veto_mask
@@ -160,7 +161,7 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     hist,xbins,ybins,plot = ax.hist2d(MeV[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm(), alpha=0.25)
     hist,xbins,ybins,plot = ax.hist2d(MeV[rve_plt_mask&mask], ranges[rve_plt_mask&mask], bins=[xbins, ybins],
                                        norm=matplotlib.colors.LogNorm(), alpha=1, cmin=np.min(hist), cmax=np.max(hist))
-    ax.set(xlabel='track width (mm)', ylabel='range (mm)')
+    ax.set(xlabel='Energy (MeV)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
 
 
@@ -313,22 +314,17 @@ def map_ranges(a_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
 
 
 def to_minimize(a_ijk, beam_xy=(0,0), offset_multiplier=0):
-    range_hist_dict = {} #dict to avoid doing the same rmap twice
+    range_hist_dict = {'absolute':[0]} #dict to avoid doing the same rmap twice
     to_return = 0
-    if absolute:
-        for weight, ptype in peak_widths_to_minimize:
-            ranges = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy, offset_multiplier)
-            to_return += np.mean((ranges - true_range_dict[ptype])**2)
-    else:
-        for weight, ptype in peak_widths_to_minimize:
-            range_hist_dict[ptype] = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy, offset_multiplier)
-            to_return += weight*np.std(range_hist_dict[ptype])**2
-        for weight, ptype1, ptype2 in peak_spacings_to_preserve:
-            if ptype1 not in range_hist_dict:
-                range_hist_dict[ptype1] = map_ranges(a_ijk, cut_mask_dict[ptype1], beam_xy, offset_multiplier)
-            if ptype2 not in range_hist_dict:
-                range_hist_dict[ptype2] = map_ranges(a_ijk, cut_mask_dict[ptype2], beam_xy, offset_multiplier)
-            to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
+    for weight, ptype in peak_widths_to_minimize:
+        range_hist_dict[ptype] = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy, offset_multiplier)
+        to_return += weight*np.std(range_hist_dict[ptype])**2
+    for weight, ptype1, ptype2 in peak_spacings_to_preserve:
+        if ptype1 not in range_hist_dict:
+            range_hist_dict[ptype1] = map_ranges(a_ijk, cut_mask_dict[ptype1], beam_xy, offset_multiplier)
+        if ptype2 not in range_hist_dict:
+            range_hist_dict[ptype2] = map_ranges(a_ijk, cut_mask_dict[ptype2], beam_xy, offset_multiplier)
+        to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
     return to_return
 
 fname_template = '%s_run%d_rmap_order%d.pkl'
@@ -357,8 +353,6 @@ if offset_endpoints:
     fname_template = 'offset_points_'+fname_template
 if force_0_to_0:
     fname_template = '0to0_' + fname_template
-if absolute:
-    fname_template = 'abs_' + fname_template
 fname_template = opt_method + '_' +fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
@@ -494,7 +488,7 @@ fig.set_figwidth(10)
 r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
 for ax, t in zip(axs.reshape(-1), [0,0.025,0.05,0.075]): 
     ax.set_title('r map for tracks at t=%g s'%t)
-    for w in np.arange(2, 3.51, 0.25):
+    for w in np.arange(2, 3.21, 0.2):
         ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) , label='%f mm'%w)#- r_obs
     ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep')# - r_obs (mm)
     ax.legend()
@@ -516,8 +510,8 @@ r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
 for ax, w in zip(axs.reshape(-1), [2, 2.25, 2.5, 2.75]): 
     ax.set_title('r map for track with %f mm width'%w)
     for t in np.linspace(0, 0.1, 10):
-        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w) - r_obs, label='%f s'%t)
-    ax.set(xlabel='position charge was observed (mm)', ylabel='r_dep - r_obs (mm)')
+        ax.plot(r_obs, map_r(a_ijk_best, r_obs, t, w), label='%f s'%t)
+    ax.set(xlabel='r_obs (mm)', ylabel='r_dep (mm)')
     ax.legend()
 
 fig, axs = plt.subplots(2,2)
