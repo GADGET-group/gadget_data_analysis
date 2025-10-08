@@ -13,7 +13,7 @@ import cupy as cp
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 3
+experiment, run, N = 'e21072', 124, 4
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),(1, 'a2153'),(1, 'a4434'),(1, 'p770')]
@@ -34,6 +34,7 @@ t_upper = 0.1
 force_0_to_0 = True
 offset_endpoints = True
 
+z_field_dist = True
 
 
 #include up to 4 particles to make scatter plots and histograms for
@@ -275,8 +276,23 @@ else:
         new_r[new_r < r] = r[new_r < r] #don't allow Efield to move electrons away from the beam axis
         new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
+    
+if z_field_dist:
+    def z_offset(b_ijk, r, t, w):
+        #expand about r=61 mm, and force offset to be 0 here since the field cage should ensure constant electric field
+        #this forcing will only happen if force_0_to_0 is true
+        #The idea here is that certain electron trajectories might be sped up or slowed down compared to those near the field cage
+        r_scaled = (61 - r)/rscale
+        t_scaled = t/tscale
+        w_scaled = w/wscale
 
-def map_endpoints(a_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
+        z_offset = np.zeros(len(r))
+        for ijk, b in zip(ijk_array, b_ijk):
+            i,j,k = ijk
+            z_offset += b*(r_scaled**i)*(t_scaled**j)*(w_scaled**k)
+        return z_offset
+
+def map_endpoints(a_ijk, b_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
     beam_xy = np.array(beam_xy)
     selected_endpoints = endpoints[event_select_mask]
     t = times_since_start_of_window[event_select_mask]
@@ -304,26 +320,29 @@ def map_endpoints(a_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
     rscale2[r2_init==0] = 0
     to_return[:,0,:2] = np.einsum('ij,i ->ij', p1_init, rscale1) + beam_xy
     to_return[:,1,:2] = np.einsum('ij,i ->ij', p2_init, rscale2) + beam_xy
+    if z_field_dist:
+        to_return[:, 0, 2] += z_offset(b_ijk, r1_init, t, w)
+        to_return[:, 1, 2] += z_offset(b_ijk, r2_init, t, w)
     return to_return
 
 
-def map_ranges(a_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
+def map_ranges(a_ijk, b_ijk, event_select_mask, beam_xy=(0,0), offset_multiplier=0):
     #map ranges as range -> range_from_mapped_r - c*width
-    new_endpoints = map_endpoints(a_ijk, event_select_mask, beam_xy, offset_multiplier)
+    new_endpoints = map_endpoints(a_ijk,  b_ijk, event_select_mask, beam_xy, offset_multiplier)
     return np.linalg.norm(new_endpoints[:,0,:] - new_endpoints[:, 1,:], axis=1) #track_widths[event_select_mask]
 
 
-def to_minimize(a_ijk, beam_xy=(0,0), offset_multiplier=0):
+def to_minimize(a_ijk, b_ijk, beam_xy, offset_multiplier):
     range_hist_dict = {'absolute':[0]} #dict to avoid doing the same rmap twice
     to_return = 0
     for weight, ptype in peak_widths_to_minimize:
-        range_hist_dict[ptype] = map_ranges(a_ijk, cut_mask_dict[ptype], beam_xy, offset_multiplier)
+        range_hist_dict[ptype] = map_ranges(a_ijk, b_ijk, cut_mask_dict[ptype], beam_xy, offset_multiplier)
         to_return += weight*np.std(range_hist_dict[ptype])**2
     for weight, ptype1, ptype2 in peak_spacings_to_preserve:
         if ptype1 not in range_hist_dict:
-            range_hist_dict[ptype1] = map_ranges(a_ijk, cut_mask_dict[ptype1], beam_xy, offset_multiplier)
+            range_hist_dict[ptype1] = map_ranges(a_ijk, b_ijk, cut_mask_dict[ptype1], beam_xy, offset_multiplier)
         if ptype2 not in range_hist_dict:
-            range_hist_dict[ptype2] = map_ranges(a_ijk, cut_mask_dict[ptype2], beam_xy, offset_multiplier)
+            range_hist_dict[ptype2] = map_ranges(a_ijk, b_ijk, cut_mask_dict[ptype2], beam_xy, offset_multiplier)
         to_return += weight*(np.mean(range_hist_dict[ptype1]) - np.mean(range_hist_dict[ptype2]) - (true_range_dict[ptype1] - true_range_dict[ptype2]))**2
     return to_return
 
@@ -353,6 +372,8 @@ if offset_endpoints:
     fname_template = 'offset_points_'+fname_template
 if force_0_to_0:
     fname_template = '0to0_' + fname_template
+if z_field_dist:
+    fname_template = 'zdist_' + fname_template
 fname_template = opt_method + '_' +fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
@@ -366,6 +387,9 @@ else:
     previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
     #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
     guess = [0 for i in range(len(ijk_array))]
+    if z_field_dist:
+        for i in range(len(ijk_array)):
+            guess.append(0)
     if exploit_symmetry:
         guess.append(0.09/Dscale) #D, sqrt(mm)
         guess.append(3000/vscale) #v, mm/s
@@ -403,8 +427,13 @@ else:
             x = x[:-2]
         else:
             beam_xy = (0,0)
+        if z_field_dist:
+            b_ijk = x[-len(ijk_array):]
+            x = x[:-len(ijk_array)]
+        else:
+            b_ijk = []
         a_ijk = x
-        return to_minimize(a_ijk, beam_xy, offset_multiplier)
+        return to_minimize(a_ijk, b_ijk, beam_xy, offset_multiplier)
         
 
     bounds = [[-50, 50] for i in range(len(ijk_array))]
@@ -446,6 +475,11 @@ if allow_beam_off_axis:
     x = x[:-2]
 else:
     beam_xy_best = (0,0)
+if z_field_dist:
+    b_ijk_best = x[-len(ijk_array):]
+    x = x[:-len(ijk_array)]
+else:
+    b_ijk_best = []
 a_ijk_best = x
 
 print(res)
@@ -459,7 +493,7 @@ plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
 plt.colorbar()
 
-mapped_ranges = map_ranges(a_ijk_best, ranges==ranges, beam_xy_best, offset_multiplier_best)
+mapped_ranges = map_ranges(a_ijk_best, b_ijk_best, ranges==ranges, beam_xy_best, offset_multiplier_best)
 plt.figure()
 plt.title('run %d RvE corrected using r-map'%run)
 rve_plt_mask = (mapped_ranges>0)&(mapped_ranges<150)&(counts>0)&(MeV<8)  & veto_mask
