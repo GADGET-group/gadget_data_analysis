@@ -30,18 +30,14 @@ class IndividualEventFrame(ttk.Frame):
         self.event_num_entry.grid(row=0, column=1)
 
         self.threeD_frame = ttk.LabelFrame(self, text='Point Cloud Viewer')
-        track_w_trace_button = ttk.Button(self.threeD_frame,
-                                          text='Show Track w/ Trace (Point Cloud)',
-                                          command = self.track_w_trace)
-        track_w_trace_button.grid(row=0, column=0) #, columnspan=2
         track_w_trace_button_raw = ttk.Button(self.threeD_frame,
-                                          text='Show Track w/ Trace (Raw Data) : Unfiltered Trace',
+                                          text='Show Track w/ Trace : Unfiltered Trace',
                                           command = self.track_w_trace_raw)
-        track_w_trace_button_raw.grid(row=0, column=1)
+        track_w_trace_button_raw.grid(row=0, column=0)
         track_w_trace_button_raw_smooth = ttk.Button(self.threeD_frame,
-                                          text='Show Track w/ Trace (Raw Data) : Smooth Trace',
+                                          text='Show Track w/ Trace : Smooth Trace',
                                           command = self.track_w_trace_raw_smooth)
-        track_w_trace_button_raw_smooth.grid(row=1, column=0)
+        track_w_trace_button_raw_smooth.grid(row=0, column=1)
         ttk.Button(self.threeD_frame, text='3D Point Cloud', 
                    command=self.show_point_cloud).grid(row=2, column=0)
         ttk.Button(self.threeD_frame, text='3D Dense Point Cloud',
@@ -63,7 +59,7 @@ class IndividualEventFrame(ttk.Frame):
 
     def open_raw_viewer(self):
         new_window = tk.Toplevel(self)
-        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.file_path, flat_lookup_path='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         self.viewer_frame.pack()
 
     
@@ -132,23 +128,17 @@ class IndividualEventFrame(ttk.Frame):
         cbar = fig.colorbar(ax.get_children()[0])
         plt.show(block=False) 
 
-    def track_w_trace(self):
-        event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
-        plt.figure()
-        self.run_data.make_image(index, show=True)
-
     def track_w_trace_raw(self):
         event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
+        # index = self.run_data.get_index(event_num)
         plt.figure()
-        self.run_data.make_image(index, use_raw_data = True, show=True)
+        self.run_data.make_image(event_num, show=True)
 
     def track_w_trace_raw_smooth(self):
         event_num = int(self.event_num_entry.get())
         index = self.run_data.get_index(event_num)
         plt.figure()
-        self.run_data.make_image(index, use_raw_data = True, show=True, smoothen = True)
+        self.run_data.make_image(index, show=True, smoothen = True)
 
 
     def show_point_cloud(self):

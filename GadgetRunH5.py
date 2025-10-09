@@ -75,24 +75,9 @@ class GadgetRunH5:
     def __init__(self, run_num, folder_path):
         self.run_num = run_num
         self.folder_path = folder_path
-
-        #energy in adc counts
-        self.total_energy = np.load(os.path.join(folder_path, 'tot_energy.npy'), allow_pickle=True)
-        #
-        self.skipped_events = np.load(os.path.join(folder_path, 'skipped_events.npy'), allow_pickle=True)
-        #
-        self.veto_events = np.load(os.path.join(folder_path, 'veto_events.npy'), allow_pickle=True)
-        #list of event numbers selected for inclusion
-        self.good_events = np.load(os.path.join(folder_path, 'good_events.npy'), allow_pickle=True)
-        #track lengths
-        self.len_list = np.load(os.path.join(folder_path, 'len_list.npy'), allow_pickle=True)
-        #time series of charge collected
-        self.trace_list = np.load(os.path.join(folder_path, 'trace_list.npy'), allow_pickle=True)
-        #
-        self.angle_list = np.load(os.path.join(folder_path, 'angle_list.npy'), allow_pickle=True)
         self.file_path = get_h5_path() + ('run_%04d.h5'%run_num)
     
-        self.h5_file = raw_h5_file(self.file_path, flat_lookup_csv='./raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        self.h5_file = raw_h5_file(self.file_path, flat_lookup_csv='./raw_viewer/channel_mappings/flatlookup4cobos.csv', zscale=zscale)
         self.h5_file.background_subtract_mode='fixed window'
         self.h5_file.data_select_mode='near peak'
         self.h5_file.remove_outliers=True
@@ -113,13 +98,6 @@ class GadgetRunH5:
         self.energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
         self.energy_offset = energy_1 - self.energy_scale_factor * channel_1
         
-        self.total_energy_MeV = self.to_MeV(self.total_energy)
-
-        self.xHit_list = np.load(os.path.join(self.folder_path, 'xHit_list.npy'), allow_pickle=True)
-        self.yHit_list = np.load(os.path.join(self.folder_path, 'yHit_list.npy'), allow_pickle=True)
-        self.zHit_list = np.load(os.path.join(self.folder_path, 'zHit_list.npy'), allow_pickle=True)
-        self.eHit_list = np.load(os.path.join(self.folder_path, 'eHit_list.npy'), allow_pickle=True)
-        
     def to_MeV(self, counts):
         return counts*self.energy_scale_factor + self.energy_offset
     
@@ -130,7 +108,7 @@ class GadgetRunH5:
         '''
         Gets the index at which an event number can be found in the data
         '''
-        return np.where(self.good_events == event_num)[0][0]
+        return event_num
 
     def get_hit_lists(self, event_num):
         '''
@@ -138,10 +116,9 @@ class GadgetRunH5:
         the energy associated with each point.
         '''
         index = self.get_index(event_num)
-        return self.xHit_list[index], self.yHit_list[index], \
-            self.zHit_list[index], self.eHit_list[index]
+        return self.h5_file.get_xyze(index,threshold=20,include_veto_pads=False)
 
-    def make_image(self, index, use_raw_data = False ,save_path=None, show=False, smoothen=False):
+    def make_image(self, index, save_path=None, show=False, smoothen=False):
         '''
         Make datafused image of event at "index". Image will be saved to "save_path"
         if not None. 
@@ -306,7 +283,7 @@ class GadgetRunH5:
             ax.spines['left'].set_visible(False)
             ax.fill_between(x, trace, color='b', alpha=1)
             rand_num = random.randrange(0,1000000,1)
-            temp_strg = f'/mnt/projects/e21072/OfflineAnalysis/analysis_scripts/energy_depo_{rand_num}.jpg'
+            temp_strg = f'/egr/research-tpc/shared/temp/energy_depo_{rand_num}.jpg'
             plt.savefig(temp_strg, dpi=my_dpi)
             plt.close()
 
@@ -460,37 +437,31 @@ class GadgetRunH5:
 
             return xset, yset
 
-        if use_raw_data:
-            VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
-            file = self.h5_file
+        
+        VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
+        file = self.h5_file
 
-            xHit, yHit, zHit, eHit = file.get_xyze(self.good_events[index],threshold=20,include_veto_pads=False)
-            energy = np.sum(eHit)
-            pads,pad_data = file.get_pad_traces(self.good_events[index])
-            pads = np.array(pads)
-            pad_data = np.array(pad_data)
-            is_not_veto = ~np.isin(pads, VETO_PADS)
-            pad_data = pad_data[is_not_veto]
-            trace = np.sum(pad_data, axis=0)
-            max_val = np.argmax(trace)
-            low_bound = max_val - 75
-            if low_bound < 0:
-                low_bound = 5
-            upper_bound = max_val + 75
-            if upper_bound > 512:
-                upper_bound = 506
-            trace = trace[low_bound:upper_bound]
-            
-            if smoothen:
-                trace = smooth_trace(trace)
-            trace = remove_noise(trace)
-    
-        else:
-            xHit = self.xHit_list[index]
-            yHit = self.yHit_list[index]
-            eHit = self.eHit_list[index]
-            energy = self.total_energy[index]
-            trace = self.trace_list[index]
+        xHit, yHit, zHit, eHit = file.get_xyze(index,threshold=20,include_veto_pads=False)
+        energy = np.sum(eHit)
+        self.total_energy_MeV = eHit
+        pads,pad_data = file.get_pad_traces(index)
+        pads = np.array(pads)
+        pad_data = np.array(pad_data)
+        is_not_veto = ~np.isin(pads, VETO_PADS)
+        pad_data = pad_data[is_not_veto]
+        trace = np.sum(pad_data, axis=0)
+        max_val = np.argmax(trace)
+        low_bound = max_val - 75
+        if low_bound < 0:
+            low_bound = 5
+        upper_bound = max_val + 75
+        if upper_bound > 512:
+            upper_bound = 506
+        trace = trace[low_bound:upper_bound]
+        
+        if smoothen:
+            trace = smooth_trace(trace)
+        trace = remove_noise(trace)
 
         mm_grid = make_grid()
         pad_plane = np.repeat(mm_grid[np.newaxis, :, :], 1, axis=0)
@@ -509,10 +480,7 @@ class GadgetRunH5:
 
         title = "Particle Track"
         plt.rcParams['figure.figsize'] = [7, 7]
-        if use_raw_data:
-            plt.title(f' Image {self.good_events[index]} of {title} Event (Using Raw Data):', fontdict = {'fontsize' : 20})
-        else:
-            plt.title(f' Image {self.good_events[index]} of {title} Event (Using Point Cloud):', fontdict = {'fontsize' : 20})
+        plt.title(f' Image {index} of {title} Event:', fontdict = {'fontsize' : 20})
         plt.tick_params(top=False, bottom=False, left=False, right=False, labelleft=False, labelbottom=False)
         str_event_num = f"run{self.run_num}_image_{index}.jpg"
         plt.imshow(complete_image)
@@ -523,7 +491,7 @@ class GadgetRunH5:
         else:
             plt.close()
 
-    def save_cutImages(self, cut_indices, use_raw_data = False):
+    def save_cutImages(self, cut_indices):
 
         def make_box(mm_grid):
             """
@@ -819,41 +787,29 @@ class GadgetRunH5:
             import torch
             all_image_data = []  # List to store the results
             pbar = tqdm(total=len(cut_indices))
-            # xHit_list = np.load(os.path.join(sub_mymainpath, 'xHit_list.npy'), allow_pickle=True)
-            # yHit_list = np.load(os.path.join(sub_mymainpath, 'yHit_list.npy'), allow_pickle=True)
-            # eHit_list = np.load(os.path.join(sub_mymainpath, 'eHit_list.npy'), allow_pickle=True)
 
             for event_num in cut_indices:
-                if use_raw_data:
-                    VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
-                    file = self.h5_file
+                VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
+                file = self.h5_file
 
-                    xHit, yHit, zHit, eHit = file.get_xyze(self.good_events[event_num],threshold=20,include_veto_pads=False)
-                    energy = np.sum(eHit)
-                    pads,pad_data = file.get_pad_traces(self.good_events[event_num])
-                    pads = np.array(pads)
-                    pad_data = np.array(pad_data)
-                    is_not_veto = ~np.isin(pads, VETO_PADS)
-                    pad_data = pad_data[is_not_veto]
-                    trace = np.sum(pad_data, axis=0)
-                    max_val = np.argmax(trace)
-                    low_bound = max_val - 75
-                    if low_bound < 0:
-                        low_bound = 5
-                    upper_bound = max_val + 75
-                    if upper_bound > 512:
-                        upper_bound = 506
-                    trace = trace[low_bound:upper_bound]
-                    trace = smooth_trace(trace)
-                    trace = remove_noise(trace)
-
-                else:
-                    xHit = self.xHit_list[event_num]
-                    yHit = self.yHit_list[event_num]
-                    eHit = self.eHit_list[event_num]
-
-                    trace = self.trace_list[event_num]
-                    energy = self.total_energy[event_num]
+                xHit, yHit, zHit, eHit = file.get_xyze(event_num,threshold=20,include_veto_pads=False)
+                energy = np.sum(eHit)
+                pads,pad_data = file.get_pad_traces(event_num)
+                pads = np.array(pads)
+                pad_data = np.array(pad_data)
+                is_not_veto = ~np.isin(pads, VETO_PADS)
+                pad_data = pad_data[is_not_veto]
+                trace = np.sum(pad_data, axis=0)
+                max_val = np.argmax(trace)
+                low_bound = max_val - 75
+                if low_bound < 0:
+                    low_bound = 5
+                upper_bound = max_val + 75
+                if upper_bound > 512:
+                    upper_bound = 506
+                trace = trace[low_bound:upper_bound]
+                trace = smooth_trace(trace)
+                trace = remove_noise(trace)
 
                 # Call pt_shift function to move all 2D pts to pad centers
                 dset_0_copyx, dset_0_copyy = pt_shift(xHit, yHit)
@@ -862,16 +818,12 @@ class GadgetRunH5:
                 pad_plane = fill_padplane(dset_0_copyx, dset_0_copyy, eHit, energy, global_grid)
 
                 # Prepare the data necessary for plotting
-                image_title = f' Image {self.good_events[event_num]} of Particle Track Event'
+                image_title = f' Image {event_num} of Particle Track Event'
                 image_filename = f"run{self.run_num}_image_{event_num}.png"
 
                 all_image_data.append((pad_plane, trace, image_title, image_filename))  # Append the result to the list
 
                 pbar.update(n=1)
-
-            # del xHit_list 
-            # del yHit_list 
-            # del eHit_list
 
             return all_image_data  # Return the list of all results after the loop
 
@@ -1051,223 +1003,3 @@ def generate_files(run_num, length, ic, pads, eps, samps, poly):
             return scale_max
         else:
             return scale_min + (scale_max - scale_min) * (angle - angle_min) / (angle_max - angle_min)
-
-
-    def main(h5file, pads, ic):
-        """
-        This functions does the following: 
-        - Converts h5 files into ndarrays. 
-        - Removes outliers.
-        - Calls PCA to return track length.
-        - Sums mesh signal to return energy.
-        """
-        # Converts h5 files into ndarrays, and output each event dataset as a separte list
-        num_events = int(len(np.array(h5file['clouds'])))
-
-        len_list = []
-        good_events = []
-        tot_energy = []
-        trace_list = []
-        xHit_list = []
-        yHit_list = []
-        zHit_list = []
-        eHit_list = []
-        angle_list = []
-
-        cloud_missing = 0
-        skipped_events = 0
-        veto_events = 0
-
-        # Veto in "junk" region of plot (low energy, high range)
-        # Define veto region
-        y = np.array([20, 40, 60])
-        x = np.array([100000, 150000, 200000])
-        slope, intercept = np.polyfit(x, y, deg=1)
-
-        pbar = tqdm(total=num_events+1)
-        for i in range(1, num_events+1):
-
-            # Make copy of cloud datasets
-            str_cloud = f"evt{i}_cloud"
-            try:
-                cloud = np.array(h5file['clouds'][str_cloud])
-            except:
-                cloud_missing += 1
-                pbar.update(n=1)
-                continue
-
-            # Make copy of datasets
-            cloud_x = cloud[:,0]
-            cloud_y = cloud[:,1]
-            cloud_z = cloud[:,2]
-            #cloud_z = cloud[:,2] - np.min(cloud[:, 2])
-            cloud_e = cloud[:,3]
-            del cloud
-
-            # Apply veto condition
-            R = 36                           # Radius of the pad plane
-            r = np.sqrt(cloud_x**2 + cloud_y**2)
-            statements = np.greater(r, R)    # Check if any point lies outside of R
-
-            if np.any(statements) == True:
-                veto_events += 1
-                pbar.update(n=1)
-                continue
-            
-            # Apply pad threshold
-            x = (35 + cloud_x) * 2 + 42
-            y = 145 - (35 + cloud_y) * 2
-            xy_tuples = np.column_stack((x, y))
-            unique_xy_tuples = set(map(tuple, xy_tuples))
-            num_unique_tuples = len(unique_xy_tuples)
-
-            if num_unique_tuples <= pads:
-                skipped_events += 1
-                pbar.update(n=1)
-                continue
-
-            """
-            # Call remove_outliers to get dataset w/ outliers removed
-            cloud_x, cloud_y, cloud_z, cloud_e, veto = remove_outliers(cloud_x, cloud_y, cloud_z, cloud_e, pads)
-            if veto == True:
-                skipped_events += 1
-                pbar.update(n=1)
-                continue
-            """
-            # Move track next to pad plane for 3D view and scale by appropriate factor
-            cloud_z = (cloud_z  - np.min(cloud_z ))*zscale # Have also used 1.92
-            #cloud_z = (cloud_z  - np.min(cloud_z ))
-
-            # Call track_len() to create lists of all track lengths
-            length, veto_on_length, angle = track_len(cloud_x, cloud_y, cloud_z)
-            if veto_on_length == True:
-                veto_events += 1
-                pbar.update(n=1)
-                continue 
-
-            str_trace = f"evt{i}_data"
-            data_trace = np.array(h5file['get'][str_trace])
-            # pad_nums = data_trace[:,4]             
-
-            trace = np.sum(data_trace[:, -512:], axis=0)
-            del data_trace
-
-
-            max_val = np.argmax(trace)
-            low_bound = max_val - 75
-            if low_bound < 0:
-                low_bound = 5
-            upper_bound = max_val + 75
-            if upper_bound > 512:
-                upper_bound = 506
-            trace = trace[low_bound:upper_bound]
-
-            # Smooth trace
-            trace = smooth_trace(trace)
-
-            # Subtract background and fit trace
-            polynomial_degree=poly 
-            baseObj=BaselineRemoval(trace)
-            trace=baseObj.IModPoly(polynomial_degree)
-
-            # Remove noise, negative values, and zero consecutive bins
-            trace = remove_noise(trace, threshold_ratio=0.01)
-    
-
-            # Here you can apply the scale factor to the total energy
-            scaled_energy = np.sum(trace)
-
-            if scaled_energy > ic:
-                veto_events += 1
-                pbar.update(n=1)
-                continue
-
-            """
-            # Check to see if point is in "junk" region
-            x1 = scaled_energy
-            y1 = length
-            y_line = slope * x1 + intercept
-            if y1 > y_line and y1 > 20:
-                veto_events += 1
-                pbar.update(n=1)
-                continue
-            """
-
-            # Call track_angle to create list of all track angles
-            angle_list.append(angle)
-
-            # Append all lists
-            len_list.append(length)
-            tot_energy.append(scaled_energy)
-            trace_list.append(trace)
-            xHit_list.append(cloud_x)
-            yHit_list.append(cloud_y)
-            zHit_list.append(cloud_z)
-            eHit_list.append(cloud_e)
-
-            # Track original event number of good events
-            good_events.append(i)
-            pbar.update(n=1)
-
-        print('Starting # of Events:', num_events)
-        print('Events Below Threshold:', skipped_events)
-        print('Vetoed Events:', veto_events)
-        print('Events Missing Cloud:', cloud_missing)
-        print('Final # of Good Events:', len(good_events))
-
-        return (tot_energy, skipped_events, veto_events, good_events, len_list, trace_list, xHit_list, yHit_list, zHit_list, eHit_list, angle_list)
-
-    
-
-    #str_file = f"/mnt/rawdata/e21072/h5/run_{run_num}.h5"
-    str_file = f"/mnt/analysis/e21072/h5test/run_{run_num}.h5"
-    f = h5py.File(str_file, 'r')
-    (tot_energy, skipped_events, veto_events, good_events, len_list, trace_list, xHit_list, yHit_list, zHit_list, eHit_list, angle_list) = main(h5file=f, pads=pads, ic=ic)
-
-    # Save Arrays
-    print(f"DIRECTORY: /mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}")
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/tot_energy"
-    np.save(sub_path, tot_energy, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/skipped_events"
-    np.save(sub_path, skipped_events, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/veto_events"
-    np.save(sub_path, veto_events, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/good_events"
-    np.save(sub_path, good_events, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/len_list"
-    np.save(sub_path, len_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/trace_list"
-    np.save(sub_path, trace_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/xHit_list"
-    np.save(sub_path, xHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/yHit_list"
-    np.save(sub_path, yHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/zHit_list"
-    np.save(sub_path, zHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/eHit_list"
-    np.save(sub_path, eHit_list, allow_pickle=True)
-
-    sub_path = f"/mnt/analysis/e21072/h5test/run_{run_num}/len{length}_ic{ic}_pads{pads}_eps{eps}_samps{samps}_poly{poly}/angle_list"
-    np.save(sub_path, angle_list, allow_pickle=True)
-
-    #Delete arrays
-    del tot_energy
-    del skipped_events
-    del veto_events
-    del good_events
-    del len_list
-    del trace_list
-    del xHit_list
-    del yHit_list
-    del zHit_list
-    del eHit_list
-    del angle_list
