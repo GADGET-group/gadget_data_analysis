@@ -13,15 +13,7 @@ import cupy as cp
 from track_fitting.field_distortion import extract_track_axis_info
 from track_fitting import build_sim
 
-experiment, run, N = 'e21072', 124, 4
-
-#list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1596'),(1, 'a2153'),(1, 'a4434'),(1, 'p770')]
-# peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
-#list of (weight, peak 1, peak 2) tuples.
-#Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
-#peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'absolute', 'a2153'), (1, 'p770', 'absolute')]
-peak_spacings_to_preserve = [(1, 'a2153', 'a4434'), (1, 'p770', 'p1596'), (1, 'p770', 'a2153')]
+experiment, run, N = 'e21072', 124, 3
 
 use_pca_for_width = False #if false, uses standard deviation of charge along the 2nd pca axis
 exploit_symmetry = False #f(r,w,t)=f0(r, sqrt(w^2 - kt))
@@ -36,9 +28,19 @@ offset_endpoints = True
 
 z_field_dist = True
 
+#list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
+peak_widths_to_minimize = [(1, 'p1596'),(1, 'p770')]
+# peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
+#list of (weight, peak 1, peak 2) tuples.
+#Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
+
+if offset_endpoints:
+    peak_spacings_to_preserve = [(1, 'absolute', 'p1596'), (1, 'absolute', 'p770')]
+else:
+    peak_spacings_to_preserve = [(1, 'a2153wr', 'a4434wr'), (1, 'p770', 'p1596'), (1, 'p770', 'a2153')]
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
+particles_to_plot = ['a4434wor', 'a4434wr', 'a2153wor', 'a2153wr']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -171,7 +173,7 @@ plt.figure()
 width_hist_bins = np.linspace(1,5,100)
 plt.hist(track_widths[veto_mask], bins=width_hist_bins)
 for ptype in particles_to_plot:
-    plt.hist(track_widths[cut_mask_dict[ptype]], label=label_dict[ptype], alpha=0.75, bins=width_hist_bins)
+    plt.hist(track_widths[cut_mask_dict[ptype]], label=label_dict[ptype], alpha=0.25, bins=width_hist_bins)
 plt.legend()
 plt.xlabel('track_width (mm)')
 
@@ -279,10 +281,8 @@ else:
     
 if z_field_dist:
     def z_offset(b_ijk, r, t, w):
-        #expand about r=61 mm, and force offset to be 0 here since the field cage should ensure constant electric field
-        #this forcing will only happen if force_0_to_0 is true
-        #The idea here is that certain electron trajectories might be sped up or slowed down compared to those near the field cage
-        r_scaled = (61 - r)/rscale
+        #force offset at center of detetor to be 0 always if force_0_to_0 is true
+        r_scaled = r/rscale
         t_scaled = t/tscale
         w_scaled = w/wscale
 
@@ -559,7 +559,7 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     ax.set(xlabel='track width (mm)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
 
-plt.show(block=False)
+#plt.show(block=False)
 
 if allow_beam_off_axis:
     print('beam axis at:', beam_xy_best)
@@ -575,3 +575,17 @@ plt.scatter(rad_dist[mask], ranges[mask], c=track_widths[mask], vmin=2., vmax=2.
 plt.colorbar()
 plt.xlabel('track centroid radial distance from beam axis (mm)')
 plt.ylabel('track length (mm)')
+
+if z_field_dist:
+    fig, axs = plt.subplots(2,2)
+    fig.set_figheight(10)
+    fig.set_figwidth(10)
+    r_obs = np.linspace(0, 40, 100)#radius at which charge was observed
+    for ax, w in zip(axs.reshape(-1), [2, 2.25, 2.5, 2.75]): 
+        ax.set_title('z_offset with %f mm width'%w)
+        for t in np.linspace(0, 0.1, 10):
+            ax.plot(r_obs, z_offset(b_ijk_best, r_obs, t, w), label='%f s'%t)
+        ax.set(xlabel='r_obs (mm)', ylabel='z_offset (mm)')
+        ax.legend()
+
+plt.show(block=False)

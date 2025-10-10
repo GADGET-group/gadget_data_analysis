@@ -495,7 +495,7 @@ class raw_h5_file:
 
 
     def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False, 
-                      mode='raw', bounds=(0.5, 2), thresh_to_replace=2000):
+                      mode='raw', bounds=(0., 10), thresh_to_replace=2000):
         print('gain matching using %d events'%len(event_numbers))
         print('getting list of energy per pad for each event')
         pad_counts = []
