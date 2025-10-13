@@ -25,22 +25,22 @@ t_lower = 0.0
 t_upper = 0.1
 force_0_to_0 = True
 offset_endpoints = True
-
+correct_width_for_angle = True
 z_field_dist = True
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
-peak_widths_to_minimize = [(1, 'p1596'),(1, 'p770')]
+peak_widths_to_minimize = [(1, 'p1596'),(1, 'p770'), (1, 'a2153'), (1, 'a4434')]
 # peak_widths_to_minimize = [(1, 'p1596'), (1, 'p770')]
 #list of (weight, peak 1, peak 2) tuples.
 #Objective function will minimize sum_i weight_i ((mean(peak i1 range) - mean(peaki2 range) - (true peak i2 range - true peak i2 range))^2
 
 if offset_endpoints:
-    peak_spacings_to_preserve = [(1, 'absolute', 'p1596'), (1, 'absolute', 'p770')]
+    peak_spacings_to_preserve = [(1, 'absolute', 'p1596'), (1, 'p1596', 'p770'), (1, 'p770', 'a2153'), (1, 'a2153', 'a4434')]
 else:
     peak_spacings_to_preserve = [(1, 'a2153wr', 'a4434wr'), (1, 'p770', 'p1596'), (1, 'p770', 'a2153')]
 
 #include up to 4 particles to make scatter plots and histograms for
-particles_to_plot = ['a4434wor', 'a4434wr', 'a2153wor', 'a2153wr']
+particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
 
 
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
@@ -161,12 +161,19 @@ fig.set_figwidth(10)
 for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
     ax.set_title(label_dict[ptype])
     mask = cut_mask_dict[ptype]
-    hist,xbins,ybins,plot = ax.hist2d(MeV[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm(), alpha=0.25)
+    hist,xbins,ybins,plot = ax.hist2d(MeV[rve_plt_mask], ranges[rve_plt_mask], 200, norm=matplotlib.colors.LogNorm(), alpha=0.5)
     hist,xbins,ybins,plot = ax.hist2d(MeV[rve_plt_mask&mask], ranges[rve_plt_mask&mask], bins=[xbins, ybins],
                                        norm=matplotlib.colors.LogNorm(), alpha=1, cmin=np.min(hist), cmax=np.max(hist))
     ax.set(xlabel='Energy (MeV)', ylabel='range (mm)')
     fig.colorbar(plot, ax=ax)
 
+
+if correct_width_for_angle:
+    #apply angular correction to track width using p1596 keV protons
+    w_poly_deg = 2
+    w_poly = np.polyfit(angles[cut_mask_dict['p1596']], track_widths[cut_mask_dict['p1596']], w_poly_deg)
+    corrected_width = track_widths - np.polyval(w_poly, angles) + np.mean(track_widths[cut_mask_dict['p1596']])
+    track_widths = corrected_width
 
 
 plt.figure()
@@ -374,6 +381,8 @@ if force_0_to_0:
     fname_template = '0to0_' + fname_template
 if z_field_dist:
     fname_template = 'zdist_' + fname_template
+if correct_width_for_angle:
+    fname_template = 'wcor_' + fname_template
 fname_template = opt_method + '_' +fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
 fname = os.path.join(package_directory,fname_template%(experiment, run, N))
