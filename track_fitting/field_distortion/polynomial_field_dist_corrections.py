@@ -47,7 +47,10 @@ particles_to_plot = ['p1596', 'p770', 'a2153', 'a4434']
 track_info_dict = extract_track_axis_info.get_track_info(experiment, run)
 endpoints = np.array(track_info_dict['endpoints'])
 
-processed_directory = '/egr/research-tpc/shared/Run_Data/run_%04d_raw_viewer/run_%04dsmart2'%(run, run)
+if run == 124:
+    processed_directory = '/egr/research-tpc/shared/Run_Data/run_%04d_raw_viewer/run_%04dsmart2'%(run, run)
+else:
+    processed_directory = '/egr/research-tpc/shared/Run_Data/run_%04d_raw_viewer/run_%04dsmart'%(run, run)
 
 #load histogram arrays
 counts = np.load(os.path.join(processed_directory, 'counts.npy'))
