@@ -32,6 +32,14 @@ def get_h5_file(experiment, run_number):
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
+    elif experiment == 'e23035_prep_vault':
+        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        h5file.length_counts_threshold = 100
+        h5file.ic_counts_threshold = 0
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 25
+        h5file.num_smart_background_ave_bins = 10
     else:
         raise ValueError
     return h5file
@@ -55,6 +63,7 @@ def get_processed_run(experiment, run_number):
         print('processing run %d'%run_number)
         first_event, last_event = h5file.get_event_num_bounds()
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
+        pad_maxs = []
         for evt in tqdm(range(first_event, last_event + 1)):
             center, uu,dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
             xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
@@ -62,9 +71,13 @@ def get_processed_run(experiment, run_number):
             variances_along_axes.append(dd**2/(len(xs)-1))
             track_centers.append(center)
             pad_counts = np.zeros(1024)
+            pad_maxs.append(np.zeros(1024))
             for pad, trace in zip(*h5file.get_pad_traces(evt)):
                 pad_counts[pad] = np.sum(trace)
+                pad_maxs[-1][pad] = np.max(trace)
             pad_charges.append(pad_counts)
+
+
             #get track end points
             if len(variances_along_axes[-1])==3:
                 points = np.concatenate((xs[:, np.newaxis], 
@@ -96,9 +109,10 @@ def get_processed_run(experiment, run_number):
                 width_above_thresholds.append(0)
         track_centers = np.array(track_centers)
         pad_charges = np.array(pad_charges)
+        pad_maxs = np.array(pad_maxs)
         to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
                    'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
-                   'width_above_threshold':width_above_thresholds}
+                   'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs}
         print('pickling')
         with open(fname, 'wb') as file:
             pickle.dump(to_return, file)
@@ -124,6 +138,17 @@ def get_veto_counts(experiment, runs):
     for i in raw_h5_file.VETO_PADS:
         veto_pad_mask[i] = 1
     return np.einsum('ij, j', get_quantity('pad_charge', experiment, runs), veto_pad_mask)
+
+def get_max_veto_counts(experiment, runs):
+    '''
+    gets array of max counts on any individual veto pad
+    '''
+    max_pad_counts = get_quantity('pad_max', experiment, runs)
+    veto_pad_mask = np.zeros(1024)
+    for i in raw_h5_file.VETO_PADS:
+        veto_pad_mask[i] = 1
+    return np.max(max_pad_counts[:,veto_pad_mask==1], axis=1)
+    
 
 
 # import os

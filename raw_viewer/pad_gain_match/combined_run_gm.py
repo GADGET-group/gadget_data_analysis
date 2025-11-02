@@ -28,21 +28,21 @@ import matplotlib.colors
 from raw_viewer.pad_gain_match import process_runs
 
 gpu_device = 3
-load_first_result = True
-load_second_result = False
+load_result = False
 
 
-runs = (6,)
+runs = (9,10,15)
 veto_thresh = 10e3
-exp = 'e23035_prep_4cobo'
+exp = 'e23035_prep_vault'
 rve_bins = 200
 offset = 'none'
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
-veto_counts = process_runs.get_veto_counts(exp, runs)
+#veto_counts = process_runs.get_veto_counts(exp, runs)
+veto_max = process_runs.get_max_veto_counts(exp, runs)
 charge_widths = process_runs.get_quantity('charge_width', exp,runs)
-veto_mask = (veto_counts < veto_thresh)&(charge_widths>2.5)
+veto_mask = (veto_max < 350)&(charge_widths>2.5)#(veto_counts < veto_thresh)&(charge_widths>2.5)
 with cp.cuda.Device(gpu_device):
     cpp_gpu = cp.array(cpp)
 
@@ -64,25 +64,27 @@ no_gm_ic = get_gm_ic(np.ones(1024))
 
 #set up initial gain match cuts
 cuts1 = []
-true_energies = [6.28808, 6.7883]#, 0.7856]# only includes energy deposited as ionization
-cuts1.append((no_gm_ic>1.042e6) & (no_gm_ic<1.295e6) & (lengths>54.7) & (lengths<60.7) & veto_mask)
-cuts1.append((no_gm_ic>1.13e6) & (no_gm_ic<1.4e6) & (lengths>61.8) & (lengths<69.43) & veto_mask)
+true_energies = [6.28808]#, 6.7883]#, 0.7856]# only includes energy deposited as ionization
+cuts1.append((no_gm_ic>1.1e6) & (no_gm_ic<1.27e6) & (lengths>56.6) & (lengths<65.5) & veto_mask)
+#cuts1.append((no_gm_ic>1.13e6) & (no_gm_ic<1.4e6) & (lengths>61.8) & (lengths<69.43) & veto_mask)
 
 
 
 plt.figure()
-plt.hist(veto_counts, 100)
+plt.hist(veto_max, 100)
 
 fig = plt.figure()
 plt_mask = veto_mask&(lengths<100)&(lengths>1)
 plt.title('without gain match, runs: '+str(runs))
 plt.hist2d(no_gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+plt.xlabel('integrated charge')
 
 fig = plt.figure()
 plt.title('gain match cuts')
 plt.hist2d(no_gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 for cut in cuts1:
     plt.scatter(no_gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
+    print('counts in cut: ', len(no_gm_ic[cut]))
 plt.colorbar()
 plt.show(block=(not load_first_result))
 
