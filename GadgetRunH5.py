@@ -24,7 +24,6 @@ from sklearn.cluster import DBSCAN
 from scipy.signal import savgol_filter
 from skspatial.objects import Line
 from raw_viewer.raw_h5_file import raw_h5_file
-from raw_viewer.raw_h5_file import raw_h5_file
 
 zscale = 1.45
 
@@ -75,6 +74,7 @@ class GadgetRunH5:
     def __init__(self, run_num, folder_path):
         self.run_num = run_num
         self.folder_path = folder_path
+        print("self.folder_path: ", self.folder_path)
         self.file_path = get_h5_path() + ('run_%04d.h5'%run_num)
     
         self.h5_file = raw_h5_file(self.file_path, flat_lookup_csv='./raw_viewer/channel_mappings/flatlookup4cobos.csv', zscale=zscale)
@@ -85,10 +85,19 @@ class GadgetRunH5:
         self.h5_file.require_peak_within= (-np.inf, np.inf)
         self.h5_file.num_background_bins=(160, 250)
         self.h5_file.zscale = zscale
+
         self.h5_filelength_counts_threshold = 100
         self.h5_file.ic_counts_threshold = 25
         self.h5_file.include_counts_on_veto_pads = False
 
+        self.max_veto_counts = np.load(os.path.join(folder_path, 'veto.npy')) 
+        self.dxys = np.load(os.path.join(folder_path, 'dxy.npy')) 
+        self.dts = np.load(os.path.join(folder_path, 'dt.npy')) 
+        self.counts = np.load(os.path.join(folder_path, 'counts.npy'))
+        self.dzs = self.dts*zscale
+        self.ranges = np.sqrt(self.dzs*self.dzs + self.dxys*self.dxys)
+        with np.errstate(divide='ignore',invalid='ignore'):#we expect some divide by zeros here
+            self.angles =  np.degrees(np.arctan(self.dxys/self.dzs))
 
         #TODO: decide how to store calibration information with runs
         calib_point_1 = (0.806, 156745)
@@ -97,6 +106,10 @@ class GadgetRunH5:
         energy_2, channel_2 = calib_point_2
         self.energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
         self.energy_offset = energy_1 - self.energy_scale_factor * channel_1
+
+    def get_event_num_bounds(self):
+        #returns first event number, last event number
+        return int(self.h5_file['meta']['meta'][0]), int(self.h5_file['meta']['meta'][2])
         
     def to_MeV(self, counts):
         return counts*self.energy_scale_factor + self.energy_offset
@@ -443,7 +456,6 @@ class GadgetRunH5:
 
         xHit, yHit, zHit, eHit = file.get_xyze(index,threshold=20,include_veto_pads=False)
         energy = np.sum(eHit)
-        self.total_energy_MeV = eHit
         pads,pad_data = file.get_pad_traces(index)
         pads = np.array(pads)
         pad_data = np.array(pad_data)
@@ -793,6 +805,9 @@ class GadgetRunH5:
                 file = self.h5_file
 
                 xHit, yHit, zHit, eHit = file.get_xyze(event_num,threshold=20,include_veto_pads=False)
+                if len(eHit) == 0:
+                    pbar.update(n=1)
+                    continue
                 energy = np.sum(eHit)
                 pads,pad_data = file.get_pad_traces(event_num)
                 pads = np.array(pads)
@@ -831,21 +846,16 @@ class GadgetRunH5:
         result = plot_track(cut_indices)
         return result
 
-    def get_RvE_cut_indexes(self, points):
+    def get_RvE_cut_indexes(self, verticies):
         '''
         points: list of (energy, range) tuples defining a cut in RvE
         Energy is in MeV, range in mm
         '''
-        path = matplotlib.path.Path(points)
-        to_return = []
-        index = 0
-        while index < len(self.good_events):
-            this_point = (self.total_energy_MeV[index], self.len_list[index])
-            if path.contains_point(this_point):
-                to_return.append(index)
-            index += 1
-        return to_return
-    
+        selected_rve_path = matplotlib.path.Path(verticies)
+        rve_points = np.vstack((self.counts, self.ranges)).transpose()
+        self.rve_cut_select_mask = selected_rve_path.contains_points(rve_points)
+        print(sum(self.rve_cut_select_mask), 'events selected in cut')
+        return np.where(self.rve_cut_select_mask)[0]
 
 
 def generate_files(run_num, length, ic, pads, eps, samps, poly):
