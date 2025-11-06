@@ -28,13 +28,14 @@ import matplotlib.colors
 from raw_viewer.pad_gain_match import process_runs
 
 gpu_device = 3
-load_result = False
+load_result = True
+load_result2 = True
 
 
-runs = (9,10,15)
+runs = (38,)#(20,)#(9,10,15)
 veto_thresh = 10e3
 exp = 'e23035_prep_vault'
-rve_bins = 200
+rve_bins = 400
 offset = 'none'
 
 lengths = process_runs.get_lengths(exp, runs)
@@ -74,7 +75,7 @@ plt.figure()
 plt.hist(veto_max, 100)
 
 fig = plt.figure()
-plt_mask = veto_mask&(lengths<100)&(lengths>1)
+plt_mask = veto_mask&(lengths<150)&(lengths>1)
 plt.title('without gain match, runs: '+str(runs))
 plt.hist2d(no_gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.xlabel('integrated charge')
@@ -86,7 +87,7 @@ for cut in cuts1:
     plt.scatter(no_gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
     print('counts in cut: ', len(no_gm_ic[cut]))
 plt.colorbar()
-plt.show(block=(not load_first_result))
+plt.show(block=(not load_result))
 
 
 def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
@@ -143,7 +144,7 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
         return res
 
 
-if load_first_result:
+if load_result:
     with open('res1_%s.pkl'%offset, 'rb') as f:
         res1 = pickle.load(f)
 else:
@@ -191,20 +192,15 @@ def show_plots(res):
 
 show_plots(res1)
 
-if False:
+#redo gain match using selection based on original gain match
+if True:
     if offset == 'none':
         gm_ic = get_gm_ic(res1.x)
     elif offset == 'constant':
         gm_ic = get_gm_ic(res1.x[:-1]) + 1e4*res1.x[-1]
     cuts2 = []
-    verticies = [(1.75,57.13),(1.434,44.66),(1.615,26.58),(1.736,27)]
-    path = matplotlib.path.Path(verticies)
-    rve_points = np.vstack((gm_ic, lengths)).transpose()
-    cuts2.append(path.contains_points(rve_points))
-    verticies = [(0.837,13.9),(0.8782,21.53),(0.8007, 21.84),(0.7192, 17.78),(0.7676, 13.86)]
-    path = matplotlib.path.Path(verticies)
-    rve_points = np.vstack((gm_ic, lengths)).transpose()
-    cuts2.append(path.contains_points(rve_points))
+    cuts2.append((gm_ic >6.65)&(gm_ic<7.1)&(lengths>64)&(lengths<76))
+    true_energies2 = [6.7783]
 
     fig = plt.figure()
     plt.title('gain match cuts')
@@ -214,12 +210,17 @@ if False:
     plt.colorbar()
     plt.show()
 
-    if load_second_result:
+    if load_result2:
         with open('res2_%s.pkl'%offset, 'rb') as f:
             res2 = pickle.load(f)
     else:
-        res2 = do_gain_match(cuts2, true_energies, offset=offset)
+        res2 = do_gain_match(cuts2, true_energies2, offset=offset)
         with open('res2_%s.pkl'%offset, 'wb') as f:
             pickle.dump(res2, f)
     print(res2)
     show_plots(res2)
+
+import ROOT
+energy_hist = ROOT.TH1D("h1", "h1", 6.2, 7, 100)
+gm_ic2 = get_gm_ic(res2.x)
+energy_hist.fill(gm_ic2[veto_mask])

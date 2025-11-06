@@ -118,6 +118,11 @@ class raw_h5_file:
         self.cobos='all'
         self.pads='all'
 
+        #caching avoids redoing baseline subtraction unecessarily. If enabled and any parameters are changed, should set self.cached_event to np.inf to force recompute.
+        self.cache_enable = False
+        self.cached_event = np.inf
+        self.cached_data = None
+
         #look at first event and figure out number of time bins
         first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
         self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
@@ -167,6 +172,9 @@ class raw_h5_file:
         Veto pads should NOT be removed during outlier removal.
         Does NOT apply thresholding. However, this is applied in get_xyte and and get_xyze.
         '''
+        if self.cache_enable and event_number == self.cached_event:
+            return np.array(self.cached_data, copy=True)
+
         data = self.h5_file['get']['evt%d_data'%event_number]
 
         
@@ -252,7 +260,9 @@ class raw_h5_file:
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
                     line[FIRST_DATA_BIN:] *= self.pad_gains[pad]  
-
+        if self.cache_enable:
+            self.cached_data = data
+            self.cached_event = event_number
         return data
 
     def calculate_background(self, trace):

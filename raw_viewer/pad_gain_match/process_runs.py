@@ -40,6 +40,7 @@ def get_h5_file(experiment, run_number):
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = True
     else:
         raise ValueError
     return h5file
