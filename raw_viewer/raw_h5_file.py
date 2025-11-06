@@ -120,8 +120,9 @@ class raw_h5_file:
 
         #caching avoids redoing baseline subtraction unecessarily. If enabled and any parameters are changed, should set self.cached_event to np.inf to force recompute.
         self.cache_enable = False
-        self.cached_event = np.inf
+        self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
         self.cached_data = None
+        self.cached_xyte = self.cached_xyze = None
 
         #look at first event and figure out number of time bins
         first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
@@ -302,7 +303,7 @@ class raw_h5_file:
                     break
                 i += 1
             peak_end = i
-            #fit a line through the points just outside the peak regio
+            #fit a line through the points just outside the peak region
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
@@ -325,6 +326,8 @@ class raw_h5_file:
                  and es[i] gives the charge that arrived at that pad at the given time.
                  Only data where the charge deposition is greater than the threshold is included.
         '''
+        if self.cache_enable and self.cached_event_xyte == event_number:
+            return self.cached_xyte
         xs, ys, es = [], [], []
         event_data =  self.get_data(event_number)
         #after this look, xs=[x1, x2, ...], same for ys, es=[[1st pad data], [2nd pad data], ...]
@@ -355,14 +358,23 @@ class raw_h5_file:
             ys = ys[es>threshold]
             ts = ts[es>threshold]
             es = es[es>threshold]
+        if self.cache_enable:
+            self.cached_event_xyte = event_number
+            self.cached_xyte = (xs, ys, ts, es)
         return xs, ys, ts, es
     
     def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
+        if self.cache_enable and self.cached_event_xyze == event_number:
+            return self.cached_xyze
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
-        return x,y, t*self.zscale ,e
+        to_return = (x,y, t*self.zscale ,e)
+        if self.cache_enable:
+            self.cached_xyze= to_return
+            self.cached_event_xyze = event_number
+        return to_return
     
     def get_track_axis(self, event=None, threshold=None, return_all_svd_results=False, xyze=None, return_np=True):
         '''
@@ -393,11 +405,13 @@ class raw_h5_file:
 
         if return_np:
             points_mean = cp.asnumpy(points_mean)
-            uu, dd, vv = cp.asnumpy(uu), cp.asnumpy(dd), cp.asnumpy(vv)
+            dd, vv = cp.asnumpy(dd), cp.asnumpy(vv)
+            if return_all_svd_results:
+                uu = cp.asnumpy(uu)
         if return_all_svd_results:
             return points_mean, uu, dd, vv
         else:
-            return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
+            return points_mean, dd, vv #vv[0] holds direction vector of 1st priciple component, etc
 
     
     def get_event_num_bounds(self):

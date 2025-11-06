@@ -66,7 +66,7 @@ def get_processed_run(experiment, run_number):
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
         pad_maxs = []
         for evt in tqdm(range(first_event, last_event + 1)):
-            center, uu,dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
+            center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=False, threshold=h5file.length_counts_threshold)
             xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
             principle_axes.append(vv)
             variances_along_axes.append(dd**2/(len(xs)-1))
