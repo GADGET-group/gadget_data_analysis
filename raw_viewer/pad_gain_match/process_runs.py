@@ -111,9 +111,12 @@ def get_processed_run(experiment, run_number):
         track_centers = np.array(track_centers)
         pad_charges = np.array(pad_charges)
         pad_maxs = np.array(pad_maxs)
+        
+        ts = h5file.get_timestamps_array()
+
         to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
                    'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
-                   'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs}
+                   'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs, 'timestamps':ts}
         print('pickling')
         with open(fname, 'wb') as file:
             pickle.dump(to_return, file)

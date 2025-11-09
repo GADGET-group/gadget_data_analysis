@@ -28,11 +28,11 @@ import matplotlib.colors
 from raw_viewer.pad_gain_match import process_runs
 
 gpu_device = 3
-load_result = True
-load_result2 = True
+load_result = False
+load_result2 = False
 
 
-runs = (38,)#(20,)#(9,10,15)
+runs = (9,10,15)#(38,)#(20,)#
 veto_thresh = 10e3
 exp = 'e23035_prep_vault'
 rve_bins = 400
@@ -141,6 +141,8 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
         print('starting minimization')
         res =  optimize.minimize(obj_func, init_guess, callback=callback, bounds=bounds, options={'maxfun':1000000})
         print('time to perform minimization: %f s'%(time.time() - start_time))
+        res.cut_masks = cut_masks
+        res.true_energies = true_energies
         return res
 
 
@@ -153,7 +155,7 @@ else:
         pickle.dump(res1, f)
 print(res1)
 
-def show_plots(res):
+def show_plots(res, block=False):
     if offset == 'none':
         gm_ic = get_gm_ic(res.x)
     elif offset == 'constant':
@@ -172,7 +174,7 @@ def show_plots(res):
     plt.title('events used in gain match')
     plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.colorbar()
-    for cut in cuts1:
+    for cut in res.cut_masks:
         plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
     plt.xlabel('Energy (MeV)')
     plt.ylabel('range (mm)')
@@ -188,7 +190,7 @@ def show_plots(res):
     im = h5.get_2d_image(d)
     plt.imshow(im)
     plt.colorbar()
-    plt.show()
+    plt.show(block=False)
 
 show_plots(res1)
 
@@ -199,8 +201,9 @@ if True:
     elif offset == 'constant':
         gm_ic = get_gm_ic(res1.x[:-1]) + 1e4*res1.x[-1]
     cuts2 = []
-    cuts2.append((gm_ic >6.65)&(gm_ic<7.1)&(lengths>64)&(lengths<76))
-    true_energies2 = [6.7783]
+    cuts2.append((gm_ic >6.1)&(gm_ic<6.4)&(lengths>55)&(lengths<69) & veto_mask)
+    cuts2.append((gm_ic >6.65)&(gm_ic<7.1)&(lengths>64)&(lengths<76) & veto_mask)
+    true_energies2 = [6.288, 6.7783]
 
     fig = plt.figure()
     plt.title('gain match cuts')
@@ -221,6 +224,7 @@ if True:
     show_plots(res2)
 
 import ROOT
-energy_hist = ROOT.TH1D("h1", "h1", 6.2, 7, 100)
+energy_hist = ROOT.TH1D("h1", "h1", 100, 6.0, 7)
 gm_ic2 = get_gm_ic(res2.x)
-energy_hist.fill(gm_ic2[veto_mask])
+energy_hist.Fill(gm_ic2[veto_mask])
+energy_hist.Draw()
