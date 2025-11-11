@@ -405,13 +405,14 @@ class raw_h5_file:
 
         if return_np:
             points_mean = cp.asnumpy(points_mean)
-            dd, vv = cp.asnumpy(dd), cp.asnumpy(vv)
+            vv = cp.asnumpy(vv)
             if return_all_svd_results:
+                dd = cp.asnumpy(dd)
                 uu = cp.asnumpy(uu)
         if return_all_svd_results:
             return points_mean, uu, dd, vv
         else:
-            return points_mean, dd, vv #vv[0] holds direction vector of 1st priciple component, etc
+            return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
 
     
     def get_event_num_bounds(self):

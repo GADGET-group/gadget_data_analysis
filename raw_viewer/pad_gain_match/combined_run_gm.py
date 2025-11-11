@@ -27,12 +27,12 @@ import matplotlib.colors
 
 from raw_viewer.pad_gain_match import process_runs
 
-gpu_device = 3
-load_result = False
-load_result2 = False
+gpu_device = 2
+load_result1 = True
+load_result2 = True
 
 
-runs = (9,10,15)#(38,)#(20,)#
+runs = (49,)#(9,10,15)#(20,)#(20,)#(38,)#
 veto_thresh = 10e3
 exp = 'e23035_prep_vault'
 rve_bins = 400
@@ -87,7 +87,7 @@ for cut in cuts1:
     plt.scatter(no_gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
     print('counts in cut: ', len(no_gm_ic[cut]))
 plt.colorbar()
-plt.show(block=(not load_result))
+plt.show(block=(not load_result1))
 
 
 def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
@@ -143,10 +143,11 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
         print('time to perform minimization: %f s'%(time.time() - start_time))
         res.cut_masks = cut_masks
         res.true_energies = true_energies
+        res.runs = runs
         return res
 
 
-if load_result:
+if load_result1:
     with open('res1_%s.pkl'%offset, 'rb') as f:
         res1 = pickle.load(f)
 else:
@@ -170,14 +171,17 @@ def show_plots(res, block=False):
     # np.save('energy_cb37815dc81a8e0abe11b70e577d05143ea7b5ab', gm_ic[plt_mask])
     # np.save('length_cb37815dc81a8e0abe11b70e577d05143ea7b5ab', lengths[plt_mask])
 
-    plt.figure()
-    plt.title('events used in gain match')
-    plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-    plt.colorbar()
-    for cut in res.cut_masks:
-        plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
-    plt.xlabel('Energy (MeV)')
-    plt.ylabel('range (mm)')
+    try:
+        plt.figure()
+        plt.title('events used in gain match')
+        plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+        plt.colorbar()
+        for cut in res.cut_masks:
+            plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
+        plt.xlabel('Energy (MeV)')
+        plt.ylabel('range (mm)')
+    except:
+        pass
 
     #show pad plane image
     plt.figure()
@@ -201,8 +205,8 @@ if True:
     elif offset == 'constant':
         gm_ic = get_gm_ic(res1.x[:-1]) + 1e4*res1.x[-1]
     cuts2 = []
-    cuts2.append((gm_ic >6.1)&(gm_ic<6.4)&(lengths>55)&(lengths<69) & veto_mask)
-    cuts2.append((gm_ic >6.65)&(gm_ic<7.1)&(lengths>64)&(lengths<76) & veto_mask)
+    cuts2.append((gm_ic >6.0)&(gm_ic<6.5)&(lengths>55)&(lengths<69) & veto_mask)
+    cuts2.append((gm_ic >6.6)&(gm_ic<7.1)&(lengths>62.5)&(lengths<76) & veto_mask)
     true_energies2 = [6.288, 6.7783]
 
     fig = plt.figure()
@@ -228,3 +232,7 @@ energy_hist = ROOT.TH1D("h1", "h1", 100, 6.0, 7)
 gm_ic2 = get_gm_ic(res2.x)
 energy_hist.Fill(gm_ic2[veto_mask])
 energy_hist.Draw()
+
+energy_hist2 = ROOT.TH1D("h2", "h2", 20, 8.2, 9.2)
+energy_hist2.Fill(gm_ic2[veto_mask])
+energy_hist2.Draw()
