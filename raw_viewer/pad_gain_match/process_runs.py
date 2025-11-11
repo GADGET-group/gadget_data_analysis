@@ -1,11 +1,24 @@
 import os
 import pickle
+import gzip
 
 from tqdm import tqdm
 import numpy as np
 
 from raw_viewer import raw_h5_file
 
+def get_save_path(experiment):
+    if experiment == 'e21072':
+        save_path = '/egr/research-tpc/shared/Run_Data/proc_pkl'
+    elif experiment == 'e23035_prep_2cobo':
+        save_path = '/egr/research-tpc/shared/e23035_prep/2cobo/proc_pkl'
+    elif experiment == 'e23035_prep_4cobo':
+        save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
+    elif experiment == 'e23035_prep_vault':
+        save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
+    else:
+        raise ValueError
+    return save_path
 
 def get_h5_file(experiment, run_number):
     if experiment == 'e21072':
@@ -16,14 +29,16 @@ def get_h5_file(experiment, run_number):
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = True
     elif experiment == 'e23035_prep_2cobo':
-        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/2cobo/run_%04d.h5'%run_number
+        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/2Cobo/run_%04d.h5'%run_number
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
         h5file.length_counts_threshold = 25
         h5file.ic_counts_threshold = 0
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = True
     elif experiment == 'e23035_prep_4cobo':
         raw_h5_path = '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.544, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -32,6 +47,7 @@ def get_h5_file(experiment, run_number):
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = True
     elif experiment == 'e23035_prep_vault':
         raw_h5_path = '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -52,11 +68,11 @@ def get_processed_run(experiment, run_number):
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a pickled version of this information isn't available.
     '''
-    package_directory = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(package_directory, '%s_run%d.pkl'%(experiment, run_number))
+    #save_path = os.path.dirname(os.path.abspath(__file__))
+    fname = os.path.join(get_save_path(experiment), '%s_run%d.pkl.gz'%(experiment, run_number))
     if os.path.exists(fname):
         print('run %d previously processed, loading previous results'%run_number)
-        with open(fname, 'rb') as file:
+        with gzip.open(fname, 'rb') as file:
             return pickle.load(file)
     else:
         # h5file = build_sim.get_rawh5_object(experiment, run_number)
@@ -66,7 +82,7 @@ def get_processed_run(experiment, run_number):
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
         pad_maxs = []
         for evt in tqdm(range(first_event, last_event + 1)):
-            center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=False, threshold=h5file.length_counts_threshold)
+            center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
             xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
             principle_axes.append(vv)
             variances_along_axes.append(dd**2/(len(xs)-1))
@@ -118,7 +134,7 @@ def get_processed_run(experiment, run_number):
                    'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
                    'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs, 'timestamps':ts}
         print('pickling')
-        with open(fname, 'wb') as file:
+        with gzip.open(fname, 'wb') as file:
             pickle.dump(to_return, file)
         return to_return
 

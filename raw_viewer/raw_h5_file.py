@@ -1,6 +1,7 @@
 import os
 import pickle
 
+
 import numpy as np
 import scipy.spatial.distance
 import scipy.optimize as opt
@@ -15,7 +16,7 @@ USE_GPU = True
 if USE_GPU:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    cp.cuda.runtime.setDevice(3)
+    cp.cuda.runtime.setDevice(2)
 else:
     cp = np
     import scipy.special as cpspecial
@@ -408,9 +409,9 @@ class raw_h5_file:
             vv = cp.asnumpy(vv)
             if return_all_svd_results:
                 dd = cp.asnumpy(dd)
-                uu = cp.asnumpy(uu)
+                #uu = cp.asnumpy(uu)
         if return_all_svd_results:
-            return points_mean, uu, dd, vv
+            return points_mean, dd, vv
         else:
             return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
 
