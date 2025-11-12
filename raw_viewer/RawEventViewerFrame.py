@@ -4,6 +4,7 @@ import configparser
 import csv
 import shutil
 import pickle
+import socket
 
 import tkinter as tk
 from tkinter import ttk
@@ -31,6 +32,10 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
+                if socket.gethostname() == 'tpcgpu':
+                    init_dir =  "/egr/research-tpc/shared/Run_Data/"
+                else:
+                    init_dir = "/mnt/analysis/e21072/h5test/"
                 file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/', title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
