@@ -33,7 +33,7 @@ class RawEventViewerFrame(ttk.Frame):
         if not heritage_file:
             if file_path == None:
                 if socket.gethostname() == 'tpcgpu':
-                    init_dir =  "/egr/research-tpc/shared/Run_Data/"
+                    init_dir =  "/egr/research-tpc/shared/"
                 else:
                     init_dir = "/mnt/analysis/e21072/h5test/"
                 file_path = tk.filedialog.askopenfilename(initialdir=init_dir, title='Select H5 File', filetypes=[('H5', ".h5")])
