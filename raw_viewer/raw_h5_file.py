@@ -12,15 +12,17 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
-USE_GPU = True
-if USE_GPU:
+
+try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    cp.cuda.runtime.setDevice(2)
-else:
+    #cp.cuda.runtime.setDevice(2)
+    USE_GPU = True
+except:
     cp = np
     import scipy.special as cpspecial
     cp.asnumpy = lambda x: x
+    USE_GPU = False
 
 
 import skimage.measure
@@ -401,7 +403,7 @@ class raw_h5_file:
         try:
             uu, dd, vv = cp.linalg.svd(points - points_mean)
         except Exception as e:
-            print('caught exceptions while trying to perform SVD of event %d'%event)
+            print('caught exceptions while trying to perform SVD of event '%+str(event))
             print(e)
             uu, vv, dd = None
 

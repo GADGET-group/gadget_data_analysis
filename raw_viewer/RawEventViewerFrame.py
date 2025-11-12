@@ -31,7 +31,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/Run_Data', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/', title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.h5file = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
@@ -60,23 +60,6 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Button(settings_frame, text='process run', command=self.process_run).grid(row=3, column=0)
         ttk.Button(settings_frame, text='load processed run', command=self.load_processed_run).grid(row=3, column=1)
         settings_frame.grid()
-
-        energy_cal_frame = ttk.LabelFrame(self, text="energy calibration")
-        ttk.Label(energy_cal_frame, text="energy calibration type:").grid(row=0, column=0)
-        ttk.Label(energy_cal_frame, text="adc counts").grid(row=1, column=1)
-        ttk.Label(energy_cal_frame, text="MeV").grid(row=1, column=2)
-        ttk.Label(energy_cal_frame, text="point 1").grid(row=2, column=0)
-        self.point1_adc_counts_entry = ttk.Entry(energy_cal_frame)
-        self.point1_adc_counts_entry.grid(row=2, column=1)
-        self.point1_MeV_entry = ttk.Entry(energy_cal_frame)
-        self.point1_MeV_entry.grid(row=2, column=2)
-        ttk.Label(energy_cal_frame, text="point 2").grid(row=3, column=0)
-        self.point2_adc_counts_entry = ttk.Entry(energy_cal_frame)
-        self.point2_adc_counts_entry.grid(row=3, column=1)
-        self.point2_MeV_entry = ttk.Entry(energy_cal_frame)
-        self.point2_MeV_entry.grid(row=3, column=2)
-        ttk.Button(energy_cal_frame, text="apply energy calibration", command=self.apply_energy_cal).grid(row=4, column=0)
-        energy_cal_frame.grid()
 
         gain_match_frame = ttk.LabelFrame(self, text="pad gain match")
         self.gain_match_label = ttk.Label(gain_match_frame, text="no gain match loaded")
@@ -431,8 +414,6 @@ class RawEventViewerFrame(ttk.Frame):
         #do zscale dependent calcuations of range and angle
         self.entry_changed(None)
 
-    def apply_energy_cal(self):
-        pass
 
     def do_gain_match(self):
         save_path =  tk.filedialog.asksaveasfilename(initialdir='./', title='gain match save path', filetypes=([("gain match", ".gain_match")]), defaultextension='.gain_match')
