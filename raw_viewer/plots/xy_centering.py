@@ -4,7 +4,7 @@ import matplotlib.pylab as plt
 from raw_viewer import process_runs
 
 experiment = 'e21072'
-runs = (124,125,126,127)
+runs = (100,)
 pad_gains = np.ones(1024)
 
 veto_max = process_runs.get_max_veto_counts(experiment, runs)
@@ -16,6 +16,10 @@ veto_mask = (lengths>10)&(lengths<20)&(veto_max<450)
 centers = process_runs.get_quantity('track_center', experiment, runs)[veto_mask]
 xs, ys = centers[:,0], centers[:,1]
 good_centroid = np.isfinite(xs) & np.isfinite(ys)
+plt.figure()
 plt.hist2d(xs[good_centroid], ys[good_centroid], 100)
 plt.colorbar()
+
+plt.figure()
+plt.scatter(xs[good_centroid], ys[good_centroid], marker='.')
 plt.show()
