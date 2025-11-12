@@ -25,7 +25,7 @@ import matplotlib.patches as patches
 from matplotlib.path import Path
 import matplotlib.colors
 
-from raw_viewer.pad_gain_match import process_runs
+from raw_viewer import process_runs
 
 gpu_device = 2
 load_result1 = True
