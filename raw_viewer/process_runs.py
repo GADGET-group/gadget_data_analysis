@@ -3,6 +3,7 @@ import pickle
 import gzip
 import multiprocessing as mp
 import subprocess
+import socket
 
 from tqdm import tqdm
 import numpy as np
@@ -12,19 +13,28 @@ from raw_viewer import raw_h5_file
 num_threads = 10
 
 def get_save_path(experiment):
-    if experiment == 'e21072':
-        save_path = '/egr/research-tpc/shared/Run_Data/proc_pkl'
-    elif experiment == 'e23035_prep_2cobo':
-        save_path = '/egr/research-tpc/shared/e23035_prep/2cobo/proc_pkl'
-    elif experiment == 'e23035_prep_4cobo':
-        save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
-    elif experiment == 'e23035_prep_vault':
-        save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
-    else:
-        raise ValueError
-    return save_path
+    if socket.gethostname() == 'tpcgpu':
+        if experiment == 'e21072':
+            save_path = '/egr/research-tpc/shared/Run_Data/proc_pkl'
+        elif experiment == 'e23035_prep_2cobo':
+            save_path = '/egr/research-tpc/shared/e23035_prep/2cobo/proc_pkl'
+        elif experiment == 'e23035_prep_4cobo':
+            save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
+        elif experiment == 'e23035_prep_vault':
+            save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
+        else:
+            raise ValueError
+        return save_path
+    elif socket.gethostname().lower() == 'gadgetserver':
+        if experiment == 'e23035_prep_vault':
+            return '/Volumes/Extreme SSD/e23035prepvault/'
 
 def get_h5_file(experiment, run_number):
+    h5_base_path = ''
+    if socket.gethostname() == 'tpcgpu':
+        h5_base_path = '/egr/research-tpc/shared'
+    elif socket.gethostname().lower() == 'gadgetserver':
+        h5_base_path = '/Volumes/Extreme SSD'
     if experiment == 'e21072':
         raw_h5_path = '/egr/research-tpc/shared/Run_Data/run_%04d.h5'%run_number
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -53,7 +63,8 @@ def get_h5_file(experiment, run_number):
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = True
     elif experiment == 'e23035_prep_vault':
-        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
+        #raw_h5_path = '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
+        raw_h5_path = '%s/e23035_prep/vault/run_%04d.h5'%(h5_base_path, run_number)
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0

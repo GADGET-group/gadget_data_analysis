@@ -4,7 +4,7 @@ import matplotlib.pylab as plt
 from raw_viewer import process_runs
 
 experiment = 'e21072'
-runs = (100,)
+runs = (99, 100, 101,)
 pad_gains = np.ones(1024)
 
 veto_max = process_runs.get_max_veto_counts(experiment, runs)
