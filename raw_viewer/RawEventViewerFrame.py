@@ -394,7 +394,9 @@ class RawEventViewerFrame(ttk.Frame):
         self.timestamps = self.h5file.get_timestamps_array()
         np.save(os.path.join(directory_path, 'timestamps.npy'), self.timestamps)
         #save all the other properties
+        self.h5file.cache_enable = True
         max_veto_counts, dxy, dz, counts, angles, pads_railed_list = self.h5file.get_histogram_arrays()
+        self.h5file.cache_enable = False
         np.save(os.path.join(directory_path, 'counts.npy'), counts)
         np.save(os.path.join(directory_path, 'dxy.npy'), dxy)
         np.save(os.path.join(directory_path, 'dt.npy'), dz/self.h5file.zscale)

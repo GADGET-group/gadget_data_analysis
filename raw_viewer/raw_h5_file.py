@@ -119,7 +119,8 @@ class raw_h5_file:
         self.cobos='all'
         self.pads='all'
 
-        #caching avoids redoing baseline subtraction unecessarily. If enabled and any parameters are changed, should set self.cached_event to np.inf to force recompute.
+        #caching avoids redoing baseline subtraction unecessarily. If enabled and any parameters are changed,
+        #  should set self.cached_event to np.inf to force recompute.
         self.cache_enable = False
         self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
         self.cached_data = None
