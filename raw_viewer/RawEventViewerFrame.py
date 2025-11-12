@@ -36,7 +36,7 @@ class RawEventViewerFrame(ttk.Frame):
                     init_dir =  "/egr/research-tpc/shared/Run_Data/"
                 else:
                     init_dir = "/mnt/analysis/e21072/h5test/"
-                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/', title='Select H5 File', filetypes=[('H5', ".h5")])
+                file_path = tk.filedialog.askopenfilename(initialdir=init_dir, title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.h5file = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
