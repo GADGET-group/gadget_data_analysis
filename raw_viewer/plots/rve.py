@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.path import Path
 import matplotlib.colors
+import ROOT
 
 from raw_viewer import process_runs
 

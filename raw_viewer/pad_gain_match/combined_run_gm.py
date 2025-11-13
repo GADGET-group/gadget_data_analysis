@@ -33,8 +33,9 @@ load_result2 = True
 
 
 runs = (49,)#(9,10,15)#(20,)#(20,)#(38,)#
-veto_thresh = 10e3
 exp = 'e23035_prep_vault'
+
+veto_thresh = 350
 rve_bins = 400
 offset = 'none'
 
@@ -43,13 +44,9 @@ cpp = process_runs.get_quantity('pad_charge', exp, runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_max = process_runs.get_max_veto_counts(exp, runs)
 charge_widths = process_runs.get_quantity('charge_width', exp,runs)
-veto_mask = (veto_max < 350)&(charge_widths>2.5)#(veto_counts < veto_thresh)&(charge_widths>2.5)
+veto_mask = (veto_max < veto_thresh)&(charge_widths>2.5)#(veto_counts < veto_thresh)&(charge_widths>2.5)
 with cp.cuda.Device(gpu_device):
     cpp_gpu = cp.array(cpp)
-
-
-
-
 
 def get_gm_ic(gains, counts_per_pad=cpp_gpu, return_gpu=False):
     #counts per pad needs to already be on the gpu

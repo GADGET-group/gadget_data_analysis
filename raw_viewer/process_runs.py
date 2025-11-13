@@ -25,7 +25,7 @@ def get_save_path(experiment):
         else:
             raise ValueError
         return save_path
-    elif socket.gethostname().lower() == 'gadgetserver':
+    elif 'gadget' in socket.gethostname().lower():
         if experiment == 'e23035_prep_vault':
             return '/Volumes/Extreme SSD/e23035prepvault/'
 
