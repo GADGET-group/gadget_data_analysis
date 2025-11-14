@@ -216,3 +216,19 @@ def get_gm_ic(experiment, runs, gains):
     counts_per_pad = get_quantity('pad_charge', experiment, runs)
     #counts per pad needs to already be on the gpu
     return np.einsum('ij, j', counts_per_pad, gains)
+
+def get_time_since_beam_off(experiment, runs):
+    to_return = []
+    for run in runs:
+        times_since_start_of_window = []
+        ts = get_quantity('timestamps', experiment, [run])
+        time_since_last_event = ts - np.roll(ts, 1)
+        start_of_current_window = -np.inf
+        time_since_last_event[0] = np.inf
+        for t, dt in zip(ts, time_since_last_event):
+            if dt > 0.1:
+                start_of_current_winow = t
+            times_since_start_of_window.append(t - start_of_current_winow)
+        times_since_start_of_window = np.array(times_since_start_of_window)
+        to_return.append(times_since_start_of_window)
+    return np.concatenate(to_return, axis=0)

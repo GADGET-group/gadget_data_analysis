@@ -11,12 +11,8 @@ from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
 
 experiment = 'e23035'
-run_range = (101,155)#(101, 143)
-exclude_runs = [113]
-runs = []
-for run in range(run_range[0], run_range[1]+1):
-    if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
-        runs.append(run)
+run = 155
+runs=[run]
 
 
 veto_thresh = 250
@@ -57,7 +53,7 @@ m = (108.4-32.2)/(3.628-2.25)
 alpha_mask = veto_mask&(lengths<(energy*m+32.2 - m*2.25))
 
 m = (159.2-26.2)/(2.81-0.619)
-proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))
+proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)
 
 plt.figure()
 plt.hist(energy[proton_mask], 200)
@@ -71,25 +67,17 @@ plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, co
 print(str(runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
 plt.figure()
-plt.hist(energy[alpha_mask], 200)
-plt.title('alpha energy spectrum, runs: '+str(runs))
-plt.xlabel('energy (MeV)')
-
-plt.figure()
-plt.title('alphas selected in RVE, runs: '+str(runs))
-plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-plt.scatter(energy[alpha_mask], lengths[alpha_mask], marker='.', alpha=0.5, color='red')
-print(str(runs) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
-
-plt.figure()
 plt.title('protons')
 tsbo=process_runs.get_time_since_beam_off(experiment, runs)
 tve_bins = (50, 50)
 plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
 
-plt.figure()
-plt.title('alphas')
-tve_bins = (50, 50)
-plt.hist2d(energy[alpha_mask&(tsbo>0)], tsbo[alpha_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
+num_protons = len(proton_mask[proton_mask])
+print("Total number of protons in run "+str(run)+": ", num_protons)
+
+ts = process_runs.get_quantity('timestamps', experiment, runs)
+print('run duration (s): ', (ts[-1]-ts[0]))
+
+print('protons per second = ', num_protons/(ts[-1]-ts[0]))
 
 plt.show(block=False)
