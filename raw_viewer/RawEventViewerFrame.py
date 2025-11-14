@@ -709,8 +709,6 @@ class RawEventViewerFrame(ttk.Frame):
         rve_points = np.vstack((self.counts, self.ranges)).transpose()
         self.rve_cut_select_mask = self.selected_rve_path.contains_points(rve_points)
 
-
-
     def define_cut_on_gui(self):
         #open a RvE histogram with the current settings
         bins = int(self.bins_entry.get())
@@ -723,7 +721,6 @@ class RawEventViewerFrame(ttk.Frame):
         if len(self.rve_cut_verticies) > 0:
             self.poly_selector.verts = self.rve_cut_verticies
         fig.show()
-
 
     def browse_for_rve_cut(self):
         file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/rve_cuts/', title='select RvE cut', filetypes=([("csv", ".csv")]))

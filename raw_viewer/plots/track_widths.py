@@ -6,7 +6,9 @@ import matplotlib.pylab as plt
 from raw_viewer import process_runs
 
 experiment = 'e23035'
-for runs in (101,102,106, 109), (111,), (112,):
+bins = np.linspace(0, 6, 25)
+
+for runs in [(106,),(122,),(125,)]:
     gain_match_path = '/egr/research-tpc/shared/e23035_prep/vault/gm.pkl'
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
@@ -17,19 +19,17 @@ for runs in (101,102,106, 109), (111,), (112,):
     energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
 
     veto_mask = (lengths>1)&(lengths<30)&(veto_max<450)&(energy<1.5)
+    alpha_mask = veto_mask&(energy>1.39)&(energy<4.2)&(lengths<37.5)
+    proton_mask = (~alpha_mask)&(energy<2.76)
 
-    centers = process_runs.get_quantity('track_center', experiment, runs)[veto_mask]
-    xs, ys = centers[:,0], centers[:,1]
-    good_centroid = np.isfinite(xs) & np.isfinite(ys)
-    # plt.figure()
-    # plt.hist2d(xs[good_centroid], ys[good_centroid], 100)
-    # plt.colorbar()
+    charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
 
     plt.figure()
-    plt.scatter(xs[good_centroid], ys[good_centroid], marker='.')
-    plt.xlim(-50, 50)
-    plt.ylim(-50, 50)
-    plt.title(runs)
+    plt.hist(charge_widths[proton_mask], bins)
+    plt.title(str(runs)+':protons')
 
+    plt.figure()
+    plt.hist(charge_widths[alpha_mask], bins)
+    plt.title(str(runs)+'alphas')
 
-plt.show()
+plt.show(block=False)

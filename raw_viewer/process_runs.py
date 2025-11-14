@@ -22,6 +22,8 @@ def get_save_path(experiment):
             save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
         elif experiment == 'e23035_prep_vault':
             save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
+        elif experiment == 'e23035':
+            save_path = '/egr/research-tpc/shared/e23035/proc_pkl'
         else:
             raise ValueError
         return save_path
@@ -29,14 +31,28 @@ def get_save_path(experiment):
         if experiment == 'e23035_prep_vault':
             return '/Volumes/Extreme SSD/e23035prepvault/'
 
-def get_h5_file(experiment, run_number):
+def get_h5_path(experiment, run_number):
     h5_base_path = ''
     if socket.gethostname() == 'tpcgpu':
         h5_base_path = '/egr/research-tpc/shared'
     elif socket.gethostname().lower() == 'gadgetserver':
         h5_base_path = '/Volumes/Extreme SSD'
     if experiment == 'e21072':
-        raw_h5_path = '/egr/research-tpc/shared/Run_Data/run_%04d.h5'%run_number
+        return '/egr/research-tpc/shared/Run_Data/run_%04d.h5'%run_number
+    elif experiment == 'e23035_prep_2cobo':
+        return '/egr/research-tpc/shared/e23035_prep/2Cobo/run_%04d.h5'%run_number
+    elif experiment == 'e23035_prep_4cobo':
+        return '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
+    elif experiment == 'e23035_prep_vault':
+        return '%s/e23035_prep/vault/run_%04d.h5'%(h5_base_path, run_number)
+    elif experiment == 'e23035':
+        return'%s/experiments/e23035/h5/run_%04d.h5'%(h5_base_path, run_number)
+    else:
+        raise ValueError
+
+def get_h5_file(experiment, run_number):
+    raw_h5_path = get_h5_path(experiment, run_number)
+    if experiment == 'e21072':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0
@@ -45,7 +61,6 @@ def get_h5_file(experiment, run_number):
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = True
     elif experiment == 'e23035_prep_2cobo':
-        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/2Cobo/run_%04d.h5'%run_number
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
         h5file.length_counts_threshold = 25
         h5file.ic_counts_threshold = 0
@@ -54,7 +69,6 @@ def get_h5_file(experiment, run_number):
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = True
     elif experiment == 'e23035_prep_4cobo':
-        raw_h5_path = '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.544, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0
@@ -63,8 +77,14 @@ def get_h5_file(experiment, run_number):
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = True
     elif experiment == 'e23035_prep_vault':
-        #raw_h5_path = '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
-        raw_h5_path = '%s/e23035_prep/vault/run_%04d.h5'%(h5_base_path, run_number)
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        h5file.length_counts_threshold = 100
+        h5file.ic_counts_threshold = 0
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 25
+        h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = True
+    elif experiment == 'e23035':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0
@@ -75,68 +95,6 @@ def get_h5_file(experiment, run_number):
     else:
         raise ValueError
     return h5file
-
-def process_chunk(experiment, run_number, event_numbers):
-    '''
-    Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
-    Only redoes processing if a pickled version of this information isn't available.
-    '''
-    #save_path = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(get_save_path(experiment), '%s_run%d.pkl.gz'%(experiment, run_number))
-    h5file = get_h5_file(experiment, run_number)
-    track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
-    pad_maxs = []
-    for evt in event_numbers:
-        center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
-        xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
-        principle_axes.append(vv)
-        variances_along_axes.append(dd**2/(len(xs)-1))
-        track_centers.append(center)
-        pad_counts = np.zeros(1024)
-        pad_maxs.append(np.zeros(1024))
-        for pad, trace in zip(*h5file.get_pad_traces(evt)):
-            pad_counts[pad] = np.sum(trace)
-            pad_maxs[-1][pad] = np.max(trace)
-        pad_charges.append(pad_counts)
-
-
-        #get track end points
-        if len(variances_along_axes[-1])==3:
-            points = np.concatenate((xs[:, np.newaxis], 
-                    ys[:, np.newaxis], 
-                    zs[:, np.newaxis]), 
-                    axis=1)
-            rbar = points - center
-            track_direction = vv[0]/np.sqrt(np.sum(vv[0]*vv[0]))
-            rdotv = np.dot(rbar, track_direction)
-            #project endpoints onto track axis
-            first_point = np.min(rdotv)*track_direction + center#points[np.argmin(rdotv)]
-            last_point = np.max(rdotv)*track_direction + center#points[np.argmax(rdotv)]
-            track_endpoints.append([first_point, last_point])
-            #above variance is just variance in postiion of points above some threshold
-            #instead calcualte variance along 2nd axis of charge
-            width_axis = vv[1]/np.sqrt(np.sum(vv[1]*vv[1]))
-            total_charge = np.sum(es)
-            center_of_charge = np.einsum('i,ij->j',es, points)/total_charge
-            displacement_from_center = points - center_of_charge
-            displacement_dot_width_axis_squared = np.einsum('ij, j', displacement_from_center, width_axis)**2
-            charge_widths.append((np.einsum('i,i', displacement_dot_width_axis_squared, es)/total_charge)**0.5)
-            #calculate width in the same way we do length
-            rdotv = np.dot(rbar, width_axis)
-            width_above_thresholds.append(np.max(rdotv) - np.min(rdotv))
-
-        else:
-            track_endpoints.append([(0,0,0), (0,0,0)])
-            charge_widths.append(0)
-            width_above_thresholds.append(0)
-    track_centers = np.array(track_centers)
-    pad_charges = np.array(pad_charges)
-    pad_maxs = np.array(pad_maxs)
-
-    to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
-                'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
-                'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs}
-    return to_return
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
