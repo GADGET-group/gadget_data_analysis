@@ -17,14 +17,14 @@ else: #during experiment
     experiment = 'e23035'
     run_range = (0,1000)#(101, 143)
 
-exclude_runs = [113]
+exclude_runs = [1,9, 73, 113]
 runs = []
 for run in range(run_range[0], run_range[1]+1):
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
 
-for run in runs:
-    run = [run]
+for r in runs:
+    run = [r]
     veto_thresh = 300
     rve_bins = (300, 300)
 
@@ -34,21 +34,21 @@ for run in runs:
         gain_match_result = pickle.load(f)
     pad_gains = gain_match_result.x
 
-    lengths = process_runs.get_lengths(experiment, runs)
-    cpp = process_runs.get_quantity('pad_charge', experiment, runs)
+    lengths = process_runs.get_lengths(experiment, run)
+    cpp = process_runs.get_quantity('pad_charge', experiment, run)
     #veto_counts = process_runs.get_veto_counts(exp, runs)
-    veto_max = process_runs.get_max_veto_counts(experiment, runs)
-    charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
-    energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
+    veto_max = process_runs.get_max_veto_counts(experiment, run)
+    charge_widths = process_runs.get_quantity('charge_width', experiment,run)
+    energy = process_runs.get_gm_ic(experiment, run, pad_gains)
 
     veto_mask = (veto_max < veto_thresh)
 
     fig, ax = plt.subplots()
     plt_mask = veto_mask&(lengths<400)&(lengths>1)
-    ax.set_title('runs: '+str(runs))
+    ax.set_title('runs: '+str(run))
     ax.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
-    plt.savefig('/egr/research-tpc/shared/e23035/images/rve_run%d.png'%run)
+    plt.savefig('/egr/research-tpc/shared/e23035/images/rve_run%d.png'%r)
     plt.close(fig)
 
 
@@ -65,32 +65,32 @@ for run in runs:
 
     plt.figure()
     plt.hist(energy[proton_mask], 1500)
-    plt.title('proton energy spectrum, runs: '+str(runs))
+    plt.title('proton energy spectrum, runs: '+str(run))
     plt.xlabel('energy (MeV)')
-    plt.savefig('/egr/research-tpc/shared/e23035/images/proton_spectra/proton_spectrum_run%d.png'%run)
+    plt.savefig('/egr/research-tpc/shared/e23035/images/proton_spectra/proton_spectrum_run%d.png'%r)
     plt.close()
 
     plt.figure()
-    plt.title('protons selected in RVE, runs: '+str(runs))
+    plt.title('protons selected in RVE, runs: '+str(run))
     plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, color='red')
-    print(str(runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
-    plt.savefig('/egr/research-tpc/shared/e23035/images/proton_spectra/selected_protons_run%d.png'%run)
+    print(str(r) + "has " + str(len(proton_mask[proton_mask])) + " protons")
+    plt.savefig('/egr/research-tpc/shared/e23035/images/proton_spectra/selected_protons_run%d.png'%r)
     plt.close()
 
     plt.figure()
     plt.hist(energy[alpha_mask], 200)
-    plt.title('alpha energy spectrum, runs: '+str(runs))
+    plt.title('alpha energy spectrum, runs: '+str(run))
     plt.xlabel('energy (MeV)')
-    plt.savefig('/egr/research-tpc/shared/e23035/images/alpha_spectra/alpha_spectrum_run%d.png'%run)
+    plt.savefig('/egr/research-tpc/shared/e23035/images/alpha_spectra/alpha_spectrum_run%d.png'%r)
     plt.close()
 
     plt.figure()
-    plt.title('alphas selected in RVE, runs: '+str(runs))
+    plt.title('alphas selected in RVE, runs: '+str(run))
     plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.scatter(energy[alpha_mask], lengths[alpha_mask], marker='.', alpha=0.5, color='red')
-    print(str(runs) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
-    plt.savefig('/egr/research-tpc/shared/e23035/images/alpha_spectra/selected_alphas_run%d.png'%run)
+    print(str(run) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
+    plt.savefig('/egr/research-tpc/shared/e23035/images/alpha_spectra/selected_alphas_run%d.png'%r)
     plt.close()
 
 

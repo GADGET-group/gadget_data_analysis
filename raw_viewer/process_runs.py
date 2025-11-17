@@ -217,6 +217,11 @@ def get_gm_ic(experiment, runs, gains):
     #counts per pad needs to already be on the gpu
     return np.einsum('ij, j', counts_per_pad, gains)
 
+def get_angle(experiment, runs):
+    endpoints = np.array(get_quantity('endpoints', experiment, runs))
+    dr = endpoints[:, 0] - endpoints[:, 1]
+    return np.arctan2(np.sqrt(dr[:,0]**2 + dr[:,1]**2), np.abs(dr[:,2]))
+
 def get_time_since_beam_off(experiment, runs):
     to_return = []
     for run in runs:

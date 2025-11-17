@@ -29,10 +29,10 @@ from raw_viewer import process_runs
 
 gpu_device = 2
 load_result1 = True
-load_result2 = True
+load_result2 = False
 
 
-runs = (49,)#(9,10,15)#(20,)#(20,)#(38,)#
+runs = (9,10,15, 20, 21, 38, 48, 49)#(20,)#(20,)#(38,49)#
 exp = 'e23035_prep_vault'
 
 veto_thresh = 350
@@ -87,7 +87,7 @@ plt.colorbar()
 plt.show(block=(not load_result1))
 
 
-def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
+def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
     gm_slices = []
     default_guess = []
     num_in_slice = []
@@ -141,6 +141,7 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset="none", ):
         res.cut_masks = cut_masks
         res.true_energies = true_energies
         res.runs = runs
+        res.offset = offset
         return res
 
 
@@ -153,10 +154,10 @@ else:
         pickle.dump(res1, f)
 print(res1)
 
-def show_plots(res, block=False):
-    if offset == 'none':
+def show_plots(res,block=False):
+    if 'offset' not in res.__dir__() or res.offset == 'none':
         gm_ic = get_gm_ic(res.x)
-    elif offset == 'constant':
+    elif res.offset == 'constant':
         gm_ic = get_gm_ic(res.x[:-1]) + 1e4*res.x[-1]
     plt.figure()
     plt.title('gain match applied, runs: '+str(runs))
@@ -197,14 +198,16 @@ show_plots(res1)
 
 #redo gain match using selection based on original gain match
 if True:
-    if offset == 'none':
+    offset2 = 'constant'
+    if 'offset' not in res1.__dir__() or res1.offset == 'none':
         gm_ic = get_gm_ic(res1.x)
-    elif offset == 'constant':
+    elif res1.offset == 'constant':
         gm_ic = get_gm_ic(res1.x[:-1]) + 1e4*res1.x[-1]
     cuts2 = []
-    cuts2.append((gm_ic >6.0)&(gm_ic<6.5)&(lengths>55)&(lengths<69) & veto_mask)
+    cuts2.append((gm_ic >6.0)&(gm_ic<6.55)&(lengths>55)&(lengths<69) & veto_mask)
     cuts2.append((gm_ic >6.6)&(gm_ic<7.1)&(lengths>62.5)&(lengths<76) & veto_mask)
-    true_energies2 = [6.288, 6.7783]
+    cuts2.append((gm_ic>8)&(gm_ic<9.25)&(lengths>90)&(lengths<105) & veto_mask)
+    true_energies2 = [6.288, 6.7783, 8.78486]#[6.7783]
 
     fig = plt.figure()
     plt.title('gain match cuts')
@@ -215,18 +218,22 @@ if True:
     plt.show()
 
     if load_result2:
-        with open('res2_%s.pkl'%offset, 'rb') as f:
+        with open('res2_%s.pkl'%offset2, 'rb') as f:
             res2 = pickle.load(f)
     else:
-        res2 = do_gain_match(cuts2, true_energies2, offset=offset)
-        with open('res2_%s.pkl'%offset, 'wb') as f:
+        res2 = do_gain_match(cuts2, true_energies2, offset=offset2)
+        with open('res2_%s.pkl'%offset2, 'wb') as f:
             pickle.dump(res2, f)
     print(res2)
     show_plots(res2)
 
 import ROOT
 energy_hist = ROOT.TH1D("h1", "h1", 100, 6.0, 7)
-gm_ic2 = get_gm_ic(res2.x)
+if res2.offset == 'none':
+    gm_ic2 = get_gm_ic(res2.x)
+if res2.offset == 'constant':
+    gm_ic2 = get_gm_ic(res2.x[:-1])
+    gm_ic2 += 1e4*res2.x[-1]
 energy_hist.Fill(gm_ic2[veto_mask])
 energy_hist.Draw()
 

@@ -1,5 +1,6 @@
 import os
 import pickle
+import sys
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -10,13 +11,14 @@ import ROOT
 from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
 
+
 experiment = 'e23035'
-run = 155
+run = 167
 runs=[run]
 
 
-veto_thresh = 250
-rve_bins = (1000, 1000)
+veto_thresh = 400
+rve_bins = (143, 143)
 
 #load pad gain match
 gain_match_path = '/egr/research-tpc/shared/e23035_prep/vault/gm.pkl'
