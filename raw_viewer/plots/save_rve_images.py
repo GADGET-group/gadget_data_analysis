@@ -25,7 +25,7 @@ for run in range(run_range[0], run_range[1]+1):
 
 for r in runs:
     run = [r]
-    veto_thresh = 300
+    veto_thresh = 400
     rve_bins = (300, 300)
 
     #load pad gain match

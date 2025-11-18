@@ -7,7 +7,7 @@ import matplotlib.pylab as plt
 from raw_viewer import process_runs
 
 experiment = 'e23035'
-run_range = (115,115)#(101, 143)
+run_range = (269,269)#(101, 143)
 
 exclude_runs = [1,9, 73, 113,210,216, 225, 226, 227, 228, 229] #210 needs to be transfered by Tyler
 runs = []
@@ -28,7 +28,7 @@ angles = process_runs.get_angle(experiment, runs)
 xy_len = np.abs(np.sin(angles)*lengths)
 
 
-veto_mask = (veto_max<200)&(xy_len < 20)#&(energy<1.5)&(lengths>5)&(lengths<30)#
+veto_mask = (veto_max<500)&(xy_len < 10)#&(energy<1.5)&(lengths>5)&(lengths<30)#
 
 centers = process_runs.get_quantity('track_center', experiment, runs)[veto_mask]
 xs, ys = centers[:,0], centers[:,1]

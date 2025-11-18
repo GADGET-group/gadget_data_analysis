@@ -29,7 +29,7 @@ from raw_viewer import process_runs
 
 gpu_device = 2
 load_result1 = True
-load_result2 = False
+load_result2 = True
 
 
 runs = (9,10,15, 20, 21, 38, 48, 49)#(20,)#(20,)#(38,49)#
@@ -38,6 +38,7 @@ exp = 'e23035_prep_vault'
 veto_thresh = 350
 rve_bins = 400
 offset = 'none'
+per_run_variation = True
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)

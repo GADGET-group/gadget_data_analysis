@@ -27,7 +27,7 @@ for run in range(run_range[0], run_range[1]+1):
 
 veto_thresh = 1000
 rve_bins = (1000, 1000)
-phist_bins = 3000
+phist_bins = np.linspace(0, 4, 4000)
 alphahist_bins = 500
 
 #load pad gain match
@@ -53,6 +53,7 @@ plt.title('runs: '+str(runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
 plt.xlabel('energy (MeV)')
+plt.ylabel('range (mm)')
 
 
 # self.poly_selector = matplotlib.widgets.PolygonSelector(ax,self.set_cut_polygon)
@@ -70,6 +71,7 @@ plt.figure()
 plt.hist(energy[proton_mask], phist_bins)
 plt.title('proton energy spectrum, runs: '+str(runs))
 plt.xlabel('energy (MeV)')
+plt.ylabel('counts/keV')
 
 plt.figure()
 plt.title('protons selected in RVE, runs: '+str(runs))
@@ -108,7 +110,7 @@ run_ts = np.concatenate(run_ts)
 
 plt.figure()
 plt.title('alphas')
-tve_bins = (50, 50)
+tve_bins = (100, 15)
 plt.hist2d(energy[alpha_mask], run_ts[alpha_mask]/3600, bins=tve_bins, norm=matplotlib.colors.LogNorm())
 plt.xlabel('energy (MeV)')
 plt.ylabel('time since start of experiment (hours)')
