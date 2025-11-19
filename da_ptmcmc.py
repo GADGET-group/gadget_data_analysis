@@ -8,6 +8,7 @@ import matplotlib.pylab as plt
 import scipy.optimize as opt
 import sklearn.cluster as cluster
 import multiprocessing
+import pickle
 
 import emcee
 import corner
@@ -131,6 +132,29 @@ if __name__ == '__main__':
     steps = 1000
     ndim = 16
 
+    def get_init_walker_pos_from_fit(event_num):
+        #start sigma_xy, sigma_z, and c in a small ball around an initial guess
+        sigma_guess = 2
+        pos_ball_size = 1
+        angle_ball_size = 1*np.pi/180
+        with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fit_dict_all_dir_and_kmeans.pkl", 'rb') as file:
+            fit_results_dict = pickle.load(file) # NOTE: the results in this dict are not scaled, they should be good to plug directly into a simulation for comparison to the real data
+        # TODO: set the values to start mcmc here
+        
+        return [(E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
+                            best_point[0] + np.random.randn()*pos_ball_size,
+                            best_point[1] + np.random.randn()*pos_ball_size,
+                            best_point[2] + np.random.randn()*pos_ball_size,
+                            best_point[0] + np.random.randn()*pos_ball_size,
+                            best_point[1] + np.random.randn()*pos_ball_size,
+                            best_point[2] + np.random.randn()*pos_ball_size,
+                            theta_1 + np.random.randn()*angle_ball_size,
+                            phi_1 + np.random.randn()*angle_ball_size,
+                            theta_2 + np.random.randn()*angle_ball_size,
+                            phi_2 + np.random.randn()*angle_ball_size,
+                            sigma_xy_guess+ np.random.randn()*pos_ball_size, sigma_z_guess+ np.random.randn()*pos_ball_size,
+                            sigma_xy_guess+ np.random.randn()*pos_ball_size, sigma_z_guess+ np.random.randn()*pos_ball_size,
+                            ) for w in range(nwalkers)]
     def get_init_walker_pos(direction):
         #initialize E per priors
         #start walkers in a small ball at far end of the track from where the particle will stop, given selected direction

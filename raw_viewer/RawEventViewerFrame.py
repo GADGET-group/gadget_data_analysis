@@ -180,8 +180,8 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Button(hist_frame, text='find next event', command=self.find_next_processed_event).grid(row=5, column=0)
         self.axis1_var = tk.StringVar()
         self.axis2_var = tk.StringVar()
-        ttk.OptionMenu(hist_frame, self.axis1_var, 'adc counts', 'adc counts', 'ranges (mm)', 'timestamps (s)', 'angles (deg)').grid(row=5, column=1)
-        ttk.OptionMenu(hist_frame, self.axis2_var, 'ranges (mm)', 'adc counts', 'ranges (mm)', 'timestamps (s)', 'angles (deg)').grid(row=5, column=2)
+        ttk.OptionMenu(hist_frame, self.axis1_var, 'ADC Counts', 'ADC Counts', 'Ranges (mm)', 'timestamps (s)', 'angles (deg)').grid(row=5, column=1)
+        ttk.OptionMenu(hist_frame, self.axis2_var, 'Ranges (mm)', 'ADC Counts', 'Ranges (mm)', 'timestamps (s)', 'angles (deg)').grid(row=5, column=2)
         ttk.Button(hist_frame, text='1D Histogram', command=self.show_1d_hist).grid(row=6, column=0)
         ttk.Button(hist_frame, text='Fit 1D Histogram', command=self.show_hist_fit_gui).grid(row=6, column=1)
         ttk.Button(hist_frame, text='2D Histogram', command=self.show_2d_hist).grid(row=6, column=3)
@@ -464,9 +464,9 @@ class RawEventViewerFrame(ttk.Frame):
         self.h5file.remove_outliers = (self.remove_outlier_var.get() == 1)
 
     def get_hist_data_from_name(self, name):
-        if name == 'adc counts':
+        if name == 'ADC Counts':
             return self.counts
-        if name == 'ranges (mm)':
+        if name == 'Ranges (mm)':
             return self.ranges
         if name == 'timestamps (s)':
             return self.timestamps

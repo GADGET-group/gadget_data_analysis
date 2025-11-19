@@ -42,8 +42,6 @@ else:
 h5file = build_sim.get_rawh5_object(experiment, run_number)
 
 
-
-
 def fit_event(run, event, particle_type, include_recoil, direction, Eknown, return_key=None, 
               return_dict=None, debug_plots=False):
     if include_recoil:
@@ -97,9 +95,14 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     #         if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
     #             new_data.append(line)
     #     data = np.array(new_data)
-    pts = []
-    for i in range(len(x_real)):
-        pts.append((x_real[i],y_real[i],z_real[i]))
+    data = np.stack((x_real,y_real,z_real),axis=1)
+    pts = data
+    # pts_test = []
+    # for i in range(len(x_real)):
+    #     pts_test.append((x_real[i],y_real[i],z_real[i]))
+    # pts_test = np.array(pts_test)
+    # if np.array_equal(pts,pts_test):
+    #     print("Looks like the way you were doing it before was wrong")
     pts = np.array(pts)
     mean = pts.mean(axis=0)
     uu, dd, vv = np.linalg.svd(pts - mean)
@@ -107,7 +110,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
     # direction[clust_id] = vv[0]
 
     # Line for plotting
-    t = np.linspace(-10, 10, 20)[:, np.newaxis]
+    t = np.linspace(-12, 12, 20)[:, np.newaxis]
     linepts = mean + t * lob_direction
 
     linepts0 = linepts
@@ -172,9 +175,34 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         init_guess = np.array((theta_guess, phi_guess, best_point[0], best_point[1], best_point[2], trace_sim.counts_per_MeV, sigma_guess, sigma_guess))
     else:
         init_guess = np.array((theta_guess, phi_guess, best_point[0], best_point[1], best_point[2], Eknown, sigma_guess, sigma_guess))
-
+    scaled_init_guess = np.zeros_like(init_guess)
+    # condition the parameters so the fitter can move in the parameter space and converge faster (each parameter should approx go from -1 to 1)
+    scaled_init_guess[0] = init_guess[0]  / np.pi
+    scaled_init_guess[1] = init_guess[1]  / (2* np.pi)
+    scaled_init_guess[2] = init_guess[2] / 40
+    scaled_init_guess[3] = init_guess[3] / 40
+    scaled_init_guess[4] = init_guess[4] / 400
+    if fit_adc_count_per_MeV:
+        scaled_init_guess[5] = init_guess[5] / 1e6 # counts per mev are typically around 1e5, so divinding by 1e6 should put the scaled value around 0.12
+    else:
+        scaled_init_guess[5] = init_guess[5] / 10
+    scaled_init_guess[6] = init_guess[6] / 10
+    scaled_init_guess[7] = init_guess[7] / 10
+    
     def to_minimize(params, least_squares):
         theta, phi, x,y,z, E_or_m, sigma_xy, sigma_z = params
+        # unscale the parameters
+        theta = theta * np.pi
+        phi = phi * 2 * np.pi
+        x = x *40
+        y = y *40
+        z = z *400
+        if fit_adc_count_per_MeV:
+            E_or_m = E_or_m * 1e6
+        else:
+            E_or_m = E_or_m * 10
+        sigma_xy, sigma_z = sigma_xy * 10, sigma_z * 10
+        
         if fit_adc_count_per_MeV:
             trace_sim.counts_per_MeV = E_or_m
             trace_sim.sims[0].initial_energy = Eknown
@@ -200,6 +228,7 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         
         trace_sim.sims[0].theta, trace_sim.sims[0].phi = theta, phi
         trace_sim.initial_point = (x,y,z)
+        trace_sim.sims[0].initial_point = (x,y,z)
         trace_sim.sims[0].sigma_xy = sigma_xy
         trace_sim.sims[0].sigma_z = sigma_z
         
@@ -233,7 +262,8 @@ def fit_event(run, event, particle_type, include_recoil, direction, Eknown, retu
         plt.show(block=True)
     print('starting optimization of event %d in run %d with particle %s'%(event, run, particle_type))
     bnds = ((0,3.2),(0,6.3),(-40,40),(-40,40),(0,400),(1.0,10.0),(0.1,6.0),(0.1,6.0))
-    res = opt.minimize(fun=to_minimize, x0=init_guess, args=(True,),bounds = bnds)
+    bnds = ((0,1),(0,1),(-1,1),(-1,1),(0,1),(0,1),(0.05,1),(0.05,1))
+    res = opt.minimize(fun=to_minimize, x0=scaled_init_guess, args=(True,),bounds = bnds)
     if use_likelihood:
         res = opt.minimize(fun=to_minimize, x0=res.x, args=(False,))
 
@@ -258,7 +288,7 @@ if False: #try fitting one event to make sure it looks ok
 
 
 events_in_catagory = [[] for i in range(3)]
-events_per_catagory = 20
+events_per_catagory = 30
 processes = []
 
 '''
@@ -378,6 +408,7 @@ for cat in range(len(events_in_catagory)):
             continue
         res, sim = fit_results_dict[evt]
         trace_sims.append(sim)
+        print(res)
         if not res.success and res.message != 'Desired error not necessarily achieved due to precision loss.':
             print('evt %d (cat %d)not succesfully fit: %s'%(evt, cat, res.message))
             continue
@@ -445,7 +476,7 @@ peak_vals = []
 peak_threshold = 10
 for evt, sim in zip(evts_to_fit, trace_sims):
     simulated_traces = sim.sim_traces
-    show_fit(evt)
+    # show_fit(evt)
     for pad in simulated_traces:
         if pad not in sim.traces_to_fit:
             continue

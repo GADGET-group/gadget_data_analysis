@@ -14,6 +14,8 @@ from sklearn.cluster import DBSCAN
 
 # np.set_printoptions(threshold=sys.maxsize)
 
+plt.rc('font', size=30)
+
 # temporaty and bad way to implement pad gain correction
 PGM = True
 
