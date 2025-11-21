@@ -93,6 +93,49 @@ class RvE_Frame(ttk.Frame):
         self.project_cut_y_ax_button = ttk.Button(self.cut_tools_frame, text='Project Cut to Y-axis')
         self.project_cut_y_ax_button.grid(row=2, column=1)
 
+        # --- Filter / Selection settings ---
+        self.filter_frame = ttk.LabelFrame(self, text='filter settings')
+        self.filter_frame.grid(row=3, pady=10)
+
+        # Veto threshold
+        ttk.Label(self.filter_frame, text="Veto max < ").grid(row=0, column=0)
+        self.veto_threshold_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.veto_threshold_entry.grid(row=0, column=1)
+        self.veto_threshold_entry.insert(0, "220")  # default
+
+        # Range min / max
+        ttk.Label(self.filter_frame, text="Range min:").grid(row=1, column=0)
+        self.range_min_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.range_min_entry.grid(row=1, column=1)
+        self.range_min_entry.insert(0, "0")
+
+        ttk.Label(self.filter_frame, text="Range max:").grid(row=1, column=2)
+        self.range_max_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.range_max_entry.grid(row=1, column=3)
+        self.range_max_entry.insert(0, "200")
+
+        # Angle min / max
+        ttk.Label(self.filter_frame, text="Angle min:").grid(row=2, column=0)
+        self.angle_min_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.angle_min_entry.grid(row=2, column=1)
+        self.angle_min_entry.insert(0, "0")
+
+        ttk.Label(self.filter_frame, text="Angle max:").grid(row=2, column=2)
+        self.angle_max_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.angle_max_entry.grid(row=2, column=3)
+        self.angle_max_entry.insert(0, "90")
+
+        # IC min / max
+        ttk.Label(self.filter_frame, text="IC min:").grid(row=3, column=0)
+        self.ic_min_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.ic_min_entry.grid(row=3, column=1)
+        self.ic_min_entry.insert(0, "0")
+
+        ttk.Label(self.filter_frame, text="IC max:").grid(row=3, column=2)
+        self.ic_max_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.ic_max_entry.grid(row=3, column=3)
+        self.ic_max_entry.insert(0, "1e9")
+
         # Storage for selected vertices and mask
         self.rve_cut_verticies = []
         self.rve_cut_select_mask = None
@@ -116,23 +159,23 @@ class RvE_Frame(ttk.Frame):
 
         TODO: calculate angles from dz and dxy
         '''
-        veto_maxs = self.run_data.max_veto_counts
-        self.veto_threshold_entry = 220
-        self.range_min_entry = 0
-        self.range_max_entry = 200
-        self.angle_min_entry = 0
-        self.angle_max_entry = 90
-        self.ic_min_entry = 0
-        self.ic_max_entry = 1e9
+        veto_maxs = self.run_data.max_veto_counts 
+        veto_thresh = float(self.veto_threshold_entry.get())
+        rmin = float(self.range_min_entry.get())
+        rmax = float(self.range_max_entry.get())
+        amin = float(self.angle_min_entry.get())
+        amax = float(self.angle_max_entry.get())
+        icmin = float(self.ic_min_entry.get())
+        icmax = float(self.ic_max_entry.get())
 
         #return veto_maxs < float(self.veto_threshold_entry.get())
-        to_return =  np.logical_and.reduce((veto_maxs < float(self.veto_threshold_entry),
-                                      self.run_data.angles < float(self.angle_max_entry),
-                                      self.run_data.angles > float(self.angle_min_entry),
-                                      self.run_data.ranges > float(self.range_min_entry),
-                                      self.run_data.ranges < float(self.range_max_entry),
-                                      self.run_data.counts < float(self.ic_max_entry),
-                                      self.run_data.counts > float(self.ic_min_entry)
+        to_return =  np.logical_and.reduce((veto_maxs < float(veto_thresh),
+                                      self.run_data.angles < float(amax),
+                                      self.run_data.angles > float(amin),
+                                      self.run_data.ranges > float(rmin),
+                                      self.run_data.ranges < float(rmax),
+                                      self.run_data.counts < float(icmax),
+                                      self.run_data.counts > float(icmin)
                                     ))
         return to_return
 
@@ -140,7 +183,7 @@ class RvE_Frame(ttk.Frame):
         '''
         Opens RvE histogram and allows polygon selection
         '''
-        bins = 500
+        bins = int(self.energy_bins_entry.get())
         fig, ax = plt.subplots()
         mask = self.get_processed_event_mask()
         print(sum(mask), 'events after mask applied', len(mask), 'total events')
@@ -178,18 +221,6 @@ class RvE_Frame(ttk.Frame):
         self.save_cut_files(self.rve_cut_verticies)
         print("Images saved successfully.")
 
-    # def plot_rve(self):
-    #     bins = int(self.bins_entry.get())
-    #     fig, ax = plt.subplots()
-    #     mask = self.get_processed_event_mask()
-    #     ax.hist2d(self.counts[mask], self.ranges[mask], bins=(bins, bins), norm=colors.LogNorm())
-    #     ax.set_xlabel('adc counts')
-    #     ax.set_ylabel('range (mm)')
-    #     self.poly_selector = PolygonSelector(ax,self.set_cut_polygon)
-    #     if len(self.rve_cut_verticies) > 0:
-    #         self.poly_selector.verts = self.rve_cut_verticies
-    #     fig.show()
-
     def show_event(self): #TODO: add "show annotation" checkbox
         #only draw plot if it's not already open
         if not plt.fignum_exists('RvE'):
@@ -208,42 +239,7 @@ class RvE_Frame(ttk.Frame):
     def prev_cut(self):
         PrevCutSelectWindow(self, self.run_data)
 
-    # def save_cut_files(self, points, use_raw_data=False):
-    #     '''
-    #     points: verticies specifying the cut region
-    #     '''
-    #     now = datetime.datetime.now()
-    #     rand_num = str(random.randrange(0,1000000,1))
-    #     cut_name = rand_num+now.strftime("CUT_Date_%m_%d_%Y")
-    #     event_images_path = os.path.join(self.run_data.folder_path, cut_name)
-
-    #     #save an image for future cut selection
-    #     self.plot_spectrum(fig_name=cut_name)
-    #     ax = plt.gca()
-    #     #add once point and use this to close the path
-    #     #actual value of final vertex is ignored for CLOSEPOLY code
-    #     points_list = list(points)
-    #     points_list.append([0,0])
-    #     codes = [Path.LINETO]*len(points_list)
-    #     codes[0] = Path.MOVETO
-    #     codes[-1] = Path.CLOSEPOLY
-    #     path = Path(points_list, codes)
-        
-    #     to_draw = patches.PathPatch(path, fill=False, color='red')
-    #     ax.add_patch(to_draw)
-    #     plt.savefig(os.path.join(self.run_data.folder_path, cut_name+'.jpg'))
-    #     plt.close()
-
-    #     #save images of the selected events
-    #     os.makedirs(event_images_path)
-    #     selected_indices = self.run_data.get_RvE_cut_indexes(points)
-    #     for index in tqdm(selected_indices):
-    #         image_name = f"run{self.run_data.run_num}_image_{index}.png"
-    #         image_path = os.path.join(event_images_path, image_name)
-    #         self.run_data.make_image(index, save_path=image_path, use_raw_data=use_raw_data, smoothen=True)
-    #     #save the cut parameters used
-    #     np.savetxt(os.path.join(event_images_path, 'cut_used.txt'), points)
-
+    
     def save_cut_files(self, points):
         now = datetime.datetime.now()
         rand_num = str(random.randrange(0,1000000,1))
@@ -346,11 +342,11 @@ class RvE_Frame(ttk.Frame):
         print("All images have been processed")
 		
 		# Pickle cut_indices
-        cut_indices_H5list = self.run_data.good_events[cut_indices]
+        cut_indices_H5list = cut_indices
         cut_indices_str = f"cut_indices_H5list.pkl"
         cut_indices_path = os.path.join(imageCut_path, cut_indices_str)
         with open(cut_indices_path, "wb") as file:
-                pickle.dump(cut_indices_H5list, file)
+            pickle.dump(cut_indices_H5list, file)
 
     def cut_from_file(self):
         '''
@@ -360,12 +356,4 @@ class RvE_Frame(ttk.Frame):
         fname = tkinter.filedialog.askopenfile(initialdir=os.getcwd())
         points = np.loadtxt(fname)
         self.save_cut_files(points)
-
-    def cut_from_file_raw(self):
-        '''
-        Input files should have an energy (MeV) followed by range (mm) on each line,
-        with the values seperated by a space. 
-        '''
-        fname = tkinter.filedialog.askopenfile(initialdir=os.getcwd())
-        points = np.loadtxt(fname)
-        self.save_cut_files(points, use_raw_data=True)
+        print("Cut images saved from file selection.")
