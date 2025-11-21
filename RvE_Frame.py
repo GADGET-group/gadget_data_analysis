@@ -140,7 +140,7 @@ class RvE_Frame(ttk.Frame):
         '''
         Opens RvE histogram and allows polygon selection
         '''
-        bins = 100
+        bins = 500
         fig, ax = plt.subplots()
         mask = self.get_processed_event_mask()
         print(sum(mask), 'events after mask applied', len(mask), 'total events')
