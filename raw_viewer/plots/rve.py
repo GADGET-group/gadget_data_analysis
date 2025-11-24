@@ -16,9 +16,10 @@ if False: #background runs before experiment
     run_range = (68, 73)
 else: #during experiment
     experiment = 'e23035'
-    run_range = (0,1000)#(0,1000)#(101, 143)
+    run_range = (187,187)#(0,1000)#(101, 143)
 
-exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229] #210 needs to be transfered by Tyler
+exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
+                289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
 runs = []
 for run in range(run_range[0], run_range[1]+1):
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
@@ -26,7 +27,7 @@ for run in range(run_range[0], run_range[1]+1):
 
 
 veto_thresh = 1000
-rve_bins = (1000, 1000)
+rve_bins = (100, 100)
 phist_bins = np.linspace(0, 4, 4000)
 alphahist_bins = 500
 
@@ -48,7 +49,7 @@ veto_mask = (veto_max < veto_thresh)
 
 
 plt.figure()
-plt_mask = veto_mask&(lengths<400)&(lengths>1)
+plt_mask = veto_mask&(lengths>1)&(lengths<400)
 plt.title('runs: '+str(runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
