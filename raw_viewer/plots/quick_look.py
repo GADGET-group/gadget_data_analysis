@@ -9,6 +9,7 @@ from raw_viewer import process_runs
 def save_images(experiment, run):
     num_to_save = 10
     h5file = process_runs.get_h5_file(experiment, run)
+    h5file.cache_enable = False
     #save x-y projections for first, last, and random num_to_save images
     first, last = h5file.get_event_num_bounds()
     first_events = np.arange(first, first+num_to_save)

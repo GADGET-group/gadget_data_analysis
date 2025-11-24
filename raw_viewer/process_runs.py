@@ -105,6 +105,14 @@ def get_h5_file(experiment, run_number):
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = True
+    elif experiment == 'e25058':
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        h5file.length_counts_threshold = 100
+        h5file.ic_counts_threshold = 0
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 25
+        h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = True
     else:
         raise ValueError
     return h5file
