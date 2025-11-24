@@ -15,7 +15,7 @@ def save_images(experiment, run):
     first_events = np.arange(first, first+num_to_save)
     last_events = np.arange(last-num_to_save+1, last+1)
     random_events = np.random.randint(first, last, num_to_save)
-    events_to_save = np.concat([first_events, random_events, last_events])
+    events_to_save = np.concatenate([first_events, random_events, last_events])
     
     im_save_path = process_runs.get_save_path(experiment).replace('proc_pkl', 'quick_look')
     im_save_path = os.path.join(im_save_path, 'run%d'%run)
