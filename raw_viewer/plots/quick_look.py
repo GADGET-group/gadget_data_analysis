@@ -19,7 +19,7 @@ def save_images(experiment, run):
     
     im_save_path = process_runs.get_save_path(experiment).replace('proc_pkl', 'quick_look')
     im_save_path = os.path.join(im_save_path, 'run%d'%run)
-    pathlib.Path.mkdir(im_save_path)
+    os.makedirs('/Volumes/e25058_v1/e25058/quick_look/run35', exist_ok=True)
     for event_num in events_to_save:
         h5file.show_2d_projection(event_num, block=False)
         plt.savefig(os.path.join(im_save_path, 'event%d_xy.png'%event_num))
