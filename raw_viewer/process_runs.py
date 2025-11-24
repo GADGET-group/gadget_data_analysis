@@ -35,13 +35,18 @@ def get_save_path(experiment):
     elif 'gadget' in socket.gethostname().lower():
         if experiment == 'e23035_prep_vault':
             return '/Volumes/Extreme SSD/e23035prepvault/'
+        if experiment == 'e25058':
+            return '/Volumes/e25058_v1/e25058/proc_pkl'
 
 def get_h5_path(experiment, run_number):
     h5_base_path = ''
     if socket.gethostname() == 'tpcgpu':
         h5_base_path = '/egr/research-tpc/shared'
-    elif socket.gethostname().lower() == 'gadget':
-        h5_base_path = '/Volumes/Extreme SSD'
+    elif 'gadget' in socket.gethostname().lower():
+        if experiment == '23035':
+            h5_base_path = '/Volumes/Extreme SSD'
+        elif experiment == 'e25058':
+            h5_base_path = '/Volumes/e25058_v1'
     if experiment == 'e21072':
         return '/egr/research-tpc/shared/Run_Data/run_%04d.h5'%run_number
     elif experiment == 'e23035_prep_2cobo':
@@ -52,6 +57,9 @@ def get_h5_path(experiment, run_number):
         return '%s/e23035_prep/vault/run_%04d.h5'%(h5_base_path, run_number)
     elif experiment == 'e23035':
         return'%s/experiments/e23035/h5/run_%04d.h5'%(h5_base_path, run_number)
+    elif experiment == 'e25058':
+        return'%s/experiments/e25058/h5/run_%04d.h5'%(h5_base_path, run_number)
+        
     else:
         raise ValueError
 
