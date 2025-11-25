@@ -1,6 +1,7 @@
 import os
 import pickle
 
+
 import numpy as np
 import scipy.spatial.distance
 import scipy.optimize as opt
@@ -11,15 +12,17 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
-USE_GPU = True
-if USE_GPU:
+
+try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    cp.cuda.runtime.setDevice(3)
-else:
+    #cp.cuda.runtime.setDevice(2)
+    USE_GPU = True
+except:
     cp = np
     import scipy.special as cpspecial
     cp.asnumpy = lambda x: x
+    USE_GPU = False
 
 
 import skimage.measure
@@ -118,6 +121,13 @@ class raw_h5_file:
         self.cobos='all'
         self.pads='all'
 
+        #caching avoids redoing baseline subtraction unecessarily. If enabled and any parameters are changed,
+        #  should set self.cached_event to np.inf to force recompute.
+        self.cache_enable = False
+        self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
+        self.cached_data = None
+        self.cached_xyte = self.cached_xyze = None
+
         #look at first event and figure out number of time bins
         first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
         self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
@@ -167,6 +177,9 @@ class raw_h5_file:
         Veto pads should NOT be removed during outlier removal.
         Does NOT apply thresholding. However, this is applied in get_xyte and and get_xyze.
         '''
+        if self.cache_enable and event_number == self.cached_event:
+            return np.array(self.cached_data, copy=True)
+
         data = self.h5_file['get']['evt%d_data'%event_number]
 
         
@@ -252,7 +265,9 @@ class raw_h5_file:
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
                     line[FIRST_DATA_BIN:] *= self.pad_gains[pad]  
-
+        if self.cache_enable:
+            self.cached_data = data
+            self.cached_event = event_number
         return data
 
     def calculate_background(self, trace):
@@ -292,7 +307,7 @@ class raw_h5_file:
                     break
                 i += 1
             peak_end = i
-            #fit a line through the points just outside the peak regio
+            #fit a line through the points just outside the peak region
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
@@ -315,6 +330,8 @@ class raw_h5_file:
                  and es[i] gives the charge that arrived at that pad at the given time.
                  Only data where the charge deposition is greater than the threshold is included.
         '''
+        if self.cache_enable and self.cached_event_xyte == event_number:
+            return self.cached_xyte
         xs, ys, es = [], [], []
         event_data =  self.get_data(event_number)
         #after this look, xs=[x1, x2, ...], same for ys, es=[[1st pad data], [2nd pad data], ...]
@@ -345,14 +362,23 @@ class raw_h5_file:
             ys = ys[es>threshold]
             ts = ts[es>threshold]
             es = es[es>threshold]
+        if self.cache_enable:
+            self.cached_event_xyte = event_number
+            self.cached_xyte = (xs, ys, ts, es)
         return xs, ys, ts, es
     
     def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
+        if self.cache_enable and self.cached_event_xyze == event_number:
+            return self.cached_xyze
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
-        return x,y, t*self.zscale ,e
+        to_return = (x,y, t*self.zscale ,e)
+        if self.cache_enable:
+            self.cached_xyze= to_return
+            self.cached_event_xyze = event_number
+        return to_return
     
     def get_track_axis(self, event=None, threshold=None, return_all_svd_results=False, xyze=None, return_np=True):
         '''
@@ -377,15 +403,18 @@ class raw_h5_file:
         try:
             uu, dd, vv = cp.linalg.svd(points - points_mean)
         except Exception as e:
-            print('caught exceptions while trying to perform SVD of event %d'%event)
+            print('caught exceptions while trying to perform SVD of event '%+str(event))
             print(e)
             uu, vv, dd = None
 
         if return_np:
             points_mean = cp.asnumpy(points_mean)
-            uu, dd, vv = cp.asnumpy(uu), cp.asnumpy(dd), cp.asnumpy(vv)
+            vv = cp.asnumpy(vv)
+            if return_all_svd_results:
+                dd = cp.asnumpy(dd)
+                #uu = cp.asnumpy(uu)
         if return_all_svd_results:
-            return points_mean, uu, dd, vv
+            return points_mean, dd, vv
         else:
             return points_mean, vv #vv[0] holds direction vector of 1st priciple component, etc
 

@@ -4,6 +4,7 @@ import configparser
 import csv
 import shutil
 import pickle
+import socket
 
 import tkinter as tk
 from tkinter import ttk
@@ -31,7 +32,11 @@ class RawEventViewerFrame(ttk.Frame):
         self.heritage_file = 10
         if not heritage_file:
             if file_path == None:
-                file_path = tk.filedialog.askopenfilename(initialdir='/egr/research-tpc/shared/Run_Data', title='Select H5 File', filetypes=[('H5', ".h5")])
+                if socket.gethostname() == 'tpcgpu':
+                    init_dir =  "/egr/research-tpc/shared/"
+                else:
+                    init_dir = "/mnt/analysis/e21072/h5test/"
+                file_path = tk.filedialog.askopenfilename(initialdir=init_dir, title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
                 flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.h5file = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
@@ -60,23 +65,6 @@ class RawEventViewerFrame(ttk.Frame):
         ttk.Button(settings_frame, text='process run', command=self.process_run).grid(row=3, column=0)
         ttk.Button(settings_frame, text='load processed run', command=self.load_processed_run).grid(row=3, column=1)
         settings_frame.grid()
-
-        energy_cal_frame = ttk.LabelFrame(self, text="energy calibration")
-        ttk.Label(energy_cal_frame, text="energy calibration type:").grid(row=0, column=0)
-        ttk.Label(energy_cal_frame, text="adc counts").grid(row=1, column=1)
-        ttk.Label(energy_cal_frame, text="MeV").grid(row=1, column=2)
-        ttk.Label(energy_cal_frame, text="point 1").grid(row=2, column=0)
-        self.point1_adc_counts_entry = ttk.Entry(energy_cal_frame)
-        self.point1_adc_counts_entry.grid(row=2, column=1)
-        self.point1_MeV_entry = ttk.Entry(energy_cal_frame)
-        self.point1_MeV_entry.grid(row=2, column=2)
-        ttk.Label(energy_cal_frame, text="point 2").grid(row=3, column=0)
-        self.point2_adc_counts_entry = ttk.Entry(energy_cal_frame)
-        self.point2_adc_counts_entry.grid(row=3, column=1)
-        self.point2_MeV_entry = ttk.Entry(energy_cal_frame)
-        self.point2_MeV_entry.grid(row=3, column=2)
-        ttk.Button(energy_cal_frame, text="apply energy calibration", command=self.apply_energy_cal).grid(row=4, column=0)
-        energy_cal_frame.grid()
 
         gain_match_frame = ttk.LabelFrame(self, text="pad gain match")
         self.gain_match_label = ttk.Label(gain_match_frame, text="no gain match loaded")
@@ -394,7 +382,9 @@ class RawEventViewerFrame(ttk.Frame):
         self.timestamps = self.h5file.get_timestamps_array()
         np.save(os.path.join(directory_path, 'timestamps.npy'), self.timestamps)
         #save all the other properties
+        self.h5file.cache_enable = True
         max_veto_counts, dxy, dz, counts, angles, pads_railed_list = self.h5file.get_histogram_arrays()
+        self.h5file.cache_enable = False
         np.save(os.path.join(directory_path, 'counts.npy'), counts)
         np.save(os.path.join(directory_path, 'dxy.npy'), dxy)
         np.save(os.path.join(directory_path, 'dt.npy'), dz/self.h5file.zscale)
@@ -429,8 +419,6 @@ class RawEventViewerFrame(ttk.Frame):
         #do zscale dependent calcuations of range and angle
         self.entry_changed(None)
 
-    def apply_energy_cal(self):
-        pass
 
     def do_gain_match(self):
         save_path =  tk.filedialog.asksaveasfilename(initialdir='./', title='gain match save path', filetypes=([("gain match", ".gain_match")]), defaultextension='.gain_match')
@@ -721,8 +709,6 @@ class RawEventViewerFrame(ttk.Frame):
         rve_points = np.vstack((self.counts, self.ranges)).transpose()
         self.rve_cut_select_mask = self.selected_rve_path.contains_points(rve_points)
 
-
-
     def define_cut_on_gui(self):
         #open a RvE histogram with the current settings
         bins = int(self.bins_entry.get())
@@ -735,7 +721,6 @@ class RawEventViewerFrame(ttk.Frame):
         if len(self.rve_cut_verticies) > 0:
             self.poly_selector.verts = self.rve_cut_verticies
         fig.show()
-
 
     def browse_for_rve_cut(self):
         file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/rve_cuts/', title='select RvE cut', filetypes=([("csv", ".csv")]))
