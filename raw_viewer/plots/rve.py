@@ -15,8 +15,8 @@ if False: #background runs before experiment
     experiment = 'e23035_prep_vault'
     run_range = (68, 73)
 else: #during experiment
-    experiment = 'e23035'
-    run_range = (187,187)#(0,1000)#(101, 143)
+    experiment = 'e25058'
+    run_range = (50,50)#(0,1000)#(101, 143)
 
 exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
                 289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
