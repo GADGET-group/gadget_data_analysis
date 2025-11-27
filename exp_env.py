@@ -1,6 +1,9 @@
 import sys
 import importlib
 import multiprocessing
+from raw_viewer import process_runs
+
+experiment = 'e25058'
 
 def import_or_reload(module_name):
     if module_name in sys.modules:
@@ -21,5 +24,10 @@ def rate_summary():
 def xy_centering():
     import_or_reload('raw_viewer.plots.xy_centering')
 
-def process_runs(runs):
-    pass
+def process_run(run):
+    process_runs.get_processed_run(experiment, run)
+
+if __name__ == '__main__':
+    runs = [71,72,73]
+    with multiprocessing.Pool(10) as pool:
+        pool.map(process_run, runs)

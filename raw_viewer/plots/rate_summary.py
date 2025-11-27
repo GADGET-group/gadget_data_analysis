@@ -15,7 +15,7 @@ if False: #background runs before experiment
     run_range = (68, 73)
 else: #during experiment
     experiment = 'e25058'
-    run_range = (55,61)#(0,1000)#(101, 143)
+    run_range = (70,73)#(0,1000)#(101, 143)
 
 if False:
     exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -29,7 +29,7 @@ for run in range(run_range[0], run_range[1]+1):
 print(runs)
 proton_counts, durations = [], []
 
-veto_thresh = 500
+veto_thresh = 250
 #load pad gain match
 gain_match_path = '/egr/research-tpc/shared/e23035_prep/vault/gm.pkl'
 with open(gain_match_path, 'rb') as f:

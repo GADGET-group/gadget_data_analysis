@@ -167,7 +167,7 @@ if __name__ == '__main__':
     include_all_data = False
     print('total events in file = %d'%len(data))
     if not include_all_data:
-        min_val, max_val = 6.5e5,9.5e5
+        min_val, max_val = 0.85, 1.13
         mask = np.logical_and(data>min_val, data<max_val)
         data = data[mask]
         #weights = weights[mask]
