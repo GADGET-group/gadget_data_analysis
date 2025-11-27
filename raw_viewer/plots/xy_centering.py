@@ -6,8 +6,8 @@ import matplotlib.pylab as plt
 
 from raw_viewer import process_runs
 
-experiment = 'e23035'
-run_range = (143,143)#(101, 143)
+experiment = 'e25058'
+run_range = (50,50)#(101, 143)
 
 exclude_runs = [1,9, 73, 113,210,216, 225, 226, 227, 228, 229] #210 needs to be transfered by Tyler
 runs = []

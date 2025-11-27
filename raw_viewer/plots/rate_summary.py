@@ -14,11 +14,14 @@ if False: #background runs before experiment
     experiment = 'e23035_prep_vault'
     run_range = (68, 73)
 else: #during experiment
-    experiment = 'e23035'
-    run_range = (285,1000)#(0,1000)#(101, 143)
+    experiment = 'e25058'
+    run_range = (55,61)#(0,1000)#(101, 143)
 
-exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
-                289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
+if False:
+    exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
+                    289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
+else:
+    exclude_runs = []
 runs=[]
 for run in range(run_range[0], run_range[1]+1):
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
@@ -32,7 +35,7 @@ gain_match_path = '/egr/research-tpc/shared/e23035_prep/vault/gm.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
 pad_gains = gain_match_result.x
-
+print(runs)
 for run in runs:
     lengths = process_runs.get_lengths(experiment, [run])
     #veto_counts = process_runs.get_veto_counts(exp, runs)
@@ -47,7 +50,8 @@ for run in runs:
     alpha_mask = veto_mask&(lengths<(energy*m+32.2 - m*2.25))
 
     m = (159.2-26.2)/(2.81-0.619)
-    proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)
+    #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)
+    proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
     num_protons = len(proton_mask[proton_mask])
     #print(str(run) + " has " + str(num_protons) + " protons")
 
@@ -57,6 +61,7 @@ for run in runs:
     #print('protons per second = ', num_protons/(ts[-1]-ts[0]))
     proton_counts.append(num_protons)
     durations.append(ts[-1]-ts[0])
+    print(run, num_protons)
 
 proton_counts = np.array(proton_counts)
 durations = np.array(durations)

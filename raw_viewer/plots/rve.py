@@ -16,7 +16,7 @@ if False: #background runs before experiment
     run_range = (68, 73)
 else: #during experiment
     experiment = 'e25058'
-    run_range = (50,50)#(0,1000)#(101, 143)
+    run_range = (64,64)#(0,1000)#(101, 143)
 
 if experiment == 'e23035':
     exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -29,8 +29,8 @@ for run in range(run_range[0], run_range[1]+1):
         runs.append(run)
 
 
-veto_thresh = 1000
-rve_bins = (100, 100)
+veto_thresh = 500
+rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 4000)
 alphahist_bins = 500
 
@@ -69,7 +69,10 @@ m = (108.4-32.2)/(3.628-2.25)
 alpha_mask = veto_mask&(lengths<(energy*m+32.2 - m*2.25))
 
 m = (159.2-26.2)/(2.81-0.619)
-proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))
+#proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))
+proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
+palpha_cut = veto_mask&(energy>1.6)&(energy<1.8)&(lengths>27.5)&(lengths<40)
+print(np.where(palpha_cut))
 
 plt.figure()
 plt.hist(energy[proton_mask], phist_bins)
@@ -84,43 +87,61 @@ plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, co
 plt.colorbar()
 print(str(runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
+timestamps = process_runs.get_quantity('timestamps', experiment, runs)
+time_since_last_event = timestamps - np.roll(timestamps, 1)
+time_since_last_event[0] = .15 #we don't actuallly know what this is for the first event, so just putting a typical value for start of window
+start_of_current_winow = 0
+times_since_start_of_window = []
+for t, dt in zip(timestamps, time_since_last_event):
+    if dt > 0.1 or dt < 0:
+        start_of_current_winow = t
+    times_since_start_of_window.append(t - start_of_current_winow)
+times_since_start_of_window = np.array(times_since_start_of_window)
 
 plt.figure()
-plt.hist(energy[alpha_mask], alphahist_bins)
-plt.title('alpha energy spectrum, runs: '+str(runs))
-plt.xlabel('energy (MeV)')
-
-plt.figure()
-plt.title('alphas selected in RVE, runs: '+str(runs))
+t_thresh = 0.05
+plt_mask = plt_mask&(times_since_start_of_window > t_thresh)
+plt.title('time since start of window > %f ms'%(t_thresh*1000))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-plt.scatter(energy[alpha_mask], lengths[alpha_mask], marker='.', alpha=0.5, color='red')
-plt.colorbar()
-print(str(runs) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
-
-
-#TODO: correct for times runs were not instantly started again after previous run ended
-run_t_offset = [0]
-run_ts = []
-for run in runs:
-    run_ts.append(process_runs.get_quantity('timestamps', experiment, [run]))
-for i in range(1, len(runs)):
-    if run_ts[i][0] <= run_ts[i-1][-1]:
-        run_t_offset.append(run_t_offset[-1] + run_ts[i-1][-1])
-    else:
-        run_t_offset.append(run_t_offset[-1])
-for i in range(len(runs)):
-    run_ts[i] = run_ts[i] + run_t_offset[i]
-run_ts = np.concatenate(run_ts)
-
-plt.figure()
-plt.title('alphas')
-tve_bins = (100, 15)
-plt.hist2d(energy[alpha_mask], run_ts[alpha_mask]/3600, bins=tve_bins, norm=matplotlib.colors.LogNorm())
-plt.xlabel('energy (MeV)')
-plt.ylabel('time since start of experiment (hours)')
 plt.colorbar()
 
 if False:
+    plt.figure()
+    plt.hist(energy[alpha_mask], alphahist_bins)
+    plt.title('alpha energy spectrum, runs: '+str(runs))
+    plt.xlabel('energy (MeV)')
+
+    plt.figure()
+    plt.title('alphas selected in RVE, runs: '+str(runs))
+    plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+    plt.scatter(energy[alpha_mask], lengths[alpha_mask], marker='.', alpha=0.5, color='red')
+    plt.colorbar()
+    print(str(runs) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
+
+
+    #TODO: correct for times runs were not instantly started again after previous run ended
+    run_t_offset = [0]
+    run_ts = []
+    for run in runs:
+        run_ts.append(process_runs.get_quantity('timestamps', experiment, [run]))
+    for i in range(1, len(runs)):
+        if run_ts[i][0] <= run_ts[i-1][-1]:
+            run_t_offset.append(run_t_offset[-1] + run_ts[i-1][-1])
+        else:
+            run_t_offset.append(run_t_offset[-1])
+    for i in range(len(runs)):
+        run_ts[i] = run_ts[i] + run_t_offset[i]
+    run_ts = np.concatenate(run_ts)
+
+    plt.figure()
+    plt.title('alphas')
+    tve_bins = (100, 15)
+    plt.hist2d(energy[alpha_mask], run_ts[alpha_mask]/3600, bins=tve_bins, norm=matplotlib.colors.LogNorm())
+    plt.xlabel('energy (MeV)')
+    plt.ylabel('time since start of experiment (hours)')
+    plt.colorbar()
+
+
     plt.figure()
     plt.title('protons')
     tsbo=process_runs.get_time_since_beam_off(experiment, runs)
