@@ -166,8 +166,8 @@ print("Number of Events to go through: ",len(completed_fit_events))
 for i in tqdm(completed_fit_events):
     evts.append(i)
     fit_results["event"].append(i)
-    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/ff_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
-    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/ff/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
+    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/ff/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
+    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/ff_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
         data = pickle.load(file)
         # bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5),(0,1))
         # if np.any(np.isclose(data[0].x, [b[0] for b in bnds], atol = 1e-6)) or np.any(np.isclose(data[0].x, [b[1] for b in bnds], atol = 1e-6)):
@@ -222,8 +222,8 @@ for i in tqdm(completed_fit_events):
         fit_results["nfev_ff"].append(data[0].nfev)
         
         
-    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fb_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
-    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
+    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
+    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fb_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
         data = pickle.load(file)
         # bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5),(0,1))
         # if np.any(np.isclose(data[0].x, [b[0] for b in bnds], atol = 1e-6)) or np.any(np.isclose(data[0].x, [b[1] for b in bnds], atol = 1e-6)):
@@ -276,8 +276,8 @@ for i in tqdm(completed_fit_events):
         fit_results["sigma_z_fb"].append(data[0].x[13] * 10)
         fit_results["counts_per_mev_fb"].append(data[0].x[14] * 1e6)
         fit_results["nfev_fb"].append(data[0].nfev)
-    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bf_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
-    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bf/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
+    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bf_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
+    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bf/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
         data = pickle.load(file)
         # bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5),(0,1))
         # if np.any(np.isclose(data[0].x, [b[0] for b in bnds], atol = 1e-6)) or np.any(np.isclose(data[0].x, [b[1] for b in bnds], atol = 1e-6)):
@@ -330,8 +330,8 @@ for i in tqdm(completed_fit_events):
         fit_results["sigma_z_bf"].append(data[0].x[13] * 10)
         fit_results["counts_per_mev_bf"].append(data[0].x[14] * 1e6)
         fit_results["nfev_bf"].append(data[0].nfev)
-    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bb_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
-    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
+    with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bb_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
+    # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
         data = pickle.load(file)
         # bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5),(0,1))
         # if np.any(np.isclose(data[0].x, [b[0] for b in bnds], atol = 1e-6)) or np.any(np.isclose(data[0].x, [b[1] for b in bnds], atol = 1e-6)):
@@ -638,8 +638,8 @@ print("Number of events looked up in cluster: ",len(lls))
 print("Failed Events: ",failed_events)
 print(set(message_best))
 
-# with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fit_dict_all_dir_and_kmeans.pkl", 'wb') as f:
-#     pickle.dump(fit_results, f)
+with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/prev_results_fit_dict_all_dir_and_kmeans.pkl", 'wb') as f:
+    pickle.dump(fit_results, f)
 
 # np.savez("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/best_fit_arrays.npz",evts=evts,
 #          counts_per_mev=counts_per_mev_best,
@@ -670,9 +670,9 @@ bad_residuals = [residual for residual, mess in zip(residual_count_sum,success_b
 good_residuals = [residual for residual, mess in zip(residual_count_sum,success_best) if mess]
 print("This should be the range of the residual plot: ",np.min(residual_count_sum), np.max(residual_count_sum))
 # 1D Histogram of counts_per_mev
-plt.hist(residual_count_sum,color="blue",bins=500,zorder=1,range=(-5.1e7,5.1e7))
-plt.hist(bad_residuals, color="red",bins=500,range=(-5.1e7,5.1e7),zorder=3, label="Minimization Exited with Success = False")
-plt.hist(good_residuals, color="green",bins=500,range=(-5.1e7,5.1e7),zorder=2, label = "Minimization Exited with Success = True")
+plt.hist(residual_count_sum,color="blue",bins=500,zorder=1,range=(-5.1e6,5.1e6))
+plt.hist(bad_residuals, color="red",bins=500,range=(-5.1e6,5.1e6),zorder=3, label="Minimization Exited with Success = False")
+plt.hist(good_residuals, color="green",bins=500,range=(-5.1e6,5.1e6),zorder=2, label = "Minimization Exited with Success = True")
 plt.title("Trace Residuals Dist\n mean, std = %d,%d"%(np.mean(residual_count_sum),np.std(residual_count_sum)))
 plt.xlabel('Summed Residuals')
 plt.ylabel('Counts')
