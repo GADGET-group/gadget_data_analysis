@@ -16,7 +16,7 @@ if False: #background runs before experiment
     run_range = (68, 73)
 else: #during experiment
     experiment = 'e25058'
-    run_range = (71,73)#(0,1000)#(101, 143)
+    run_range = (121,121)#(0,1000)#(101, 143)
 
 if experiment == 'e23035':
     exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -29,7 +29,7 @@ for run in range(run_range[0], run_range[1]+1):
         runs.append(run)
 
 
-veto_thresh = 250#np.inf
+veto_thresh = np.inf#250
 rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 4000)
 alphahist_bins = 500
@@ -53,7 +53,7 @@ veto_mask = (veto_max < veto_thresh)
 
 
 plt.figure()
-plt_mask = veto_mask&(lengths>1)&(lengths<400)
+plt_mask = veto_mask# &(lengths>1)&(lengths<400)
 plt.title('runs: '+str(runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()

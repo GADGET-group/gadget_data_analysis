@@ -15,13 +15,13 @@ if False: #background runs before experiment
     run_range = (68, 73)
 else: #during experiment
     experiment = 'e25058'
-    run_range = (70,73)#(0,1000)#(101, 143)
+    run_range = (104,121)#(0,1000)#(101, 143)
 
 if False:
     exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
                     289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
 else:
-    exclude_runs = []
+    exclude_runs = [103,108,109,110,112,113,115,117,120]
 runs=[]
 for run in range(run_range[0], run_range[1]+1):
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
@@ -52,6 +52,8 @@ for run in runs:
     m = (159.2-26.2)/(2.81-0.619)
     #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)
     proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
+    # Below is a cut on the 800 keV proton peak
+    proton_mask = (lengths < 32.36)&(lengths > 19.14)&(energy > 0.702)&(energy < 0.837)
     num_protons = len(proton_mask[proton_mask])
     #print(str(run) + " has " + str(num_protons) + " protons")
 
