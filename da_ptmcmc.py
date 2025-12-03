@@ -140,20 +140,74 @@ if __name__ == '__main__':
         with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fit_dict_all_dir_and_kmeans.pkl", 'rb') as file:
             fit_results_dict = pickle.load(file) # NOTE: the results in this dict are not scaled, they should be good to plug directly into a simulation for comparison to the real data
         # TODO: set the values to start mcmc here
-        
+        index_to_use = fit_results_dict['event'].index(event_num)
+        if fit_results_dict['residuals_ff'][index_to_use] < fit_results_dict['residuals_fb'][index_to_use] and fit_results_dict['residuals_ff'][index_to_use] < fit_results_dict['residuals_bf'][index_to_use] and fit_results_dict['residuals_ff'][index_to_use] < fit_results_dict['residuals_bb'][index_to_use]:
+            E_prior.sigma = fit_results_dict['e0_ff'] + fit_results_dict['e1_ff']
+            Ea_frac_guess = fit_results_dict['e0_ff'] / fit_results_dict['e0_ff'] + fit_results_dict['e1_ff']
+            best_point0 = np.array([fit_results_dict['x0_ff'],fit_results_dict['y0_ff'],fit_results_dict['z0_ff']])
+            best_point1 = np.array([fit_results_dict['x1_ff'],fit_results_dict['y1_ff'],fit_results_dict['z1_ff']])
+            theta_0 = fit_results_dict['theta0_ff']
+            phi_0 = fit_results_dict['phi0_ff']
+            theta_1 = fit_results_dict['theta1_ff']
+            phi_1 = fit_results_dict['phi1_ff']
+            sigma_xy0_guess = fit_results_dict['sigma_xy0_ff']
+            sigma_z0_guess = fit_results_dict['sigma_z0_ff']
+            sigma_xy1_guess = fit_results_dict['sigma_xy1_ff']
+            sigma_z1_guess = fit_results_dict['sigma_z1_ff']
+        if fit_results_dict['residuals_fb'][index_to_use] < fit_results_dict['residuals_ff'][index_to_use] and fit_results_dict['residuals_fb'][index_to_use] < fit_results_dict['residuals_bf'][index_to_use] and fit_results_dict['residuals_fb'][index_to_use] < fit_results_dict['residuals_bb'][index_to_use]:
+            E_prior.sigma = fit_results_dict['e0_fb'] + fit_results_dict['e1_fb']
+            Ea_frac_guess = fit_results_dict['e0_fb'] / fit_results_dict['e0_fb'] + fit_results_dict['e1_fb']
+            best_point0 = np.array([fit_results_dict['x0_fb'],fit_results_dict['y0_fb'],fit_results_dict['z0_fb']])
+            best_point1 = np.array([fit_results_dict['x1_fb'],fit_results_dict['y1_fb'],fit_results_dict['z1_fb']])
+            theta_0 = fit_results_dict['theta0_fb']
+            phi_0 = fit_results_dict['phi0_fb']
+            theta_1 = fit_results_dict['theta1_fb']
+            phi_1 = fit_results_dict['phi1_fb']
+            sigma_xy0_guess = fit_results_dict['sigma_xy0_fb']
+            sigma_z0_guess = fit_results_dict['sigma_z0_fb']
+            sigma_xy1_guess = fit_results_dict['sigma_xy1_fb']
+            sigma_z1_guess = fit_results_dict['sigma_z1_fb']
+        if fit_results_dict['residuals_bf'][index_to_use] < fit_results_dict['residuals_ff'][index_to_use] and fit_results_dict['residuals_bf'][index_to_use] < fit_results_dict['residuals_fb'][index_to_use] and fit_results_dict['residuals_bf'][index_to_use] < fit_results_dict['residuals_bb'][index_to_use]:
+            E_prior.sigma = fit_results_dict['e0_bf'] + fit_results_dict['e1_bf']
+            Ea_frac_guess = fit_results_dict['e0_bf'] / fit_results_dict['e0_bf'] + fit_results_dict['e1_bf']
+            best_point0 = np.array([fit_results_dict['x0_bf'],fit_results_dict['y0_bf'],fit_results_dict['z0_bf']])
+            best_point1 = np.array([fit_results_dict['x1_bf'],fit_results_dict['y1_bf'],fit_results_dict['z1_bf']])
+            theta_0 = fit_results_dict['theta0_bf']
+            phi_0 = fit_results_dict['phi0_bf']
+            theta_1 = fit_results_dict['theta1_bf']
+            phi_1 = fit_results_dict['phi1_bf']
+            sigma_xy0_guess = fit_results_dict['sigma_xy0_bf']
+            sigma_z0_guess = fit_results_dict['sigma_z0_bf']
+            sigma_xy1_guess = fit_results_dict['sigma_xy1_bf']
+            sigma_z1_guess = fit_results_dict['sigma_z1_bf']
+        if fit_results_dict['residuals_bb'][index_to_use] < fit_results_dict['residuals_ff'][index_to_use] and fit_results_dict['residuals_bb'][index_to_use] < fit_results_dict['residuals_fb'][index_to_use] and fit_results_dict['residuals_bb'][index_to_use] < fit_results_dict['residuals_bf'][index_to_use]:
+            E_prior.sigma = fit_results_dict['e0_bb'] + fit_results_dict['e1_bb']
+            Ea_frac_guess = fit_results_dict['e0_bb'] / fit_results_dict['e0_bb'] + fit_results_dict['e1_bb']
+            best_point0 = np.array([fit_results_dict['x0_bb'],fit_results_dict['y0_bb'],fit_results_dict['z0_bb']])
+            best_point1 = np.array([fit_results_dict['x1_bb'],fit_results_dict['y1_bb'],fit_results_dict['z1_bb']])
+            theta_0 = fit_results_dict['theta0_bb']
+            phi_0 = fit_results_dict['phi0_bb']
+            theta_1 = fit_results_dict['theta1_bb']
+            phi_1 = fit_results_dict['phi1_bb']
+            sigma_xy0_guess = fit_results_dict['sigma_xy0_bb']
+            sigma_z0_guess = fit_results_dict['sigma_z0_bb']
+            sigma_xy1_guess = fit_results_dict['sigma_xy1_bb']
+            sigma_z1_guess = fit_results_dict['sigma_z1_bb']
+            
+            
         return [(E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
-                            best_point[0] + np.random.randn()*pos_ball_size,
-                            best_point[1] + np.random.randn()*pos_ball_size,
-                            best_point[2] + np.random.randn()*pos_ball_size,
-                            best_point[0] + np.random.randn()*pos_ball_size,
-                            best_point[1] + np.random.randn()*pos_ball_size,
-                            best_point[2] + np.random.randn()*pos_ball_size,
+                            best_point0[0] + np.random.randn()*pos_ball_size,
+                            best_point0[1] + np.random.randn()*pos_ball_size,
+                            best_point0[2] + np.random.randn()*pos_ball_size,
+                            best_point1[0] + np.random.randn()*pos_ball_size,
+                            best_point1[1] + np.random.randn()*pos_ball_size,
+                            best_point1[2] + np.random.randn()*pos_ball_size,
+                            theta_0 + np.random.randn()*angle_ball_size,
+                            phi_0 + np.random.randn()*angle_ball_size,
                             theta_1 + np.random.randn()*angle_ball_size,
                             phi_1 + np.random.randn()*angle_ball_size,
-                            theta_2 + np.random.randn()*angle_ball_size,
-                            phi_2 + np.random.randn()*angle_ball_size,
-                            sigma_xy_guess+ np.random.randn()*pos_ball_size, sigma_z_guess+ np.random.randn()*pos_ball_size,
-                            sigma_xy_guess+ np.random.randn()*pos_ball_size, sigma_z_guess+ np.random.randn()*pos_ball_size,
+                            sigma_xy0_guess+ np.random.randn()*pos_ball_size, sigma_z0_guess+ np.random.randn()*pos_ball_size,
+                            sigma_xy1_guess+ np.random.randn()*pos_ball_size, sigma_z1_guess+ np.random.randn()*pos_ball_size,
                             ) for w in range(nwalkers)]
     def get_init_walker_pos(direction):
         #initialize E per priors

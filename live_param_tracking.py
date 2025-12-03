@@ -6,6 +6,8 @@ import pickle
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from tqdm import tqdm
+import multiprocessing
+import time
 
 from track_fitting.SimulatedEvent import SimulatedEvent
 from track_fitting. MultiParticleEvent import MultiParticleEvent
@@ -45,11 +47,11 @@ for filename in os.listdir(ff_results_directory):
 # events = [item for item in events if item in completed_fit_events]
 # completed_fit_events = [34001]
 evts, theta0,theta1, phi0,phi1, x0,y0,z0, x1,y1,z1, lls, cats, E0,E1, Erecs, nfev, sigma_xy, sigma_z, counts_per_mev = [], [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], []
-theta0_ff,theta1_ff, phi0_ff,phi1_ff, x0_ff,y0_ff,z0_ff, x1_ff,y1_ff,z1_ff, lls_ff, cats_ff, E0_ff,E1_ff, Erecs_ff, nfev_ff, sigma_xy_ff, sigma_z_ff, counts_per_mev_ff = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], []
-theta0_fb,theta1_fb, phi0_fb,phi1_fb, x0_fb,y0_fb,z0_fb, x1_fb,y1_fb,z1_fb, lls_fb, cats_fb, E0_fb,E1_fb, Erecs_fb, nfev_fb, sigma_xy_fb, sigma_z_fb, counts_per_mev_fb = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], []
-theta0_bf,theta1_bf, phi0_bf,phi1_bf, x0_bf,y0_bf,z0_bf, x1_bf,y1_bf,z1_bf, lls_bf, cats_bf, E0_bf,E1_bf, Erecs_bf, nfev_bf, sigma_xy_bf, sigma_z_bf, counts_per_mev_bf = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], []
-theta0_bb,theta1_bb, phi0_bb,phi1_bb, x0_bb,y0_bb,z0_bb, x1_bb,y1_bb,z1_bb, lls_bb, cats_bb, E0_bb,E1_bb, Erecs_bb, nfev_bb, sigma_xy_bb, sigma_z_bb, counts_per_mev_bb = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], []
-theta0_best,theta1_best, phi0_best,phi1_best, x0_best,y0_best,z0_best, x1_best,y1_best,z1_best, lls_best, cats_best, E0_best,E1_best, Erecs_best, nfev_best, sigma_xy_best, sigma_z_best, counts_per_mev_best = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], []
+theta0_ff,theta1_ff, phi0_ff,phi1_ff, x0_ff,y0_ff,z0_ff, x1_ff,y1_ff,z1_ff, lls_ff, cats_ff, E0_ff,E1_ff, Erecs_ff, nfev_ff, sigma_xy0_ff, sigma_z0_ff, sigma_xy1_ff, sigma_z1_ff, counts_per_mev_ff = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], [],[], []
+theta0_fb,theta1_fb, phi0_fb,phi1_fb, x0_fb,y0_fb,z0_fb, x1_fb,y1_fb,z1_fb, lls_fb, cats_fb, E0_fb,E1_fb, Erecs_fb, nfev_fb, sigma_xy0_fb, sigma_z0_fb, sigma_xy1_fb, sigma_z1_fb, counts_per_mev_fb = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], [],[], []
+theta0_bf,theta1_bf, phi0_bf,phi1_bf, x0_bf,y0_bf,z0_bf, x1_bf,y1_bf,z1_bf, lls_bf, cats_bf, E0_bf,E1_bf, Erecs_bf, nfev_bf, sigma_xy0_bf, sigma_z0_bf, sigma_xy1_bf, sigma_z1_bf, counts_per_mev_bf = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], [],[], []
+theta0_bb,theta1_bb, phi0_bb,phi1_bb, x0_bb,y0_bb,z0_bb, x1_bb,y1_bb,z1_bb, lls_bb, cats_bb, E0_bb,E1_bb, Erecs_bb, nfev_bb, sigma_xy0_bb, sigma_z0_bb, sigma_xy1_bb, sigma_z1_bb, counts_per_mev_bb = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], [],[], []
+theta0_best,theta1_best, phi0_best,phi1_best, x0_best,y0_best,z0_best, x1_best,y1_best,z1_best, lls_best, cats_best, E0_best,E1_best, Erecs_best, nfev_best, sigma_xy0_best, sigma_z0_best, sigma_xy1_best, sigma_z1_best, counts_per_mev_best = [],[], [],[], [],[],[], [],[],[], [], [], [],[], [], [], [],[], [],[], []
 
 message, success = [], []
 message_ff, success_ff = [], []
@@ -57,6 +59,11 @@ message_fb, success_fb = [], []
 message_bf, success_bf = [], []
 message_bb, success_bb = [], []
 message_best, success_best = [], []
+residuals_ff = []
+residuals_fb = []
+residuals_bf = []
+residuals_bb = []
+residuals_kmeans = []
 
 counts_per_mev_best = []
 lls_best = []
@@ -80,10 +87,13 @@ fit_results = {'event': [],
                'z1_ff': [],
                'e0_ff': [],
                'e1_ff': [],
-               'sigma_xy_ff': [],
-               'sigma_z_ff': [],
+               'sigma_xy0_ff': [],
+               'sigma_z0_ff': [],
+               'sigma_xy1_ff': [],
+               'sigma_z1_ff': [],
                'counts_per_mev_ff': [],
                'nfev_ff': [],
+               'residuals_ff': [],
                'success_fb': [],
                'message_fb': [],
                'fun_fb': [],
@@ -99,10 +109,13 @@ fit_results = {'event': [],
                'z1_fb': [],
                'e0_fb': [],
                'e1_fb': [],
-               'sigma_xy_fb': [],
-               'sigma_z_fb': [],
+               'sigma_xy0_fb': [],
+               'sigma_z0_fb': [],
+               'sigma_xy1_fb': [],
+               'sigma_z1_fb': [],
                'counts_per_mev_fb': [],
                'nfev_fb': [],
+               'residuals_fb': [],
                'success_bf': [],
                'message_bf': [],
                'fun_bf': [],
@@ -118,10 +131,13 @@ fit_results = {'event': [],
                'z1_bf': [],
                'e0_bf': [],
                'e1_bf': [],
-               'sigma_xy_bf': [],
-               'sigma_z_bf': [],
+               'sigma_xy0_bf': [],
+               'sigma_z0_bf': [],
+               'sigma_xy1_bf': [],
+               'sigma_z1_bf': [],
                'counts_per_mev_bf': [],
                'nfev_bf': [],
+               'residuals_bf': [],
                'success_bb': [],
                'message_bb': [],
                'fun_bb': [],
@@ -137,10 +153,13 @@ fit_results = {'event': [],
                'z1_bb': [],
                'e0_bb': [],
                'e1_bb': [],
-               'sigma_xy_bb': [],
-               'sigma_z_bb': [],
+               'sigma_xy0_bb': [],
+               'sigma_z0_bb': [],
+               'sigma_xy1_bb': [],
+               'sigma_z1_bb': [],
                'counts_per_mev_bb': [],
                'nfev_bb': [],
+               'residuals_bb': [],
                'success_kmeans': [],
                'message_kmeans': [],
                'fun_kmeans': [],
@@ -159,7 +178,9 @@ fit_results = {'event': [],
                'sigma_xy_kmeans': [],
                'sigma_z_kmeans': [],
                'counts_per_mev_kmeans': [],
-               'nfev_kmeans': []}
+               'nfev_kmeans': [],
+               'residuals_kmeans': []
+               }
 # completed_fit_events = [23510,1364]
 failed_events = []
 print("Number of Events to go through: ",len(completed_fit_events))
@@ -196,9 +217,11 @@ for i in tqdm(completed_fit_events):
         z1_ff.append(data[0].x[9] * 400)
         E0_ff.append(data[0].x[10] * 10)
         E1_ff.append(data[0].x[11] * 10)
-        sigma_xy_ff.append(data[0].x[12] * 10)
-        sigma_z_ff.append(data[0].x[13] * 10)
-        counts_per_mev_ff.append(data[0].x[14] * 1e6)
+        sigma_xy0_ff.append(data[0].x[12] * 10)
+        sigma_z0_ff.append(data[0].x[13] * 10)
+        sigma_xy1_ff.append(data[0].x[14] * 10)
+        sigma_z1_ff.append(data[0].x[15] * 10)
+        counts_per_mev_ff.append(data[0].x[16] * 1e6)
         # lls_ff.append(data[0].fun)
         nfev_ff.append(data[0].nfev)
         fit_results["success_ff"].append(data[0].success)
@@ -216,11 +239,32 @@ for i in tqdm(completed_fit_events):
         fit_results["z1_ff"].append(data[0].x[9]* 400)
         fit_results["e0_ff"].append(data[0].x[10] * 10)
         fit_results["e1_ff"].append(data[0].x[11] * 10)
-        fit_results["sigma_xy_ff"].append(data[0].x[12] * 10)
-        fit_results["sigma_z_ff"].append(data[0].x[13] * 10)
-        fit_results["counts_per_mev_ff"].append(data[0].x[14] * 1e6)
+        fit_results["sigma_xy0_ff"].append(data[0].x[12] * 10)
+        fit_results["sigma_z0_ff"].append(data[0].x[13] * 10)
+        fit_results["sigma_xy1_ff"].append(data[0].x[14] * 10)
+        fit_results["sigma_z1_ff"].append(data[0].x[15] * 10)
+        fit_results["counts_per_mev_ff"].append(data[0].x[16] * 1e6)
         fit_results["nfev_ff"].append(data[0].nfev)
-        
+        trace_sim = build_sim.create_multi_particle_event('e24joe', 124, i, ['4He','4He'])
+        trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
+        trace_sim.shared_params = ['gas_density']
+        trace_sim.sims[0].adaptive_stopping_power = False
+        trace_sim.sims[0].initial_energy = data[0].x[10] * 10
+        trace_sim.sims[0].theta, trace_sim.sims[0].phi = data[0].x[0] * np.pi, data[0].x[2] * 2 * np.pi
+        trace_sim.sims[0].num_stopping_power_points = trace_sim.sims[0].get_num_stopping_points_for_energy(data[0].x[10] * 10)
+        trace_sim.sims[0].initial_point = (data[0].x[4]* 40,data[0].x[5]* 40,data[0].x[6]* 400)
+        trace_sim.sims[0].sigma_xy = data[0].x[12] * 10
+        trace_sim.sims[0].sigma_z = data[0].x[13] * 10
+        trace_sim.sims[1].adaptive_stopping_power = False
+        trace_sim.sims[1].initial_energy = data[0].x[11] * 10
+        trace_sim.sims[1].theta, trace_sim.sims[1].phi = data[0].x[1] * np.pi, data[0].x[3] * 2 * np.pi
+        trace_sim.sims[1].num_stopping_power_points = trace_sim.sims[1].get_num_stopping_points_for_energy(data[0].x[11] * 10)
+        trace_sim.sims[1].initial_point = (data[0].x[7]* 40,data[0].x[8]* 40,data[0].x[9]* 400)
+        trace_sim.sims[1].sigma_xy = data[0].x[14] * 10
+        trace_sim.sims[1].sigma_z = data[0].x[15] * 10
+        trace_sim.simulate_event()
+        fit_results["residuals_ff"] = np.sum(trace_sim.get_residuals())
+        residuals_ff.append(np.sum(trace_sim.get_residuals()))
         
     # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
     with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/fb_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
@@ -252,9 +296,11 @@ for i in tqdm(completed_fit_events):
         z1_fb.append(data[0].x[9] * 400)
         E0_fb.append(data[0].x[10] * 10)
         E1_fb.append(data[0].x[11] * 10)
-        sigma_xy_fb.append(data[0].x[12] * 10)
-        sigma_z_fb.append(data[0].x[13] * 10)
-        counts_per_mev_fb.append(data[0].x[14] * 1e6)
+        sigma_xy0_fb.append(data[0].x[12] * 10)
+        sigma_z0_fb.append(data[0].x[13] * 10)
+        sigma_xy1_fb.append(data[0].x[14] * 10)
+        sigma_z1_fb.append(data[0].x[15] * 10)
+        counts_per_mev_fb.append(data[0].x[16] * 1e6)
         # lls_fb.append(data[0].fun)
         nfev_fb.append(data[0].nfev)
         fit_results["success_fb"].append(data[0].success)
@@ -272,10 +318,32 @@ for i in tqdm(completed_fit_events):
         fit_results["z1_fb"].append(data[0].x[9]* 400)
         fit_results["e0_fb"].append(data[0].x[10] * 10)
         fit_results["e1_fb"].append(data[0].x[11] * 10)
-        fit_results["sigma_xy_fb"].append(data[0].x[12] * 10)
-        fit_results["sigma_z_fb"].append(data[0].x[13] * 10)
-        fit_results["counts_per_mev_fb"].append(data[0].x[14] * 1e6)
+        fit_results["sigma_xy0_fb"].append(data[0].x[12] * 10)
+        fit_results["sigma_z0_fb"].append(data[0].x[13] * 10)
+        fit_results["sigma_xy1_fb"].append(data[0].x[14] * 10)
+        fit_results["sigma_z1_fb"].append(data[0].x[15] * 10)
+        fit_results["counts_per_mev_fb"].append(data[0].x[16] * 1e6)
         fit_results["nfev_fb"].append(data[0].nfev)
+        trace_sim = build_sim.create_multi_particle_event('e24joe', 124, i, ['4He','4He'])
+        trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
+        trace_sim.shared_params = ['gas_density']
+        trace_sim.sims[0].adaptive_stopping_power = False
+        trace_sim.sims[0].initial_energy = data[0].x[10] * 10
+        trace_sim.sims[0].theta, trace_sim.sims[0].phi = data[0].x[0] * np.pi, data[0].x[2] * 2 * np.pi
+        trace_sim.sims[0].num_stopping_power_points = trace_sim.sims[0].get_num_stopping_points_for_energy(data[0].x[10] * 10)
+        trace_sim.sims[0].initial_point = (data[0].x[4]* 40,data[0].x[5]* 40,data[0].x[6]* 400)
+        trace_sim.sims[0].sigma_xy = data[0].x[12] * 10
+        trace_sim.sims[0].sigma_z = data[0].x[13] * 10
+        trace_sim.sims[1].adaptive_stopping_power = False
+        trace_sim.sims[1].initial_energy = data[0].x[11] * 10
+        trace_sim.sims[1].theta, trace_sim.sims[1].phi = data[0].x[1] * np.pi, data[0].x[3] * 2 * np.pi
+        trace_sim.sims[1].num_stopping_power_points = trace_sim.sims[1].get_num_stopping_points_for_energy(data[0].x[11] * 10)
+        trace_sim.sims[1].initial_point = (data[0].x[7]* 40,data[0].x[8]* 40,data[0].x[9]* 400)
+        trace_sim.sims[1].sigma_xy = data[0].x[14] * 10
+        trace_sim.sims[1].sigma_z = data[0].x[15] * 10
+        trace_sim.simulate_event()
+        fit_results["residuals_fb"] = np.sum(trace_sim.get_residuals())
+        
     with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bf_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
     # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bf/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
         data = pickle.load(file)
@@ -306,9 +374,11 @@ for i in tqdm(completed_fit_events):
         z1_bf.append(data[0].x[9] * 400)
         E0_bf.append(data[0].x[10] * 10)
         E1_bf.append(data[0].x[11] * 10)
-        sigma_xy_bf.append(data[0].x[12] * 10)
-        sigma_z_bf.append(data[0].x[13] * 10)
-        counts_per_mev_bf.append(data[0].x[14] * 1e6)
+        sigma_xy0_bf.append(data[0].x[12] * 10)
+        sigma_z0_bf.append(data[0].x[13] * 10)
+        sigma_xy1_bf.append(data[0].x[14] * 10)
+        sigma_z1_bf.append(data[0].x[15] * 10)
+        counts_per_mev_bf.append(data[0].x[16] * 1e6)
         # lls_bf.append(data[0].fun)
         nfev_bf.append(data[0].nfev)
         fit_results["success_bf"].append(data[0].success)
@@ -326,10 +396,32 @@ for i in tqdm(completed_fit_events):
         fit_results["z1_bf"].append(data[0].x[9]* 400)
         fit_results["e0_bf"].append(data[0].x[10] * 10)
         fit_results["e1_bf"].append(data[0].x[11] * 10)
-        fit_results["sigma_xy_bf"].append(data[0].x[12] * 10)
-        fit_results["sigma_z_bf"].append(data[0].x[13] * 10)
-        fit_results["counts_per_mev_bf"].append(data[0].x[14] * 1e6)
+        fit_results["sigma_xy0_bf"].append(data[0].x[12] * 10)
+        fit_results["sigma_z0_bf"].append(data[0].x[13] * 10)
+        fit_results["sigma_xy1_bf"].append(data[0].x[14] * 10)
+        fit_results["sigma_z1_bf"].append(data[0].x[15] * 10)
+        fit_results["counts_per_mev_bf"].append(data[0].x[16] * 1e6)
         fit_results["nfev_bf"].append(data[0].nfev)
+        trace_sim = build_sim.create_multi_particle_event('e24joe', 124, i, ['4He','4He'])
+        trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
+        trace_sim.shared_params = ['gas_density']
+        trace_sim.sims[0].adaptive_stopping_power = False
+        trace_sim.sims[0].initial_energy = data[0].x[10] * 10
+        trace_sim.sims[0].theta, trace_sim.sims[0].phi = data[0].x[0] * np.pi, data[0].x[2] * 2 * np.pi
+        trace_sim.sims[0].num_stopping_power_points = trace_sim.sims[0].get_num_stopping_points_for_energy(data[0].x[10] * 10)
+        trace_sim.sims[0].initial_point = (data[0].x[4]* 40,data[0].x[5]* 40,data[0].x[6]* 400)
+        trace_sim.sims[0].sigma_xy = data[0].x[12] * 10
+        trace_sim.sims[0].sigma_z = data[0].x[13] * 10
+        trace_sim.sims[1].adaptive_stopping_power = False
+        trace_sim.sims[1].initial_energy = data[0].x[11] * 10
+        trace_sim.sims[1].theta, trace_sim.sims[1].phi = data[0].x[1] * np.pi, data[0].x[3] * 2 * np.pi
+        trace_sim.sims[1].num_stopping_power_points = trace_sim.sims[1].get_num_stopping_points_for_energy(data[0].x[11] * 10)
+        trace_sim.sims[1].initial_point = (data[0].x[7]* 40,data[0].x[8]* 40,data[0].x[9]* 400)
+        trace_sim.sims[1].sigma_xy = data[0].x[14] * 10
+        trace_sim.sims[1].sigma_z = data[0].x[15] * 10
+        trace_sim.simulate_event()
+        fit_results["residuals_bf"] = np.sum(trace_sim.get_residuals())
+        
     with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bb_best/event_%05d_ls_fit_two_particle_decays_in_e24joe_starting_from_previous_fit_params.dat"%i, 'rb') as file:
     # with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/bb/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
         data = pickle.load(file)
@@ -360,9 +452,11 @@ for i in tqdm(completed_fit_events):
         z1_bb.append(data[0].x[9] * 400)
         E0_bb.append(data[0].x[10] * 10)
         E1_bb.append(data[0].x[11] * 10)
-        sigma_xy_bb.append(data[0].x[12] * 10)
-        sigma_z_bb.append(data[0].x[13] * 10)
-        counts_per_mev_bb.append(data[0].x[14] * 1e6)
+        sigma_xy0_bb.append(data[0].x[12] * 10)
+        sigma_z0_bb.append(data[0].x[13] * 10)
+        sigma_xy1_bb.append(data[0].x[14] * 10)
+        sigma_z1_bb.append(data[0].x[15] * 10)
+        counts_per_mev_bb.append(data[0].x[16] * 1e6)
         # lls_bb.append(data[0].fun)
         nfev_bb.append(data[0].nfev)
         fit_results["success_bb"].append(data[0].success)
@@ -380,10 +474,32 @@ for i in tqdm(completed_fit_events):
         fit_results["z1_bb"].append(data[0].x[9]* 400)
         fit_results["e0_bb"].append(data[0].x[10] * 10)
         fit_results["e1_bb"].append(data[0].x[11] * 10)
-        fit_results["sigma_xy_bb"].append(data[0].x[12] * 10)
-        fit_results["sigma_z_bb"].append(data[0].x[13] * 10)
-        fit_results["counts_per_mev_bb"].append(data[0].x[14] * 1e6)
+        fit_results["sigma_xy0_bb"].append(data[0].x[12] * 10)
+        fit_results["sigma_z0_bb"].append(data[0].x[13] * 10)
+        fit_results["sigma_xy1_bb"].append(data[0].x[14] * 10)
+        fit_results["sigma_z1_bb"].append(data[0].x[15] * 10)
+        fit_results["counts_per_mev_bb"].append(data[0].x[16] * 1e6)
         fit_results["nfev_bb"].append(data[0].nfev)
+        trace_sim = build_sim.create_multi_particle_event('e24joe', 124, i, ['4He','4He'])
+        trace_sim.per_particle_params = ['initial_energy', 'theta', 'phi', 'sigma_xy', 'sigma_z', 'num_stopping_power_points','initial_point'] 
+        trace_sim.shared_params = ['gas_density']
+        trace_sim.sims[0].adaptive_stopping_power = False
+        trace_sim.sims[0].initial_energy = data[0].x[10] * 10
+        trace_sim.sims[0].theta, trace_sim.sims[0].phi = data[0].x[0] * np.pi, data[0].x[2] * 2 * np.pi
+        trace_sim.sims[0].num_stopping_power_points = trace_sim.sims[0].get_num_stopping_points_for_energy(data[0].x[10] * 10)
+        trace_sim.sims[0].initial_point = (data[0].x[4]* 40,data[0].x[5]* 40,data[0].x[6]* 400)
+        trace_sim.sims[0].sigma_xy = data[0].x[12] * 10
+        trace_sim.sims[0].sigma_z = data[0].x[13] * 10
+        trace_sim.sims[1].adaptive_stopping_power = False
+        trace_sim.sims[1].initial_energy = data[0].x[11] * 10
+        trace_sim.sims[1].theta, trace_sim.sims[1].phi = data[0].x[1] * np.pi, data[0].x[3] * 2 * np.pi
+        trace_sim.sims[1].num_stopping_power_points = trace_sim.sims[1].get_num_stopping_points_for_energy(data[0].x[11] * 10)
+        trace_sim.sims[1].initial_point = (data[0].x[7]* 40,data[0].x[8]* 40,data[0].x[9]* 400)
+        trace_sim.sims[1].sigma_xy = data[0].x[14] * 10
+        trace_sim.sims[1].sigma_z = data[0].x[15] * 10
+        trace_sim.simulate_event()
+        fit_results["residuals_bb"] = np.sum(trace_sim.get_residuals())
+        
     with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/cluster_best_initial_guess_start/event_%05d_ls_fit_two_particle_decays_in_e24joe.dat"%i, 'rb') as file:
         data = pickle.load(file)
         # bnds = ((0,1),(0,1),(0,1),(0,1),(-1,1),(-1,1),(0,1),(-1,1),(-1,1),(0,1),(0.1,1),(0.1,1),(0,0.5),(0,0.5),(0,1))
@@ -500,8 +616,10 @@ for i in tqdm(completed_fit_events):
         z1_best.append(z1_ff[-1])
         E0_best.append(E0_ff[-1])
         E1_best.append(E1_ff[-1])
-        sigma_xy_best.append(sigma_xy_ff[-1])
-        sigma_z_best.append(sigma_z_ff[-1])
+        sigma_xy0_best.append(sigma_xy0_ff[-1])
+        sigma_z0_best.append(sigma_z0_ff[-1])
+        sigma_xy1_best.append(sigma_xy1_ff[-1])
+        sigma_z1_best.append(sigma_z1_ff[-1])
         nfev_best.append(nfev_ff[-1])
     elif (lls_fb[-1] <= lls_ff[-1] and lls_fb[-1] <= lls_bf[-1] and lls_fb[-1] <= lls_bb[-1]) and lls_fb[-1] <= lls[-1]:
     # if False:
@@ -521,8 +639,10 @@ for i in tqdm(completed_fit_events):
         z1_best.append(z1_fb[-1])
         E0_best.append(E0_fb[-1])
         E1_best.append(E1_fb[-1])
-        sigma_xy_best.append(sigma_xy_fb[-1])
-        sigma_z_best.append(sigma_z_fb[-1])
+        sigma_xy0_best.append(sigma_xy0_fb[-1])
+        sigma_z0_best.append(sigma_z0_fb[-1])
+        sigma_xy1_best.append(sigma_xy1_fb[-1])
+        sigma_z1_best.append(sigma_z1_fb[-1])
         nfev_best.append(nfev_fb[-1])
     elif (lls_bf[-1] <= lls_ff[-1] and lls_bf[-1] <= lls_fb[-1] and lls_bf[-1] <= lls_bb[-1]) and lls_bf[-1] <= lls[-1]:
     # if False:
@@ -542,8 +662,10 @@ for i in tqdm(completed_fit_events):
         z1_best.append(z1_bf[-1])
         E0_best.append(E0_bf[-1])
         E1_best.append(E1_bf[-1])
-        sigma_xy_best.append(sigma_xy_bf[-1])
-        sigma_z_best.append(sigma_z_bf[-1])
+        sigma_xy0_best.append(sigma_xy0_bf[-1])
+        sigma_z0_best.append(sigma_z0_bf[-1])
+        sigma_xy1_best.append(sigma_xy1_bf[-1])
+        sigma_z1_best.append(sigma_z1_bf[-1])
         nfev_best.append(nfev_bf[-1])
     elif (lls_bb[-1] <= lls_ff[-1] and lls_bb[-1] <= lls_fb[-1] and lls_bb[-1] <= lls_bf[-1]) and lls_bb[-1] <= lls[-1]:
     # if False:
@@ -563,8 +685,10 @@ for i in tqdm(completed_fit_events):
         z1_best.append(z1_bb[-1])
         E0_best.append(E0_bb[-1])
         E1_best.append(E1_bb[-1])
-        sigma_xy_best.append(sigma_xy_bb[-1])
-        sigma_z_best.append(sigma_z_bb[-1])
+        sigma_xy0_best.append(sigma_xy0_bb[-1])
+        sigma_z0_best.append(sigma_z0_bb[-1])
+        sigma_xy1_best.append(sigma_xy1_bb[-1])
+        sigma_z1_best.append(sigma_z1_bb[-1])
         nfev_best.append(nfev_bb[-1])
     # if lls_ff[-1] == lls_fb[-1] == lls_bf[-1] == lls_bb[-1] or (lls[-1] < lls_ff[-1] and lls[-1] < lls_fb[-1] and lls[-1] < lls_bf[-1] and lls[-1] < lls_bb[-1]):
     elif lls[-1] <= lls_ff[-1] and lls[-1] <= lls_fb[-1] and lls[-1] <= lls_bf[-1] and lls[-1] <= lls_bb[-1]:
@@ -584,14 +708,16 @@ for i in tqdm(completed_fit_events):
         z1_best.append(z1[-1])
         E0_best.append(E0[-1])
         E1_best.append(E1[-1])
-        sigma_xy_best.append(sigma_xy[-1])
-        sigma_z_best.append(sigma_z[-1])
+        sigma_xy0_best.append(sigma_xy[-1])
+        sigma_z0_best.append(sigma_z[-1])
+        sigma_xy1_best.append(sigma_xy[-1])
+        sigma_z1_best.append(sigma_z[-1])
         nfev_best.append(nfev[-1])
         
 
     # if the fit terminated abnormally, view the fit particle by particle
     # if not success_best[-1]:
-    if True:
+    if False:
         # print("Event",i,"failed: ",success_best[-1])
         # print(message_best[-1])
     # if data[0].message != "`callback` raised `StopIteration`.":
@@ -624,6 +750,40 @@ for i in tqdm(completed_fit_events):
         # print('observed data sum:', np.sum(e))
         observed_trace_sum.append(np.sum(e))
         # plt.show()
+        
+# print("Parallel processing:")
+# start_time = time.time()
+# manager = multiprocessing.Manager()
+# fit_results = manager.dict()  # shared dictionary
+
+# with multiprocessing.Pool(processes=100) as pool:
+#     for result in tqdm(pool.imap_unordered(add_event_to_dict,completed_fit_events)):
+#         pass
+
+# end_time = time.time()
+# print(f"Parallel time: {end_time - start_time:.4f} seconds")
+# fit_results['event'] = completed_fit_events
+# fit_results['success_ff'] = success_ff
+# fit_results['message_ff'] = message_ff
+# fit_results['fun_ff'] = lls_ff
+# fit_results['theta0_ff'] = theta0_ff
+# fit_results['phi0_ff'] = phi0_ff
+# fit_results['x0_ff'] = x0_ff
+# fit_results['y0_ff'] = y0_ff
+# fit_results['z0_ff'] = z0_ff
+# fit_results['x1_ff'] = x1_ff
+# fit_results['y1_ff'] = y1_ff
+# fit_results['z1_ff'] = z1_ff
+# fit_results['e0_ff'] = E0_ff
+# fit_results['e1_ff'] = E1_ff
+# fit_results['sigma_xy0_ff'] = sigma_xy0_ff
+# fit_results['sigma_z0_ff'] = sigma_z0_ff
+# fit_results['sigma_xy1_ff'] = sigma_xy1_ff
+# fit_results['sigma_z1_ff'] = sigma_z1_ff
+# fit_results['counts_per_mev_ff'] = counts_per_mev_ff
+# fit_results['nfev_ff'] = nfev_ff
+# fit_results['residuals_ff'] = 
+
 # print("Percentage of events terminated as expected: ",message.count("`callback` raised `StopIteration`.")/(len(message)))
 # print("Percentage of events ABNORMAL: ",message.count("ABNORMAL_TERMINATION_IN_LNSRCH")/(len(message)))
 # print("Percentage of events other: ",(message.count("ABNORMAL_TERMINATION_IN_LNSRCH") + message.count("`callback` raised `StopIteration`."))/(len(message)))
@@ -638,7 +798,7 @@ print("Number of events looked up in cluster: ",len(lls))
 print("Failed Events: ",failed_events)
 print(set(message_best))
 
-with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/prev_results_fit_dict_all_dir_and_kmeans.pkl", 'wb') as f:
+with open("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/diff_sigmas_prev_results_fit_dict_all_dir_and_kmeans.pkl", 'wb') as f:
     pickle.dump(fit_results, f)
 
 # np.savez("/egr/research-tpc/dopferjo/gadget_analysis/fit_results/least_squares/best_fit_arrays.npz",evts=evts,
