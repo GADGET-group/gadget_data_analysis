@@ -11,27 +11,29 @@ import numpy as np
 from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
 
-if False: #background runs before experiment
-    experiment = 'e23035_prep_vault'
-    run_range = (68, 73)
-else: #during experiment
-    experiment = 'e25058'
-    run_range = (71,73)#(0,1000)#(101, 143)
 
+experiment = 'e23035'
+ 
 if experiment == 'e23035':
     exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
                     289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
-elif experiment == 'e25058':
-    exclude_runs = []
+if True: #background runs before experiment
+    experiment = 'e23035_prep_vault'
+    run_range = (17,20,21)
+else: #during experiment
+    #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
+    run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
+
+exclude_runs = [210]#[1,9, 73, 113]
 runs = []
-for run in range(run_range[0], run_range[1]+1):
+for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
 
 
-veto_thresh = 250#np.inf
+veto_thresh = 300#np.inf
 rve_bins = (300, 300)
-phist_bins = np.linspace(0, 4, 4000)
+phist_bins = np.linspace(0, 4, 4001)
 alphahist_bins = 500
 
 #load pad gain match
@@ -39,7 +41,7 @@ gain_match_path = '/egr/research-tpc/shared/e23035_prep/vault/gm.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
 pad_gains = gain_match_result.x
-#pad_gains = np.ones(1024)*np.mean(gain_match_result.x)
+#pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
 
 lengths = process_runs.get_lengths(experiment, runs)
 cpp = process_runs.get_quantity('pad_charge', experiment, runs)
@@ -81,6 +83,7 @@ plt.hist(energy[proton_mask], phist_bins)
 plt.title('proton energy spectrum, runs: '+str(runs))
 plt.xlabel('energy (MeV)')
 plt.ylabel('counts/keV')
+#plt.yscale('log')
 
 plt.figure()
 plt.title('protons selected in RVE, runs: '+str(runs))
@@ -164,6 +167,14 @@ plt.show(block=False)
 import numpy as np
 np.save('to_fit.npy', energy[proton_mask])
 
+p800_mask = veto_mask&(energy>0.67)&(energy<0.84)&(lengths>15)&(lengths<32)
+print("nmber of protons in 800 keV peak: %d"%len(energy[p800_mask]))
 plt.figure()
-plt.hist(energy[veto_mask], 2000)
+plt.title('800 keV protons selected in RVE, runs: '+str(runs))
+plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+plt.scatter(energy[p800_mask], lengths[p800_mask], marker='.', alpha=0.5, color='red')
+plt.colorbar()
+
+plt.figure()
+plt.hist(energy, 2000)
 plt.show(block=False)

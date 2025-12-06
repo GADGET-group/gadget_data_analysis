@@ -28,6 +28,6 @@ def process_run(run):
     process_runs.get_processed_run(experiment, run)
 
 if __name__ == '__main__':
-    runs = [71,72,73]
+    runs = range(157, 300)#[74,75,76,77]
     with multiprocessing.Pool(10) as pool:
         pool.map(process_run, runs)

@@ -52,7 +52,7 @@ def get_h5_path(experiment, run_number):
     elif experiment == 'e23035_prep_4cobo':
         return '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
     elif experiment == 'e23035_prep_vault':
-        return '%s/e23035_prep/vault/run_%04d.h5'%(h5_base_path, run_number)
+        return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 

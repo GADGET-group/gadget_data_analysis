@@ -154,7 +154,8 @@ if __name__ == '__main__':
          np.random.uniform(-5,5,500)])#b=50, m=0'''
     root = tk.Tk()
     
-    file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/')
+    #file_path = tk.filedialog.askopenfilename(initialdir='/mnt/analysis/e21072/')
+    file_path = '../to_fit.npy'
     event = 107
     #file_path = './track_projections/run365_event%dproj_dist.npy'%event
     #file_path = './track_projections/ruchi_event_%d_dist.npy'%event
@@ -167,7 +168,7 @@ if __name__ == '__main__':
     include_all_data = False
     print('total events in file = %d'%len(data))
     if not include_all_data:
-        min_val, max_val = 0.85, 1.13
+        min_val, max_val = 0.65,0.82
         mask = np.logical_and(data>min_val, data<max_val)
         data = data[mask]
         #weights = weights[mask]

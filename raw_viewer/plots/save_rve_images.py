@@ -6,6 +6,7 @@ import matplotlib.patches as patches
 from matplotlib.path import Path
 import matplotlib.colors
 import ROOT
+import numpy as np
 
 from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
@@ -15,15 +16,16 @@ if False: #background runs before experiment
     run_range = (68, 73)
 else: #during experiment
     experiment = 'e23035'
-    run_range = (0,1000)#(101, 143)
+    run_range = np.concatenate((np.arange(140,219)))#(101, 143)
 
-exclude_runs = [1,9, 73, 113]
+exclude_runs = [210]#[1,9, 73, 113]
 runs = []
-for run in range(run_range[0], run_range[1]+1):
+for run in run_range(run_range[0], run_range[1]+1):
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
 
 for r in runs:
+    print('saving images from run '+str(r))
     run = [r]
     veto_thresh = 400
     rve_bins = (300, 300)
@@ -48,7 +50,7 @@ for r in runs:
     ax.set_title('runs: '+str(run))
     ax.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
-    plt.savefig('/egr/research-tpc/shared/e23035/images/rve_run%d.png'%r)
+    plt.savefig('/egr/research-tpc/shared/proc_runs/%s/images/rve/rve_run%d.png'%(experiment, r))
     plt.close(fig)
 
 
@@ -67,7 +69,7 @@ for r in runs:
     plt.hist(energy[proton_mask], 1500)
     plt.title('proton energy spectrum, runs: '+str(run))
     plt.xlabel('energy (MeV)')
-    plt.savefig('/egr/research-tpc/shared/e23035/images/proton_spectra/proton_spectrum_run%d.png'%r)
+    plt.savefig('/egr/research-tpc/shared/proc_runs/%s/images/proton_spectra/proton_spectrum_run%d.png'%(experiment, r))
     plt.close()
 
     plt.figure()
@@ -75,14 +77,14 @@ for r in runs:
     plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, color='red')
     print(str(r) + "has " + str(len(proton_mask[proton_mask])) + " protons")
-    plt.savefig('/egr/research-tpc/shared/e23035/images/proton_spectra/selected_protons_run%d.png'%r)
+    plt.savefig('/egr/research-tpc/shared/proc_runs/%s/images/proton_spectra/selected_protons_run%d.png'%(experiment, r))
     plt.close()
 
     plt.figure()
     plt.hist(energy[alpha_mask], 200)
     plt.title('alpha energy spectrum, runs: '+str(run))
     plt.xlabel('energy (MeV)')
-    plt.savefig('/egr/research-tpc/shared/e23035/images/alpha_spectra/alpha_spectrum_run%d.png'%r)
+    plt.savefig('/egr/research-tpc/shared/proc_runs/%s/images/alpha_spectra/alpha_spectrum_run%d.png'%(experiment, r))
     plt.close()
 
     plt.figure()
@@ -90,7 +92,7 @@ for r in runs:
     plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.scatter(energy[alpha_mask], lengths[alpha_mask], marker='.', alpha=0.5, color='red')
     print(str(run) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
-    plt.savefig('/egr/research-tpc/shared/e23035/images/alpha_spectra/selected_alphas_run%d.png'%r)
+    plt.savefig('/egr/research-tpc/shared/proc_runs/%s/images/alpha_spectra/selected_alphas_run%d.png'%(experiment, r))
     plt.close()
 
 
