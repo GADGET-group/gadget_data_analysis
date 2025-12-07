@@ -28,12 +28,12 @@ import matplotlib.colors
 from raw_viewer import process_runs
 
 gpu_device = 2
-load_result1 = True
-load_result2 = True
+load_result1 = False
+load_result2 = False
 load_result3 = False
 
 
-runs = (17,20,21,38,49,)#(20,)#(20,)#(38,49)#
+runs = (17,20,21,38,49,60,61,62,63)#(20,)#(20,)#(38,49)#
 exp = 'e23035_prep_vault'
 
 veto_thresh = 400
@@ -61,6 +61,26 @@ def get_gm_ic(gains, counts_per_pad=cpp_gpu, return_gpu=False):
         return to_return
     else:
         return cp.asnumpy(to_return)
+    
+
+def apply_gm_result(gm_result):
+    if gm_result.per_run_variation:
+        run_indexes = np.copy(run_numbers)
+        for i, r in enumerate(runs):
+            run_indexes[run_numbers == r] = i
+        if gm_result.offset == 'none':
+            per_run_gain = gm_result.x[-1*len(runs):]
+            return get_gm_ic(gm_result.x[:-1*len(runs)])*per_run_gain[run_indexes]
+        elif gm_result.offset == 'constant':
+            per_run_gain = gm_result.x[-2*len(runs):-1*len(runs)]
+            per_run_offset = gm_result.x[-1*len(runs):]
+            return (get_gm_ic(gm_result.x[:-2*len(runs)])*per_run_gain[run_indexes] +
+                    1e4*per_run_offset[run_indexes])
+    else:
+        if gm_result.offset == 'none':
+            return get_gm_ic(gm_result.x)
+        elif gm_result.offset == 'constant':
+            return get_gm_ic(gm_result.x[:-1]) + 1e4*gm_result.x[-1]
 
 no_gm_ic = get_gm_ic(np.ones(1024))
 
@@ -96,20 +116,43 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
     gm_slices = []
     default_guess = []
     num_in_slice = []
+    run_indexs = [] 
+    num_params = 1024
+    if per_run_variation:
+        if offset == 'none':
+            num_params += len(runs)
+        elif offset == 'constant':
+            num_params += 2*len(runs)
+    else:
+        if offset == 'constant':
+            num_params += 1
     with cp.cuda.Device(gpu_device):
         for cut_mask, true_energy in zip(cut_masks, true_energies):
             gm_slices.append(cpp_gpu[cut_mask, :])
             default_guess.append(cp.asnumpy(true_energy/cp.mean(cp.sum(gm_slices[-1], axis=1))))
             num_in_slice.append(cp.shape(gm_slices[-1])[0])
             print('cut with true energy of %f MeV has %d events'%(true_energy, num_in_slice[-1]))
+            run_indexs.append(cp.array(run_numbers[cut_mask]))
+            for i, r in enumerate(runs):
+                run_indexs[-1][r] = i
         if offset == 'none':
-            default_guess = np.ones(1024)*np.average(default_guess)
-            bounds=[(0, np.inf)]*1024
+            default_guess = np.ones(num_params)*np.average(default_guess)
+            bounds=np.array([(0, np.inf)]*num_params)
+            if per_run_variation:
+                default_guess[-1*len(runs):] = 1
+                bounds[-1*len(runs):] = (0,2)
         elif offset == 'constant':
-            default_guess = np.ones(1025)*np.average(default_guess)
+            default_guess = np.ones(num_params)*np.average(default_guess)
+            if per_run_variation:
+                default_guess[-2*len(runs):-1*len(runs)] = 1
+                default_guess[-1*len(runs):] = 0
             default_guess[-1] = 0
-            bounds=[(0, np.inf)]*1024
-            bounds.append((-np.inf, np.inf))
+            bounds=np.array([(0, np.inf)]*num_params)
+            if per_run_variation:
+                bounds[-2*len(runs):-1*len(runs)] = (0,2)
+                bounds[-1*len(runs):] = (-np.inf, np.inf)
+            else:
+                bounds[-1] = (-np.inf, np.inf)
         if type(init_guess) == type(None):
             init_guess = default_guess
         
@@ -117,19 +160,27 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
             if offset == 'none':
                 if per_run_variation:
                     gains = x[:-1*len(runs)]
+                    per_run_gain = cp.array(x[-1*len(runs):])
                 else:
                     gains = x
             elif offset == 'constant':
                 if per_run_variation:
                     gains = x[:-2*len(runs)]
+                    per_run_gain =cp.array(x[-2*len(runs):-1*len(runs)])
+                    per_run_offset = cp.array(x[-1*len(runs):])
                 else:
                     gains = x[:-1]
                 offset_constant = x[-1]*1e4
             e_list = []
-            for gm_slice in gm_slices:
+            for gm_slice, ri in zip(gm_slices, run_indexs):
                 e_list.append(get_gm_ic(gains, gm_slice, True))
+                if per_run_variation:
+                    e_list[-1] *= per_run_gain[ri]
                 if offset == 'constant':
-                    e_list[-1] += offset_constant
+                    if per_run_variation:
+                        e_list[-1] += per_run_offset[ri]*1e4
+                    else:
+                        e_list[-1] += offset_constant
             to_return = 0
             with cp.cuda.Device(gpu_device):
                 for es, true_e, num in zip(e_list, true_energies, num_in_slice):
@@ -158,19 +209,16 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
 
 
 if load_result1:
-    with open('res1_%s.pkl'%offset, 'rb') as f:
+    with open('res1_%s_%s.pkl'%(offset, per_run_variation), 'rb') as f:
         res1 = pickle.load(f)
 else:
     res1 = do_gain_match(cuts1, true_energies, offset=offset)
-    with open('res1_%s.pkl'%offset, 'wb') as f:
+    with open('res1_%s_%s.pkl'%(offset, per_run_variation), 'wb') as f:
         pickle.dump(res1, f)
 print(res1)
 
 def show_plots(res,block=False):
-    if 'offset' not in res.__dir__() or res.offset == 'none':
-        gm_ic = get_gm_ic(res.x)
-    elif res.offset == 'constant':
-        gm_ic = get_gm_ic(res.x[:-1]) + 1e4*res.x[-1]
+    gm_ic = apply_gm_result(res)
     plt.figure()
     plt.title('gain match applied, runs: '+str(runs))
     plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
@@ -210,14 +258,11 @@ show_plots(res1)
 
 #redo gain match using selection based on original gain match
 if True:
-    offset2 = 'constant'
-    if 'offset' not in res1.__dir__() or res1.offset == 'none':
-        gm_ic = get_gm_ic(res1.x)
-    elif res1.offset == 'constant':
-        gm_ic = get_gm_ic(res1.x[:-1]) + 1e4*res1.x[-1]
+    offset2 = 'none'
+    gm_ic = apply_gm_result(res1)
     cuts2 = []
     cuts2.append((gm_ic >6.0)&(gm_ic<6.55)&(lengths>55)&(lengths<69) & veto_mask)
-    cuts2.append((gm_ic >6.6)&(gm_ic<7.1)&(lengths>62.5)&(lengths<76) & veto_mask)
+    cuts2.append((gm_ic >6.6)&(gm_ic<7.5)&(lengths>62.5)&(lengths<76) & veto_mask)
     cuts2.append((gm_ic>8)&(gm_ic<9.25)&(lengths>90)&(lengths<105) & veto_mask)
     true_energies2 = [6.288, 6.7783, 8.78486]#[6.7783]
 
@@ -230,11 +275,11 @@ if True:
     plt.show()
 
     if load_result2:
-        with open('res2_%s.pkl'%offset2, 'rb') as f:
+        with open('res2_%s_%s.pkl'%(offset2, per_run_variation), 'rb') as f:
             res2 = pickle.load(f)
     else:
         res2 = do_gain_match(cuts2, true_energies2, offset=offset2)
-        with open('res2_%s.pkl'%offset2, 'wb') as f:
+        with open('res2_%s_%s.pkl'%(offset2, per_run_variation), 'wb') as f:
             pickle.dump(res2, f)
     print(res2)
     show_plots(res2)
@@ -256,11 +301,8 @@ if False:
 
     #redo gain match using selection based on original gain match
 if True:
-    offset3 = 'constant'
-    if 'offset' not in res2.__dir__() or res2.offset == 'none':
-        gm_ic2 = get_gm_ic(res2.x)
-    elif res2.offset == 'constant':
-        gm_ic2 = get_gm_ic(res2.x[:-1]) + 1e4*res2.x[-1]
+    offset3 = 'none'
+    gm_ic2 = apply_gm_result(res2)
     cuts3 = []
     cuts3.append(((gm_ic2 >6.0)&(gm_ic2<6.6)&(lengths>50)&(lengths<64)|
                   (gm_ic2 >6.1)&(gm_ic2<6.53)&(lengths>50)&(lengths<69.4)) & veto_mask)
@@ -277,15 +319,12 @@ if True:
     plt.show()
 
     if load_result3:
-        with open('res3_%s.pkl'%offset3, 'rb') as f:
+        with open('res3_%s_%s.pkl'%(offset3, per_run_variation), 'rb') as f:
             res3 = pickle.load(f)
     else:
-        if res2.offset == offset3:
-            init_guess = res2.x
-        else:
-            init_guess = None
-        res3 = do_gain_match(cuts3, true_energies3, offset=offset3, init_guess=init_guess)
-        with open('res3_%s.pkl'%offset3, 'wb') as f:
+        
+        res3 = do_gain_match(cuts3, true_energies3, offset=offset3, init_guess=None)
+        with open('res3_%s_%s.pkl'%(offset3, per_run_variation), 'wb') as f:
             pickle.dump(res3, f)
     print(res3)
     show_plots(res3)
