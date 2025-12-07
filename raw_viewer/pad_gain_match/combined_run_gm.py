@@ -39,7 +39,7 @@ exp = 'e23035_prep_vault'
 veto_thresh = 400
 rve_bins = 400
 offset = 'none' #'constant' or 'none'
-per_run_variation = False #allow gain and offset (if applicable) to vary per run
+per_run_variation = True #allow gain and offset (if applicable) to vary per run
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
@@ -174,7 +174,7 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
             e_list = []
             for gm_slice, ri in zip(gm_slices, run_indexs):
                 e_list.append(get_gm_ic(gains, gm_slice, True))
-                if per_run_variation:
+                if offset == 'none' and per_run_variation:
                     e_list[-1] *= per_run_gain[ri]
                 if offset == 'constant':
                     if per_run_variation:
@@ -190,9 +190,15 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
         def callback(intermediate_result):
             print(intermediate_result)
             if offset == 'none':
-                gains = intermediate_result.x
+                if per_run_variation:
+                    gains = intermediate_result.x[:-1*len(runs)]
+                else:
+                    gains = intermediate_result.x
             elif offset == 'constant':
-                gains = intermediate_result.x[:-1]
+                if per_run_variation:
+                    gains = intermediate_result.x[:-2*len(runs)]
+                else:
+                    gains = intermediate_result.x[:-1]
             print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
 
         print('objective function for initial guess: ', obj_func(init_guess))
