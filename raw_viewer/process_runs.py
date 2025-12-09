@@ -12,7 +12,7 @@ from raw_viewer import raw_h5_file
 
 num_threads = 10
 
-outer_ring_pads = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,1014,752,751,743,742,732,720,707,693,678,663,
+OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,1014,752,751,743,742,732,720,707,693,678,663,
                    647,631,614,597,580,563,545,527,272,290,308,325,342,359,376,392,408,423,438,452,465,477,488,487,497,496,
                    504,503,502,501,507,506,505,250,251,252,246,247,248,249,241,242,232,233,222,210,197,183,168,153,137,121,
                    104,87,70,53,35,17,782,800,818,835,852,869,886,902,918,933,948,962,975,987,998,997]
@@ -278,6 +278,19 @@ def get_max_veto_counts(experiment, runs):
     for i in raw_h5_file.VETO_PADS:
         veto_pad_mask[i] = 1
     return np.max(max_pad_counts[:,veto_pad_mask==1], axis=1)
+
+def get_outer_ring_counts(experiment, runs):
+    outer_ring_mask = np.zeros(1024)
+    for i in OUTER_RING_PADS:
+        outer_ring_mask[i] = 1
+    return np.einsum('ij, j', get_quantity('pad_charge', experiment, runs), outer_ring_mask)
+
+def get_outer_ring_max_counts(experiment, runs):
+    max_pad_counts = get_quantity('pad_max', experiment, runs)
+    outer_ring_mask = np.zeros(1024)
+    for i in OUTER_RING_PADS:
+        outer_ring_mask[i] = 1
+    return np.max(max_pad_counts[:,outer_ring_mask==1], axis=1)
     
 def get_gm_ic(experiment, runs, gains):
     counts_per_pad = get_quantity('pad_charge', experiment, runs)

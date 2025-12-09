@@ -28,7 +28,7 @@ import matplotlib.colors
 from raw_viewer import process_runs
 
 gpu_device = 2
-load_result1 = False
+load_result1 = True
 load_result2 = False
 load_result3 = False
 
@@ -69,8 +69,10 @@ def apply_gm_result(gm_result):
         for i, r in enumerate(runs):
             run_indexes[run_numbers == r] = i
         if gm_result.offset == 'none':
-            per_run_gain = gm_result.x[-1*len(runs):]
-            return get_gm_ic(gm_result.x[:-1*len(runs)])*per_run_gain[run_indexes]
+            gains = gm_result.x[:-1*(len(runs)-1)]
+            per_run_gain = np.array(gm_result.x[-1*(len(runs)-1):])
+            per_run_gain = np.concatenate((per_run_gain, np.array([1.0])))
+            return get_gm_ic(gains)*per_run_gain[run_indexes]
         elif gm_result.offset == 'constant':
             per_run_gain = gm_result.x[-2*len(runs):-1*len(runs)]
             per_run_offset = gm_result.x[-1*len(runs):]
@@ -120,9 +122,9 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
     num_params = 1024
     if per_run_variation:
         if offset == 'none':
-            num_params += len(runs)
+            num_params += len(runs)-1
         elif offset == 'constant':
-            num_params += 2*len(runs)
+            num_params += 2*(len(runs)-1)
     else:
         if offset == 'constant':
             num_params += 1
@@ -159,8 +161,9 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
         def obj_func(x):
             if offset == 'none':
                 if per_run_variation:
-                    gains = x[:-1*len(runs)]
-                    per_run_gain = cp.array(x[-1*len(runs):])
+                    gains = x[:-1*(len(runs)-1)]
+                    per_run_gain = cp.array(x[-1*(len(runs)-1):])
+                    per_run_gain = cp.concatenate((per_run_gain, cp.array([1.0])))
                 else:
                     gains = x
             elif offset == 'constant':
@@ -192,14 +195,18 @@ def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
             if offset == 'none':
                 if per_run_variation:
                     gains = intermediate_result.x[:-1*len(runs)]
+                    per_run_gains = intermediate_result.x[-1*(len(runs)-1):]
                 else:
                     gains = intermediate_result.x
             elif offset == 'constant':
                 if per_run_variation:
                     gains = intermediate_result.x[:-2*len(runs)]
+                    per_run_gains = intermediate_result.x[-2*len(runs):-1*len(runs)]
                 else:
                     gains = intermediate_result.x[:-1]
-            print(np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+            print('gains',np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+            if per_run_variation:
+                print('per run gains:', np.mean(per_run_gains), np.std(per_run_gains), np.min(per_run_gains), np.max(per_run_gains))
 
         print('objective function for initial guess: ', obj_func(init_guess))
         start_time = time.time()
@@ -241,7 +248,7 @@ def show_plots(res,block=False):
         plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
         plt.colorbar()
         for cut in res.cut_masks:
-            plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.5)
+            plt.scatter(gm_ic[cut],lengths[cut], marker='.', alpha=0.1)
         plt.xlabel('Energy (MeV)')
         plt.ylabel('range (mm)')
     except:
@@ -267,8 +274,8 @@ if True:
     offset2 = 'none'
     gm_ic = apply_gm_result(res1)
     cuts2 = []
-    cuts2.append((gm_ic >6.0)&(gm_ic<6.55)&(lengths>55)&(lengths<69) & veto_mask)
-    cuts2.append((gm_ic >6.6)&(gm_ic<7.5)&(lengths>62.5)&(lengths<76) & veto_mask)
+    cuts2.append((gm_ic >6.0)&(gm_ic<6.58)&(lengths>50)&(lengths<69) & veto_mask)
+    cuts2.append((gm_ic >6.58)&(gm_ic<7.5)&(lengths>59)&(lengths<80) & veto_mask)
     cuts2.append((gm_ic>8)&(gm_ic<9.25)&(lengths>90)&(lengths<105) & veto_mask)
     true_energies2 = [6.288, 6.7783, 8.78486]#[6.7783]
 

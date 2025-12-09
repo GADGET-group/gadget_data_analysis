@@ -9,6 +9,7 @@ import scipy.interpolate as interpolate
 import h5py
 import matplotlib.pylab as plt
 import matplotlib.colors as colors
+import matplotlib.cm 
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 
@@ -708,10 +709,14 @@ class raw_h5_file:
     
     def get_2d_image(self, data):
         #data should be a dictionary of numbers to put in the image, indexed by pad
-        image = np.zeros(np.shape(self.pad_plane))
-        for pad in data:
+        image = -1*np.ones(np.shape(self.pad_plane))
+        for pad in self.pad_to_xy_index:
             x,y = self.pad_to_xy_index[pad]
-            image[y,x] = data[pad]
+            if pad in data:
+                image[y,x] = data[pad]
+            else:
+                image[y,x] = np.inf
+            
         #image[image<0]=0
         return image
 
@@ -729,7 +734,9 @@ class raw_h5_file:
         fig.suptitle(title)
 
         # Top plot: padplane image
-        im = ax1.imshow(image, norm=colors.LogNorm())
+        cmap = matplotlib.cm.get_cmap('viridis').copy()
+        cmap.set_under(color='black')
+        im = ax1.imshow(image, cmap=cmap, vmin=np.min(image[image>=0]), vmax=np.max(image[image<np.inf]))#norm=colors.LogNorm()
         fig.colorbar(im, ax=ax1)
         ax1.set_title('Padplane Image')
 

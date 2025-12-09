@@ -42,7 +42,7 @@ for run in runs:
     veto_max = process_runs.get_max_veto_counts(experiment, [run])
     energy = process_runs.get_gm_ic(experiment, [run], pad_gains)
 
-    veto_mask = (veto_max < veto_thresh)
+    veto_mask = process_runs.get_outer_ring_max_counts(experiment, [run])<113
 
 
 

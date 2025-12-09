@@ -17,12 +17,12 @@ experiment = 'e23035'
 if experiment == 'e23035':
     exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
                     289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
-if True: #background runs before experiment
+if False: #background runs before experiment
     experiment = 'e23035_prep_vault'
     run_range = (17,20,21)
 else: #during experiment
-    #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
-    run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
+    run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
+    #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
 
 exclude_runs = [210]#[1,9, 73, 113]
 runs = []
@@ -31,16 +31,16 @@ for run in run_range:
         runs.append(run)
 
 
-veto_thresh = 300#np.inf
+veto_thresh = 500#np.inf
 rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 4001)
 alphahist_bins = 500
 
 #load pad gain match
-gain_match_path = '/egr/research-tpc/shared/e23035_prep/vault/gm.pkl'
+gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
-pad_gains = gain_match_result.x
+pad_gains = gain_match_result.x[:1024]
 #pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
 
 lengths = process_runs.get_lengths(experiment, runs)
@@ -50,7 +50,7 @@ veto_max = process_runs.get_max_veto_counts(experiment, runs)
 charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
 energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
 
-veto_mask = (veto_max < veto_thresh)
+veto_mask = process_runs.get_outer_ring_counts(experiment, runs)<113#(veto_max < veto_thresh)#
 
 
 
