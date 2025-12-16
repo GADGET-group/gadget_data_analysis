@@ -318,9 +318,12 @@ def get_time_since_beam_off(experiment, runs):
         to_return.append(times_since_start_of_window)
     return np.concatenate(to_return, axis=0)
 
-def get_event_run_numbers(experiment, runs):
-    to_return = []
+def get_run_and_event_numbers(experiment, runs):
+    run_numbers = []
+    event_numbers = []
     for run in runs:
-        num_events = get_quantity('timestamps', experiment, [run]).shape[0]
-        to_return.append(np.full(num_events, run))
-    return np.concatenate(to_return, axis=0)
+        h5 = get_h5_file(experiment, run)
+        first, last  = h5.get_event_num_bounds()
+        event_numbers.append(np.arange(first, last+1))
+        run_numbers.append(np.ones(last - first + 1)*run)
+    return np.concatenate(run_numbers, axis=0), np.concatenate(event_numbers, axis=0)

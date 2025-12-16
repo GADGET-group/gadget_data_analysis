@@ -33,7 +33,7 @@ load_result2 = False
 load_result3 = False
 
 
-runs = (17,20,21,38,49,60,61,62,63)#(20,)#(20,)#(38,49)#
+runs = (61,62,63)#(20,)#(20,)#(38,49)#17,20,21,38,49,60,
 exp = 'e23035_prep_vault'
 
 veto_thresh = 400

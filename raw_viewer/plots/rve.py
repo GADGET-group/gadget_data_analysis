@@ -15,20 +15,28 @@ from  raw_viewer import raw_h5_file
 experiment = 'e23035'
  
 if experiment == 'e23035':
-    exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
+    exclude_runs = [1,9, 19, 73, 113,
+                    132, #run missing some CoBos
+                    210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
                     289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
-if False: #background runs before experiment
+if True: # runs before experiment
     experiment = 'e23035_prep_vault'
-    run_range = (17,20,21)
+    #run_range = (17,20,21)
+    run_range = np.arange(61, 63+1) #calibration before experiment
+   #run_range = np.arange(68, 73+1) #background before experiemnt 
+
 else: #during experiment
-    run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
+    #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
+    run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
     #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
+    #run_range = np.concatenate((np.arange(281,286+1), np.arange(296,301+1)))#59Zn with field cage on
 
 exclude_runs = [210]#[1,9, 73, 113]
 runs = []
 for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
+#runs=[280] #background after experiment
 
 
 veto_thresh = 500#np.inf
@@ -49,8 +57,9 @@ cpp = process_runs.get_quantity('pad_charge', experiment, runs)
 veto_max = process_runs.get_max_veto_counts(experiment, runs)
 charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
 energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
+angles = process_runs.get_angle(experiment, runs)
 
-veto_mask = process_runs.get_outer_ring_counts(experiment, runs)<113#(veto_max < veto_thresh)#
+veto_mask = process_runs.get_outer_ring_counts(experiment, runs)<113#(veto_max < veto_thresh)#&(angles>np.radians(5))
 
 
 
@@ -70,10 +79,10 @@ plt.ylabel('range (mm)')
 # fig.show()
 m = (108.4-32.2)/(3.628-2.25)
 m2 = (23.3-35.5)/(1-2.4)
-alpha_mask = veto_mask&((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
+alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
 
 m = (159.2-26.2)/(2.81-0.619)
-proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))
+proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
 #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
 palpha_cut = veto_mask&(energy>1.6)&(energy<1.8)&(lengths>27.5)&(lengths<40)
 print(np.where(palpha_cut))
@@ -138,7 +147,7 @@ if True:
         run_ts[i] = run_ts[i] + run_t_offset[i]
     run_ts = np.concatenate(run_ts)
 
-if False:
+if True:
     plt.figure()
     plt.title('alphas')
     tve_bins = (100, 15)
@@ -146,7 +155,7 @@ if False:
     plt.xlabel('energy (MeV)')
     plt.ylabel('time since start of experiment (hours)')
     plt.colorbar()
-
+if False:
     plt.figure()
     plt.title('protons')
     tsbo=process_runs.get_time_since_beam_off(experiment, runs)
