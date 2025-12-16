@@ -28,7 +28,7 @@ import matplotlib.colors
 from raw_viewer import process_runs
 
 gpu_device = 2
-load_result1 = True
+load_result1 = False
 load_result2 = False
 load_result3 = False
 
@@ -38,8 +38,8 @@ exp = 'e23035_prep_vault'
 
 veto_thresh = 400
 rve_bins = 400
-offset = 'none' #'constant' or 'none'
-per_run_variation = True #allow gain and offset (if applicable) to vary per run
+offset = 'constant' #'constant' or 'none'
+per_run_variation = False #allow gain and offset (if applicable) to vary per run
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
@@ -47,7 +47,7 @@ cpp = process_runs.get_quantity('pad_charge', exp, runs)
 veto_max = process_runs.get_max_veto_counts(exp, runs)
 charge_widths = process_runs.get_quantity('charge_width', exp,runs)
 veto_mask = (veto_max < veto_thresh)&(charge_widths>2.5)#(veto_counts < veto_thresh)&(charge_widths>2.5)
-run_numbers = process_runs.get_event_run_numbers(exp, runs)
+run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 with cp.cuda.Device(gpu_device):
     cpp_gpu = cp.array(cpp)
@@ -271,7 +271,7 @@ show_plots(res1)
 
 #redo gain match using selection based on original gain match
 if True:
-    offset2 = 'none'
+    offset2 = offset
     gm_ic = apply_gm_result(res1)
     cuts2 = []
     cuts2.append((gm_ic >6.0)&(gm_ic<6.58)&(lengths>50)&(lengths<69) & veto_mask)
@@ -314,7 +314,7 @@ if False:
 
     #redo gain match using selection based on original gain match
 if True:
-    offset3 = 'none'
+    offset3 = offset2
     gm_ic2 = apply_gm_result(res2)
     cuts3 = []
     cuts3.append(((gm_ic2 >6.0)&(gm_ic2<6.6)&(lengths>50)&(lengths<64)|
