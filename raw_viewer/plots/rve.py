@@ -19,15 +19,16 @@ if experiment == 'e23035':
                     132, #run missing some CoBos
                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
                     289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
-if True: # runs before experiment
+if False: # runs before experiment
     experiment = 'e23035_prep_vault'
     #run_range = (17,20,21)
     run_range = np.arange(61, 63+1) #calibration before experiment
+    run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
    #run_range = np.arange(68, 73+1) #background before experiemnt 
 
 else: #during experiment
-    #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
-    run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
+    run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
+    #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
     #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
     #run_range = np.concatenate((np.arange(281,286+1), np.arange(296,301+1)))#59Zn with field cage on
 
@@ -37,6 +38,7 @@ for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
 #runs=[280] #background after experiment
+runs=[111]
 
 
 veto_thresh = 500#np.inf
@@ -45,7 +47,8 @@ phist_bins = np.linspace(0, 4, 4001)
 alphahist_bins = 500
 
 #load pad gain match
-gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
+#gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
+gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
 pad_gains = gain_match_result.x[:1024]
@@ -59,7 +62,7 @@ charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
 energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
 angles = process_runs.get_angle(experiment, runs)
 
-veto_mask = process_runs.get_outer_ring_counts(experiment, runs)<113#(veto_max < veto_thresh)#&(angles>np.radians(5))
+veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
 
 
@@ -185,5 +188,5 @@ plt.scatter(energy[p800_mask], lengths[p800_mask], marker='.', alpha=0.5, color=
 plt.colorbar()
 
 plt.figure()
-plt.hist(energy, 2000)
+plt.hist(energy, 200)
 plt.show(block=False)
