@@ -257,7 +257,6 @@ def get_quantity(qname, experiment, runs):
         to_return.append(loaded_runs[(experiment, run)][qname])
     return np.concatenate(to_return, axis=0)
 
-
 def get_lengths(experiment, runs):
     endpoints = np.array(get_quantity('endpoints', experiment, runs))
     dr = endpoints[:, 0] - endpoints[:, 1]
