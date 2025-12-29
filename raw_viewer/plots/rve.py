@@ -44,7 +44,7 @@ ddas_runs = range(126, 133+1)
 print('getting times since beam off for each event')
 times_since_beam_off = []
 for run in tqdm(ddas_runs):
-    es, ts, ms = ddas_interface.extract_data(experiment, run)
+    es, ts, ms = ddas_interface.extract_get_event_data(experiment, run)
     times_since_beam_off.append(ddas_interface.get_time_since_beam_off(es, ts, ms)[:-1])
 times_since_beam_off = np.concatenate(times_since_beam_off)
 
@@ -173,14 +173,14 @@ if True:
     tve_bins = (50, 50)
     plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
-    plt.ylabel('time since beam off (s)')
+    plt.ylabel('time since beam off (ms)')
 
     plt.figure()
     plt.title('alphas')
     tve_bins = (50, 50)
     plt.hist2d(energy[alpha_mask&(tsbo>0)], tsbo[alpha_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
-    plt.ylabel('time since beam off (s)')
+    plt.ylabel('time since beam off (ms)')
 
 plt.show(block=False)
 
