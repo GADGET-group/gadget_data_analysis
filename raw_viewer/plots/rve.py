@@ -7,10 +7,11 @@ from matplotlib.path import Path
 import matplotlib.colors
 import ROOT
 import numpy as np
+from tqdm import tqdm
 
 from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
-
+from raw_viewer import ddas_interface
 
 experiment = 'e23035'
  
@@ -38,8 +39,14 @@ for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
 #runs=[280] #background after experiment
-runs=[111]
-
+runs=range(145, 152+1)
+ddas_runs = range(126, 133+1)
+print('getting times since beam off for each event')
+times_since_beam_off = []
+for run in tqdm(ddas_runs):
+    es, ts, ms = ddas_interface.extract_data(experiment, run)
+    times_since_beam_off.append(ddas_interface.get_time_since_beam_off(es, ts, ms)[:-1])
+times_since_beam_off = np.concatenate(times_since_beam_off)
 
 veto_thresh = 500#np.inf
 rve_bins = (300, 300)
@@ -64,6 +71,7 @@ angles = process_runs.get_angle(experiment, runs)
 
 veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
+assert len(times_since_beam_off) == len(energy)
 
 
 plt.figure()
@@ -158,17 +166,21 @@ if True:
     plt.xlabel('energy (MeV)')
     plt.ylabel('time since start of experiment (hours)')
     plt.colorbar()
-if False:
+if True:
     plt.figure()
     plt.title('protons')
-    tsbo=process_runs.get_time_since_beam_off(experiment, runs)
+    tsbo=times_since_beam_off/1e6#process_runs.get_time_since_beam_off(experiment, runs)
     tve_bins = (50, 50)
     plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
+    plt.xlabel('energy (MeV)')
+    plt.ylabel('time since beam off (s)')
 
     plt.figure()
     plt.title('alphas')
     tve_bins = (50, 50)
     plt.hist2d(energy[alpha_mask&(tsbo>0)], tsbo[alpha_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
+    plt.xlabel('energy (MeV)')
+    plt.ylabel('time since beam off (s)')
 
 plt.show(block=False)
 

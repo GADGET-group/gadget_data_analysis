@@ -1,5 +1,10 @@
 import ROOT
 import numpy as np
+import matplotlib.pylab as plt
+
+NUM_SLOTS = 10
+CH_PER_SLOT = 16
+NUM_TOTAL_CH = NUM_SLOTS*CH_PER_SLOT
 
 class CH_MAP:
     MESH_PRE_AMP = 150
@@ -13,15 +18,23 @@ class CH_MAP:
     CHOPPER_ON = 156
     CHOPPER_OFF = 157
 
+    #PID channels
+    MSX100 = 160
+    MSX40 = 161
+    CROSS_SCINT_B2 = 2*16+13
+    CROSS_SCINT_T2 = 2*16+14
+    DB_5_SCINT = 3*16
+    DB_3_SCINT_L = 3*16 + 2
+
 def get_root_file_path(experiment, run):
     base_path = f'/egr/research-tpc/shared/proc_runs/{experiment}/ddas/'
-    file_name = 'run-%04d_gadget.root'%run
+    file_name = 'run-%04d.root'%run
     return base_path + file_name
 
 def extract_data(experiment, run):
     file = ROOT.TFile(get_root_file_path(experiment, run), "READ")
     tree = file.Get("tree")
-    energies, times, multiplicities = np.zeros(160, dtype=np.int32), np.zeros(160), np.zeros(160,dtype=np.int32)
+    energies, times, multiplicities = np.zeros(NUM_TOTAL_CH, dtype=np.int32), np.zeros(NUM_TOTAL_CH), np.zeros(NUM_TOTAL_CH,dtype=np.int32)
     tree.SetBranchAddress("energies", energies)
     tree.SetBranchAddress("times", times)
     tree.SetBranchAddress("multiplicity", multiplicities)
@@ -51,3 +64,14 @@ def get_time_since_beam_off(es, ts, ms):
         to_return[i] = event_times[i] - beam_off_times[j]
         i += 1
     return to_return
+
+def show_dE_dt_pid(es, ts, ms):
+    dE_ch = CH_MAP.MSX100
+    t_start_ch = CH_MAP.DB_3_SCINT_L
+    t_stop_ch = CH_MAP.CROSS_SCINT_B2
+    dt = ts[:, t_stop_ch] - ts[:,t_start_ch]
+    dE = es[:, dE_ch]
+    plt_mask = (dt>0) & (dE>0)
+    plt.figure()
+    plt.hist2d(dt[plt_mask], dE[plt_mask])
+    plt.show(block=False)

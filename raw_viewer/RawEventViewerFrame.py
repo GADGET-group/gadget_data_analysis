@@ -33,7 +33,7 @@ class RawEventViewerFrame(ttk.Frame):
         if not heritage_file:
             if file_path == None:
                 if socket.gethostname() == 'tpcgpu':
-                    init_dir =  "/egr/research-tpc/shared/"
+                    init_dir =  "/egr/research-tpc/shared/experiments/e23035/h5"
                 else:
                     init_dir = "/mnt/analysis/e21072/h5test/"
                 file_path = tk.filedialog.askopenfilename(initialdir=init_dir, title='Select H5 File', filetypes=[('H5', ".h5")])
@@ -351,6 +351,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def process_run(self):
         directory_path, h5_fname = os.path.split(self.h5file.file_path)
+        directory_path = '/egr/research-tpc/shared/proc_runs/e23035'
         #make directory for processed data from this run, if it doesn't already exist
         directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0] + "_raw_viewer")
         if not os.path.isdir(directory_path):
