@@ -8,6 +8,7 @@ import matplotlib.colors
 import ROOT
 import numpy as np
 from tqdm import tqdm
+from scipy import optimize
 
 from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
@@ -126,7 +127,7 @@ for t, dt in zip(timestamps, time_since_last_event):
     times_since_start_of_window.append(t - start_of_current_winow)
 times_since_start_of_window = np.array(times_since_start_of_window)
 
-for t_thresh in []:#[0.02, 0.05, 0.1, 0.15]:
+for t_thresh in [0.05]:#[0.02, 0.05, 0.1, 0.15]:
     plt.figure()
     plt_mask = plt_mask&(times_since_start_of_window > t_thresh)
     plt.title('time since start of window > %f ms'%(t_thresh*1000))
@@ -210,4 +211,20 @@ plt.colorbar()
 
 plt.figure()
 plt.hist(energy, 200)
+
 plt.show(block=False)
+
+def fit_decay_exponential(mask, time_bin_edges, guess=(100,100)):
+    plt.figure()
+    counts, bins, patches = plt.hist(tsbo[mask], time_bin_edges)
+    bin_centers = (bins[:-1] + bins[1:])/2
+    sigma = np.sqrt(counts)
+    sigma[sigma==1] = 1
+    to_fit = lambda t, A, tau: A*np.exp(-t/tau)
+    #plt.plot(bin_centers, to_fit(bin_centers, *guess))
+    popt, pcov = optimize.curve_fit(to_fit, bin_centers, counts, guess, sigma)
+    plt.plot(bin_centers, to_fit(bin_centers, *popt))
+    plt.figure()
+    plt.plot(bin_centers, counts - to_fit(bin_centers,*popt))
+    plt.show(block=False)
+    return popt, pcov
