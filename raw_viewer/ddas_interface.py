@@ -87,7 +87,7 @@ def extract_get_event_data(experiment, run):
             pickle.dump(es, save_file)
             pickle.dump(ts, save_file)
             pickle.dump(ms, save_file)
-        return es, ts, ms
+    return es, ts, ms
 
 
 def get_time_since_beam_off(es, ts, ms):

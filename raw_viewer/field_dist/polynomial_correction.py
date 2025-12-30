@@ -52,9 +52,6 @@ class PolynomialCorrection:
         #these member variables will hold the mapped points once set_data and apply_correction have been called
         self.corrected_xyz = None
         self.corrected_widths = None
-        
-        
-
     
     def set_data(self, points, widths, track_angles, times):
         '''

@@ -35,17 +35,19 @@ else: #during experiment
 
 exclude_runs = [210]#[1,9, 73, 113]
 runs = []
-for run in run_range:
-    if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
-        runs.append(run)
+for ddas_run in run_range:
+    if ddas_run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, ddas_run)):
+        runs.append(ddas_run)
 #runs=[280] #background after experiment
-runs=range(145, 152+1)
-ddas_runs = range(126, 133+1)
+runs=range(145, 150+1)#152+1)
+ddas_runs = range(126, 131+1)#133+1)
 print('getting times since beam off for each event')
 times_since_beam_off = []
-for run in tqdm(ddas_runs):
-    es, ts, ms = ddas_interface.extract_get_event_data(experiment, run)
+for ddas_run, get_run in tqdm(zip(ddas_runs, runs)):
+    es, ts, ms = ddas_interface.extract_get_event_data(experiment, ddas_run)
+    get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
     times_since_beam_off.append(ddas_interface.get_time_since_beam_off(es, ts, ms)[:-1])
+    print(len(times_since_beam_off[-1]), len(get_ts))
 times_since_beam_off = np.concatenate(times_since_beam_off)
 
 veto_thresh = 500#np.inf
@@ -71,6 +73,7 @@ angles = process_runs.get_angle(experiment, runs)
 
 veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
+print(len(times_since_beam_off), len(energy))
 assert len(times_since_beam_off) == len(energy)
 
 
@@ -147,8 +150,8 @@ if True:
     #TODO: correct for times runs were not instantly started again after previous run ended
     run_t_offset = [0]
     run_ts = []
-    for run in runs:
-        run_ts.append(process_runs.get_quantity('timestamps', experiment, [run]))
+    for ddas_run in runs:
+        run_ts.append(process_runs.get_quantity('timestamps', experiment, [ddas_run]))
     for i in range(1, len(runs)):
         if run_ts[i][0] <= run_ts[i-1][-1]:
             run_t_offset.append(run_t_offset[-1] + run_ts[i-1][-1])
@@ -171,16 +174,22 @@ if True:
     plt.title('protons')
     tsbo=times_since_beam_off/1e6#process_runs.get_time_since_beam_off(experiment, runs)
     tve_bins = (50, 50)
-    plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
+    plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins)#, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
     plt.ylabel('time since beam off (ms)')
+    plt.colorbar()
 
     plt.figure()
     plt.title('alphas')
-    tve_bins = (50, 50)
-    plt.hist2d(energy[alpha_mask&(tsbo>0)], tsbo[alpha_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
+    tve_bins = (50, 10)
+    plt.hist2d(energy[alpha_mask&(tsbo>0)], tsbo[alpha_mask&(tsbo>0)], bins=tve_bins)#, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
     plt.ylabel('time since beam off (ms)')
+    plt.colorbar()
+
+    plt.figure()
+    plt.hist(tsbo, bins=100)
+    plt.xlabel('time since beam off')
 
 plt.show(block=False)
 
