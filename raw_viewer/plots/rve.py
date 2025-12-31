@@ -36,9 +36,9 @@ else: #during experiment
 
 exclude_runs = [210]#[1,9, 73, 113]
 runs = []
-for ddas_run in run_range:
-    if ddas_run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, ddas_run)):
-        runs.append(ddas_run)
+for run in run_range:
+    if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
+        runs.append(run)
 #runs=[280] #background after experiment
 runs=range(145, 150+1)#152+1)
 ddas_runs = range(126, 131+1)#133+1)
@@ -47,7 +47,7 @@ times_since_beam_off = []
 for ddas_run, get_run in tqdm(zip(ddas_runs, runs)):
     es, ts, ms = ddas_interface.extract_get_event_data(experiment, ddas_run)
     get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
-    times_since_beam_off.append(ddas_interface.get_time_since_beam_off(es, ts, ms)[:-1])
+    times_since_beam_off.append(ddas_interface.get_time_since_beam_off(ts)[:-1])
     print(len(times_since_beam_off[-1]), len(get_ts))
 times_since_beam_off = np.concatenate(times_since_beam_off)
 
@@ -173,7 +173,7 @@ if True:
 if True:
     plt.figure()
     plt.title('protons')
-    tsbo=times_since_beam_off/1e6#process_runs.get_time_since_beam_off(experiment, runs)
+    tsbo=times_since_beam_off*1e3#process_runs.get_time_since_beam_off(experiment, runs)
     tve_bins = (50, 50)
     plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins)#, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
