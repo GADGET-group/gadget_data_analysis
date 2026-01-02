@@ -5,6 +5,7 @@ import gzip
 import ROOT
 import numpy as np
 import matplotlib.pylab as plt
+import matplotlib.colors
 
 NUM_SLOTS = 10
 CH_PER_SLOT = 16
@@ -182,15 +183,17 @@ def time_since_beam_off(ts, ch_select):
 
 def show_dE_dt_pid(es, ts, ms):
     dE_ch = CH_MAP.MSX100
-    t_start_ch = CH_MAP.DB_3_SCINT_L
+    t_start_ch = CH_MAP.DB_5_SCINT
     t_stop_ch = CH_MAP.CROSS_SCINT_B2
     dt = ts[:, t_stop_ch] - ts[:,t_start_ch]
     dE = es[:, dE_ch]
-    plt_mask = (dt>0) & (dE>0)
+    plt_mask = (dt<-580) & (dt>-680) & (dE>0)
     plt.figure()
-    plt.hist2d(dt[plt_mask], dE[plt_mask])
+    plt.hist2d(dt[plt_mask], dE[plt_mask], 1000,norm=matplotlib.colors.LogNorm())
+    plt.colorbar()
     plt.show(block=False)
 
 def show_gamma_energy_alignment_plot(es):
     energy_bins = np.linspace(0,2**22, 1000)
     image = np.zeros(len(CH_MAP.GE_INDECIES), len(energy_bins))
+
