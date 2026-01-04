@@ -6,6 +6,7 @@ import ROOT
 import numpy as np
 import matplotlib.pylab as plt
 import matplotlib.colors
+import tqdm
 
 NUM_SLOTS = 10
 CH_PER_SLOT = 16
@@ -129,7 +130,7 @@ def extract_get_event_data(experiment, run):
         tree.SetBranchAddress("multiplicity", multiplicities)
         shape = (tree.GetEntries(), NUM_TOTAL_CH)
         es, ts, ms = [],[],[]
-        for i in range(tree.GetEntries()):
+        for i in tqdm.tqdm(range(tree.GetEntries())):
             tree.GetEntry(i)
 
             if np.max(multiplicities[CH_MAP.MESH_PRE_AMP:CH_MAP.CHOPPER_OFF+1]) > 0:
@@ -144,23 +145,34 @@ def extract_get_event_data(experiment, run):
     return es, ts, ms
 
 
-def get_time_since_beam_off(ts):
+def get_time_since_beam_off(experiment, run):
     '''
     Get time since beam as turned off for each accepted trigger
-    ''' 
-    beam_off_times = ts[:, CH_MAP.CHOPPER_OFF]
-    beam_off_times = beam_off_times[beam_off_times >= 0]
-    event_times = ts[:, CH_MAP.GET_TRIG_ACCEPTED]
-    event_times = event_times[event_times >= 0]
-    
-    to_return = np.zeros(len(event_times))
-    i, j = 0,0
-    while i < len(event_times):
-        while (j < len(beam_off_times) - 1) and (beam_off_times[j+1] < event_times[i]):
-            j += 1
-        to_return[i] = event_times[i] - beam_off_times[j]
-        i += 1
-    return to_return/1e9
+    '''
+    save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
+    pkl_fname = os.path.join(save_path, '%s_run%d_tsbo.pkl.gz'%(experiment, run))
+    if os.path.exists(pkl_fname):
+        with gzip.open(pkl_fname, 'rb') as file:
+            return pickle.load(file)
+    else:
+        es, ts, ms = extract_get_event_data(experiment, run)
+        beam_off_times = ts[:, CH_MAP.CHOPPER_OFF]
+        beam_off_times = beam_off_times[beam_off_times >= 0]
+        event_times = ts[:, CH_MAP.GET_TRIG_ACCEPTED]
+        event_times = event_times[event_times >= 0]
+        
+        to_return = np.zeros(len(event_times))
+        i, j = 0,0
+        while i < len(event_times):
+            while (j < len(beam_off_times) - 1) and (beam_off_times[j+1] < event_times[i]):
+                j += 1
+            to_return[i] = event_times[i] - beam_off_times[j]
+            i += 1
+
+        to_return /= 1e9
+        with gzip.open(pkl_fname, 'wb') as save_file:
+            pickle.dump(to_return, save_file)
+        return to_return
 
 def time_since_beam_off(ts, ch_select):
     '''
