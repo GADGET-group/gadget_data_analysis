@@ -13,6 +13,7 @@ from scipy import optimize
 from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
+from e23035_analysis import e23035_runs
 
 experiment = 'e23035'
  
@@ -45,9 +46,8 @@ ddas_runs = range(126, 131+1)#133+1)
 print('getting times since beam off for each event')
 times_since_beam_off = []
 for ddas_run, get_run in tqdm(zip(ddas_runs, runs)):
-    es, ts, ms = ddas_interface.extract_get_event_data(experiment, ddas_run)
     get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
-    times_since_beam_off.append(ddas_interface.get_time_since_beam_off(ts)[:-1])
+    times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
     print(len(times_since_beam_off[-1]), len(get_ts))
 times_since_beam_off = np.concatenate(times_since_beam_off)
 
@@ -72,7 +72,8 @@ charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
 energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
 angles = process_runs.get_angle(experiment, runs)
 
-veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
+#veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
+veto_mask = e23035_runs.get_veto_mask(runs)
 
 print(len(times_since_beam_off), len(energy))
 assert len(times_since_beam_off) == len(energy)

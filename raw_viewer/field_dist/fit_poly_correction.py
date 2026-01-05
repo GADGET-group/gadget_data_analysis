@@ -12,6 +12,8 @@ ddas_runs = range(126, 131+1)
 
 poly_correction = PolynomialCorrection()
 
+
+
 print('loading GET data')
 uncorrected_lengths = process_runs.get_lengths(experiment, get_runs)
 uncorrected_widths = process_runs.get_quantity('charge_width', experiment, get_runs)
@@ -22,3 +24,4 @@ for ddas_run in tqdm(ddas_runs):
     #exclude last event since it seems to be dumped
     times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
 times_since_beam_off = np.concatenate(times_since_beam_off)
+
