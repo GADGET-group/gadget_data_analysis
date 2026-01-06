@@ -30,10 +30,11 @@ if False: # runs before experiment
    #run_range = np.arange(68, 73+1) #background before experiemnt 
 
 else: #during experiment
-    run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
+    #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
     #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
     #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
     #run_range = np.concatenate((np.arange(281,286+1), np.arange(296,301+1)))#59Zn with field cage on
+    run_range = range(285, 287)
 
 exclude_runs = [210]#[1,9, 73, 113]
 runs = []
@@ -41,8 +42,11 @@ for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
 #runs=[280] #background after experiment
-runs=range(145, 150+1)#152+1)
-ddas_runs = range(126, 131+1)#133+1)
+#runs=range(145, 150+1)#152+1)
+ddas_runs = []
+for get_run in runs:
+    ddas_runs.append(np.array(e23035_runs.run_df['DDAS'][e23035_runs.run_df['GET']==get_run]))
+print(ddas_runs)
 print('getting times since beam off for each event')
 times_since_beam_off = []
 for ddas_run, get_run in tqdm(zip(ddas_runs, runs)):
@@ -228,4 +232,22 @@ def fit_decay_exponential(mask, time_bin_edges, guess=(100,100)):
     plt.figure()
     plt.plot(bin_centers, counts - to_fit(bin_centers,*popt))
     plt.show(block=False)
+    print('half life: ', popt[1]*np.log(2), "+/-", np.sqrt(pcov[1,1])*np.log(2), 'ms')
+    return popt, pcov
+
+def fit_double_decay_exponential(mask, time_bin_edges, guess=(100,60, 100, 100)):
+    plt.figure()
+    counts, bins, patches = plt.hist(tsbo[mask], time_bin_edges)
+    bin_centers = (bins[:-1] + bins[1:])/2
+    sigma = np.sqrt(counts)
+    sigma[sigma==0] = 1
+    to_fit = lambda t, A1, tau1, A2, tau2: A1*np.exp(-t/tau1) + A2*np.exp(-t/tau2)
+    #plt.plot(bin_centers, to_fit(bin_centers, *guess))
+    popt, pcov = optimize.curve_fit(to_fit, bin_centers, counts, guess, sigma)
+    plt.plot(bin_centers, to_fit(bin_centers, *popt))
+    plt.figure()
+    plt.plot(bin_centers, counts - to_fit(bin_centers,*popt))
+    plt.show(block=False)
+    print('half lives: ', popt[1]*np.log(2), "+/-", np.sqrt(pcov[1,1])*np.log(2), 'ms, ',
+           popt[3]*np.log(2), "+/-", np.sqrt(pcov[3,3])*np.log(2), 'ms')
     return popt, pcov
