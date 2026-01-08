@@ -34,13 +34,14 @@ else: #during experiment
     #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
     #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
     #run_range = np.concatenate((np.arange(281,286+1), np.arange(296,301+1)))#59Zn with field cage on
-    run_range = range(285, 287)
+    run_range = range(148,151)
 
 exclude_runs = [210]#[1,9, 73, 113]
 runs = []
 for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
+runs=[125]#[148,149,150]
 #runs=[280] #background after experiment
 #runs=range(145, 150+1)#152+1)
 ddas_runs = []
@@ -52,7 +53,7 @@ times_since_beam_off = []
 for ddas_run, get_run in tqdm(zip(ddas_runs, runs)):
     get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
     times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
-    print(len(times_since_beam_off[-1]), len(get_ts))
+    print(get_run, len(times_since_beam_off[-1]), len(get_ts))
 times_since_beam_off = np.concatenate(times_since_beam_off)
 
 veto_thresh = 500#np.inf

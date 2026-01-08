@@ -80,10 +80,12 @@ class CH_MAP:
     CLOVER_11C = 9*16 + 10
     CLOVER_11D = 9*16 + 11
     CLOVER_11_INDECIES = np.array([CLOVER_11A, CLOVER_11B, CLOVER_11C, CLOVER_11D])
-
+    #list of all germnaium channels
     GE_INDECIES = np.concatenate([CLOVER_1_INDECIES, CLOVER_2_INDECIES, CLOVER_3_INDECIES, CLOVER_5_INDECIES,
                               CLOVER_6_INDECIES, CLOVER_7_INDECIES, CLOVER_9_INDECIES, CLOVER_10_INDECIES,
                               CLOVER_11_INDECIES])
+    #list of crystal ids corresponding to the above inecies
+    GE_CALIBRATION_INDEXES = [0,1,2,3,4,5,6,7,8,9,10,11,16,17,18,19,20,21,22,23,24,25,26,27,32,33,34,35,36,37,38,39,40,41,42,43]
 
 def get_root_file_path(experiment, run):
     base_path = f'/egr/research-tpc/shared/proc_runs/{experiment}/ddas/'
@@ -209,3 +211,17 @@ def show_gamma_energy_alignment_plot(es):
     energy_bins = np.linspace(0,2**22, 1000)
     image = np.zeros(len(CH_MAP.GE_INDECIES), len(energy_bins))
 
+def get_calibrated_gamma_energies(es, file='e23035_analysis/init_ge_cal.csv'):
+    '''
+    [CLOVER_1_INDECIES, CLOVER_2_INDECIES, CLOVER_3_INDECIES, CLOVER_5_INDECIES,
+                              CLOVER_6_INDECIES, CLOVER_7_INDECIES, CLOVER_9_INDECIES, CLOVER_10_INDECIES,
+                              CLOVER_11_INDECIES])
+    '''
+    cal_table = np.genfromtxt(file, delimiter=',', skip_header=1)
+    slopes = cal_table[:, 2]
+    offsets = cal_table[:, 1]
+    to_return = np.zeros((len(es), len(CH_MAP.GE_INDECIES)))
+    for i in range(len(CH_MAP.GE_INDECIES)):
+        cal_index = CH_MAP.GE_CALIBRATION_INDEXES[i]
+        to_return[:, i] = offsets[cal_index] + slopes[cal_index]*es[:, CH_MAP.GE_INDECIES[i]]
+    return to_return
