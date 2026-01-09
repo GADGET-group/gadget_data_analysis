@@ -134,9 +134,8 @@ times_since_start_of_window = np.array(times_since_start_of_window)
 
 for t_thresh in [0.05]:#[0.02, 0.05, 0.1, 0.15]:
     plt.figure()
-    plt_mask = plt_mask&(times_since_start_of_window > t_thresh)
     plt.title('time since start of window > %f ms'%(t_thresh*1000))
-    plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+    plt.hist2d(energy[plt_mask&(times_since_start_of_window > t_thresh)], lengths[plt_mask&(times_since_start_of_window > t_thresh)], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.colorbar()
 
 if True:
