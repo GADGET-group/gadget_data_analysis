@@ -225,3 +225,6 @@ def get_calibrated_gamma_energies(es, file='e23035_analysis/init_ge_cal.csv'):
         cal_index = CH_MAP.GE_CALIBRATION_INDEXES[i]
         to_return[:, i] = offsets[cal_index] + slopes[cal_index]*es[:, CH_MAP.GE_INDECIES[i]]
     return to_return
+
+def make_cal_root_file(run):
+    pass

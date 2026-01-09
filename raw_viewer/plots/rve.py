@@ -37,20 +37,18 @@ else: #during experiment
     run_range = range(148,151)
 
 exclude_runs = [210]#[1,9, 73, 113]
-runs = []
+get_runs = []
 for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
-        runs.append(run)
-runs=[125]#[148,149,150]
+        get_runs.append(run)
+get_runs=range(145,151)
 #runs=[280] #background after experiment
 #runs=range(145, 150+1)#152+1)
-ddas_runs = []
-for get_run in runs:
-    ddas_runs.append(np.array(e23035_runs.run_df['DDAS'][e23035_runs.run_df['GET']==get_run]))
+ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
 print(ddas_runs)
 print('getting times since beam off for each event')
 times_since_beam_off = []
-for ddas_run, get_run in tqdm(zip(ddas_runs, runs)):
+for ddas_run, get_run in tqdm(zip(ddas_runs, get_runs)):
     get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
     times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
     print(get_run, len(times_since_beam_off[-1]), len(get_ts))
@@ -69,16 +67,16 @@ with open(gain_match_path, 'rb') as f:
 pad_gains = gain_match_result.x[:1024]
 #pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
 
-lengths = process_runs.get_lengths(experiment, runs)
-cpp = process_runs.get_quantity('pad_charge', experiment, runs)
+lengths = process_runs.get_lengths(experiment, get_runs)
+cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
-veto_max = process_runs.get_max_veto_counts(experiment, runs)
-charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
-energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
-angles = process_runs.get_angle(experiment, runs)
+veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
+charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
+energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
+angles = process_runs.get_angle(experiment, get_runs)
 
 #veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
-veto_mask = e23035_runs.get_veto_mask(runs)
+veto_mask = e23035_runs.get_veto_mask(get_runs)
 
 print(len(times_since_beam_off), len(energy))
 assert len(times_since_beam_off) == len(energy)
@@ -86,7 +84,7 @@ assert len(times_since_beam_off) == len(energy)
 
 plt.figure()
 plt_mask = veto_mask&(lengths>1)&(lengths<400)
-plt.title('runs: '+str(runs))
+plt.title('runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
 plt.xlabel('energy (MeV)')
@@ -103,26 +101,27 @@ m2 = (23.3-35.5)/(1-2.4)
 alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
 
 m = (159.2-26.2)/(2.81-0.619)
-proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
+#proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
+proton_mask = e23035_runs.get_proton_mask(get_runs)
 #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
 palpha_cut = veto_mask&(energy>1.6)&(energy<1.8)&(lengths>27.5)&(lengths<40)
 print(np.where(palpha_cut))
 
 plt.figure()
 plt.hist(energy[proton_mask], phist_bins)
-plt.title('proton energy spectrum, runs: '+str(runs))
+plt.title('proton energy spectrum, runs: '+str(get_runs))
 plt.xlabel('energy (MeV)')
 plt.ylabel('counts/keV')
 #plt.yscale('log')
 
 plt.figure()
-plt.title('protons selected in RVE, runs: '+str(runs))
+plt.title('protons selected in RVE, runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, color='red')
 plt.colorbar()
-print(str(runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
+print(str(get_runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
-timestamps = process_runs.get_quantity('timestamps', experiment, runs)
+timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
 time_since_last_event = timestamps - np.roll(timestamps, 1)
 time_since_last_event[0] = .15 #we don't actuallly know what this is for the first event, so just putting a typical value for start of window
 start_of_current_winow = 0
@@ -143,28 +142,28 @@ for t_thresh in [0.05]:#[0.02, 0.05, 0.1, 0.15]:
 if True:
     plt.figure()
     plt.hist(energy[alpha_mask], alphahist_bins)
-    plt.title('alpha energy spectrum, runs: '+str(runs))
+    plt.title('alpha energy spectrum, runs: '+str(get_runs))
     plt.xlabel('energy (MeV)')
 
     plt.figure()
-    plt.title('alphas selected in RVE, runs: '+str(runs))
+    plt.title('alphas selected in RVE, runs: '+str(get_runs))
     plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.scatter(energy[alpha_mask], lengths[alpha_mask], marker='.', alpha=0.5, color='red')
     plt.colorbar()
-    print(str(runs) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
+    print(str(get_runs) + "has " + str(len(alpha_mask[alpha_mask])) + " alphas")
 
 
     #TODO: correct for times runs were not instantly started again after previous run ended
     run_t_offset = [0]
     run_ts = []
-    for ddas_run in runs:
+    for ddas_run in get_runs:
         run_ts.append(process_runs.get_quantity('timestamps', experiment, [ddas_run]))
-    for i in range(1, len(runs)):
+    for i in range(1, len(get_runs)):
         if run_ts[i][0] <= run_ts[i-1][-1]:
             run_t_offset.append(run_t_offset[-1] + run_ts[i-1][-1])
         else:
             run_t_offset.append(run_t_offset[-1])
-    for i in range(len(runs)):
+    for i in range(len(get_runs)):
         run_ts[i] = run_ts[i] + run_t_offset[i]
     run_ts = np.concatenate(run_ts)
 
@@ -210,7 +209,7 @@ np.save('to_fit.npy', energy[proton_mask])
 p800_mask = veto_mask&(energy>0.67)&(energy<0.84)&(lengths>15)&(lengths<32)
 print("nmber of protons in 800 keV peak: %d"%len(energy[p800_mask]))
 plt.figure()
-plt.title('800 keV protons selected in RVE, runs: '+str(runs))
+plt.title('800 keV protons selected in RVE, runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.scatter(energy[p800_mask], lengths[p800_mask], marker='.', alpha=0.5, color='red')
 plt.colorbar()

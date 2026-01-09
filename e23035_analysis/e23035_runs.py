@@ -3,9 +3,11 @@ File which stores information about runs
 '''
 from pathlib import Path
 import os
+import pickle
 
 import pandas as pd
 import numpy as np
+from skimage.measure import points_in_poly
 
 from raw_viewer import process_runs
 
@@ -26,12 +28,12 @@ def is_iterable(obj):
 
 def get_GET_run_number(ddas_run_number):
     if is_iterable(ddas_run_number):
-        return np.concatenate([get_GET_run_number(i) for i in ddas_run_number])
+        return np.array([get_GET_run_number(i) for i in ddas_run_number])
     return run_df['GET'][run_df['DDAS']==ddas_run_number].iloc[0]
 
 def get_DDAS_run_number(get_run_number):
     if is_iterable(get_run_number):
-        return np.concatenate([get_DDAS_run_number(i) for i in get_run_number])
+        return np.array([get_DDAS_run_number(i) for i in get_run_number])
     return run_df['DDAS'][run_df['GET']==get_run_number].iloc[0]
 
 def get_veto_mask(get_run):
@@ -55,3 +57,31 @@ def get_veto_mask(get_run):
         veto_thresholds[764]=500
     return np.all(max_pad_counts<veto_thresholds, axis=1)
 
+def get_pad_gains(get_run):
+    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
+    with open(gain_match_path, 'rb') as f:
+        gain_match_result = pickle.load(f)
+    return gain_match_result.x[:1024]
+
+def get_length_mm(get_run):
+    if not is_iterable(get_run):
+        get_run = [get_run]
+    return process_runs.get_lengths(experiment, get_run)
+
+def get_energy_MeV(get_run):
+    if not is_iterable(get_run):
+        get_run = [get_run]
+    to_return = []
+    for i in get_run:
+        to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(i)))
+    return np.concatenate(to_return)
+
+def get_proton_mask(get_run):
+    if not is_iterable(get_run):
+        get_run = [get_run]
+    lengths = get_length_mm(get_run)
+    energy = get_energy_MeV(get_run)
+    veto_mask = get_veto_mask(get_run)
+    polygon = np.array([(3.78,215.8),(0.56,25.3),(0.56,11.8),(1.56,17.4),(3.01,56.1),(3.95,187.4)])
+    points = np.vstack([energy, lengths]).T
+    return veto_mask&points_in_poly(points, polygon)
