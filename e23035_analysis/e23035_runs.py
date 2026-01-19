@@ -10,6 +10,7 @@ import numpy as np
 from skimage.measure import points_in_poly
 
 from raw_viewer import process_runs
+from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'
 
@@ -48,6 +49,13 @@ def get_veto_mask(get_run):
         veto_thresholds[509]=600
         veto_thresholds[763]=280
         veto_thresholds[764]=260
+
+        # veto_thresholds[253]=110
+        # veto_thresholds[254]=110
+        # veto_thresholds[508]=130
+        # veto_thresholds[509]=390
+        # veto_thresholds[763]=182
+        # veto_thresholds[764]=168
     else:
         veto_thresholds[253]=500
         veto_thresholds[254]=500
@@ -82,6 +90,25 @@ def get_proton_mask(get_run):
     lengths = get_length_mm(get_run)
     energy = get_energy_MeV(get_run)
     veto_mask = get_veto_mask(get_run)
+    
+    stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
+    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run))
+    expected_proton_length = proton_srim_table.get_stopping_distance(energy)
+    return veto_mask & (lengths < expected_proton_length+15) & (lengths > expected_proton_length-37)
+
+    #old
     polygon = np.array([(3.78,215.8),(0.56,25.3),(0.56,11.8),(1.56,17.4),(3.01,56.1),(3.95,187.4)])
     points = np.vstack([energy, lengths]).T
     return veto_mask&points_in_poly(points, polygon)
+
+def get_alpha_mask(get_run):
+    if not is_iterable(get_run):
+        get_run = [get_run]
+    lengths = get_length_mm(get_run)
+    energy = get_energy_MeV(get_run)
+    veto_mask = get_veto_mask(get_run)
+    
+    stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
+    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run))
+    expected_proton_length = proton_srim_table.get_stopping_distance(energy)
+    return veto_mask & (lengths < expected_proton_length-37 - 30)

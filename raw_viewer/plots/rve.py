@@ -41,18 +41,22 @@ get_runs = []
 for run in run_range:
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         get_runs.append(run)
-get_runs=range(145,151)
-#runs=[280] #background after experiment
+#get_runs=range(145,151)
+runs=[280] #background after experiment
 #runs=range(145, 150+1)#152+1)
-ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
-print(ddas_runs)
-print('getting times since beam off for each event')
-times_since_beam_off = []
-for ddas_run, get_run in tqdm(zip(ddas_runs, get_runs)):
-    get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
-    times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
-    print(get_run, len(times_since_beam_off[-1]), len(get_ts))
-times_since_beam_off = np.concatenate(times_since_beam_off)
+
+load_ddas = False
+
+if load_ddas:
+    ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
+    print(ddas_runs)
+    print('getting times since beam off for each event')
+    times_since_beam_off = []
+    for ddas_run, get_run in tqdm(zip(ddas_runs, get_runs)):
+        get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
+        times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
+        print(get_run, len(times_since_beam_off[-1]), len(get_ts))
+    times_since_beam_off = np.concatenate(times_since_beam_off)
 
 veto_thresh = 500#np.inf
 rve_bins = (300, 300)
@@ -78,8 +82,9 @@ angles = process_runs.get_angle(experiment, get_runs)
 #veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 veto_mask = e23035_runs.get_veto_mask(get_runs)
 
-print(len(times_since_beam_off), len(energy))
-assert len(times_since_beam_off) == len(energy)
+if load_ddas:
+    print(len(times_since_beam_off), len(energy))
+    assert len(times_since_beam_off) == len(energy)
 
 
 plt.figure()
@@ -98,7 +103,8 @@ plt.ylabel('range (mm)')
 # fig.show()
 m = (108.4-32.2)/(3.628-2.25)
 m2 = (23.3-35.5)/(1-2.4)
-alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
+#alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
+alpha_mask = e23035_runs.get_alpha_mask(get_runs)
 
 m = (159.2-26.2)/(2.81-0.619)
 #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
@@ -124,19 +130,6 @@ print(str(get_runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
 time_since_last_event = timestamps - np.roll(timestamps, 1)
 time_since_last_event[0] = .15 #we don't actuallly know what this is for the first event, so just putting a typical value for start of window
-start_of_current_winow = 0
-times_since_start_of_window = []
-for t, dt in zip(timestamps, time_since_last_event):
-    if dt > 0.1 or dt < 0:
-        start_of_current_winow = t
-    times_since_start_of_window.append(t - start_of_current_winow)
-times_since_start_of_window = np.array(times_since_start_of_window)
-
-for t_thresh in [0.05]:#[0.02, 0.05, 0.1, 0.15]:
-    plt.figure()
-    plt.title('time since start of window > %f ms'%(t_thresh*1000))
-    plt.hist2d(energy[plt_mask&(times_since_start_of_window > t_thresh)], lengths[plt_mask&(times_since_start_of_window > t_thresh)], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-    plt.colorbar()
 
 if True:
     plt.figure()
@@ -174,7 +167,7 @@ if True:
     plt.xlabel('energy (MeV)')
     plt.ylabel('time since start of experiment (hours)')
     plt.colorbar()
-if True:
+if load_ddas:
     plt.figure()
     plt.title('protons')
     tsbo=times_since_beam_off*1e3#process_runs.get_time_since_beam_off(experiment, runs)
@@ -202,7 +195,6 @@ plt.show(block=False)
 # hist.Fill(energy[proton_mask])
 # hist.Draw()
 
-import numpy as np
 np.save('to_fit.npy', energy[proton_mask])
 
 p800_mask = veto_mask&(energy>0.67)&(energy<0.84)&(lengths>15)&(lengths<32)
@@ -250,3 +242,5 @@ def fit_double_decay_exponential(mask, time_bin_edges, guess=(100,60, 100, 100))
     print('half lives: ', popt[1]*np.log(2), "+/-", np.sqrt(pcov[1,1])*np.log(2), 'ms, ',
            popt[3]*np.log(2), "+/-", np.sqrt(pcov[3,3])*np.log(2), 'ms')
     return popt, pcov
+
+evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)
