@@ -27,7 +27,7 @@ import matplotlib.colors
 
 from raw_viewer import process_runs
 
-gpu_device = 3
+gpu_device = 1
 load_result1 = False
 load_result2 = False
 load_result3 = False

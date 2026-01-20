@@ -39,8 +39,7 @@ exp = 'e23035_prep_vault'
 
 veto_thresh = 400
 rve_bins = 400
-offset = 'constant' #'constant' or 'none'
-per_run_variation = False #allow gain and offset (if applicable) to vary per run
+freq_bins_to_cut=18
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
@@ -65,7 +64,7 @@ def get_gm_ic(gains, counts_per_pad=cpp_gpu, return_gpu=False):
     
 
 def apply_gm_result(gm_result, freq_bins_to_cut = 1):
-    return get_gm_ic(get_pad_gains(gm_result.x, freq_bins_to_cut))
+    return get_gm_ic(get_pad_gains(gm_result.x))
         
 
 no_gm_ic = get_gm_ic(np.ones(1024))
@@ -98,7 +97,7 @@ plt.colorbar()
 plt.show(block=(not load_result1))
 
 h5 = process_runs.get_h5_file(exp, runs[0])
-def get_init_spectrum_guess(init_gain_guess, freq_bins_to_cut=1):  
+def get_init_spectrum_guess(init_gain_guess):  
     image = np.ones(np.shape(h5.pad_plane))*init_gain_guess
     # plt.figure()
     # plt.title('desired init pad gains')
@@ -113,7 +112,7 @@ def get_init_spectrum_guess(init_gain_guess, freq_bins_to_cut=1):
     to_return = fftpack.dctn(image, norm='ortho')[:-freq_bins_to_cut, :-freq_bins_to_cut]
     return to_return.flatten()
 
-def get_pad_gains(x, freq_bins_to_cut=1):
+def get_pad_gains(x):
     sp = np.zeros(np.shape(h5.pad_plane))
     sp[:-freq_bins_to_cut, :-freq_bins_to_cut] = np.reshape(x,np.array(np.shape(sp)) - freq_bins_to_cut)
 
@@ -125,11 +124,12 @@ def get_pad_gains(x, freq_bins_to_cut=1):
 
     gains = np.zeros(1024)
     for pad in h5.pad_to_xy_index:
-        gains[pad] = gain_image[h5.pad_to_xy_index[pad]]
+        if pad not in process_runs.raw_h5_file.VETO_PADS:
+            gains[pad] = gain_image[h5.pad_to_xy_index[pad]]
     return gains
 
 
-def do_gain_match(cut_masks, true_energies, freq_bins_to_cut=1):
+def do_gain_match(cut_masks, true_energies):
     h5 = process_runs.get_h5_file(exp, runs[0]) #used to make pad plane images
     
     gm_slices = []
@@ -148,17 +148,18 @@ def do_gain_match(cut_masks, true_energies, freq_bins_to_cut=1):
                 run_indexs[-1][r] = i
         
     
-        init_guess = get_init_spectrum_guess(np.average(default_guess), freq_bins_to_cut)
+        init_guess = get_init_spectrum_guess(np.average(default_guess))
+        print('num params:', len(init_guess))
         bounds=np.array([(-np.inf, np.inf)]*len(init_guess))
 
         plt.figure()
         print(np.average(default_guess))
-        print(get_pad_gains(init_guess, freq_bins_to_cut))
-        plt.hist2d(get_gm_ic(get_pad_gains(init_guess, freq_bins_to_cut))[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+        print(get_pad_gains(init_guess))
+        plt.hist2d(get_gm_ic(get_pad_gains(init_guess))[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
         plt.show()
        
         def obj_func(x):
-            gains = get_pad_gains(x, freq_bins_to_cut)
+            gains = get_pad_gains(x)
             e_list = []
             
             for gm_slice, ri in zip(gm_slices, run_indexs):
@@ -173,7 +174,7 @@ def do_gain_match(cut_masks, true_energies, freq_bins_to_cut=1):
         def callback(intermediate_result):
             print(intermediate_result)
            
-            gains = get_pad_gains(intermediate_result.x, freq_bins_to_cut)
+            gains = get_pad_gains(intermediate_result.x)
             
             print('gains',np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
             
@@ -187,17 +188,16 @@ def do_gain_match(cut_masks, true_energies, freq_bins_to_cut=1):
         res.cut_masks = cut_masks
         res.true_energies = true_energies
         res.runs = runs
-        res.offset = offset
-        res.per_run_variation = per_run_variation
+        res.freq_to_cut = freq_bins_to_cut
         return res
 
 
 if load_result1:
-    with open('fft_res1_%s_%s.pkl'%(offset, per_run_variation), 'rb') as f:
+    with open('fft%d_res1.pkl'%(freq_bins_to_cut), 'rb') as f:
         res1 = pickle.load(f)
 else:
     res1 = do_gain_match(cuts1, true_energies)
-    with open('fft_res1_%s_%s.pkl'%(offset, per_run_variation), 'wb') as f:
+    with open('fft%d_res1.pkl'%(freq_bins_to_cut), 'wb') as f:
         pickle.dump(res1, f)
 print(res1)
 
@@ -243,7 +243,6 @@ show_plots(res1)
 
 #redo gain match using selection based on original gain match
 if True:
-    offset2 = offset
     gm_ic = apply_gm_result(res1)
     cuts2 = []
     cuts2.append((gm_ic >6.0)&(gm_ic<6.58)&(lengths>50)&(lengths<69) & veto_mask)
@@ -260,11 +259,11 @@ if True:
     plt.show()
 
     if load_result2:
-        with open('fft_res2_%s_%s.pkl'%(offset2, per_run_variation), 'rb') as f:
+        with open('fft%d_res2.pkl'%(freq_bins_to_cut), 'rb') as f:
             res2 = pickle.load(f)
     else:
         res2 = do_gain_match(cuts2, true_energies2)
-        with open('fft_res2_%s_%s.pkl'%(offset2, per_run_variation), 'wb') as f:
+        with open('fft%d_res2.pkl'%(freq_bins_to_cut), 'wb') as f:
             pickle.dump(res2, f)
     print(res2)
     show_plots(res2)
@@ -286,7 +285,6 @@ if False:
 
     #redo gain match using selection based on original gain match
 if True:
-    offset3 = offset2
     gm_ic2 = apply_gm_result(res2)
     cuts3 = []
     cuts3.append(((gm_ic2 >6.0)&(gm_ic2<6.6)&(lengths>50)&(lengths<64)|
@@ -304,12 +302,12 @@ if True:
     plt.show()
 
     if load_result3:
-        with open('fft_res3_%s_%s.pkl'%(offset3, per_run_variation), 'rb') as f:
+        with open('fft%d_res3.pkl'%(freq_bins_to_cut), 'rb') as f:
             res3 = pickle.load(f)
     else:
         
         res3 = do_gain_match(cuts3, true_energies3)
-        with open('fft_res3_%s_%s.pkl'%(offset3, per_run_variation), 'wb') as f:
+        with open('fft%d_res3.pkl'%(freq_bins_to_cut), 'wb') as f:
             pickle.dump(res3, f)
     print(res3)
     show_plots(res3)
