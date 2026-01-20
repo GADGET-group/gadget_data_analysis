@@ -46,7 +46,7 @@ cpp = process_runs.get_quantity('pad_charge', exp, runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_max = process_runs.get_max_veto_counts(exp, runs)
 charge_widths = process_runs.get_quantity('charge_width', exp,runs)
-veto_mask = (veto_max < veto_thresh)&(charge_widths>2.5)#(veto_counts < veto_thresh)&(charge_widths>2.5)
+veto_mask = (veto_max < veto_thresh)&(charge_widths>3.25)#(veto_counts < veto_thresh)&(charge_widths>2.5)
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 with cp.cuda.Device(gpu_device):
@@ -263,7 +263,8 @@ def show_plots(res,block=False):
         if i in h5.pad_to_xy_index:
             d[i] = res.x[i]
     im = h5.get_2d_image(d)
-    plt.imshow(im)
+    
+    plt.imshow(im,vmin = np.min(res.x), vmax = np.max(res.x))
     plt.colorbar()
     plt.show(block=False)
 

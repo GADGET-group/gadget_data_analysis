@@ -61,7 +61,7 @@ if load_ddas:
 veto_thresh = 500#np.inf
 rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 4001)
-alphahist_bins = 500
+alphahist_bins = 100
 
 #load pad gain match
 #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
