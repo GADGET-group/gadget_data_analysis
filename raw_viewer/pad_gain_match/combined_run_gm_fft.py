@@ -39,15 +39,29 @@ exp = 'e23035_prep_vault'
 
 veto_thresh = 400
 rve_bins = 400
-freq_bins_to_cut=18
 
 lengths = process_runs.get_lengths(exp, runs)
 cpp = process_runs.get_quantity('pad_charge', exp, runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_max = process_runs.get_max_veto_counts(exp, runs)
 charge_widths = process_runs.get_quantity('charge_width', exp,runs)
-veto_mask = (veto_max < veto_thresh)&(charge_widths>3.25)#(veto_counts < veto_thresh)&(charge_widths>2.5)
+#veto_mask = (veto_max < veto_thresh)&(charge_widths>3.25)#(veto_counts < veto_thresh)&(charge_widths>2.5)
+veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
+veto_thresholds[253]=170
+veto_thresholds[254]=170
+veto_thresholds[508]=200
+veto_thresholds[509]=600
+veto_thresholds[763]=280
+veto_thresholds[764]=260
+veto_thresholds *= 400/600.
+max_pad_counts = process_runs.get_quantity('pad_max', exp, runs)
+veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
+
+h5 = process_runs.get_h5_file(exp, runs[0])
+freqs_to_use = 10
+freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
+
 
 with cp.cuda.Device(gpu_device):
     cpp_gpu = cp.array(cpp)
@@ -63,7 +77,7 @@ def get_gm_ic(gains, counts_per_pad=cpp_gpu, return_gpu=False):
         return cp.asnumpy(to_return)
     
 
-def apply_gm_result(gm_result, freq_bins_to_cut = 1):
+def apply_gm_result(gm_result):
     return get_gm_ic(get_pad_gains(gm_result.x))
         
 
@@ -96,7 +110,6 @@ for cut in cuts1:
 plt.colorbar()
 plt.show(block=(not load_result1))
 
-h5 = process_runs.get_h5_file(exp, runs[0])
 def get_init_spectrum_guess(init_gain_guess):  
     image = np.ones(np.shape(h5.pad_plane))*init_gain_guess
     # plt.figure()
@@ -152,11 +165,11 @@ def do_gain_match(cut_masks, true_energies):
         print('num params:', len(init_guess))
         bounds=np.array([(-np.inf, np.inf)]*len(init_guess))
 
-        plt.figure()
-        print(np.average(default_guess))
-        print(get_pad_gains(init_guess))
-        plt.hist2d(get_gm_ic(get_pad_gains(init_guess))[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-        plt.show()
+        # plt.figure()
+        # print(np.average(default_guess))
+        # print(get_pad_gains(init_guess))
+        # plt.hist2d(get_gm_ic(get_pad_gains(init_guess))[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+        # plt.show()
        
         def obj_func(x):
             gains = get_pad_gains(x)
@@ -189,17 +202,18 @@ def do_gain_match(cut_masks, true_energies):
         res.true_energies = true_energies
         res.runs = runs
         res.freq_to_cut = freq_bins_to_cut
+        res.pad_gains = get_pad_gains(res.x)
         return res
 
 
 if load_result1:
-    with open('fft%d_res1.pkl'%(freq_bins_to_cut), 'rb') as f:
+    with open('fft%d_res1.pkl'%(freqs_to_use), 'rb') as f:
         res1 = pickle.load(f)
 else:
     res1 = do_gain_match(cuts1, true_energies)
-    with open('fft%d_res1.pkl'%(freq_bins_to_cut), 'wb') as f:
+    with open('fft%d_res1.pkl'%(freqs_to_use), 'wb') as f:
         pickle.dump(res1, f)
-print(res1)
+#print(res1)
 
 def show_plots(res,block=False):
     gm_ic = apply_gm_result(res)
@@ -229,17 +243,18 @@ def show_plots(res,block=False):
     plt.figure()
     plt.title('gain matched cut')
     h5 = process_runs.get_h5_file(exp, runs[0])
+    pad_gains = get_pad_gains(res.x)
     d = {}
-    for i in range(len(res.x)):
+    for i in range(len(pad_gains)):
         if i in h5.pad_to_xy_index:
-            d[i] = res.x[i]
+            d[i] = pad_gains[i]
     im = h5.get_2d_image(d)
     
-    plt.imshow(im,vmin = np.min(res.x), vmax = np.max(res.x))
+    plt.imshow(im,vmin = np.min(pad_gains[pad_gains>0]), vmax = np.max(pad_gains))
     plt.colorbar()
     plt.show(block=False)
 
-show_plots(res1)
+#show_plots(res1)
 
 #redo gain match using selection based on original gain match
 if True:
@@ -259,29 +274,16 @@ if True:
     plt.show()
 
     if load_result2:
-        with open('fft%d_res2.pkl'%(freq_bins_to_cut), 'rb') as f:
+        with open('fft%d_res2.pkl'%(freqs_to_use), 'rb') as f:
             res2 = pickle.load(f)
     else:
         res2 = do_gain_match(cuts2, true_energies2)
-        with open('fft%d_res2.pkl'%(freq_bins_to_cut), 'wb') as f:
+        with open('fft%d_res2.pkl'%(freqs_to_use), 'wb') as f:
             pickle.dump(res2, f)
     print(res2)
-    show_plots(res2)
+    #show_plots(res2)
 
-if False:
-    import ROOT
-    energy_hist = ROOT.TH1D("h1", "h1", 100, 6.0, 7)
-    if res2.offset == 'none':
-        gm_ic2 = get_gm_ic(res2.x)
-    if res2.offset == 'constant':
-        gm_ic2 = get_gm_ic(res2.x[:-1])
-        gm_ic2 += 1e4*res2.x[-1]
-    energy_hist.Fill(gm_ic2[veto_mask])
-    energy_hist.Draw()
 
-    energy_hist2 = ROOT.TH1D("h2", "h2", 20, 8.2, 9.2)
-    energy_hist2.Fill(gm_ic2[veto_mask])
-    energy_hist2.Draw()
 
     #redo gain match using selection based on original gain match
 if True:
@@ -302,12 +304,61 @@ if True:
     plt.show()
 
     if load_result3:
-        with open('fft%d_res3.pkl'%(freq_bins_to_cut), 'rb') as f:
+        with open('fft%d_res3.pkl'%(freqs_to_use), 'rb') as f:
             res3 = pickle.load(f)
     else:
         
         res3 = do_gain_match(cuts3, true_energies3)
-        with open('fft%d_res3.pkl'%(freq_bins_to_cut), 'wb') as f:
+        with open('fft%d_res3.pkl'%(freqs_to_use), 'wb') as f:
             pickle.dump(res3, f)
     print(res3)
     show_plots(res3)
+
+if True:
+    import ROOT
+    c1 = ROOT.TCanvas()
+    c1.cd()
+    emin, emax = 6,7
+    energy_hist = ROOT.TH1D("h1", "h1", 100,  emin, emax)
+    gm2_ic = apply_gm_result(res3)
+    energy_hist.Fill(gm_ic2[veto_mask])
+    energy_hist.Draw()
+    func1 = ROOT.TF1('f1', '[0] + gaus(1) + gaus(4)',  emin, emax)
+    #background, height, mu, sigam, height, mu, sigma
+    func1.SetParameters(0, 10, 6.28, 0.05, 10, 6.88, 0.05)
+    func1.SetParLimits(0,0,np.inf)
+    func1.SetParLimits(1,0,np.inf)
+    func1.SetParLimits(2,6.1,6.5)
+    func1.SetParLimits(3, 0, 0.5)
+    func1.SetParLimits(4, 0, np.inf)
+    func1.SetParLimits(5, 6.6, 7)
+    func1.SetParLimits(6, 0, 0.5)
+    energy_hist.Fit(func1, "L")
+    energy_hist.Fit(func1, "L")
+    energy_hist.Fit(func1, "L")
+    fit_params1 = np.zeros(7)
+    func1.GetParameters(fit_params1)
+    print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5])
+    ROOT.gStyle.SetOptFit(1111)
+
+
+    c2 = ROOT.TCanvas()
+    c2.cd()
+    emin, emax= 8.3, 9.2
+    energy_hist2 = ROOT.TH1D("h2", "h2", 20, emin, emax)
+    energy_hist2.Fill(gm_ic2[veto_mask])
+    energy_hist2.Draw()
+    func2 = ROOT.TF1('f1', '[0] + gaus(1)',  emin, emax)
+    func2.SetParameters(0, 10, 8.78, 0.05, )
+    func2.SetParLimits(0,0,np.inf)
+    func2.SetParLimits(1,0,np.inf)
+    func2.SetParLimits(2,emin,emax)
+    func2.SetParLimits(3, 0, 0.5)
+
+    energy_hist2.Fit(func2, "L")
+    energy_hist2.Fit(func2, "L")
+    energy_hist2.Fit(func2, "L")
+    fit_params2 = np.zeros(4)
+    func2.GetParameters(fit_params2)
+
+    print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5], 2.355*fit_params2[3]/fit_params2[2])

@@ -84,10 +84,13 @@ def get_veto_mask(get_run):
     return np.all(max_pad_counts<veto_thresholds, axis=1)
 
 def get_pad_gains(get_run):
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
+    #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
+    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+    #return np.ones(1024)*5.47e-6
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
-    return gain_match_result.x[:1024]
+    #return gain_match_result.x[:1024]
+    return gain_match_result.pad_gains
 
 def get_length_mm(get_run):
     if not is_iterable(get_run):

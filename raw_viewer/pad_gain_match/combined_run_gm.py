@@ -28,9 +28,9 @@ import matplotlib.colors
 from raw_viewer import process_runs
 
 gpu_device = 1
-load_result1 = False
-load_result2 = False
-load_result3 = False
+load_result1 = True
+load_result2 = True
+load_result3 = True
 
 
 runs = (61,62,63)#(20,)#(20,)#(38,49)#17,20,21,38,49,60,
@@ -298,20 +298,7 @@ if True:
     print(res2)
     show_plots(res2)
 
-if False:
-    import ROOT
-    energy_hist = ROOT.TH1D("h1", "h1", 100, 6.0, 7)
-    if res2.offset == 'none':
-        gm_ic2 = get_gm_ic(res2.x)
-    if res2.offset == 'constant':
-        gm_ic2 = get_gm_ic(res2.x[:-1])
-        gm_ic2 += 1e4*res2.x[-1]
-    energy_hist.Fill(gm_ic2[veto_mask])
-    energy_hist.Draw()
 
-    energy_hist2 = ROOT.TH1D("h2", "h2", 20, 8.2, 9.2)
-    energy_hist2.Fill(gm_ic2[veto_mask])
-    energy_hist2.Draw()
 
     #redo gain match using selection based on original gain match
 if True:
@@ -342,3 +329,18 @@ if True:
             pickle.dump(res3, f)
     print(res3)
     show_plots(res3)
+
+if True:
+    import ROOT
+    energy_hist = ROOT.TH1D("h1", "h1", 100, 6.0, 7)
+    if res2.offset == 'none':
+        gm_ic2 = get_gm_ic(res2.x)
+    if res2.offset == 'constant':
+        gm_ic2 = get_gm_ic(res2.x[:-1])
+        gm_ic2 += 1e4*res2.x[-1]
+    energy_hist.Fill(gm_ic2[veto_mask])
+    energy_hist.Draw()
+
+    energy_hist2 = ROOT.TH1D("h2", "h2", 20, 8.2, 9.2)
+    energy_hist2.Fill(gm_ic2[veto_mask])
+    energy_hist2.Draw()

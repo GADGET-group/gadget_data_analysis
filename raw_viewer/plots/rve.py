@@ -37,13 +37,17 @@ else: #during experiment
     run_range = range(148,151)
 
 exclude_runs = [210]#[1,9, 73, 113]
+
+#get_runs=range(145,151)
+#runs=[280] #background after experiment
+#runs=range(145, 150+1)#152+1)
+run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+
 get_runs = []
 for run in run_range:
-    if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
-        get_runs.append(run)
-#get_runs=range(145,151)
-runs=[280] #background after experiment
-#runs=range(145, 150+1)#152+1)
+    if not np.isnan(run):
+        if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
+            get_runs.append(run)
 
 load_ddas = False
 
@@ -60,23 +64,27 @@ if load_ddas:
 
 veto_thresh = 500#np.inf
 rve_bins = (300, 300)
-phist_bins = np.linspace(0, 4, 4001)
+phist_bins = np.linspace(0, 4, 1001)
 alphahist_bins = 100
 
 #load pad gain match
 #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
 gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
+#gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft18_res3.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
-pad_gains = gain_match_result.x[:1024]
-#pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
+#pad_gains = gain_match_result.x[:1024]
+#pad_gains = gain_match_result.pad_gains
+pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
+
 
 lengths = process_runs.get_lengths(experiment, get_runs)
 cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
 charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
-energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
+#energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
+energy = e23035_runs.get_energy_MeV(get_runs)
 angles = process_runs.get_angle(experiment, get_runs)
 
 #veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
