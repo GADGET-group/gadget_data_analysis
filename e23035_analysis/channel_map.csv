@@ -1,4 +1,4 @@
-Index,Name, Offset,Slope
+Index,Name, Slope,Offset
 118, mesh_pre_amp, 1.000000, 0.000000
 119, get_trig_accepted, 1.000000, 0.000000
 120, sca_logic, 1.000000, 0.000000

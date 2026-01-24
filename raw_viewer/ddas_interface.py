@@ -1,12 +1,16 @@
 import os
 import pickle
 import gzip
+import re
 
 import ROOT
 import numpy as np
 import matplotlib.pylab as plt
 import matplotlib.colors
 import tqdm
+
+from e23035_analysis import e23035_runs
+from raw_viewer import process_runs
 
 NUM_SLOTS = 10
 CH_PER_SLOT = 16
@@ -37,23 +41,23 @@ class CH_MAP:
     CLOVER_1B = 3*16 + 1
     CLOVER_1C = 3*16 + 2
     CLOVER_1D = 3*16 + 3
-    CLOVER_1_INDECIES = np.array([CLOVER_1A, CLOVER_1B, CLOVER_1C, CLOVER_1D])
+    CLOVER_1 = np.array([CLOVER_1A, CLOVER_1B, CLOVER_1C, CLOVER_1D])
     CLOVER_2A = 3*16 + 4
     CLOVER_2B = 3*16 + 5
     CLOVER_2C = 3*16 + 6
     CLOVER_2D = 3*16 + 7
-    CLOVER_2_INDECIES = np.array([CLOVER_2A, CLOVER_2B, CLOVER_2C, CLOVER_2D])
+    CLOVER_2 = np.array([CLOVER_2A, CLOVER_2B, CLOVER_2C, CLOVER_2D])
     CLOVER_3A = 3*16 + 8
     CLOVER_3B = 5*16 + 4
     CLOVER_3C = 5*16 + 5
     CLOVER_3D = 3*16 + 11
-    CLOVER_3_INDECIES = np.array([CLOVER_3A, CLOVER_3B, CLOVER_3C, CLOVER_3D])
+    CLOVER_3 = np.array([CLOVER_3A, CLOVER_3B, CLOVER_3C, CLOVER_3D])
     #clover 4 not installed
     CLOVER_5A = 4*16 + 0
     CLOVER_5B = 4*16 + 1
     CLOVER_5C = 4*16 + 2
     CLOVER_5D = 4*16 + 3
-    CLOVER_5_INDECIES = np.array([CLOVER_5A, CLOVER_5B, CLOVER_5C, CLOVER_5D])
+    CLOVER_5 = np.array([CLOVER_5A, CLOVER_5B, CLOVER_5C, CLOVER_5D])
     CLOVER_6A = 4*16 + 4
     CLOVER_6B = 4*16 + 5
     CLOVER_6C = 4*16 + 6
@@ -63,29 +67,31 @@ class CH_MAP:
     CLOVER_7B = 5*16 + 7
     CLOVER_7C = 5*16 + 8
     CLOVER_7D = 4*16 + 11
-    CLOVER_7_INDECIES = np.array([CLOVER_7A, CLOVER_7B, CLOVER_7C, CLOVER_7D])
+    CLOVER_7 = np.array([CLOVER_7A, CLOVER_7B, CLOVER_7C, CLOVER_7D])
     #clover 8 not installed
     CLOVER_9A = 9*16 + 0
     CLOVER_9B = 9*16 + 1
     CLOVER_9C = 9*16 + 2
     CLOVER_9D = 9*16 + 3
-    CLOVER_9_INDECIES = np.array([CLOVER_9A, CLOVER_9B, CLOVER_9C, CLOVER_9D])
+    CLOVER_9 = np.array([CLOVER_9A, CLOVER_9B, CLOVER_9C, CLOVER_9D])
     CLOVER_10A = 9*16 + 4
     CLOVER_10B = 9*16 + 5
     CLOVER_10C = 9*16 + 6
     CLOVER_10D = 9*16 + 7
-    CLOVER_10_INDECIES = np.array([CLOVER_10A, CLOVER_10B, CLOVER_10C, CLOVER_10D])
+    CLOVER_10 = np.array([CLOVER_10A, CLOVER_10B, CLOVER_10C, CLOVER_10D])
     CLOVER_11A = 9*16 + 8
     CLOVER_11B = 9*16 + 9
     CLOVER_11C = 9*16 + 10
     CLOVER_11D = 9*16 + 11
-    CLOVER_11_INDECIES = np.array([CLOVER_11A, CLOVER_11B, CLOVER_11C, CLOVER_11D])
+    CLOVER_11 = np.array([CLOVER_11A, CLOVER_11B, CLOVER_11C, CLOVER_11D])
     #list of all germnaium channels
-    GE_INDECIES = np.concatenate([CLOVER_1_INDECIES, CLOVER_2_INDECIES, CLOVER_3_INDECIES, CLOVER_5_INDECIES,
-                              CLOVER_6_INDECIES, CLOVER_7_INDECIES, CLOVER_9_INDECIES, CLOVER_10_INDECIES,
-                              CLOVER_11_INDECIES])
+    GE_INDECIES = np.concatenate([CLOVER_1, CLOVER_2, CLOVER_3, CLOVER_5,
+                              CLOVER_6_INDECIES, CLOVER_7, CLOVER_9, CLOVER_10,
+                              CLOVER_11])
     #list of crystal ids corresponding to the above inecies
-    GE_CALIBRATION_INDEXES = [0,1,2,3,4,5,6,7,8,9,10,11,16,17,18,19,20,21,22,23,24,25,26,27,32,33,34,35,36,37,38,39,40,41,42,43]
+    GE_CALIBRATION_INDEXES = np.array([0,1,2,3,4,5,6,7,8,9,10,11,16,17,18,19,20,21,22,23,24,25,26,27,32,33,34,35,36,37,38,39,40,41,42,43])
+
+
 
 def get_root_file_path(experiment, run):
     base_path = f'/egr/research-tpc/shared/proc_runs/{experiment}/ddas/'
@@ -226,5 +232,130 @@ def get_calibrated_gamma_energies(es, file='e23035_analysis/init_ge_cal.csv'):
         to_return[:, i] = offsets[cal_index] + slopes[cal_index]*es[:, CH_MAP.GE_INDECIES[i]]
     return to_return
 
-def make_cal_root_file(run):
-    pass
+def make_merged_root_file(ddas_run):
+    '''
+    Merge GET data stream into an existing root file, adding a new TTree called "merged_data".
+    The ddas root file is assumed to be in the uncalibrated raw format assumed by the above function, but the 
+    file written will include rough energy calibration for all the gamma detectors, and branches will have friendly names rather than a 
+    array of unlabeled channels.
+
+    Branches will be added for each channel in channel_map.csv, and given the specified name with a _t ending for ddas time,
+    _e for energy, or _m for multiplicity.
+    Additionally, the following branches will be added for GET data:
+    Energy, track length, particle type (0=uncatagorized, 1=proton, 2=alpha), should_veto, get_timetamp
+
+    An initial energy calibraiton will be provided for DDAS channels using the slope and offset specified in the channel map.
+
+    All times will be stored in seconds, and energies will be stored in keV if a calibraiton is available. Track lengths are in mm.
+
+    '''
+            
+
+    get_runs = np.sort(e23035_runs.run_df['GET'][e23035_runs.run_df['DDAS']==ddas_run])
+    root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
+
+    tpc_energy_MeV = e23035_runs.get_energy_MeV(get_runs)
+    proton_mask = e23035_runs.get_proton_mask(get_runs)
+    alpha_mask = e23035_runs.get_alpha_mask(get_runs)
+    track_lengths = e23035_runs.get_length_mm(get_runs)
+    get_timestamps = process_runs.get_quantity('timtestamps', 'e23035', get_runs)
+    veto_mask = e23035_runs.get_veto_mask(get_runs)
+
+    chmap = np.genfromtxt('e23035_analysis/channel_map.csv',delimiter=',', dtype=str, skip_header=1)
+    ch_indexes = np.array(chmap[:,0], dtype=int)
+    ch_names = chmap[:,1]
+    slopes, offsets = np.array(chmap[:,2]), np.array(chmap[:,3])
+
+    log_path = os.join(os.path.split(root_file_path)[0], 'run%d_merge.log'%ddas_run)
+    with ROOT.TFile(root_file_path, "update") as root_file, open(log_path, 'w') as log_file:
+        log_file.write('Opening ROOT file\n')
+        in_tree = root_file.Get("tree")
+        energies, times, multiplicities = np.zeros(NUM_TOTAL_CH, dtype=np.int32), np.zeros(NUM_TOTAL_CH), np.zeros(NUM_TOTAL_CH,dtype=np.int32)
+        in_tree.SetBranchAddress("energies", energies)
+        in_tree.SetBranchAddress("times", times)
+        in_tree.SetBranchAddress("multiplicity", multiplicities)
+
+        log_file.write('Setting up tree in which merged data will be stored\n')
+        out_tree = ROOT.TTree("merged_data")
+        branch_evals = [np.array([0]) for i in ch_names]
+        branch_tvals = [np.array([0]) for i in ch_names]
+        branch_mvals = [np.array([0]) for i in ch_names]
+        tree_tpc_energy, tree_track_length = np.array([0]), np.array([0])
+        tree_ptype = np.array([0], dtype=int)
+        tree_should_veto = np.array([True], dtype=bool)
+        tree_get_timestamp = np.array([np.nan])
+
+        for i in range(len(ch_names)):
+            out_tree.Branch(ch_names[i]+'_e', branch_evals[i])
+            out_tree.Branch(ch_names[i]+'_t', branch_tvals[i])
+            out_tree.Branch(ch_names[i]+'_m', branch_mvals[i])
+        out_tree.Branch('tpc_energy', tree_tpc_energy)
+        out_tree.Branch('tpc_track_length', tree_track_length)
+        out_tree.Branch('tpc_particle_id', tree_ptype)
+        out_tree.Branch('tpc_should_veto', tree_should_veto)
+
+        log_file.write('Starting merge \n')
+        ddas_index = 0
+        get_evt_index = 0
+        get_trig_accepted_index = ch_indexes[np.where(ch_names=='get_trig_accepted')]
+        last_ddas_time, last_get_time = np.nan, np.nan
+        GET_DDAS_TIME_MATCH_TRHESHOLD = 10e-6
+        while ddas_index < in_tree.GetEntries():
+            #copy over ddas values with calibration factors applied
+            in_tree.GetEntry(ddas_index)
+            for i in range(len(ch_names)):
+                branch_evals[i] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
+                branch_tvals[i] = times[ch_indexes[i]]/1e9 #store all times in seconds
+                branch_mvals[i] = multiplicities[ch_indexes[i]]
+
+            record_get_event = False
+            if multiplicities[get_trig_accepted_index] == 1:
+                get_time = get_timestamps[get_evt_index] - last_get_time
+                ddas_time = times[get_trig_accepted_index]/1e9
+                if last_get_time == np.nan: #first trigger
+                    record_get_event = True
+                else: #check that delta between timestamps matches
+                    if (get_time - last_get_time) - (ddas_time - last_ddas_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
+                       log_file.write('GET event index %d doesn\'t match with  next DDAS event with a valid trigger; trigger likely not recorded in GET.'%get_evt_index)
+                    elif (ddas_time - last_ddas_time)>(get_time - last_get_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
+                        log_file.write('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
+                        print('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
+                        get_evt_index += 1
+                    else:
+                        record_get_event = True
+            if record_get_event:
+                tree_tpc_energy[0] = tpc_energy_MeV[get_evt_index]*1000
+                tree_track_length[0] = track_lengths[get_evt_index]
+                tree_ptype[0] = 0
+                if proton_mask[get_evt_index]:
+                    tree_ptype[0] = 1
+                if alpha_mask[get_evt_index]:
+                    tree_ptype[0] = 2
+                tree_should_veto[0] = veto_mask[get_evt_index]
+                tree_get_timestamp[0] = get_time
+                
+                last_get_time = get_time
+                last_ddas_time = ddas_time            
+                tree_ptype
+                get_evt_index += 1
+            else: #no corresponding TPC event; set TPC quantities to NaN
+                pass
+            out_tree.Fill()
+            ddas_index += 1
+        
+        root_file.WriteObject(out_tree, "merged_data")
+
+
+#code used to generate "channel_map.csv"
+# gamma_cal_table = np.genfromtxt('e23035_analysis/init_ge_cal.csv', delimiter=',', skip_header=1)
+# gamma_slopes = gamma_cal_table[:, 2]
+# gamma_offsets = gamma_cal_table[:, 1]
+# for k in CH_MAP.__dict__:
+#     v = CH_MAP.__dict__[k]
+#     if type(v) == int:
+#         if 'clover' in k.lower():
+#             cal_index = CH_MAP.GE_CALIBRATION_INDEXES[np.where(v==CH_MAP.GE_INDECIES)]
+#             slope, offset = gamma_slopes[cal_index], gamma_offsets[cal_index]
+#         else:
+#             slope, offset = 1,0
+#         print('%d, %s, %f, %f'%(v, k.lower(), slope, offset)), 

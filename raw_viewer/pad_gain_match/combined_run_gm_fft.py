@@ -59,7 +59,7 @@ veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])
-freqs_to_use = 10
+freqs_to_use = 12
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
 
