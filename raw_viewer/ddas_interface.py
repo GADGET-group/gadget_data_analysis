@@ -288,10 +288,10 @@ def make_merged_root_file(ddas_run):
 
         log_file.write('Setting up tree in which merged data will be stored\n')
         out_tree = ROOT.TTree("merged_data", "merged_data")
-        branch_evals = [np.array([0]) for i in ch_names]
-        branch_tvals = [np.array([0]) for i in ch_names]
+        branch_evals = [np.array([0], dtype=np.float64) for i in ch_names]
+        branch_tvals = [np.array([0], dtype=np.float64) for i in ch_names]
         branch_mvals = [np.array([0], dtype=int) for i in ch_names]
-        tree_tpc_energy, tree_track_length = np.array([0]), np.array([0])
+        tree_tpc_energy, tree_track_length = np.array([0.], dtype=np.float64), np.array([0.], dtype=np.float64)
         tree_ptype = np.array([0], dtype=int)
         tree_should_veto = np.array([True], dtype=bool)
         tree_get_timestamp = np.array([np.nan])
@@ -311,6 +311,7 @@ def make_merged_root_file(ddas_run):
         get_trig_accepted_index = ch_indexes[np.where(ch_names=='get_trig_accepted')][0]
         last_ddas_time, last_get_time = np.nan, np.nan
         GET_DDAS_TIME_MATCH_TRHESHOLD = 10e-6
+
         for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
             #copy over ddas values with calibration factors applied
             in_tree.GetEntry(ddas_index)
@@ -321,19 +322,22 @@ def make_merged_root_file(ddas_run):
 
             record_get_event = False
             if multiplicities[get_trig_accepted_index] == 1:
-                get_time = get_timestamps[get_evt_index] - last_get_time
-                ddas_time = times[get_trig_accepted_index]/1e9
-                if last_get_time == np.nan: #first trigger
-                    record_get_event = True
-                else: #check that delta between timestamps matches
-                    if (get_time - last_get_time) - (ddas_time - last_ddas_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
-                       log_file.write('GET event index %d doesn\'t match with  next DDAS event with a valid trigger; trigger likely not recorded in GET.'%get_evt_index)
-                    elif (ddas_time - last_ddas_time)>(get_time - last_get_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
-                        log_file.write('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
-                        print('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
-                        get_evt_index += 1
-                    else:
+                if get_evt_index < len(get_timestamps):
+                    get_time = get_timestamps[get_evt_index] - last_get_time
+                    ddas_time = times[get_trig_accepted_index]/1e9
+                    if last_get_time == np.nan: #first trigger
                         record_get_event = True
+                    else: #check that delta between timestamps matches
+                        if (get_time - last_get_time) - (ddas_time - last_ddas_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
+                            log_file.write('GET event index %d doesn\'t match with  next DDAS event with a valid trigger; trigger likely not recorded in GET.'%get_evt_index)
+                        elif (ddas_time - last_ddas_time)>(get_time - last_get_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
+                            log_file.write('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
+                            print('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
+                            get_evt_index += 1
+                        else:
+                            record_get_event = True
+                else:
+                    log_file.write('detected GET trigger in DDAS data stream, but no remaining GET events to read')
             if record_get_event:
                 tree_tpc_energy[0] = tpc_energy_MeV[get_evt_index]*1000
                 tree_track_length[0] = track_lengths[get_evt_index]
@@ -350,7 +354,9 @@ def make_merged_root_file(ddas_run):
                 tree_ptype
                 get_evt_index += 1
             else: #no corresponding TPC event; set TPC quantities to NaN
-                pass
+                tree_get_timestamp[0] = tree_tpc_energy[0] = tree_track_length[0] = np.nan
+                tree_ptype[0] = -1
+                tree_should_veto[0] = True
             out_tree.Fill()
         root_file.WriteObject(out_tree, "merged_data")
 
