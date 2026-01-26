@@ -49,6 +49,8 @@ for run in run_range:
         if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
             get_runs.append(run)
 
+get_runs = np.sort(get_runs)
+
 load_ddas = False
 
 if load_ddas:

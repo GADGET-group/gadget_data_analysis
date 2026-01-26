@@ -253,7 +253,8 @@ def make_merged_root_file(ddas_run):
     root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
 
     log_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merge.log'%ddas_run)
-    with ROOT.TFile(root_file_path, "update") as root_file, open(log_path, 'w') as log_file:
+    output_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
+    with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
         git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
         git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True).stdout
@@ -280,7 +281,7 @@ def make_merged_root_file(ddas_run):
         slopes, offsets = np.array(chmap[:,2], dtype=float), np.array(chmap[:,3], dtype=float)
         
         log_file.write('Opening ROOT file\n')
-        in_tree = root_file.Get("tree")
+        in_tree = input_file.Get("tree")
         energies, times, multiplicities = np.zeros(NUM_TOTAL_CH, dtype=np.int32), np.zeros(NUM_TOTAL_CH), np.zeros(NUM_TOTAL_CH,dtype=np.int32)
         in_tree.SetBranchAddress("energies", energies)
         in_tree.SetBranchAddress("times", times)
@@ -319,6 +320,7 @@ def make_merged_root_file(ddas_run):
                 branch_mvals[i] = multiplicities[ch_indexes[i]]
                 if branch_mvals[i] > 0:
                     branch_evals[i] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
+                    #print(branch_evals[i])
                     branch_tvals[i] = times[ch_indexes[i]]/1e9 #store all times in seconds
                 else:
                     branch_evals[i] = 0
@@ -351,21 +353,21 @@ def make_merged_root_file(ddas_run):
                     tree_ptype[0] = 1
                 if alpha_mask[get_evt_index]:
                     tree_ptype[0] = 2
-                tree_should_veto[0] = veto_mask[get_evt_index]
+                tree_should_veto[0] = not veto_mask[get_evt_index]
                 tree_get_timestamp[0] = get_time
                 
                 last_get_time = get_time
                 last_ddas_time = ddas_time            
                 tree_ptype
                 get_evt_index += 1
-                print(tree_tpc_energy)
+                #print(tree_tpc_energy)
             else: #no corresponding TPC event; set TPC quantities to NaN
                 tree_get_timestamp[0] = tree_tpc_energy[0] = tree_track_length[0] = np.nan
                 tree_ptype[0] = -1
                 tree_should_veto[0] = True
             out_tree.Fill()
 
-        root_file.WriteObject(out_tree, "merged_data")
+        output_file.WriteObject(out_tree, "merged_data")
 
 
 #code used to generate "channel_map.csv"
