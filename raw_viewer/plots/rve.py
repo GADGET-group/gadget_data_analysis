@@ -34,14 +34,14 @@ else: #during experiment
     #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
     #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
     #run_range = np.concatenate((np.arange(281,286+1), np.arange(296,301+1)))#59Zn with field cage on
-    run_range = range(148,151)
+    run_range = [285]
 
-exclude_runs = [210]#[1,9, 73, 113]
+exclude_runs = []#[1,9, 73, 113]
 
 #get_runs=range(145,151)
 #runs=[280] #background after experiment
 #runs=range(145, 150+1)#152+1)
-run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
 
 get_runs = []
 for run in run_range:

@@ -263,7 +263,7 @@ def make_merged_root_file(ddas_run):
         log_file.write('git diff: %s\n'%git_diff)
 
         get_runs = np.sort(e23035_runs.run_df['GET'][e23035_runs.run_df['DDAS']==ddas_run])
-        log_file.write('found corresponding GET runs:%s'%str(get_runs))
+        log_file.write('found corresponding GET runs: %s\n'%str(get_runs))
             
         tpc_energy_MeV = e23035_runs.get_energy_MeV(get_runs)
         proton_mask = e23035_runs.get_proton_mask(get_runs)
@@ -290,9 +290,9 @@ def make_merged_root_file(ddas_run):
         out_tree = ROOT.TTree("merged_data", "merged_data")
         branch_evals = [np.array([0], dtype=np.float64) for i in ch_names]
         branch_tvals = [np.array([0], dtype=np.float64) for i in ch_names]
-        branch_mvals = [np.array([0], dtype=int) for i in ch_names]
+        branch_mvals = [np.array([0], dtype=np.int32) for i in ch_names]
         tree_tpc_energy, tree_track_length = np.array([0.], dtype=np.float64), np.array([0.], dtype=np.float64)
-        tree_ptype = np.array([0], dtype=int)
+        tree_ptype = np.array([0], dtype=np.int32)
         tree_should_veto = np.array([True], dtype=bool)
         tree_get_timestamp = np.array([np.nan])
 
@@ -300,8 +300,8 @@ def make_merged_root_file(ddas_run):
             out_tree.Branch(ch_names[i]+'_e', branch_evals[i], ch_names[i]+'_e/D')
             out_tree.Branch(ch_names[i]+'_t', branch_tvals[i], ch_names[i]+'_t/D')
             out_tree.Branch(ch_names[i]+'_m', branch_mvals[i], ch_names[i]+'_m/I')
-        out_tree.Branch('tpc_energy', tree_tpc_energy, 'tpc_energy/F')
-        out_tree.Branch('tpc_track_length', tree_track_length, 'tpc_track_length/F')
+        out_tree.Branch('tpc_energy', tree_tpc_energy, 'tpc_energy/D')
+        out_tree.Branch('tpc_track_length', tree_track_length, 'tpc_track_length/D')
         out_tree.Branch('tpc_particle_id', tree_ptype, 'tpc_particle_id/I')
         out_tree.Branch('tpc_should_veto', tree_should_veto, 'tpc_should_veto/O')
 
@@ -316,9 +316,14 @@ def make_merged_root_file(ddas_run):
             #copy over ddas values with calibration factors applied
             in_tree.GetEntry(ddas_index)
             for i in range(len(ch_names)):
-                branch_evals[i] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
-                branch_tvals[i] = times[ch_indexes[i]]/1e9 #store all times in seconds
                 branch_mvals[i] = multiplicities[ch_indexes[i]]
+                if branch_mvals[i] > 0:
+                    branch_evals[i] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
+                    branch_tvals[i] = times[ch_indexes[i]]/1e9 #store all times in seconds
+                else:
+                    branch_evals[i] = 0
+                    branch_tvals[i] = np.nan
+
 
             record_get_event = False
             if multiplicities[get_trig_accepted_index] == 1:
@@ -353,11 +358,13 @@ def make_merged_root_file(ddas_run):
                 last_ddas_time = ddas_time            
                 tree_ptype
                 get_evt_index += 1
+                print(tree_tpc_energy)
             else: #no corresponding TPC event; set TPC quantities to NaN
                 tree_get_timestamp[0] = tree_tpc_energy[0] = tree_track_length[0] = np.nan
                 tree_ptype[0] = -1
                 tree_should_veto[0] = True
             out_tree.Fill()
+
         root_file.WriteObject(out_tree, "merged_data")
 
 
