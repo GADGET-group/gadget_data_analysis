@@ -115,7 +115,7 @@ def get_proton_mask(get_run):
     stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
     proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run))
     expected_proton_length = proton_srim_table.get_stopping_distance(energy)
-    return veto_mask & (lengths < expected_proton_length+15) & (lengths > expected_proton_length-37)
+    return veto_mask & (lengths < expected_proton_length+20) & (lengths > expected_proton_length-37)
 
     #old
     polygon = np.array([(3.78,215.8),(0.56,25.3),(0.56,11.8),(1.56,17.4),(3.01,56.1),(3.95,187.4)])

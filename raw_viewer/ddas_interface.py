@@ -233,6 +233,10 @@ def get_calibrated_gamma_energies(es, file='e23035_analysis/init_ge_cal.csv'):
         to_return[:, i] = offsets[cal_index] + slopes[cal_index]*es[:, CH_MAP.GE_INDECIES[i]]
     return to_return
 
+def get_merged_root_file_path(ddas_run):
+    root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
+    return os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
+
 def make_merged_root_file(ddas_run):
     '''
     Merge GET data stream into an existing root file, adding a new TTree called "merged_data".

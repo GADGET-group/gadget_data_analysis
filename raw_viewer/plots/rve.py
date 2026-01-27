@@ -41,8 +41,8 @@ exclude_runs = []#[1,9, 73, 113]
 #get_runs=range(145,151)
 #runs=[280] #background after experiment
 #runs=range(145, 150+1)#152+1)
-run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-
+#run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+run_range = [299,300,301]
 get_runs = []
 for run in run_range:
     if not np.isnan(run):
