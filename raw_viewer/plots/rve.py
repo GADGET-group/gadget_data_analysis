@@ -15,19 +15,21 @@ from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 
-experiment = 'e23035'
+experiment = 'e23035_prep_vault'
  
 if experiment == 'e23035':
-    exclude_runs = [1,9, 19, 73, 113,
-                    132, #run missing some CoBos
-                    210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
-                    289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
-if False: # runs before experiment
-    experiment = 'e23035_prep_vault'
+    run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+#     exclude_runs = [1,9, 19, 73, 113,
+#                     132, #run missing some CoBos
+#                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
+#                     289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
+if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = (17,20,21)
-    run_range = np.arange(61, 63+1) #calibration before experiment
-    run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
-   #run_range = np.arange(68, 73+1) #background before experiemnt 
+    #run_range = np.arange(61, 63+1) #calibration before experiment
+    #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
+    #run_range = np.arange(68, 73+1) #background before experiemnt 
+    run_range = [73]
+    
 
 else: #during experiment
     #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
@@ -41,8 +43,8 @@ exclude_runs = []#[1,9, 73, 113]
 #get_runs=range(145,151)
 #runs=[280] #background after experiment
 #runs=range(145, 150+1)#152+1)
-#run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-run_range = [299,300,301]
+#
+#srun_range = [299,300,301]
 get_runs = []
 for run in run_range:
     if not np.isnan(run):
@@ -50,6 +52,7 @@ for run in run_range:
             get_runs.append(run)
 
 get_runs = np.sort(get_runs)
+print('get_runs:', get_runs)
 
 load_ddas = False
 
@@ -71,13 +74,13 @@ alphahist_bins = 100
 
 #load pad gain match
 #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
-gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
-#gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft18_res3.pkl'
+#gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
+gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
 #pad_gains = gain_match_result.x[:1024]
-#pad_gains = gain_match_result.pad_gains
-pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
+pad_gains = gain_match_result.pad_gains
+#pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
 
 
 lengths = process_runs.get_lengths(experiment, get_runs)
@@ -86,12 +89,18 @@ cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
 charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
 #energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
-energy = e23035_runs.get_energy_MeV(get_runs)
+if experiment == 'e23035':
+    energy = e23035_runs.get_energy_MeV(get_runs)
+else:
+    energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 angles = process_runs.get_angle(experiment, get_runs)
 
-#veto_mask = (veto_max < veto_thresh)#&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
-veto_mask = e23035_runs.get_veto_mask(get_runs)
-
+##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
+if experiment == 'e23035':
+    veto_mask = e23035_runs.get_veto_mask(get_runs)
+else:
+    veto_mask = (veto_max < veto_thresh)
+    
 if load_ddas:
     print(len(times_since_beam_off), len(energy))
     assert len(times_since_beam_off) == len(energy)
@@ -252,5 +261,8 @@ def fit_double_decay_exponential(mask, time_bin_edges, guess=(100,60, 100, 100))
     print('half lives: ', popt[1]*np.log(2), "+/-", np.sqrt(pcov[1,1])*np.log(2), 'ms, ',
            popt[3]*np.log(2), "+/-", np.sqrt(pcov[3,3])*np.log(2), 'ms')
     return popt, pcov
+
+def gui_for_selection_mask():
+    plt.figrue()
 
 evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)

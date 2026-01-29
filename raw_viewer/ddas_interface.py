@@ -309,6 +309,9 @@ def make_merged_root_file(ddas_run):
         out_tree.Branch('tpc_track_length', tree_track_length, 'tpc_track_length/D')
         out_tree.Branch('tpc_particle_id', tree_ptype, 'tpc_particle_id/I')
         out_tree.Branch('tpc_should_veto', tree_should_veto, 'tpc_should_veto/O')
+        
+        tsbo = np.array([np.nan], dtype=np.float64)
+        out_tree.Branch('time_since_beam_off', tsbo, 'time_since_beam_off/D')
 
         log_file.write('Starting merge \n')
         ddas_index = 0
