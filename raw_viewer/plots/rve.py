@@ -15,10 +15,11 @@ from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'
  
 if experiment == 'e23035':
     run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+    #run_range = [145]
 #     exclude_runs = [1,9, 19, 73, 113,
 #                     132, #run missing some CoBos
 #                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -31,12 +32,12 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     run_range = [73]
     
 
-else: #during experiment
-    #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
-    #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
-    #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
-    #run_range = np.concatenate((np.arange(281,286+1), np.arange(296,301+1)))#59Zn with field cage on
-    run_range = [285]
+# else: #during experiment
+#     #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
+#     #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
+#     #run_range = np.arange(220, 263+1)#60Ga with SCA set ~1000 keV
+#     #run_range = np.concatenate((np.arange(281,286+1), np.arange(296,301+1)))#59Zn with field cage on
+#     run_range = [285]
 
 exclude_runs = []#[1,9, 73, 113]
 
@@ -98,6 +99,9 @@ angles = process_runs.get_angle(experiment, get_runs)
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(get_runs)
+    endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
+    min_z = np.min(endpoints[:,:,2], axis=1)
+    #veto_mask = veto_mask&(min_z>5)
 else:
     veto_mask = (veto_max < veto_thresh)
     
@@ -216,16 +220,16 @@ plt.show(block=False)
 
 np.save('to_fit.npy', energy[proton_mask])
 
-p800_mask = veto_mask&(energy>0.67)&(energy<0.84)&(lengths>15)&(lengths<32)
-print("nmber of protons in 800 keV peak: %d"%len(energy[p800_mask]))
-plt.figure()
-plt.title('800 keV protons selected in RVE, runs: '+str(get_runs))
-plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-plt.scatter(energy[p800_mask], lengths[p800_mask], marker='.', alpha=0.5, color='red')
-plt.colorbar()
+# p800_mask = veto_mask&(energy>0.67)&(energy<0.84)&(lengths>15)&(lengths<32)
+# print("nmber of protons in 800 keV peak: %d"%len(energy[p800_mask]))
+# plt.figure()
+# plt.title('800 keV protons selected in RVE, runs: '+str(get_runs))
+# plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+# plt.scatter(energy[p800_mask], lengths[p800_mask], marker='.', alpha=0.5, color='red')
+# plt.colorbar()
 
-plt.figure()
-plt.hist(energy, 200)
+# plt.figure()
+# plt.hist(energy, 200)
 
 plt.show(block=False)
 

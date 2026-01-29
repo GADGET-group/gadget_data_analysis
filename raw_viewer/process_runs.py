@@ -113,8 +113,9 @@ def get_h5_file(experiment, run_number):
 def process_events(experiment, run_number, first_event, last_event):
     h5file = get_h5_file(experiment, run_number)
     track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
-    pad_maxs = []
+    pad_maxs, railed_pads = [], []
     for evt in tqdm(range(first_event, last_event + 1)):
+        railed_pads.append(h5file.get_railed_pads(evt))
         center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
         xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
         principle_axes.append(vv)
@@ -161,7 +162,7 @@ def process_events(experiment, run_number, first_event, last_event):
     pad_maxs = np.array(pad_maxs)
     to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
                    'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
-                   'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs}
+                   'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs, 'railed_pads':railed_pads}
 
 
 #coppied from field distortions folder in track fitting branch
