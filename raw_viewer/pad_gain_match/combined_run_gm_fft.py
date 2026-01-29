@@ -29,9 +29,9 @@ from scipy import fftpack
 from raw_viewer import process_runs
 
 gpu_device = 1
-load_result1 = True
-load_result2 = True
-load_result3 = True
+load_result1 = False
+load_result2 = False
+load_result3 = False
 
 
 runs = (61,62,63)#(20,)#(20,)#(38,49)#17,20,21,38,49,60,
@@ -55,7 +55,9 @@ veto_thresholds[763]=280
 veto_thresholds[764]=260
 veto_thresholds *= 400/600.
 max_pad_counts = process_runs.get_quantity('pad_max', exp, runs)
-veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)
+pads_railed = process_runs.get_quantity('railed_pads', exp, runs)
+num_pads_railed = np.array([len(prl) for prl in pads_railed])
+veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])
