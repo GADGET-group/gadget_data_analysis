@@ -165,6 +165,18 @@ class raw_h5_file:
             to_return[i] = self.get_timestamp(evt)
         return to_return
 
+    def get_railed_pads(self, event_number):
+        '''
+        Returns a list of pads which railed in the current event
+        '''
+        data = self.h5_file['get']['evt%d_data'%event_number]
+        traces = data[:,FIRST_DATA_BIN:]
+        which_ones_railed = np.logical_not(np.all(traces<4095, axis=1))
+        ch_info = data[which_ones_railed,0:4]
+        return [self.chnls_to_pad[tuple(info)] for info in ch_info]
+
+        
+
     def get_data(self, event_number):
         '''
         Get data for event, with background subtraction and pad outlier removal applied as specified
@@ -517,10 +529,9 @@ class raw_h5_file:
                     max_veto_pad_counts = trace_max
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
-            if trace_max >= 4095:
-                pads_railed.append(pad)
+        
         dxy, dz, angle = self.get_track_length_angle(event_num)
-        return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
+        return max_veto_pad_counts, dxy, dz, counts, angle, self.get_railed_pads(event_num)
     
 
 
@@ -702,8 +713,8 @@ class raw_h5_file:
         cbar = fig.colorbar(ax.get_children()[0])
         max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(event_num)
         length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
-                                                                                               energy*energy_scale_factor + energy_offset, length,
+        plt.title('event %d, total counts=%d \n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
+                                                                                               length,
                                                                                                np.degrees(angle), len(pads_railed)))
         plt.show(block=block)
     
