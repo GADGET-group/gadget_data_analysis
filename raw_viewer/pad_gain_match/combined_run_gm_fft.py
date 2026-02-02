@@ -61,7 +61,7 @@ veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])
-freqs_to_use = 6
+freqs_to_use = 10
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
 
@@ -90,7 +90,7 @@ cuts1 = []
 true_energies = [6.28808, 6.7883,8.784 ]#, 0.7856]# only includes energy deposited as ionization
 cuts1.append((no_gm_ic>1.1e6) & (no_gm_ic<1.31e6) & (lengths>50) & (lengths<65.5) & veto_mask)
 cuts1.append((no_gm_ic>1.13e6) & (no_gm_ic<1.4e6) & (lengths>66) & (lengths<76) & veto_mask)
-cuts1.append((no_gm_ic>1.55e6) & (no_gm_ic<1.85e6) & (lengths>90) & (lengths< 105) & veto_mask)
+cuts1.append((no_gm_ic>1.35e6) & (no_gm_ic<1.85e6) & (lengths>90) & (lengths< 105) & veto_mask)
 
 
 
@@ -243,7 +243,7 @@ def show_plots(res,block=False):
 
     #show pad plane image
     plt.figure()
-    plt.title('gain matched cut')
+    plt.title('pad gains')
     h5 = process_runs.get_h5_file(exp, runs[0])
     pad_gains = get_pad_gains(res.x)
     d = {}
@@ -256,15 +256,15 @@ def show_plots(res,block=False):
     plt.colorbar()
     plt.show(block=False)
 
-#show_plots(res1)
+show_plots(res1)
 
 #redo gain match using selection based on original gain match
 if True:
     gm_ic = apply_gm_result(res1)
     cuts2 = []
-    cuts2.append((gm_ic >6.0)&(gm_ic<6.58)&(lengths>50)&(lengths<69) & veto_mask)
+    cuts2.append(((gm_ic >6)&(gm_ic<6.58)&(lengths>50)&(lengths<67) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
     cuts2.append((gm_ic >6.58)&(gm_ic<7.5)&(lengths>59)&(lengths<80) & veto_mask)
-    cuts2.append((gm_ic>8)&(gm_ic<9.25)&(lengths>90)&(lengths<105) & veto_mask)
+    cuts2.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
     true_energies2 = [6.288, 6.7783, 8.78486]#[6.7783]
 
     fig = plt.figure()
@@ -283,7 +283,7 @@ if True:
         with open('fft%d_res2.pkl'%(freqs_to_use), 'wb') as f:
             pickle.dump(res2, f)
     print(res2)
-    #show_plots(res2)
+    show_plots(res2)
 
 
 
@@ -291,10 +291,9 @@ if True:
 if True:
     gm_ic2 = apply_gm_result(res2)
     cuts3 = []
-    cuts3.append(((gm_ic2 >6.0)&(gm_ic2<6.6)&(lengths>50)&(lengths<64)|
-                  (gm_ic2 >6.1)&(gm_ic2<6.53)&(lengths>50)&(lengths<69.4)) & veto_mask)
-    cuts3.append((gm_ic2 >6.6)&(gm_ic2<7.35)&(lengths>60)&(lengths<77) & veto_mask)
-    cuts3.append((gm_ic2>8.6)&(gm_ic2<9.1)&(lengths>92)&(lengths<105) & veto_mask)
+    cuts3.append(((gm_ic >6)&(gm_ic<6.58)&(lengths>55)&(lengths<67) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
+    cuts3.append((gm_ic >6.58)&(gm_ic<7.5)&(lengths>59)&(lengths<80) & veto_mask)
+    cuts3.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
     true_energies3 = [6.288, 6.7783, 8.78486]#[6.7783]
 
     fig = plt.figure()
@@ -316,51 +315,58 @@ if True:
     print(res3)
     show_plots(res3)
 
-if True:
-    import ROOT
-    c1 = ROOT.TCanvas()
-    c1.cd()
-    emin, emax = 6,7
-    energy_hist = ROOT.TH1D("h1", "h1", 100,  emin, emax)
-    gm2_ic = apply_gm_result(res3)
-    energy_hist.Fill(gm_ic2[veto_mask])
-    energy_hist.Draw()
-    func1 = ROOT.TF1('f1', '[0] + gaus(1) + gaus(4)',  emin, emax)
-    #background, height, mu, sigam, height, mu, sigma
-    func1.SetParameters(0, 10, 6.28, 0.05, 10, 6.88, 0.05)
-    func1.SetParLimits(0,0,np.inf)
-    func1.SetParLimits(1,0,np.inf)
-    func1.SetParLimits(2,6.1,6.5)
-    func1.SetParLimits(3, 0, 0.5)
-    func1.SetParLimits(4, 0, np.inf)
-    func1.SetParLimits(5, 6.6, 7)
-    func1.SetParLimits(6, 0, 0.5)
-    energy_hist.Fit(func1, "L")
-    energy_hist.Fit(func1, "L")
-    energy_hist.Fit(func1, "L")
-    fit_params1 = np.zeros(7)
-    func1.GetParameters(fit_params1)
-    print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5])
-    ROOT.gStyle.SetOptFit(1111)
+#if True:
+gm_ic3 = apply_gm_result(res3)
+import ROOT
+c1 = ROOT.TCanvas()
+c1.cd()
+emin, emax = 6,7
+energy_hist = ROOT.TH1D("h1", "h1", 100,  emin, emax)
+gm2_ic = apply_gm_result(res3)
+energy_hist.Fill(gm_ic3[veto_mask])
+energy_hist.Draw()
+func1 = ROOT.TF1('f1', '[0] + gaus(1) + gaus(4)',  emin, emax)
+#background, height, mu, sigam, height, mu, sigma
+func1.SetParameters(0, 10, 6.28, 0.05, 10, 6.88, 0.05)
+func1.SetParLimits(0,0,np.inf)
+func1.SetParLimits(1,0,np.inf)
+func1.SetParLimits(2,6.1,6.5)
+func1.SetParLimits(3, 0, 0.5)
+func1.SetParLimits(4, 0, np.inf)
+func1.SetParLimits(5, 6.6, 7)
+func1.SetParLimits(6, 0, 0.5)
+energy_hist.Fit(func1, "L")
+energy_hist.Fit(func1, "L")
+energy_hist.Fit(func1, "L")
+fit_params1 = np.zeros(7)
+func1.GetParameters(fit_params1)
+print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5])
+ROOT.gStyle.SetOptFit(1111)
 
 
-    c2 = ROOT.TCanvas()
-    c2.cd()
-    emin, emax= 8.3, 9.2
-    energy_hist2 = ROOT.TH1D("h2", "h2", 20, emin, emax)
-    energy_hist2.Fill(gm_ic2[veto_mask])
-    energy_hist2.Draw()
-    func2 = ROOT.TF1('f1', '[0] + gaus(1)',  emin, emax)
-    func2.SetParameters(0, 10, 8.78, 0.05, )
-    func2.SetParLimits(0,0,np.inf)
-    func2.SetParLimits(1,0,np.inf)
-    func2.SetParLimits(2,emin,emax)
-    func2.SetParLimits(3, 0, 0.5)
+c2 = ROOT.TCanvas()
+c2.cd()
+emin, emax= 8.3, 9.2
+energy_hist2 = ROOT.TH1D("h2", "h2", 20, emin, emax)
+energy_hist2.Fill(gm_ic3[veto_mask])
+energy_hist2.Draw()
+func2 = ROOT.TF1('f1', '[0] + gaus(1)',  emin, emax)
+func2.SetParameters(0, 10, 8.78, 0.05, )
+func2.SetParLimits(0,0,np.inf)
+func2.SetParLimits(1,0,np.inf)
+func2.SetParLimits(2,emin,emax)
+func2.SetParLimits(3, 0, 0.5)
 
-    energy_hist2.Fit(func2, "L")
-    energy_hist2.Fit(func2, "L")
-    energy_hist2.Fit(func2, "L")
-    fit_params2 = np.zeros(4)
-    func2.GetParameters(fit_params2)
+energy_hist2.Fit(func2, "L")
+energy_hist2.Fit(func2, "L")
+energy_hist2.Fit(func2, "L")
+fit_params2 = np.zeros(4)
+func2.GetParameters(fit_params2)
 
-    print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5], 2.355*fit_params2[3]/fit_params2[2])
+print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5], 2.355*fit_params2[3]/fit_params2[2])
+
+angles = process_runs.get_angle(exp, runs)
+plt.figure()
+plt.scatter(gm_ic3[veto_mask],lengths[veto_mask],c=np.degrees(angles[veto_mask]), marker='.')
+plt.colorbar()
+plt.show(block=False)

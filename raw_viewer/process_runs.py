@@ -86,17 +86,19 @@ def get_h5_file(experiment, run_number):
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart'
-        h5file.smart_bins_away_to_check = 25
+        h5file.background_subtract_mode = 'smart2'
+        h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 10
+        h5file.smart2_threshold = 15
         h5file.cache_enable = True
     elif experiment == 'e23035':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart'
-        h5file.smart_bins_away_to_check = 25
+        h5file.background_subtract_mode = 'smart2'
+        h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 10
+        h5file.smart2_threshold = 15
         h5file.cache_enable = True
     elif experiment == 'e25058':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -112,14 +114,14 @@ def get_h5_file(experiment, run_number):
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def get_processed_run(experiment, run_number):
+def get_processed_run(experiment, run_number, force_reprocess=False):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a pickled version of this information isn't available.
     '''
     #save_path = os.path.dirname(os.path.abspath(__file__))
     fname = os.path.join(get_save_path(experiment), '%s_run%d.pkl.gz'%(experiment, run_number))
-    if os.path.exists(fname):
+    if os.path.exists(fname) and not force_reprocess:
         print('run %d previously processed, loading previous results'%run_number)
         with gzip.open(fname, 'rb') as file:
             return pickle.load(file)

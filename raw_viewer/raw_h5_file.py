@@ -95,7 +95,7 @@ class raw_h5_file:
                         (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
-        self.background_subtract_mode = 'none' #none, fixed window, smart, or convolution
+        self.background_subtract_mode = 'none' #none, fixed window, smart, smart2, or convolution
         self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
@@ -111,6 +111,7 @@ class raw_h5_file:
         self.num_smart_background_ave_bins = 5 
         #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
         self.smart_bins_away_to_check = 3
+        self.smart2_threshold = 15
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -267,7 +268,7 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        #for smart baseline subtraction, zeroing traces outside thepeak window is handled by baseline subtraction
+        #for smart baseline subtraction, zeroing traces outside the peak window is handled by baseline subtraction
         
         #pad gain match is applied after baseline subtraction because a number of baseline subtraction
         #parameters are mostly driven by noise, which we don't expect to strongly correlate with pad gain
@@ -324,7 +325,7 @@ class raw_h5_file:
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            #slope, offset = np.polyfit(xs, ys, 1)
+            #slope, offset = np.polysz fit(xs, ys, 1)
             offset = np.mean(ys)
             #baseline will be the trace except in the peak region,
             #so that everything away from the peak is zero'd out
@@ -333,6 +334,34 @@ class raw_h5_file:
             #     baseline[i] = slope*i + offset
             baseline[np.arange(peak_start, peak_end+1)] = offset
             return baseline
+        elif self.background_subtract_mode == 'smart2':
+            dtrace = np.roll(trace, -self.smart_bins_away_to_check)[:-self.smart_bins_away_to_check] - trace[:-self.smart_bins_away_to_check]
+            #get first place trace[i] is more than smart2_threshold counts below trace[i+smart_bins_away_to_check]
+            start_candidates = np.where(dtrace>self.smart2_threshold)[0]
+            if len(start_candidates) > 0:
+                peak_start = start_candidates[0]
+            else:
+                return trace #no peak found, assume entire trace is baseline
+            #get last place trace[i] is more than smart2_threshold counts above trace[i+smart_bins_away_to_check]
+            stop_candidates = np.where(dtrace < -self.smart2_threshold)[0]
+            if len(stop_candidates) > 0:
+                peak_end = stop_candidates[-1]+self.smart_bins_away_to_check
+            else:
+                peak_end = -1
+            #fit a line through the points just outside the peak region
+            xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
+                                           np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
+            ys = trace[xs]
+            #slope, offset = np.polysz fit(xs, ys, 1)
+            offset = np.mean(ys)
+            #baseline will be the trace except in the peak region,
+            #so that everything away from the peak is zero'd out
+            baseline = np.array(trace, copy=True)
+            # for i in range(peak_start, peak_end+1):
+            #     baseline[i] = slope*i + offset
+            baseline[np.arange(peak_start, peak_end+1)] = offset
+            return baseline
+
         assert False #invalid mode
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=False):
