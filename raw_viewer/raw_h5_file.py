@@ -17,7 +17,7 @@ import tqdm
 try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    #cp.cuda.runtime.setDevice(2)
+    cp.cuda.runtime.setDevice(2)
     USE_GPU = True
 except:
     cp = np
@@ -111,7 +111,7 @@ class raw_h5_file:
         self.num_smart_background_ave_bins = 5 
         #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
         self.smart_bins_away_to_check = 3
-        self.smart2_threshold = 15
+        self.smart2_threshold = 4#35
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -336,14 +336,17 @@ class raw_h5_file:
             return baseline
         elif self.background_subtract_mode == 'smart2':
             dtrace = np.roll(trace, -self.smart_bins_away_to_check)[:-self.smart_bins_away_to_check] - trace[:-self.smart_bins_away_to_check]
+            background_start = self.num_background_bins[0]
+            background_end = min(len(dtrace), self.num_background_bins[1])
+            threshold = self.smart2_threshold*max(np.max(dtrace[background_start:background_end]), np.max(-dtrace[background_start:background_end]))
             #get first place trace[i] is more than smart2_threshold counts below trace[i+smart_bins_away_to_check]
-            start_candidates = np.where(dtrace>self.smart2_threshold)[0]
+            start_candidates = np.where(dtrace>threshold)[0]
             if len(start_candidates) > 0:
                 peak_start = start_candidates[0]
             else:
                 return trace #no peak found, assume entire trace is baseline
             #get last place trace[i] is more than smart2_threshold counts above trace[i+smart_bins_away_to_check]
-            stop_candidates = np.where(dtrace < -self.smart2_threshold)[0]
+            stop_candidates = np.where(dtrace < -threshold)[0]
             if len(stop_candidates) > 0:
                 peak_end = stop_candidates[-1]+self.smart_bins_away_to_check
             else:
@@ -352,14 +355,15 @@ class raw_h5_file:
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            #slope, offset = np.polysz fit(xs, ys, 1)
-            offset = np.mean(ys)
+            slope, offset = np.polyfit(xs, ys, 1)
+            #offset = np.mean(ys)
             #baseline will be the trace except in the peak region,
             #so that everything away from the peak is zero'd out
             baseline = np.array(trace, copy=True)
             # for i in range(peak_start, peak_end+1):
             #     baseline[i] = slope*i + offset
-            baseline[np.arange(peak_start, peak_end+1)] = offset
+            x_peak = np.arange(peak_start, peak_end+1)
+            baseline[x_peak] = offset + slope*x_peak
             return baseline
 
         assert False #invalid mode

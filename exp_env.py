@@ -25,9 +25,9 @@ def xy_centering():
 experiment = 'e23035_prep_vault'
 
 def process_run(run):
-    process_runs.get_processed_run(experiment, run)
+    process_runs.get_processed_run(experiment, run, True)
 
 if __name__ == '__main__':
-    runs = range(61,74)#[74,75,76,77]
+    runs = [49]#range(61,74)#[74,75,76,77]
     with multiprocessing.Pool(10) as pool:
         pool.map(process_run, runs)

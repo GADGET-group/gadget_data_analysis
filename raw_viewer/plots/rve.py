@@ -15,7 +15,7 @@ from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 
-experiment = 'e23035'
+experiment = 'e23035_prep_vault'
  
 if experiment == 'e23035':
     run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
@@ -29,7 +29,7 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = np.arange(61, 63+1) #calibration before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [73]
+    run_range = [61, 62, 63]
     
 
 # else: #during experiment
@@ -127,34 +127,34 @@ plt.ylabel('range (mm)')
 m = (108.4-32.2)/(3.628-2.25)
 m2 = (23.3-35.5)/(1-2.4)
 #alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
-alpha_mask = e23035_runs.get_alpha_mask(get_runs)
+if experiment == 'e23035':
+    alpha_mask = e23035_runs.get_alpha_mask(get_runs)
 
-m = (159.2-26.2)/(2.81-0.619)
-#proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
-proton_mask = e23035_runs.get_proton_mask(get_runs)
-#proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
-palpha_cut = veto_mask&(energy>1.6)&(energy<1.8)&(lengths>27.5)&(lengths<40)
-print(np.where(palpha_cut))
+    m = (159.2-26.2)/(2.81-0.619)
+    #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
+    proton_mask = e23035_runs.get_proton_mask(get_runs)
+    #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
+    # palpha_cut = veto_mask&(energy>1.6)&(energy<1.8)&(lengths>27.5)&(lengths<40)
+    # print(np.where(palpha_cut))
 
-plt.figure()
-plt.hist(energy[proton_mask], phist_bins)
-plt.title('proton energy spectrum, runs: '+str(get_runs))
-plt.xlabel('energy (MeV)')
-plt.ylabel('counts/keV')
-#plt.yscale('log')
+    plt.figure()
+    plt.hist(energy[proton_mask], phist_bins)
+    plt.title('proton energy spectrum, runs: '+str(get_runs))
+    plt.xlabel('energy (MeV)')
+    plt.ylabel('counts/keV')
+    #plt.yscale('log')
 
-plt.figure()
-plt.title('protons selected in RVE, runs: '+str(get_runs))
-plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, color='red')
-plt.colorbar()
-print(str(get_runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
+    plt.figure()
+    plt.title('protons selected in RVE, runs: '+str(get_runs))
+    plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+    plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, color='red')
+    plt.colorbar()
+    print(str(get_runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
-timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
-time_since_last_event = timestamps - np.roll(timestamps, 1)
-time_since_last_event[0] = .15 #we don't actuallly know what this is for the first event, so just putting a typical value for start of window
+    timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
+    time_since_last_event = timestamps - np.roll(timestamps, 1)
+    time_since_last_event[0] = .15 #we don't actuallly know what this is for the first event, so just putting a typical value for start of window
 
-if True:
     plt.figure()
     plt.hist(energy[alpha_mask], alphahist_bins)
     plt.title('alpha energy spectrum, runs: '+str(get_runs))
@@ -182,7 +182,6 @@ if True:
         run_ts[i] = run_ts[i] + run_t_offset[i]
     run_ts = np.concatenate(run_ts)
 
-if True:
     plt.figure()
     plt.title('alphas')
     tve_bins = (100, 15)
@@ -190,6 +189,7 @@ if True:
     plt.xlabel('energy (MeV)')
     plt.ylabel('time since start of experiment (hours)')
     plt.colorbar()
+
 if load_ddas:
     plt.figure()
     plt.title('protons')
@@ -218,18 +218,7 @@ plt.show(block=False)
 # hist.Fill(energy[proton_mask])
 # hist.Draw()
 
-np.save('to_fit.npy', energy[proton_mask])
-
-# p800_mask = veto_mask&(energy>0.67)&(energy<0.84)&(lengths>15)&(lengths<32)
-# print("nmber of protons in 800 keV peak: %d"%len(energy[p800_mask]))
-# plt.figure()
-# plt.title('800 keV protons selected in RVE, runs: '+str(get_runs))
-# plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-# plt.scatter(energy[p800_mask], lengths[p800_mask], marker='.', alpha=0.5, color='red')
-# plt.colorbar()
-
-# plt.figure()
-# plt.hist(energy, 200)
+# np.save('to_fit.npy', energy[proton_mask])
 
 plt.show(block=False)
 
@@ -266,7 +255,37 @@ def fit_double_decay_exponential(mask, time_bin_edges, guess=(100,60, 100, 100))
            popt[3]*np.log(2), "+/-", np.sqrt(pcov[3,3])*np.log(2), 'ms')
     return popt, pcov
 
-def gui_for_selection_mask():
-    plt.figrue()
+rve_cut_select_mask = None
+def set_cut_polygon(verticies):
+        '''
+        verticies: (counts, ranges)
+        '''
+        global rve_cut_select_mask
+        print(verticies)
+        rve_cut_verticies = verticies
+        selected_rve_path = matplotlib.path.Path(rve_cut_verticies)
+        rve_points = np.vstack((energy[plt_mask], lengths[plt_mask])).transpose()
+        rve_cut_select_mask = selected_rve_path.contains_points(rve_points)
+
+poly_selector = None
+def define_cut_on_gui():
+    global poly_selector
+    #open a RvE histogram with the current settings
+    fig, ax = plt.subplots()
+    ax.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+    ax.set_xlabel('adc counts')
+    ax.set_ylabel('range (mm)')
+    poly_selector = matplotlib.widgets.PolygonSelector(ax,set_cut_polygon)
+    # if len(self.rve_cut_verticies) > 0:
+    #     self.poly_selector.verts = self.rve_cut_verticies
+    fig.show()
 
 evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)
+def show_selected_event(i):
+    h5file = process_runs.get_h5_file(experiment, evt_runs[plt_mask][rve_cut_select_mask][i])
+    evt = evt_nums[plt_mask][rve_cut_select_mask][i]
+    h5file.show_2d_projection(evt, block=False)
+    h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
+    h5file.plot_traces(evt, block=False)
+    
+

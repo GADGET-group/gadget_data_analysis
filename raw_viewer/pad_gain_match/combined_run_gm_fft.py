@@ -61,7 +61,7 @@ veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])
-freqs_to_use = 10
+freqs_to_use = 8
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
 
@@ -262,8 +262,8 @@ show_plots(res1)
 if True:
     gm_ic = apply_gm_result(res1)
     cuts2 = []
-    cuts2.append(((gm_ic >6)&(gm_ic<6.58)&(lengths>50)&(lengths<67) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
-    cuts2.append((gm_ic >6.58)&(gm_ic<7.5)&(lengths>59)&(lengths<80) & veto_mask)
+    cuts2.append(((gm_ic >6)&(gm_ic<6.54)&(lengths>50)&(lengths<70) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
+    cuts2.append((gm_ic >6.6)&(gm_ic<7.25)&(lengths>63)&(lengths<80) & veto_mask)
     cuts2.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
     true_energies2 = [6.288, 6.7783, 8.78486]#[6.7783]
 
@@ -291,8 +291,8 @@ if True:
 if True:
     gm_ic2 = apply_gm_result(res2)
     cuts3 = []
-    cuts3.append(((gm_ic >6)&(gm_ic<6.58)&(lengths>55)&(lengths<67) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
-    cuts3.append((gm_ic >6.58)&(gm_ic<7.5)&(lengths>59)&(lengths<80) & veto_mask)
+    cuts3.append(((gm_ic >6)&(gm_ic<6.54)&(lengths>50)&(lengths<70) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
+    cuts3.append((gm_ic >6.6)&(gm_ic<7.25)&(lengths>63)&(lengths<80) & veto_mask)
     cuts3.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
     true_energies3 = [6.288, 6.7783, 8.78486]#[6.7783]
 

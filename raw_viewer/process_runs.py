@@ -89,7 +89,8 @@ def get_h5_file(experiment, run_number):
         h5file.background_subtract_mode = 'smart2'
         h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 10
-        h5file.smart2_threshold = 15
+        h5file.smart2_threshold = 4
+        h5file.num_background_bins = (300,400)
         h5file.cache_enable = True
     elif experiment == 'e23035':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -98,7 +99,7 @@ def get_h5_file(experiment, run_number):
         h5file.background_subtract_mode = 'smart2'
         h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 10
-        h5file.smart2_threshold = 15
+        h5file.smart2_threshold = 35
         h5file.cache_enable = True
     elif experiment == 'e25058':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
