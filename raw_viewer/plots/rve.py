@@ -15,7 +15,7 @@ from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
     run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
@@ -29,7 +29,7 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = np.arange(61, 63+1) #calibration before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [61, 62, 63]
+    run_range = [49]#[61, 62, 63]
     
 
 # else: #during experiment
@@ -76,7 +76,7 @@ alphahist_bins = 100
 #load pad gain match
 #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
 #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
-gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft10_res3.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
 #pad_gains = gain_match_result.x[:1024]
@@ -104,6 +104,10 @@ if experiment == 'e23035':
     #veto_mask = veto_mask&(min_z>5)
 else:
     veto_mask = (veto_max < veto_thresh)
+    pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
+    num_pads_railed = np.array([len(prl) for prl in pads_railed])
+    veto_mask = veto_mask & (num_pads_railed==0)
+
     
 if load_ddas:
     print(len(times_since_beam_off), len(energy))

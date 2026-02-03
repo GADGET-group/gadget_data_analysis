@@ -34,7 +34,7 @@ load_result2 = False
 load_result3 = False
 
 
-runs = (61,62,63)#(20,)#(20,)#(38,49)#17,20,21,38,49,60,
+runs = (49,)#(61,62,63)#(20,)#(20,)#(38,49)#17,20,21,38,49,60,
 exp = 'e23035_prep_vault'
 
 veto_thresh = 400
@@ -61,7 +61,7 @@ veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])
-freqs_to_use = 8
+freqs_to_use = 10
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
 
@@ -87,10 +87,10 @@ no_gm_ic = get_gm_ic(np.ones(1024))
 
 #set up initial gain match cuts
 cuts1 = []
-true_energies = [6.28808, 6.7883,8.784 ]#, 0.7856]# only includes energy deposited as ionization
+true_energies = [6.28808, 6.7883]#,8.784 ]#, 0.7856]# only includes energy deposited as ionization
 cuts1.append((no_gm_ic>1.1e6) & (no_gm_ic<1.31e6) & (lengths>50) & (lengths<65.5) & veto_mask)
 cuts1.append((no_gm_ic>1.13e6) & (no_gm_ic<1.4e6) & (lengths>66) & (lengths<76) & veto_mask)
-cuts1.append((no_gm_ic>1.35e6) & (no_gm_ic<1.85e6) & (lengths>90) & (lengths< 105) & veto_mask)
+#cuts1.append((no_gm_ic>1.35e6) & (no_gm_ic<1.85e6) & (lengths>90) & (lengths< 105) & veto_mask)
 
 
 
@@ -150,7 +150,7 @@ def do_gain_match(cut_masks, true_energies):
     gm_slices = []
     default_guess = []
     num_in_slice = []
-    run_indexs = [] 
+    # run_indexs = [] 
 
     with cp.cuda.Device(gpu_device):
         for cut_mask, true_energy in zip(cut_masks, true_energies):
@@ -158,9 +158,9 @@ def do_gain_match(cut_masks, true_energies):
             default_guess.append(cp.asnumpy(true_energy/cp.mean(cp.sum(gm_slices[-1], axis=1))))
             num_in_slice.append(cp.shape(gm_slices[-1])[0])
             print('cut with true energy of %f MeV has %d events'%(true_energy, num_in_slice[-1]))
-            run_indexs.append(cp.array(run_numbers[cut_mask]))
-            for i, r in enumerate(runs):
-                run_indexs[-1][r] = i
+            # run_indexs.append(cp.array(run_numbers[cut_mask]))
+            # for i, r in enumerate(runs):
+            #     run_indexs[-1][r] = i
         
     
         init_guess = get_init_spectrum_guess(np.average(default_guess))
@@ -177,7 +177,8 @@ def do_gain_match(cut_masks, true_energies):
             gains = get_pad_gains(x)
             e_list = []
             
-            for gm_slice, ri in zip(gm_slices, run_indexs):
+            #for gm_slice, ri in zip(gm_slices, run_indexs):
+            for gm_slice in gm_slices:
                 e_list.append(get_gm_ic(gains, gm_slice, True))
 
             to_return = 0
@@ -264,8 +265,8 @@ if True:
     cuts2 = []
     cuts2.append(((gm_ic >6)&(gm_ic<6.54)&(lengths>50)&(lengths<70) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
     cuts2.append((gm_ic >6.6)&(gm_ic<7.25)&(lengths>63)&(lengths<80) & veto_mask)
-    cuts2.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
-    true_energies2 = [6.288, 6.7783, 8.78486]#[6.7783]
+    #cuts2.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
+    true_energies2 = [6.288, 6.7783]#, 8.78486]#[6.7783]
 
     fig = plt.figure()
     plt.title('gain match cuts')
@@ -291,10 +292,10 @@ if True:
 if True:
     gm_ic2 = apply_gm_result(res2)
     cuts3 = []
-    cuts3.append(((gm_ic >6)&(gm_ic<6.54)&(lengths>50)&(lengths<70) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
-    cuts3.append((gm_ic >6.6)&(gm_ic<7.25)&(lengths>63)&(lengths<80) & veto_mask)
-    cuts3.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
-    true_energies3 = [6.288, 6.7783, 8.78486]#[6.7783]
+    cuts3.append(((gm_ic >6)&(gm_ic<6.49)&(lengths>50)&(lengths<70) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
+    cuts3.append((gm_ic >6.51)&(gm_ic<7.25)&(lengths>63)&(lengths<80) & veto_mask)
+    #cuts3.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
+    true_energies3 = [6.288, 6.7783]#, 8.78486]#[6.7783]
 
     fig = plt.figure()
     plt.title('gain match cuts')
