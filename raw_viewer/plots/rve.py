@@ -15,11 +15,11 @@ from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 
-experiment = 'e23035'#_prep_vault'
+experiment = 'e23035_prep_vault'
  
 if experiment == 'e23035':
-    run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-    #run_range = [145]
+    #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+    run_range = [145]
 #     exclude_runs = [1,9, 19, 73, 113,
 #                     132, #run missing some CoBos
 #                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -97,6 +97,8 @@ else:
 angles = process_runs.get_angle(experiment, get_runs)
 
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
+pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
+num_pads_railed = np.array([len(prl) for prl in pads_railed])
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(get_runs)
     endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
@@ -104,9 +106,7 @@ if experiment == 'e23035':
     #veto_mask = veto_mask&(min_z>5)
 else:
     veto_mask = (veto_max < veto_thresh)
-    pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
-    num_pads_railed = np.array([len(prl) for prl in pads_railed])
-    veto_mask = veto_mask & (num_pads_railed==0)
+veto_mask = veto_mask & (num_pads_railed==0)    
 
     
 if load_ddas:
@@ -286,10 +286,13 @@ def define_cut_on_gui():
 
 evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)
 def show_selected_event(i):
-    h5file = process_runs.get_h5_file(experiment, evt_runs[plt_mask][rve_cut_select_mask][i])
+    run = evt_runs[plt_mask][rve_cut_select_mask][i]
     evt = evt_nums[plt_mask][rve_cut_select_mask][i]
+    show_event(run,evt)
+    
+
+def show_event(run, evt):
+    h5file = process_runs.get_h5_file(experiment, run)
     h5file.show_2d_projection(evt, block=False)
     h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
     h5file.plot_traces(evt, block=False)
-    
-

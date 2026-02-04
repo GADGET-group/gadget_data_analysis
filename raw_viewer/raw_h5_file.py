@@ -12,7 +12,7 @@ import matplotlib.colors as colors
 import matplotlib.cm 
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
-
+from sklearn import datasets, linear_model
 
 try:
     import cupy as cp
@@ -112,6 +112,7 @@ class raw_h5_file:
         #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
         self.smart_bins_away_to_check = 3
         self.smart2_threshold = 4#35
+        self.smart2_min_bins_in_peak = 10
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -284,7 +285,7 @@ class raw_h5_file:
             self.cached_event = event_number
         return data
 
-    def calculate_background(self, trace):
+    def calculate_background(self, trace, debug_plots=False):
         '''
         Return calculated background for each timebin.
 
@@ -325,32 +326,54 @@ class raw_h5_file:
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            #slope, offset = np.polysz fit(xs, ys, 1)
-            offset = np.mean(ys)
+            slope, offset = np.polyfit(xs, ys, 1)
+            #offset = np.mean(ys)
             #baseline will be the trace except in the peak region,
             #so that everything away from the peak is zero'd out
             baseline = np.array(trace, copy=True)
             # for i in range(peak_start, peak_end+1):
             #     baseline[i] = slope*i + offset
-            baseline[np.arange(peak_start, peak_end+1)] = offset
+            #baseline[np.arange(peak_start, peak_end+1)] = offset
+            x_peak = np.arange(peak_start, peak_end)
+            baseline[x_peak] = offset + slope*x_peak
             return baseline
         elif self.background_subtract_mode == 'smart2':
-            dtrace = np.roll(trace, -self.smart_bins_away_to_check)[:-self.smart_bins_away_to_check] - trace[:-self.smart_bins_away_to_check]
-            background_start = self.num_background_bins[0]
-            background_end = min(len(dtrace), self.num_background_bins[1])
-            threshold = self.smart2_threshold*max(np.max(dtrace[background_start:background_end]), np.max(-dtrace[background_start:background_end]))
-            #get first place trace[i] is more than smart2_threshold counts below trace[i+smart_bins_away_to_check]
-            start_candidates = np.where(dtrace>threshold)[0]
-            if len(start_candidates) > 0:
-                peak_start = start_candidates[0]
-            else:
-                return trace #no peak found, assume entire trace is baseline
-            #get last place trace[i] is more than smart2_threshold counts above trace[i+smart_bins_away_to_check]
-            stop_candidates = np.where(dtrace < -threshold)[0]
-            if len(stop_candidates) > 0:
-                peak_end = stop_candidates[-1]+self.smart_bins_away_to_check
-            else:
-                peak_end = -1
+            #use ransac to fit a line to background
+            x = np.arange(len(trace)).reshape(-1, 1)
+            ransac = linear_model.RANSACRegressor()
+            ransac.fit(x, trace.reshape(-1, 1))
+            ransac_baseline = ransac.predict(x).flatten()
+            #threshold = self.smart2_threshold + np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
+            above_threshold = trace>ransac_baseline#threshold
+            peak_labels = skimage.measure.label(above_threshold*1, background=0)
+            # print('ransac baseline: ', ransac_baseline)
+            # print('trace: ', trace)
+            # print('labels: ', peak_labels)
+            not_background = peak_labels[peak_labels!=0]
+            if len(not_background) == 0:
+                return trace
+            labels, num_bins = np.unique(not_background, return_counts=True)
+            most_counts, largest_index = 0,0
+            for i in range(len(labels)):
+                label = labels[i]
+                max_counts = np.max(trace[peak_labels==label])
+                if max_counts > most_counts and num_bins[i] > self.smart2_min_bins_in_peak:
+                    most_counts = max_counts
+                    largest_index = i
+            #largest_index = np.argmax(num_bins)
+            largest_label = labels[largest_index]
+
+            baseline = np.array(trace, copy=True)
+            if num_bins[largest_index] < self.smart2_min_bins_in_peak:
+                return trace
+            
+            selected_label_indicies = np.where(peak_labels==largest_label)[0]
+            peak_start = max(0, selected_label_indicies[0] - self.smart_bins_away_to_check)
+            peak_end = min(len(trace), selected_label_indicies[-1]+self.smart_bins_away_to_check)
+            # print(peak_start, peak_end)
+            if peak_start == 0 and peak_end == len(trace):
+                return trace
+
             #fit a line through the points just outside the peak region
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
@@ -362,7 +385,7 @@ class raw_h5_file:
             baseline = np.array(trace, copy=True)
             # for i in range(peak_start, peak_end+1):
             #     baseline[i] = slope*i + offset
-            x_peak = np.arange(peak_start, peak_end+1)
+            x_peak = np.arange(peak_start, peak_end)
             baseline[x_peak] = offset + slope*x_peak
             return baseline
 
@@ -806,7 +829,7 @@ class raw_h5_file:
             fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
         return fig
-
+    
     def show_2d_projection(self, event_number, block=True, fig_name=None):
         pads, traces = self.get_pad_traces(event_number)
         trace_dict = {pad: trace for pad, trace in zip(pads, traces)}
@@ -814,22 +837,58 @@ class raw_h5_file:
         should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
         length = np.sqrt(dxy**2 + dz**2)
         title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
-        return self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+        # return self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+    
+        image = self.get_2d_image(data)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 6), constrained_layout=True, num=fig_name, clear=True)
+        fig.suptitle(title)
+
+        # Top plot: padplane image
+        cmap = matplotlib.cm.get_cmap('viridis').copy()
+        cmap.set_under(color='black')
+        im = ax1.imshow(image, cmap=cmap, vmin=np.min(image[image>=0]), vmax=np.max(image[image<np.inf]))#norm=colors.LogNorm()
+        fig.colorbar(im, ax=ax1)
+        ax1.set_title('Padplane Image')
+
+        # Bottom plot: sum of traces
+        if trace_dict != None:
+            summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
+            ax2.plot(summed_trace)
+            ax2.set_title('Summed Trace')
+            ax2.set_xlabel('Time')
+            ax2.set_ylabel('ADC Counts')
+            if type(trace_dict) != type(None):
+                def onclick(event):
+                    x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
+                    pad = self.xy_index_to_pad.get((x, y))
+                    if pad in trace_dict:
+                        self.show_traces_w_baseline_estimate(event_number, False, pad_to_plot=pad)
+
+            fig.canvas.mpl_connect('button_press_event', onclick)
+        plt.show(block=block)
+        return fig
 
 
 
-    def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
+    def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None, pad_to_plot=None):
         '''
         plots traces without background subtraction, with backgrounds shown as ... lines
+        If pad is specified, plot only the one pad
         '''
         plt.figure(fig_name)
         plt.clf()
         old_background_mode = self.background_subtract_mode
+        old_cache = self.cache_enable
+        self.cache_enable = False
         self.background_subtract_mode = 'none' #will set back after drawing traces
         old_mode = self.data_select_mode
         self.data_select_mode = 'all data'
         pads, pad_data = self.get_pad_traces(event_num)
+        self.cache_enable = old_cache
         for pad, data in zip(pads, pad_data):
+            if type(pad) != type(None) and pad != pad_to_plot:
+                continue
             r = pad/1024*.8
             g = (pad%512)/512*.8
             b = (pad%256)/256*.8
@@ -839,6 +898,8 @@ class raw_h5_file:
                 plt.plot(data, color=(r,g,b), label='%d'%pad)
         self.background_subtract_mode = old_background_mode
         for pad, data in zip(pads, pad_data):
+            if type(pad) != type(None) and pad != pad_to_plot:
+                continue 
             r = pad/1024*.8
             g = (pad%512)/512*.8
             b = (pad%256)/256*.8
