@@ -17,7 +17,7 @@ from sklearn import datasets, linear_model
 try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    cp.cuda.runtime.setDevice(2)
+    #cp.cuda.runtime.setDevice(2)
     USE_GPU = True
 except:
     cp = np
@@ -111,7 +111,6 @@ class raw_h5_file:
         self.num_smart_background_ave_bins = 5 
         #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
         self.smart_bins_away_to_check = 3
-        self.smart2_threshold = 4#35
         self.smart2_min_bins_in_peak = 10
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
