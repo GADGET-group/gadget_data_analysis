@@ -42,45 +42,51 @@ def get_veto_mask(get_run):
         return np.concatenate([get_veto_mask(i) for i in get_run])
     max_pad_counts = process_runs.get_quantity('pad_max', experiment, [get_run])
     veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
-    if get_run<285:
-        veto_thresholds[253]=170
-        veto_thresholds[254]=170
-        veto_thresholds[508]=200
-        veto_thresholds[509]=600
-        veto_thresholds[763]=280
-        veto_thresholds[764]=260
+    for pad in process_runs.raw_h5_file.VETO_PADS:
+            veto_thresholds[pad] = 260
+    veto_thresholds[509]=500
+    # if get_run<285:
+        
 
-        # veto_thresholds[253]=110
-        # veto_thresholds[254]=110
-        # veto_thresholds[508]=130
-        # veto_thresholds[509]=390
-        # veto_thresholds[763]=182
-        # veto_thresholds[764]=168
+    #     # veto_thresholds[253]=170
+    #     # veto_thresholds[254]=170
+    #     # veto_thresholds[508]=200
+    #     # veto_thresholds[509]=600
+    #     # veto_thresholds[763]=280
+    #     # veto_thresholds[764]=260
+
+
+    #     # veto_thresholds[253]=110
+    #     # veto_thresholds[254]=110
+    #     # veto_thresholds[508]=130
+    #     # veto_thresholds[509]=390
+    #     # veto_thresholds[763]=182
+    #     # veto_thresholds[764]=168
 
         
-        start_veto = False
-        for pad in process_runs.OUTER_RING_PADS:
-            if pad == 272:
-                start_veto = True
-            if pad == 465:
-                start_veto = False
-            if start_veto:
-                veto_thresholds[pad] = 50
-    else:
-        veto_thresholds[253]=500
-        veto_thresholds[254]=500
-        veto_thresholds[508]=500
-        veto_thresholds[509]=750
-        veto_thresholds[763]=500
-        veto_thresholds[764]=500
-        start_veto = False
-        for pad in process_runs.OUTER_RING_PADS:
-            if pad == 272:
-                start_veto = True
-            if pad == 465:
-                start_veto = False
-            if start_veto:
-                veto_thresholds[pad] = 50
+    #     # start_veto = False
+    #     # for pad in process_runs.OUTER_RING_PADS:
+    #     #     if pad == 272:
+    #     #         start_veto = True
+    #     #     if pad == 465:
+    #     #         start_veto = False
+    #     #     if start_veto:
+    #     #         veto_thresholds[pad] = 50
+    # else:
+    #     veto_thresholds[253]=500
+    #     veto_thresholds[254]=500
+    #     veto_thresholds[508]=500
+    #     veto_thresholds[509]=750
+    #     veto_thresholds[763]=500
+    #     veto_thresholds[764]=500
+    #     start_veto = False
+    #     for pad in process_runs.OUTER_RING_PADS:
+    #         if pad == 272:
+    #             start_veto = True
+    #         if pad == 465:
+    #             start_veto = False
+    #         if start_veto:
+    #             veto_thresholds[pad] = 50
     return np.all(max_pad_counts<veto_thresholds, axis=1)
 
 def get_pad_gains(get_run):

@@ -112,6 +112,8 @@ class raw_h5_file:
         #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
         self.smart_bins_away_to_check = 3
         self.smart2_min_bins_in_peak = 10
+        self.smart2_threshold = 30
+        self.smart2_ransac_percentile = 100
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -337,10 +339,17 @@ class raw_h5_file:
             baseline[x_peak] = offset + slope*x_peak
             return baseline
         elif self.background_subtract_mode == 'smart2':
+            '''
+            RANSAC lowest 25% of points to get initial baseline estimate
+            Find peak with maximum value and more than 5 consecutive bins above the baseline found by RANSAC. Trim trace to 10 bins to each side of the found block of bins.
+            Starting from the left of the trimmed trace, find the first place where the current time bin is more than MAD (from RANSAC) counts below the sample 10 samples later, and further trim the trace here. Do the same thing from the right.
+            Go 10 bins away from each end of the peak, and fit a line to the next 20 bins to get a local estimate of the baseline
+            '''
             #use ransac to fit a line to background
             x = np.arange(len(trace)).reshape(-1, 1)
             ransac = linear_model.RANSACRegressor()
-            ransac.fit(x, trace.reshape(-1, 1))
+            to_ransac = trace<np.percentile(trace, self.smart2_ransac_percentile)
+            ransac.fit(x[to_ransac], trace.reshape(-1, 1)[to_ransac])
             ransac_baseline = ransac.predict(x).flatten()
             #threshold = self.smart2_threshold + np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
             above_threshold = trace>ransac_baseline#threshold
@@ -368,14 +377,25 @@ class raw_h5_file:
             
             selected_label_indicies = np.where(peak_labels==largest_label)[0]
             peak_start = max(0, selected_label_indicies[0] - self.smart_bins_away_to_check)
-            peak_end = min(len(trace), selected_label_indicies[-1]+self.smart_bins_away_to_check)
+            peak_end = min(len(trace)-1, selected_label_indicies[-1]+self.smart_bins_away_to_check)
+            #get threshold for trimming peak from MAD
+            peak_thresh = np.max(np.abs(trace[to_ransac][ransac.inlier_mask_] - ransac_baseline[to_ransac][ransac.inlier_mask_]))
+            #print(peak_thresh)
+            while peak_start< peak_end:
+                if trace[peak_start] < trace[min(peak_start + self.smart_bins_away_to_check, len(trace)-1)] - peak_thresh:
+                    break
+                peak_start += 1
+            while peak_end > peak_start:
+                if trace[peak_end] < trace[max(0, peak_end - self.smart_bins_away_to_check)] - peak_thresh:
+                    break
+                peak_end -= 1
             # print(peak_start, peak_end)
-            if peak_start == 0 and peak_end == len(trace):
+            if peak_start == peak_end:
                 return trace
 
             #fit a line through the points just outside the peak region
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
-                                           np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
+                                           np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins+1, len(trace)))])
             ys = trace[xs]
             slope, offset = np.polyfit(xs, ys, 1)
             #offset = np.mean(ys)

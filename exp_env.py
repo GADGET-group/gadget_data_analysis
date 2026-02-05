@@ -32,5 +32,5 @@ if __name__ == '__main__':
     from e23035_analysis.e23035_runs import run_df
     import numpy as np
     runs = run_df['GET'][np.isfinite(run_df['GET'])]
-    with multiprocessing.Pool(100) as pool:
+    with multiprocessing.Pool(50) as pool:
         pool.map(process_run, runs)
