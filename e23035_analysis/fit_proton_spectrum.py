@@ -5,18 +5,20 @@ import numpy as np
 
 from raw_viewer import ddas_interface
 
-ddas_runs = [277,278]
-analysis_file_name = 'ddas_runs_277_278_proton_spectra.root'
+# ddas_runs = [277,278]
+# analysis_file_name = 'ddas_runs_277_278_proton_spectra.root'
 
-merged_data = ROOT.TChain('merged_data')
-for ddas_run in ddas_runs:
-    merged_data.Add(ddas_interface.get_merged_root_file_path(ddas_run))
+# merged_data = ROOT.TChain('merged_data')
+# for ddas_run in ddas_runs:
+#     merged_data.Add(ddas_interface.get_merged_root_file_path(ddas_run))
 
-df = ROOT.RDataFrame(merged_data)
-good_protons = df.Filter( 'tpc_particle_id==1 && !tpc_should_veto')
+# df = ROOT.RDataFrame(merged_data)
+# good_protons = df.Filter( 'tpc_particle_id==1 && !tpc_should_veto')
 
-proton_spectrum = good_protons.Histo1D(('proton_hist', 'proton energy spectrum', 350, 500, 3500),'tpc_energy')
-proton_spectrum.Draw()
+# proton_spectrum = good_protons.Histo1D(('proton_hist', 'proton energy spectrum', 350, 500, 3500),'tpc_energy')
+# proton_spectrum.Draw()
+
+get_runs
 
 peak_location_guesses = [913,1063,1264,1331,1376,1778,1817,1857]#,2025,2089,2182,2197,2250,2410,2455]#825, 910, 1054]#, 1183, 1262, 1376, 1792, 2060, 2157, 2429]
 sigma_guess = 100

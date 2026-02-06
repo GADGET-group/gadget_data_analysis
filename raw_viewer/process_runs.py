@@ -10,8 +10,6 @@ import numpy as np
 
 from raw_viewer import raw_h5_file
 
-num_threads = 10
-
 OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,1014,752,751,743,742,732,720,707,693,678,663,
                    647,631,614,597,580,563,545,527,272,290,308,325,342,359,376,392,408,423,438,452,465,477,488,487,497,496,
                    504,503,502,501,507,506,505,250,251,252,246,247,248,249,241,242,232,233,222,210,197,183,168,153,137,121,
@@ -82,36 +80,12 @@ def get_h5_file(experiment, run_number):
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = True
-    elif experiment == 'e23035_prep_vault':
+    elif experiment == 'e23035_prep_vault' or experiment == 'e23035':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = -np.inf
+        h5file.ic_counts_threshold = 0
         h5file.background_subtract_mode = 'smart2'
-        h5file.smart_bins_away_to_check = 10
-        h5file.num_smart_background_ave_bins = 20
-        h5file.smart2_min_bins_in_peak = 5
-        h5file.smart2_min_sigma = 2
-        h5file.cache_enable = True
-        # h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        # h5file.length_counts_threshold = 100
-        # h5file.ic_counts_threshold = 0
-        # h5file.background_subtract_mode = 'smart'
-        # h5file.smart_bins_away_to_check = 25
-        # h5file.num_smart_background_ave_bins = 10
-        # h5file.cache_enable = True
-    elif experiment == 'e23035':
-        # h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        # h5file.length_counts_threshold = 100
-        # h5file.ic_counts_threshold = 0
-        # h5file.background_subtract_mode = 'smart'
-        # h5file.smart_bins_away_to_check = 25
-        # h5file.num_smart_background_ave_bins = 10
-        # h5file.cache_enable = True
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = -np.inf
-        h5file.background_subtract_mode = 'smart2'
-        h5file.smart_bins_away_to_check = 10
+        h5file.smart_bins_away_to_check = 3
         h5file.num_smart_background_ave_bins = 20
         h5file.smart2_min_bins_in_peak = 5
         h5file.smart2_min_sigma = 2
@@ -137,6 +111,7 @@ def get_processed_run(experiment, run_number, force_reprocess=False):
     '''
     #save_path = os.path.dirname(os.path.abspath(__file__))
     fname = os.path.join(get_save_path(experiment), '%s_run%d.pkl.gz'%(experiment, run_number))
+    #fname += '.no_neg'
     if os.path.exists(fname) and not force_reprocess:
         print('run %d previously processed, loading previous results'%run_number)
         with gzip.open(fname, 'rb') as file:

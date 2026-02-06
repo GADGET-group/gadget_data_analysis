@@ -43,7 +43,7 @@ def get_veto_mask(get_run):
     max_pad_counts = process_runs.get_quantity('pad_max', experiment, [get_run])
     veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
     for pad in process_runs.raw_h5_file.VETO_PADS:
-            veto_thresholds[pad] = 260
+            veto_thresholds[pad] = 500#260
     veto_thresholds[509]=500
     # if get_run<285:
         

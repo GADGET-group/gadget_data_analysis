@@ -19,7 +19,7 @@ experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
     #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-    run_range = [251]
+    run_range = [145]
 #     exclude_runs = [1,9, 19, 73, 113,
 #                     132, #run missing some CoBos
 #                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -73,18 +73,11 @@ rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 1001)
 alphahist_bins = 100
 
-#load pad gain match
-#gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_gm.pkl'
-#gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
-gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft10_res3.pkl'
-with open(gain_match_path, 'rb') as f:
-    gain_match_result = pickle.load(f)
-#pad_gains = gain_match_result.x[:1024]
-pad_gains = gain_match_result.pad_gains
-#pad_gains = np.ones(1024)#*np.mean(gain_match_result.x)
+print('loading stuff')
 
 
 lengths = process_runs.get_lengths(experiment, get_runs)
+print('lengths loaded')
 cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
@@ -93,6 +86,11 @@ charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
 if experiment == 'e23035':
     energy = e23035_runs.get_energy_MeV(get_runs)
 else:
+    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+    with open(gain_match_path, 'rb') as f:
+        gain_match_result = pickle.load(f)
+    #pad_gains = gain_match_result.x[:1024]
+    pad_gains = gain_match_result.pad_gains
     energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 angles = process_runs.get_angle(experiment, get_runs)
 
@@ -113,7 +111,7 @@ if load_ddas:
     print(len(times_since_beam_off), len(energy))
     assert len(times_since_beam_off) == len(energy)
 
-
+print('starting plotting')
 plt.figure()
 plt_mask = veto_mask&(lengths>1)&(lengths<400)
 plt.title('runs: '+str(get_runs))

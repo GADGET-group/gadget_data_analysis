@@ -17,7 +17,7 @@ from sklearn import datasets, linear_model
 try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    #cp.cuda.runtime.setDevice(2)
+    cp.cuda.runtime.setDevice(2)
     USE_GPU = True
 except:
     cp = np
@@ -380,6 +380,7 @@ class raw_h5_file:
             #get threshold for trimming peak from MAD
             peak_thresh = self.smart2_min_sigma*np.std(np.concatenate([trace[:peak_start]-ransac_baseline[:peak_start], 
                                                                        trace[peak_end:]-ransac_baseline[peak_end:]]))
+            #print(peak_thresh)
             i = np.argmax(trace)
             if trace[i] - ransac_baseline[i] < peak_thresh:
                 return trace
