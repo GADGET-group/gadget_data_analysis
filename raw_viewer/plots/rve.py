@@ -15,11 +15,11 @@ from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
     #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-    run_range = [254]
+    run_range = [251]
 #     exclude_runs = [1,9, 19, 73, 113,
 #                     132, #run missing some CoBos
 #                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler

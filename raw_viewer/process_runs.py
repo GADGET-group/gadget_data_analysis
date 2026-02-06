@@ -85,11 +85,12 @@ def get_h5_file(experiment, run_number):
     elif experiment == 'e23035_prep_vault':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 0
+        h5file.ic_counts_threshold = -np.inf
         h5file.background_subtract_mode = 'smart2'
         h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 20
         h5file.smart2_min_bins_in_peak = 5
+        h5file.smart2_min_sigma = 2
         h5file.cache_enable = True
         # h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         # h5file.length_counts_threshold = 100
@@ -108,11 +109,12 @@ def get_h5_file(experiment, run_number):
         # h5file.cache_enable = True
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 0
+        h5file.ic_counts_threshold = -np.inf
         h5file.background_subtract_mode = 'smart2'
         h5file.smart_bins_away_to_check = 10
         h5file.num_smart_background_ave_bins = 20
         h5file.smart2_min_bins_in_peak = 5
+        h5file.smart2_min_sigma = 2
         h5file.cache_enable = True
     elif experiment == 'e25058':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
