@@ -22,10 +22,15 @@ def rate_summary():
 def xy_centering():
     import_or_reload('raw_viewer.plots.xy_centering')
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'
 
 def process_run(run):
-    process_runs.get_processed_run(experiment, run, True)
+    try:
+        process_runs.get_processed_run(experiment, run, True)
+        print('processed run ', run)
+    except Exception as e:
+        print('error processing run ', run)
+        print(e)
 
 if __name__ == '__main__':
     #runs = [49]#range(61,74)#[74,75,76,77]
