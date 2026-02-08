@@ -47,17 +47,15 @@ veto_max = process_runs.get_max_veto_counts(exp, runs)
 charge_widths = process_runs.get_quantity('charge_width', exp,runs)
 #veto_mask = (veto_max < veto_thresh)&(charge_widths>3.25)#(veto_counts < veto_thresh)&(charge_widths>2.5)
 veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
-veto_thresholds[253]=170
-veto_thresholds[254]=170
-veto_thresholds[508]=200
-veto_thresholds[509]=600
-veto_thresholds[763]=280
-veto_thresholds[764]=260
-veto_thresholds *= 400/600.
+for pad in process_runs.raw_h5_file.VETO_PADS:
+    veto_thresholds[pad] = 500#260
 max_pad_counts = process_runs.get_quantity('pad_max', exp, runs)
 pads_railed = process_runs.get_quantity('railed_pads', exp, runs)
 num_pads_railed = np.array([len(prl) for prl in pads_railed])
-veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)
+angles = process_runs.get_angle(exp, runs)
+
+veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)&(np.degrees(angles)>8)
+
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])

@@ -17,7 +17,7 @@ from sklearn import datasets, linear_model
 try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    cp.cuda.runtime.setDevice(2)
+    #cp.cuda.runtime.setDevice(2)
     USE_GPU = True
 except:
     cp = np

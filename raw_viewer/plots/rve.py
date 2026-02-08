@@ -18,8 +18,9 @@ from e23035_analysis import e23035_runs
 experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
-    #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-    run_range = [145]
+    #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+    run_range=[148,149,150]
+    #run_range = [145]
 #     exclude_runs = [1,9, 19, 73, 113,
 #                     132, #run missing some CoBos
 #                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -29,7 +30,7 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = np.arange(61, 63+1) #calibration before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [49]#[61, 62, 63]
+    run_range = [73]#[61, 62, 63]
     
 
 # else: #during experiment
@@ -77,7 +78,6 @@ print('loading stuff')
 
 
 lengths = process_runs.get_lengths(experiment, get_runs)
-print('lengths loaded')
 cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
@@ -95,16 +95,17 @@ else:
 angles = process_runs.get_angle(experiment, get_runs)
 
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
+
 pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
 num_pads_railed = np.array([len(prl) for prl in pads_railed])
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(get_runs)
     endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
     min_z = np.min(endpoints[:,:,2], axis=1)
-    #veto_mask = veto_mask&(min_z>5)
+    veto_mask = veto_mask&(min_z>5)
 else:
     veto_mask = (veto_max < veto_thresh)
-veto_mask = veto_mask & (num_pads_railed==0)    
+veto_mask = veto_mask & (num_pads_railed==0)# & (angles>np.radians(8)) 
 
     
 if load_ddas:
@@ -286,6 +287,7 @@ evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs
 def show_selected_event(i):
     run = evt_runs[plt_mask][rve_cut_select_mask][i]
     evt = evt_nums[plt_mask][rve_cut_select_mask][i]
+    print('run %d evt %d energy %f MeV'%(run, evt, energy[plt_mask][rve_cut_select_mask][i]))
     show_event(run,evt)
     
 
