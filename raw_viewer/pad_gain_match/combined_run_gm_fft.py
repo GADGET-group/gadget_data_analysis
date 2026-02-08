@@ -261,7 +261,7 @@ show_plots(res1)
 if True:
     gm_ic = apply_gm_result(res1)
     cuts2 = []
-    cuts2.append(((gm_ic >6)&(gm_ic<6.54)&(lengths>50)&(lengths<70) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
+    cuts2.append((gm_ic >6)&(gm_ic<6.54)&(lengths>50)&(lengths<70)& veto_mask)# | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))
     cuts2.append((gm_ic >6.6)&(gm_ic<7.25)&(lengths>63)&(lengths<80) & veto_mask)
     #cuts2.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
     true_energies2 = [6.288, 6.7783]#, 8.78486]#[6.7783]
@@ -290,7 +290,7 @@ if True:
 if True:
     gm_ic2 = apply_gm_result(res2)
     cuts3 = []
-    cuts3.append(((gm_ic >6)&(gm_ic<6.49)&(lengths>50)&(lengths<70) | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68)))& veto_mask)
+    cuts3.append(((gm_ic >6)&(gm_ic<6.49)&(lengths>50)&(lengths<67))& veto_mask)# | ((gm_ic >5)&(gm_ic<6)&(lengths>60)&(lengths<68))
     cuts3.append((gm_ic >6.51)&(gm_ic<7.25)&(lengths>63)&(lengths<80) & veto_mask)
     #cuts3.append((gm_ic>7.25)&(gm_ic<9.25)&(lengths>93)&(lengths<105) & veto_mask)
     true_energies3 = [6.288, 6.7783]#, 8.78486]#[6.7783]
@@ -319,7 +319,7 @@ gm_ic3 = apply_gm_result(res3)
 import ROOT
 c1 = ROOT.TCanvas()
 c1.cd()
-emin, emax = 6,7
+emin, emax = 6.15,6.9
 energy_hist = ROOT.TH1D("h1", "h1", 100,  emin, emax)
 gm2_ic = apply_gm_result(res3)
 energy_hist.Fill(gm_ic3[veto_mask])
@@ -340,29 +340,29 @@ energy_hist.Fit(func1, "L")
 fit_params1 = np.zeros(7)
 func1.GetParameters(fit_params1)
 print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5])
-ROOT.gStyle.SetOptFit(1111)
+#ROOT.gStyle.SetOptFit(1111)
 
 
-c2 = ROOT.TCanvas()
-c2.cd()
-emin, emax= 8.3, 9.2
-energy_hist2 = ROOT.TH1D("h2", "h2", 20, emin, emax)
-energy_hist2.Fill(gm_ic3[veto_mask])
-energy_hist2.Draw()
-func2 = ROOT.TF1('f1', '[0] + gaus(1)',  emin, emax)
-func2.SetParameters(0, 10, 8.78, 0.05, )
-func2.SetParLimits(0,0,np.inf)
-func2.SetParLimits(1,0,np.inf)
-func2.SetParLimits(2,emin,emax)
-func2.SetParLimits(3, 0, 0.5)
+# c2 = ROOT.TCanvas()
+# c2.cd()
+# emin, emax= 8.3, 9.2
+# energy_hist2 = ROOT.TH1D("h2", "h2", 20, emin, emax)
+# energy_hist2.Fill(gm_ic3[veto_mask])
+# energy_hist2.Draw()
+# func2 = ROOT.TF1('f1', '[0] + gaus(1)',  emin, emax)
+# func2.SetParameters(0, 10, 8.78, 0.05, )
+# func2.SetParLimits(0,0,np.inf)
+# func2.SetParLimits(1,0,np.inf)
+# func2.SetParLimits(2,emin,emax)
+# func2.SetParLimits(3, 0, 0.5)
 
-energy_hist2.Fit(func2, "L")
-energy_hist2.Fit(func2, "L")
-energy_hist2.Fit(func2, "L")
-fit_params2 = np.zeros(4)
-func2.GetParameters(fit_params2)
+# energy_hist2.Fit(func2, "L")
+# energy_hist2.Fit(func2, "L")
+# energy_hist2.Fit(func2, "L")
+# fit_params2 = np.zeros(4)
+# func2.GetParameters(fit_params2)
 
-print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5], 2.355*fit_params2[3]/fit_params2[2])
+# print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5]), 2.355*fit_params2[3]/fit_params2[2])
 
 angles = process_runs.get_angle(exp, runs)
 plt.figure()
