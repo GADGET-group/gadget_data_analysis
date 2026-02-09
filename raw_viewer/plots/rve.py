@@ -18,8 +18,8 @@ from e23035_analysis import e23035_runs
 experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
-    #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-    run_range=[148,149,150]
+    run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+    #run_range=[148,149,150]
     #run_range = [145]
 #     exclude_runs = [1,9, 19, 73, 113,
 #                     132, #run missing some CoBos
@@ -114,7 +114,7 @@ if load_ddas:
 
 print('starting plotting')
 plt.figure()
-plt_mask = veto_mask&(lengths>1)&(lengths<400)
+plt_mask = veto_mask&(lengths>1)&(lengths<250)&(energy<9)
 plt.title('runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()

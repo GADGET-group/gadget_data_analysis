@@ -29,34 +29,59 @@ print('total protons: ', n_protons)
 proton_spectrum = ROOT.TH1D('proton_spectrum', 'proton spectrum', 3000, 0.5, 3.5)
 proton_spectrum.FillN(n_protons, tpc_energy[proton_mask], np.ones(n_protons, dtype='float64'))
 
-peak_location_guesses = [0.913,1.063,1.1264,1.1331,1.1376,1.1778,1.817,1.857]#,2025,2089,2182,2197,2250,2410,2455]#825, 910, 1054]#, 1183, 1262, 1376, 1792, 2060, 2157, 2429]
-sigma_guess = 0.100
-sigma_bounds = (.005,0.50)
-magnitude_guess = 100
-fit_range = (0.890,1.900)#(700, 2600)
-peak_location_wiggle = 0.030
+if False:
+    proton_spectrum = ROOT.TH1D('proton_spectrum', 'proton spectrum', 3000, 0.5, 3.5)
+    proton_spectrum.FillN(n_protons, tpc_energy[proton_mask], np.ones(n_protons, dtype='float64'))
 
-function_string = '[0] + [1]*x'
-for i in range(len(peak_location_guesses)):
-    function_string += ' + [%d]*exp(-0.5*((x-[%d])/[2])^2)/([2] *sqrt(2*pi))*%f'%(2*i+3, 2*i+4, proton_spectrum.GetBinWidth(0))
-#use [2] for sigma
-f_to_fit = ROOT.TF1('to_fit', function_string, *fit_range)
-f_to_fit.SetParLimits(0, 0, np.inf)
-for i in range(len(peak_location_guesses)):
-    f_to_fit.SetParameter(2*i+3, magnitude_guess) #magnitude
-    f_to_fit.SetParLimits(2*i+3,0,np.inf)
-    f_to_fit.SetParName(2*i+3, 'A_%d'%i)
+    peak_location_guesses = [0.913,1.063,1.1264,1.1331,1.1376,1.1778,1.817,1.857]#,2025,2089,2182,2197,2250,2410,2455]#825, 910, 1054]#, 1183, 1262, 1376, 1792, 2060, 2157, 2429]
+    sigma_guess = 0.100
+    sigma_bounds = (.005,0.50)
+    magnitude_guess = 100
+    fit_range = (0.890,1.900)#(700, 2600)
+    peak_location_wiggle = 0.030
 
-    f_to_fit.SetParameter(2*i+4, peak_location_guesses[i])
-    f_to_fit.SetParLimits(2*i+4,peak_location_guesses[i] - peak_location_wiggle,peak_location_guesses[i] + peak_location_wiggle)
-    f_to_fit.SetParName(2*i+4, 'mu_%d'%i)
+    function_string = '[0] + [1]*x'
+    for i in range(len(peak_location_guesses)):
+        function_string += ' + [%d]*exp(-0.5*((x-[%d])/[2])^2)/([2] *sqrt(2*pi))*%f'%(2*i+3, 2*i+4, proton_spectrum.GetBinWidth(0))
+    #use [2] for sigma
+    f_to_fit = ROOT.TF1('to_fit', function_string, *fit_range)
+    f_to_fit.SetParLimits(0, 0, np.inf)
+    for i in range(len(peak_location_guesses)):
+        f_to_fit.SetParameter(2*i+3, magnitude_guess) #magnitude
+        f_to_fit.SetParLimits(2*i+3,0,np.inf)
+        f_to_fit.SetParName(2*i+3, 'A_%d'%i)
 
-f_to_fit.SetParameter(2, sigma_guess)
-f_to_fit.SetParLimits(2,*sigma_bounds)
-f_to_fit.SetParName(2, 'sigma')
-f_to_fit.SetNpx(3000)
-# for i in range(12):
-fit_res = proton_spectrum.Fit(f_to_fit, "LR")
-proton_spectrum.Draw()
+        f_to_fit.SetParameter(2*i+4, peak_location_guesses[i])
+        f_to_fit.SetParLimits(2*i+4,peak_location_guesses[i] - peak_location_wiggle,peak_location_guesses[i] + peak_location_wiggle)
+        f_to_fit.SetParName(2*i+4, 'mu_%d'%i)
 
-def fit_single_peak(energy_guess, energy_wiggle, )
+    f_to_fit.SetParameter(2, sigma_guess)
+    f_to_fit.SetParLimits(2,*sigma_bounds)
+    f_to_fit.SetParName(2, 'sigma')
+    f_to_fit.SetNpx(3000)
+    # for i in range(12):
+    fit_res = proton_spectrum.Fit(f_to_fit, "LR")
+    proton_spectrum.Draw()
+
+def fit_single_peak(energy_guess, energy_wiggle, energy_window):
+    function_string = '[0] + [1]*x + [3]*exp(-0.5*((x-[4])/[2])^2)/([2] *sqrt(2*pi))*%f'%proton_spectrum.GetBinWidth(0)
+    f_to_fit = ROOT.TF1('to_fit', function_string, energy_guess-energy_window, energy_guess+energy_window)
+
+    f_to_fit.SetParameter(3, 100) #magnitude
+    f_to_fit.SetParLimits(3,0,np.inf)
+    f_to_fit.SetParName(3, 'A')
+
+    f_to_fit.SetParameter(4, energy_guess)
+    f_to_fit.SetParLimits(4,energy_guess - energy_wiggle,energy_guess+energy_wiggle)
+    f_to_fit.SetParName(4, 'mu')
+
+    f_to_fit.SetParameter(2, 0.05)
+    f_to_fit.SetParLimits(2,0.005, 0.5)
+    f_to_fit.SetParName(2, 'sigma')
+    f_to_fit.SetNpx(3000)
+
+    f_to_fit.SetNpx(3000)
+    # for i in range(12):
+    fit_res = proton_spectrum.Fit(f_to_fit, "LR")
+    proton_spectrum.Draw()
+    return fit_res

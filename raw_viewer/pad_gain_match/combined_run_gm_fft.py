@@ -59,7 +59,7 @@ veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)&
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])
-freqs_to_use = 6
+freqs_to_use = 12
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
 
@@ -319,7 +319,7 @@ gm_ic3 = apply_gm_result(res3)
 import ROOT
 c1 = ROOT.TCanvas()
 c1.cd()
-emin, emax = 6.15,6.9
+emin, emax = 6.15,6.95
 energy_hist = ROOT.TH1D("h1", "h1", 100,  emin, emax)
 gm2_ic = apply_gm_result(res3)
 energy_hist.Fill(gm_ic3[veto_mask])

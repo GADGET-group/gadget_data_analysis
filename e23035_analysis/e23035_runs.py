@@ -91,7 +91,7 @@ def get_veto_mask(get_run):
 
 def get_pad_gains(get_run):
     #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft14_res3.pkl'
     #return np.ones(1024)*5.47e-6
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
