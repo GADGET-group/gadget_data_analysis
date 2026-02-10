@@ -21,50 +21,25 @@ from e23035_analysis import e23035_runs
 
 get_runs = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
 get_runs = get_runs[(get_runs != 298) & (get_runs != 297)] #TODO: need to merge these runs!!!
+get_runs = range(136,151)
 tpc_energy = e23035_runs.get_energy_MeV(get_runs)
 angles = process_runs.get_angle('e23035', get_runs)
+
 proton_mask = e23035_runs.get_proton_mask(get_runs)#&(np.degrees(angles)>15)
 n_protons = len(tpc_energy[proton_mask])
 print('total protons: ', n_protons)
 proton_spectrum = ROOT.TH1D('proton_spectrum', 'proton spectrum', 3000, 0.5, 3.5)
 proton_spectrum.FillN(n_protons, tpc_energy[proton_mask], np.ones(n_protons, dtype='float64'))
 
-if False:
-    proton_spectrum = ROOT.TH1D('proton_spectrum', 'proton spectrum', 3000, 0.5, 3.5)
-    proton_spectrum.FillN(n_protons, tpc_energy[proton_mask], np.ones(n_protons, dtype='float64'))
+alpha_mask = e23035_runs.get_alpha_mask(get_runs)#&(np.degrees(angles)>15)
+n_alphas = len(tpc_energy[alpha_mask])
+print('total alphas: ', n_alphas)
+alpha_spectrum = ROOT.TH1D('alpha_spectrum', 'alpha spectrum', 350, 2, 9)
+alpha_spectrum.FillN(n_alphas, tpc_energy[alpha_mask], np.ones(n_alphas, dtype='float64'))
 
-    peak_location_guesses = [0.913,1.063,1.1264,1.1331,1.1376,1.1778,1.817,1.857]#,2025,2089,2182,2197,2250,2410,2455]#825, 910, 1054]#, 1183, 1262, 1376, 1792, 2060, 2157, 2429]
-    sigma_guess = 0.100
-    sigma_bounds = (.005,0.50)
-    magnitude_guess = 100
-    fit_range = (0.890,1.900)#(700, 2600)
-    peak_location_wiggle = 0.030
 
-    function_string = '[0] + [1]*x'
-    for i in range(len(peak_location_guesses)):
-        function_string += ' + [%d]*exp(-0.5*((x-[%d])/[2])^2)/([2] *sqrt(2*pi))*%f'%(2*i+3, 2*i+4, proton_spectrum.GetBinWidth(0))
-    #use [2] for sigma
-    f_to_fit = ROOT.TF1('to_fit', function_string, *fit_range)
-    f_to_fit.SetParLimits(0, 0, np.inf)
-    for i in range(len(peak_location_guesses)):
-        f_to_fit.SetParameter(2*i+3, magnitude_guess) #magnitude
-        f_to_fit.SetParLimits(2*i+3,0,np.inf)
-        f_to_fit.SetParName(2*i+3, 'A_%d'%i)
-
-        f_to_fit.SetParameter(2*i+4, peak_location_guesses[i])
-        f_to_fit.SetParLimits(2*i+4,peak_location_guesses[i] - peak_location_wiggle,peak_location_guesses[i] + peak_location_wiggle)
-        f_to_fit.SetParName(2*i+4, 'mu_%d'%i)
-
-    f_to_fit.SetParameter(2, sigma_guess)
-    f_to_fit.SetParLimits(2,*sigma_bounds)
-    f_to_fit.SetParName(2, 'sigma')
-    f_to_fit.SetNpx(3000)
-    # for i in range(12):
-    fit_res = proton_spectrum.Fit(f_to_fit, "LR")
-    proton_spectrum.Draw()
-
-def fit_single_peak(energy_guess, energy_wiggle, energy_window):
-    function_string = '[0] + [1]*x + [3]*exp(-0.5*((x-[4])/[2])^2)/([2] *sqrt(2*pi))*%f'%proton_spectrum.GetBinWidth(0)
+def fit_single_peak(spectrum, energy_guess, energy_wiggle, energy_window):
+    function_string = '[0] + [1]*x + [3]*exp(-0.5*((x-[4])/[2])^2)/([2] *sqrt(2*pi))*%f'%spectrum.GetBinWidth(0)
     f_to_fit = ROOT.TF1('to_fit', function_string, energy_guess-energy_window, energy_guess+energy_window)
 
     f_to_fit.SetParameter(3, 100) #magnitude
@@ -83,15 +58,15 @@ def fit_single_peak(energy_guess, energy_wiggle, energy_window):
     f_to_fit.SetNpx(3000)
     done = False
     while not done:
-        fit_res = proton_spectrum.Fit(f_to_fit, "LRS")
+        fit_res = spectrum.Fit(f_to_fit, "LRS")
         done = fit_res.IsValid()
-    proton_spectrum.Draw()
+    spectrum.Draw()
     return fit_res
 
-def fit_multiple_peaks(energy_guesses, energy_wiggle, energy_window):
+def fit_multiple_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
     function_string = '[0] + [1]*x'
     for i in range(len(energy_guesses)):
-        function_string += ' + [%d]*exp(-0.5*((x-[%d])/[2])^2)/([2] *sqrt(2*pi))*%f'%(2*i+3, 2*i+4, proton_spectrum.GetBinWidth(0))
+        function_string += ' + [%d]*exp(-0.5*((x-[%d])/[2])^2)/([2] *sqrt(2*pi))*%f'%(2*i+3, 2*i+4, spectrum.GetBinWidth(0))
     #use [2] for sigma
     f_to_fit = ROOT.TF1('to_fit', function_string, energy_guesses[0] - energy_window, energy_guesses[-1]+energy_window)
     f_to_fit.SetParLimits(0, 0, np.inf)
@@ -112,7 +87,7 @@ def fit_multiple_peaks(energy_guesses, energy_wiggle, energy_window):
     f_to_fit.SetNpx(3000)
     done = False
     while not done:
-        fit_res = proton_spectrum.Fit(f_to_fit, "LRS")
+        fit_res = spectrum.Fit(f_to_fit, "LRS")
         done = fit_res.IsValid()
-    proton_spectrum.Draw()
+    spectrum.Draw()
     return fit_res

@@ -28,10 +28,10 @@ from scipy import fftpack
 
 from raw_viewer import process_runs
 
-gpu_device = 1
-load_result1 = False
-load_result2 = False
-load_result3 = False
+gpu_device = 2
+load_result1 = True
+load_result2 = True
+load_result3 = True
 
 
 runs = (49,)#(61,62,63)#(20,)#(20,)#(38,49)#17,20,21,38,49,60,
@@ -59,7 +59,7 @@ veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)&
 run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
 
 h5 = process_runs.get_h5_file(exp, runs[0])
-freqs_to_use = 12
+freqs_to_use = 30
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
 
