@@ -18,7 +18,7 @@ from e23035_analysis import e23035_runs
 experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
-    run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+    run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
     #run_range = [145]
 #     exclude_runs = [1,9, 19, 73, 113,

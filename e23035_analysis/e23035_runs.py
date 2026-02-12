@@ -37,6 +37,7 @@ def get_DDAS_run_number(get_run_number):
         return np.array([get_DDAS_run_number(i) for i in get_run_number])
     return run_df['DDAS'][run_df['GET']==get_run_number].iloc[0]
 
+
 def get_veto_mask(get_run):
     if is_iterable(get_run):
         return np.concatenate([get_veto_mask(i) for i in get_run])
