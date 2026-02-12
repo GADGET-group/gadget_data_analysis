@@ -19,6 +19,10 @@ import ROOT
 import numpy as np
 import uuid
 
+import ROOT
+import numpy as np
+import uuid
+
 def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window): 
     # 1. Unique ID
     unique_id = uuid.uuid4().hex[:8]
@@ -27,12 +31,28 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
     canvas_name = f"c_fit_{unique_id}"
     canvas = ROOT.TCanvas(canvas_name, f"Fit {energy_guesses[0]:.1f} keV", 800, 600)
 
-    # 3. Clone and Zoom (Data Histogram)
-    spectrum_to_plot = spectrum.Clone(f"spectrum_zoom_{unique_id}")
+    # 3. Create Subset Histogram (The "Cut")
+    #    We calculate the exact range and binning to match the original
     e_low = energy_guesses[0] - energy_window
     e_high = energy_guesses[-1] + energy_window
-    spectrum_to_plot.GetXaxis().SetRangeUser(e_low, e_high)
-    spectrum_to_plot.SetTitle("Data vs Fit")
+    
+    bin_width = spectrum.GetBinWidth(1)
+    # Calculate number of bins in this window (rounding safe)
+    n_bins_new = int((e_high - e_low) / bin_width + 0.5)
+    
+    # Create the fresh histogram
+    spectrum_to_plot = ROOT.TH1D(f"sub_{unique_id}", "Data vs Fit", n_bins_new, e_low, e_high)
+    
+    # Copy data from the original spectrum to the subset
+    for i in range(1, n_bins_new + 1):
+        center = spectrum_to_plot.GetBinCenter(i)
+        source_bin = spectrum.FindBin(center)
+        
+        content = spectrum.GetBinContent(source_bin)
+        error = spectrum.GetBinError(source_bin)
+        
+        spectrum_to_plot.SetBinContent(i, content)
+        spectrum_to_plot.SetBinError(i, error)
 
     # 4. String Construction
     peaks_string = ''
@@ -41,7 +61,7 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
         if i > 0: peaks_string += ' + '
         sigma_string = '(0.011107*[%d] + 0.008813049)' % (2*i+1) 
         peaks_string += '[%d]*exp(-0.5*((x-[%d])/%s)^2)/(%s *sqrt(2*pi))*%f' % (
-            2*i, 2*i+1, sigma_string, sigma_string, spectrum.GetBinWidth(1)
+            2*i, 2*i+1, sigma_string, sigma_string, bin_width
         )
     
     bg_idx_1 = 2 * n_peaks
@@ -64,54 +84,38 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
 
     f_to_fit.SetNpx(1000) 
 
-    # 6. Perform Fit 
-    fit_res = spectrum_to_plot.Fit(f_to_fit, "S0Q") 
+    # 6. Perform Fit
+    # "S": Return Result, "0": Do not draw, "Q": Quiet
+    fit_res = spectrum_to_plot.Fit(f_to_fit, "S0") 
     if not fit_res.IsValid():
-        fit_res = spectrum_to_plot.Fit(f_to_fit, "S0Q")
+        fit_res = spectrum_to_plot.Fit(f_to_fit, "S0")
 
-    # --- NEW: Convert Function to Histogram for Residual Plot ---
-    # We clone the data histogram structure to ensure bins match exactly
+    # --- Convert Function to Histogram for Residual Plot ---
     h_fit = spectrum_to_plot.Clone(f"h_fit_{unique_id}")
-    h_fit.Reset() # Clear it
-    
-    # Fill h_fit with the function values
+    h_fit.Reset() 
     for i in range(1, h_fit.GetNbinsX() + 1):
-        bin_center = h_fit.GetBinCenter(i)
-        val = f_to_fit.Eval(bin_center)
+        val = f_to_fit.Eval(h_fit.GetBinCenter(i))
         h_fit.SetBinContent(i, val)
-        h_fit.SetBinError(i, 0) # The fit curve itself has no statistical error in this view
-    
-    # Style the "Fit" histogram to look like a red line
     h_fit.SetLineColor(ROOT.kRed)
     h_fit.SetLineWidth(2)
 
-    # 7. Draw TRatioPlot with "diff" option
+    # 7. Draw TRatioPlot
     canvas.cd()
-    
-    # "diff" calculates (h1 - h2). 
-    # We pass (spectrum, h_fit) so we get (Data - Fit).
+    # (Data, Fit) -> Residuals = Data - Fit
     rp = ROOT.TRatioPlot(spectrum_to_plot, h_fit, "diff")
     
-    rp.SetH1DrawOpt("E")      # Draw Data as Points w/ Errors
-    rp.SetH2DrawOpt("L")      # Draw Fit as Line
-    rp.SetGraphDrawOpt("P")   # Draw Residuals as Points
+    rp.SetH1DrawOpt("E")      # Data: Points w/ Error
+    rp.SetH2DrawOpt("L")      # Fit: Line
+    rp.SetGraphDrawOpt("P")   # Residuals: Points
     
     rp.Draw()
 
-    # --- Style the Residual Axis ---
-    # Centering around 0 usually looks best for residuals
-    rp.GetLowerRefYaxis().SetTitle("Residuals (Data - Fit)")
+    # Style Residuals
+    rp.GetLowerRefYaxis().SetTitle("Resid. (Data-Fit)")
     rp.GetLowerRefGraph().SetMarkerStyle(20)
     rp.GetLowerRefGraph().SetMarkerSize(0.6)
-    
-    # Optional: Draw a dashed line at 0
-    ref_line = ROOT.TLine()
-    ref_line.SetLineStyle(2)
-    # We need to draw the line after updating the canvas coordinates,
-    # but TRatioPlot manages the pads tricky-ly. 
-    # Often simpler to just grid the lower pad:
     rp.GetLowerPad().SetGridy()
-
+    
     canvas.Update()
 
     # 8. Return
@@ -124,7 +128,6 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
     peaks = ROOT.TF1(pk_name, peaks_string, e_low, e_high)
     peaks.SetParameters(fit_params[:-2])
     
-    # Return h_fit as well!
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_multiple_peaks_sigma_free(spectrum, energy_guesses, energy_wiggle, energy_window):
@@ -156,6 +159,7 @@ def fit_multiple_peaks_sigma_free(spectrum, energy_guesses, energy_wiggle, energ
     #spectrum.Draw()
     rp = ROOT.TRatioPlot(spectrum)
     rp.Draw()
+    fit_res.Print()
     return fit_res, rp
 
 def get_residuals(histogram, function:ROOT.TF1, residual_hist_name=None, plot=True):

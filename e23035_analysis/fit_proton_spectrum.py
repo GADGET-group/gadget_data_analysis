@@ -17,7 +17,7 @@ angles = process_runs.get_angle('e23035', get_runs)
 proton_mask = e23035_runs.get_proton_mask(get_runs)#&(np.degrees(angles)>15)
 n_protons = len(tpc_energy[proton_mask])
 print('total protons: ', n_protons)
-proton_spectrum = ROOT.TH1D('proton_spectrum', 'proton spectrum', 3000, 0.5, 3.5)
+proton_spectrum = ROOT.TH1D('proton_spectrum', 'proton spectrum', 1000, 0.5, 3.5)#3000
 proton_spectrum.FillN(n_protons, tpc_energy[proton_mask], np.ones(n_protons, dtype='float64'))
 
 alpha_mask = e23035_runs.get_alpha_mask(get_runs)#&(np.degrees(angles)>15)
