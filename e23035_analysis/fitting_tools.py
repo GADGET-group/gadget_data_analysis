@@ -33,8 +33,8 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
 
     # 3. Create Subset Histogram (The "Cut")
     #    We calculate the exact range and binning to match the original
-    e_low = energy_guesses[0] - energy_window
-    e_high = energy_guesses[-1] + energy_window
+    e_low = energy_window[0]
+    e_high = energy_window[1]
     
     bin_width = spectrum.GetBinWidth(1)
     # Calculate number of bins in this window (rounding safe)
@@ -72,7 +72,6 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
     # 5. Fit Function Setup
     func_name = f'to_fit_{unique_id}'
     f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high)
-    f_to_fit.SetParLimits(0, 0, np.inf)
     
     for i in range(n_peaks):
         f_to_fit.SetParameter(2*i, 100) 
@@ -135,7 +134,7 @@ def fit_multiple_peaks_sigma_free(spectrum, energy_guesses, energy_wiggle, energ
     for i in range(len(energy_guesses)):
         function_string += ' + [%d]*exp(-0.5*((x-[%d])/[2])^2)/([2] *sqrt(2*pi))*%f'%(2*i+3, 2*i+4, spectrum.GetBinWidth(0))
     #use [2] for sigma
-    f_to_fit = ROOT.TF1('to_fit', function_string, energy_guesses[0] - energy_window, energy_guesses[-1]+energy_window)
+    f_to_fit = ROOT.TF1('to_fit', function_string, energy_window[0], energy_window[1])
     f_to_fit.SetParLimits(0, 0, np.inf)
     for i in range(len(energy_guesses)):
         f_to_fit.SetParameter(2*i+3, 100) #magnitude

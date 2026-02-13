@@ -26,4 +26,4 @@ print('total alphas: ', n_alphas)
 alpha_spectrum = ROOT.TH1D('alpha_spectrum', 'alpha spectrum', 350, 2, 9)
 alpha_spectrum.FillN(n_alphas, tpc_energy[alpha_mask], np.ones(n_alphas, dtype='float64'))
 
-peaks_to_fit = [[0.913], [1.063], ]
+peaks_to_fit = [[0.913], [1.063], [0.913, 1.063, 1.1, 1.264, 1.331,1.376]]
