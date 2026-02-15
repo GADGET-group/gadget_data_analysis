@@ -19,8 +19,9 @@ from track_fitting import srim_interface, build_sim
 experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
-    if False:
+    if True:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+        run_range = range(275, 279)
     else:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
@@ -118,7 +119,7 @@ if load_ddas:
 
 print('starting plotting')
 plt.figure()
-plt_mask = veto_mask&(lengths>1)&(lengths<250)&(energy<9)
+plt_mask = veto_mask&(lengths>1)&(lengths<250)&(energy<10)
 plt.title('runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()

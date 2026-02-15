@@ -141,10 +141,16 @@ def get_proton_mask(get_run):
     lower_band, upper_band = get_proton_mask_min_max_range(get_run, energy)
     return veto_mask & (lengths < upper_band) & (lengths > lower_band)
 
-    #old
-    polygon = np.array([(3.78,215.8),(0.56,25.3),(0.56,11.8),(1.56,17.4),(3.01,56.1),(3.95,187.4)])
-    points = np.vstack([energy, lengths]).T
-    return veto_mask&points_in_poly(points, polygon)
+def get_alpha_mask_min_max_range(get_run, energies:np.ndarray):
+    if not is_iterable(get_run):
+        get_run = [get_run]
+    stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('4He', 'P10')
+    alpha_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run[0]))
+    expected_alpha_length = alpha_srim_table.get_stopping_distance(energies)
+    lower_band = np.zeros(len(energies))
+    lower_proton, upper_proton = get_proton_mask_min_max_range(get_run, energies)
+    upper_band = np.min([lower_proton-10, expected_alpha_length + 30], axis=0)
+    return lower_band, upper_band
 
 def get_alpha_mask(get_run):
     if not is_iterable(get_run):
@@ -152,6 +158,6 @@ def get_alpha_mask(get_run):
     lengths = get_length_mm(get_run)
     energy = get_energy_MeV(get_run)
     veto_mask = get_veto_mask(get_run)
+    lower_band, upper_band = get_alpha_mask_min_max_range(get_run, energy)
     
-    lower_proton, upper_proton = get_proton_mask_min_max_range(get_run, energy)
-    return veto_mask & (lengths < lower_proton)
+    return veto_mask & (lengths > lower_band) & (lengths < upper_band)
