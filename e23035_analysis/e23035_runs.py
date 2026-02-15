@@ -112,17 +112,34 @@ def get_energy_MeV(get_run):
         to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(i)))
     return np.concatenate(to_return)
 
+def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
+    if not is_iterable(get_run):
+        get_run = [get_run]
+    stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
+    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run[0]))
+    expected_proton_length = proton_srim_table.get_stopping_distance(energies)
+    lower_band = expected_proton_length - 37
+    upper_band = expected_proton_length + 20
+
+    x1, x2 = 0.81, 2
+    y1 = proton_srim_table.get_stopping_distance(x1)
+    y2 = proton_srim_table.get_stopping_distance(x2)-37
+    lower_band[energies<x2] = y1 + (y2-y1)/(x2-x1)*(energies[energies<x2]-x1)
+
+    xa, xb = 0.4, 1
+    ya = y1 + (y2-y1)/(x2-x1)*(xa-x1)
+    yb = proton_srim_table.get_stopping_distance(xb)+20
+    upper_band[energies<xb] = ya + (yb-ya)/(xb-xa)*(energies[energies<xb]-xa)
+    return lower_band, upper_band
+
 def get_proton_mask(get_run):
     if not is_iterable(get_run):
         get_run = [get_run]
     lengths = get_length_mm(get_run)
     energy = get_energy_MeV(get_run)
     veto_mask = get_veto_mask(get_run)
-    
-    stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
-    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run))
-    expected_proton_length = proton_srim_table.get_stopping_distance(energy)
-    return veto_mask & (lengths < expected_proton_length+20) & (lengths > expected_proton_length-37)
+    lower_band, upper_band = get_proton_mask_min_max_range(get_run, energy)
+    return veto_mask & (lengths < upper_band) & (lengths > lower_band)
 
     #old
     polygon = np.array([(3.78,215.8),(0.56,25.3),(0.56,11.8),(1.56,17.4),(3.01,56.1),(3.95,187.4)])
@@ -136,7 +153,5 @@ def get_alpha_mask(get_run):
     energy = get_energy_MeV(get_run)
     veto_mask = get_veto_mask(get_run)
     
-    stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
-    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run))
-    expected_proton_length = proton_srim_table.get_stopping_distance(energy)
-    return veto_mask & (lengths < expected_proton_length-37 - 30)
+    lower_proton, upper_proton = get_proton_mask_min_max_range(get_run, energy)
+    return veto_mask & (lengths < lower_proton)

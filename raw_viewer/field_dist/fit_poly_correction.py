@@ -16,7 +16,7 @@ from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'
 #get_runs = range(145, 150+1)
-get_runs = [286]
+get_runs = [299, 300, 301]
 ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
 
 max_index = -1
@@ -57,7 +57,7 @@ if False:
 #event_mask = e23035_runs.get_proton_mask(get_runs)&(energy_MeV>2.2)
 veto_mask = e23035_runs.get_veto_mask(get_runs)
 expected_proton_length = proton_srim_table.get_stopping_distance(energy_MeV)
-event_mask = veto_mask & (uncorrected_lengths < expected_proton_length+15) & (uncorrected_lengths > expected_proton_length-37) & (energy_MeV>0.5)
+event_mask = veto_mask & (uncorrected_lengths < expected_proton_length+15) & (uncorrected_lengths > expected_proton_length-20) & (energy_MeV>1.5)
 
 times_since_beam_off = times_since_beam_off[:max_index]
 energy_MeV = energy_MeV[:max_index]
@@ -162,7 +162,7 @@ if not mode_args[0]:
     poly_correction2.convert_to_cylindrical_coords()
 def callback(res):
     print(res, obj_func(res, *mode_args))
-save_fname = 'run269_field_dist.pkl'
+save_fname = 'run299_300_301_field_dist.pkl'
 if True:
     res = optimize.minimize(obj_func, get_init_guess(*mode_args), args=mode_args, callback=callback)
     with open(save_fname, 'wb') as f:

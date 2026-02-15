@@ -14,11 +14,15 @@ from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
+from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
-    run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+    if False:
+        run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+    else:
+        run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
     #run_range = [145]
 #     exclude_runs = [1,9, 19, 73, 113,
@@ -150,7 +154,16 @@ if experiment == 'e23035':
     plt.figure()
     plt.title('protons selected in RVE, runs: '+str(get_runs))
     plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-    plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, color='red')
+    #plt.scatter(energy[proton_mask], lengths[proton_mask], marker='.', alpha=0.5, color='red')
+    stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
+    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_runs[0]))
+    es_to_plot_ranges = np.linspace(0, 3.5, 1000)
+    expected_proton_length = proton_srim_table.get_stopping_distance(es_to_plot_ranges)
+    lower_proton_band, upper_proton_band = e23035_runs.get_proton_mask_min_max_range(get_runs, es_to_plot_ranges)
+    plt.plot(es_to_plot_ranges, expected_proton_length, 'r')
+    plt.plot(es_to_plot_ranges, lower_proton_band, 'k')
+    plt.plot(es_to_plot_ranges, upper_proton_band, 'k')
+    
     plt.colorbar()
     print(str(get_runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
