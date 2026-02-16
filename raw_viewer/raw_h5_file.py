@@ -327,8 +327,8 @@ class raw_h5_file:
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            slope, offset = np.polyfit(xs, ys, 1)
-            #offset = np.mean(ys)
+            #slope, offset = np.polyfit(xs, ys, 1)
+            offset = np.mean(ys)
             #baseline will be the trace except in the peak region,
             #so that everything away from the peak is zero'd out
             baseline = np.array(trace, copy=True)
@@ -336,7 +336,7 @@ class raw_h5_file:
             #     baseline[i] = slope*i + offset
             #baseline[np.arange(peak_start, peak_end+1)] = offset
             x_peak = np.arange(peak_start, peak_end)
-            baseline[x_peak] = offset + slope*x_peak
+            baseline[x_peak] = offset# + slope*x_peak
             return baseline
         elif self.background_subtract_mode == 'smart2':
             '''

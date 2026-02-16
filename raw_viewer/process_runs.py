@@ -25,6 +25,8 @@ def get_save_path(experiment):
             save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
         elif experiment == 'e23035_prep_vault':
             save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
+        elif experiment == 'e25058_prep_vault':
+            save_path = '/egr/research-tpc/shared/experiments/e25058/processed/proc_pkl'
         else:
             save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
         return save_path
@@ -51,6 +53,8 @@ def get_h5_path(experiment, run_number):
         return '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
     elif experiment == 'e23035_prep_vault':
         return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
+    elif experiment == 'e25058':
+        return '/egr/research-tpc/shared/experiments/e25058/h5/run_%04d.h5'%run_number
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
