@@ -19,9 +19,9 @@ from track_fitting import srim_interface, build_sim
 experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
-    if True:
+    if False:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-        run_range = range(275, 279)
+        #run_range = range(275, 279)
     else:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
@@ -310,3 +310,22 @@ def show_event(run, evt):
     h5file.show_2d_projection(evt, block=False)
     h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
     h5file.plot_traces(evt, block=False)
+
+
+plt.figure()
+proton_mask = proton_mask & (energy<3.5)
+plt.title('protons')
+plt.hist2d(energy[proton_mask],evt_runs[proton_mask],bins=(300,np.arange(min(get_runs)-0.5, max(get_runs)+0.5)),  norm=matplotlib.colors.LogNorm())
+plt.xlabel('energy (MeV)')
+plt.ylabel('run number')
+plt.colorbar()
+plt.show(block=False)
+
+plt.figure()
+alpha_mask = alpha_mask & (energy<10)
+plt.title('alphas')
+plt.hist2d(energy[alpha_mask],evt_runs[alpha_mask],bins=(50,np.arange(min(get_runs)-0.5, max(get_runs)+0.5)),  norm=matplotlib.colors.LogNorm())
+plt.xlabel('energy (MeV)')
+plt.ylabel('run number')
+plt.colorbar()
+plt.show(block=False)
