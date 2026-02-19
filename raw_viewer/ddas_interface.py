@@ -257,7 +257,7 @@ def make_merged_root_file(ddas_run):
     root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
 
     log_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merge.log'%ddas_run)
-    output_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
+    output_path = get_merged_root_file_path(ddas_run)
     with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
         git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
@@ -267,15 +267,18 @@ def make_merged_root_file(ddas_run):
         log_file.write('git status: %s\n'%git_status)
         log_file.write('git diff: %s\n'%git_diff)
 
-        get_runs = np.sort(e23035_runs.run_df['GET'][e23035_runs.run_df['DDAS']==ddas_run])
-        log_file.write('found corresponding GET runs: %s\n'%str(get_runs))
-            
-        tpc_energy_MeV = e23035_runs.get_energy_MeV(get_runs)
-        proton_mask = e23035_runs.get_proton_mask(get_runs)
-        alpha_mask = e23035_runs.get_alpha_mask(get_runs)
-        track_lengths = e23035_runs.get_length_mm(get_runs)
-        get_timestamps = process_runs.get_quantity('timestamps', 'e23035', get_runs)
-        veto_mask = e23035_runs.get_veto_mask(get_runs)
+        get_runs = np.sort(e23035_runs.run_df['GET'][(e23035_runs.run_df['DDAS']==ddas_run) & np.isfinite(e23035_runs.run_df['GET'])] )
+        if len(get_runs)>0:
+            log_file.write('found corresponding GET runs: %s\n'%str(get_runs))
+            tpc_energy_MeV = e23035_runs.get_energy_MeV(get_runs)
+            proton_mask = e23035_runs.get_proton_mask(get_runs)
+            alpha_mask = e23035_runs.get_alpha_mask(get_runs)
+            track_lengths = e23035_runs.get_length_mm(get_runs)
+            get_timestamps = process_runs.get_quantity('timestamps', 'e23035', get_runs)
+            veto_mask = e23035_runs.get_veto_mask(get_runs)
+        else:
+            log_file.write('no corresponding GET runs found \n')
+            get_timestamps = []
 
         ddas_ch_map_path = 'e23035_analysis/channel_map.csv'
         log_file.write('loading DDAS channel map from %s\n'%ddas_ch_map_path)
@@ -283,6 +286,10 @@ def make_merged_root_file(ddas_run):
         ch_indexes = np.array(chmap[:,0], dtype=int)
         ch_names = chmap[:,1]
         slopes, offsets = np.array(chmap[:,2], dtype=float), np.array(chmap[:,3], dtype=float)
+
+        log_file.write('ch_names:')
+        log_file.write(str(ch_names))
+        log_file.write('\n slopes: %s\n'%str(slopes))
         
         log_file.write('Opening ROOT file\n')
         in_tree = input_file.Get("tree")
@@ -324,14 +331,16 @@ def make_merged_root_file(ddas_run):
             #copy over ddas values with calibration factors applied
             in_tree.GetEntry(ddas_index)
             for i in range(len(ch_names)):
-                branch_mvals[i] = multiplicities[ch_indexes[i]]
-                if branch_mvals[i] > 0:
-                    branch_evals[i] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
+                branch_mvals[i][0] = multiplicities[ch_indexes[i]]
+                if branch_mvals[i][0] > 0:
+                    branch_evals[i][0] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
                     #print(branch_evals[i])
-                    branch_tvals[i] = times[ch_indexes[i]]/1e9 #store all times in seconds
+                    branch_tvals[i][0] = times[ch_indexes[i]]/1e9 #store all times in seconds
                 else:
-                    branch_evals[i] = 0
-                    branch_tvals[i] = np.nan
+                    branch_evals[i][0] = 0
+                    branch_tvals[i][0] = np.nan
+                # if ch_names[i]=='msx100' and branch_mvals[i] > 0:
+                #     print(branch_evals[i], branch_mvals[i], branch_tvals[i])
 
 
             record_get_event = False
