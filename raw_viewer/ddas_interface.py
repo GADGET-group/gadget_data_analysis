@@ -391,14 +391,26 @@ def get_pid_cut(ddas_run, species):
     name = 'run%d_%s_cut'%(ddas_run, species)
     if name in pid_cuts:
         return pid_cuts[name]
-    if ddas_run == 262:
-        if species == '60Ga':
-            points = [(-6.24497e-7,6759.02),(-6.2187e-7,6759.02),(-6.2187e-7,6578.56),(-6.24555e-7,6545.71)]
-        elif species == '59Zn':
-            points=[(-6.22727e-7,6451.17),(-6.20798e-7,6631.63),(-6.18756e-7,6514.86),(-6.189e-7,6260),(-6.2077e-7,6090),(-6.22642e-7,6249)]
+    
+    if species == '60Ga':
+        points = [(-6.22262e-7,6715.99),(-6.20756e-7,6829.88),(-6.19298e-7,6768.19),(-6.19465e-7,6635.32),(-6.2066e-7,6540.42),(-6.21903e-7,6583.12)]
+    elif species == '59Zn':
+        points=[(-6.20086e-7,6417.04),(-6.18461e-7,6554.65),(-6.16429e-7,6438.47),(-6.16429e-7,6307.9),(-6.18556e-7,6208.25),(-6.19943e-7,6269.94)]
     points.append(points[0])
+    if ddas_run == 113:
+        timing_offset = 0
+    elif ddas_run == 177 or ddas_run == 240:
+        timing_offset = (-6.24407e-7 + 6.22262e-7)
+    elif ddas_run == 262:
+        timing_offset = -6.2222e-7 + 6.20086e-7
+    # if ddas_run == 262:
+    #     if species == '60Ga':
+    #         points = [(-6.24497e-7,6759.02),(-6.2187e-7,6759.02),(-6.2187e-7,6578.56),(-6.24555e-7,6545.71)]
+    #     elif species == '59Zn':
+    #         points=[(-6.22727e-7,6451.17),(-6.20798e-7,6631.63),(-6.18756e-7,6514.86),(-6.189e-7,6260),(-6.2077e-7,6090),(-6.22642e-7,6249)]
+    # elif ddas_run == 113:
     points_arr = np.array(points, dtype=np.float64)
-    xs = np.ascontiguousarray(points_arr[:,0], dtype=np.float64)
+    xs = np.ascontiguousarray(points_arr[:,0], dtype=np.float64) + timing_offset
     ys = np.ascontiguousarray(points_arr[:,1], dtype=np.float64)
     to_return =  ROOT.TCutG(name, len(xs), xs, ys)
     to_return.SetVarX("cross_scint_b2_t - db_5_scint_t")
