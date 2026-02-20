@@ -430,6 +430,18 @@ def get_counts_in_pid_cut(ddas_run, species):
     cut_name = 'run%d_%s_cut'%(ddas_run, species)
     return current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1 && %s'%cut_name, 'goff')
 
+rdataframes = {}
+def get_cross_scint_counts(ddas_run):
+    global rdataframes
+    if ddas_run not in rdataframes:
+        rdataframes[ddas_run] = ROOT.RDataFrame('merged_data', get_merged_root_file_path(ddas_run))
+    return rdataframes[ddas_run].Sum('cross_scint_b2_m').GetValue()
+
+def get_cross_scint_counts_during_get_run(get_run):
+    pass #TODO
+
+def get_ddas_run_duration(ddas_run):
+    pass#TODO
 
 
 
