@@ -385,6 +385,53 @@ def make_merged_root_file(ddas_run):
 
         output_file.WriteObject(out_tree, "merged_data")
 
+pid_cuts = {}
+def get_pid_cut(ddas_run, species):
+    global pid_cuts
+    name = 'run%d_%s_cut'%(ddas_run, species)
+    if name in pid_cuts:
+        return pid_cuts[name]
+    if ddas_run == 262:
+        if species == '60Ga':
+            points = [(-6.24497e-7,6759.02),(-6.2187e-7,6759.02),(-6.2187e-7,6578.56),(-6.24555e-7,6545.71)]
+        elif species == '59Zn':
+            points=[(-6.22727e-7,6451.17),(-6.20798e-7,6631.63),(-6.18756e-7,6514.86),(-6.189e-7,6260),(-6.2077e-7,6090),(-6.22642e-7,6249)]
+    points.append(points[0])
+    points_arr = np.array(points, dtype=np.float64)
+    xs = np.ascontiguousarray(points_arr[:,0], dtype=np.float64)
+    ys = np.ascontiguousarray(points_arr[:,1], dtype=np.float64)
+    to_return =  ROOT.TCutG(name, len(xs), xs, ys)
+    to_return.SetVarX("cross_scint_b2_t - db_5_scint_t")
+    to_return.SetVarY("msx100_e")
+    pid_cuts[name] = to_return
+    return to_return
+
+
+current_run, current_file, current_data = np.nan, None, None
+def show_pid(ddas_run):
+    global current_run
+    global current_file
+    global current_data
+    if current_run != ddas_run:
+        current_run = ddas_run
+        current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
+        current_data = current_file.Get('merged_data')
+    current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)>>(1000,-0.63e-6,-0.6e-6,1000,4000,8000)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1', 'colz')
+
+def get_counts_in_pid_cut(ddas_run, species):
+    global current_run
+    global current_file
+    global current_data
+    if current_run != ddas_run:
+        current_run = ddas_run
+        current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
+        current_data = current_file.Get('merged_data')
+    cut = get_pid_cut(ddas_run, species)
+    cut_name = 'run%d_%s_cut'%(ddas_run, species)
+    return current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1 && %s'%cut_name, 'goff')
+
+
+
 
 #code used to generate "channel_map.csv"
 # gamma_cal_table = np.genfromtxt('e23035_analysis/init_ge_cal.csv', delimiter=',', skip_header=1)
