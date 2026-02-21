@@ -15,19 +15,17 @@ def get_efficiency(implant_time, half_life, dead_time_start, dead_time_end,decay
     decay_constant = np.log(2)/half_life
     rate = 1
     def number_after(time, N0, R):
-
         return (N0 - R/decay_constant)*np.exp(-time*decay_constant) + R/decay_constant
-
-
-    stop_time = 1000*half_life
+    stop_time = 10000*half_life
     t = 0
     N = 0
-
     decays_measured = 0
+    total_implant_time = 0
     while t < stop_time:
         #implant_cycle
         N = number_after(implant_time, N, rate)
         t += implant_time
+        total_implant_time += implant_time
         #dead_time
         N = number_after(dead_time_start, N, 0)
         t += dead_time_start
@@ -39,7 +37,7 @@ def get_efficiency(implant_time, half_life, dead_time_start, dead_time_end,decay
         #dead_time
         N = number_after(dead_time_end, N, 0)
         t += dead_time_end
-    return decays_measured/(rate*stop_time)
+    return decays_measured/(rate*total_implant_time)
 
    
 
@@ -66,20 +64,17 @@ Mg21_half_life = 120e-3
 dead_time_start = 12e-3
 dead_time_end = 2e-3
  
+if False:
+    implant_time, decay_time = get_best_settings(Mg20_half_life, dead_time_start, dead_time_end)
+    print('optimum implant time and decay time = %f s, %f s'%(implant_time, decay_time))
+    print('efficiencies with optimum times')
+    print('61Ge efficiency = ', get_efficiency(implant_time, Ge61_half_life, dead_time_start, dead_time_end, decay_time))
+    print('Zn59 efficiency = ', get_efficiency(implant_time, Zn59_half_life, dead_time_start, dead_time_end, decay_time))
+    print('60Ga efficiency = ', get_efficiency(implant_time, Ga60_half_life, dead_time_start, dead_time_end, decay_time))
+    print('20Mg efficiency = ', get_efficiency(implant_time, Mg20_half_life, dead_time_start, dead_time_end, decay_time))
 
-implant_time, decay_time = get_best_settings(Mg20_half_life, dead_time_start, dead_time_end)
-
-print('optimum implant time and decay time = %f s, %f s'%(implant_time, decay_time))
-print('efficiencies with optimum times')
-print('61Ge efficiency = ', get_efficiency(implant_time, Ge61_half_life, dead_time_start, dead_time_end, decay_time))
-print('Zn59 efficiency = ', get_efficiency(implant_time, Zn59_half_life, dead_time_start, dead_time_end, decay_time))
-print('60Ga efficiency = ', get_efficiency(implant_time, Ga60_half_life, dead_time_start, dead_time_end, decay_time))
-print('20Mg efficiency = ', get_efficiency(implant_time, Mg20_half_life, dead_time_start, dead_time_end, decay_time))
-
-implant_time = 500e-3
+implant_time = 100e-3
 decay_time = implant_time
-
-implant_duty_cycle = 0.5
 
 ('60Ga efficiency = ', get_efficiency(implant_time, Ga60_half_life, dead_time_start, dead_time_end, decay_time))
 
@@ -89,10 +84,11 @@ print('Zn59 efficiency = ', get_efficiency(implant_time, Zn59_half_life, dead_ti
 print('60Ga efficiency = ', get_efficiency(implant_time, Ga60_half_life, dead_time_start, dead_time_end, decay_time))
 print('20Mg efficiency = ', get_efficiency(implant_time, Mg20_half_life, dead_time_start, dead_time_end, decay_time))
 
-decay_time = 300e-3
-half_life = Mg20_half_life
-implant_time = get_best_settings_fixed_decay_time(half_life, dead_time_start, dead_time_end, decay_time)
-print('optimum implant time for %f s decay time is %f s'%(decay_time, implant_time))
-print('efficiencies with these settings:')
+if False:
+    decay_time = 300e-3
+    half_life = Mg20_half_life
+    implant_time = get_best_settings_fixed_decay_time(half_life, dead_time_start, dead_time_end, decay_time)
+    print('optimum implant time for %f s decay time is %f s'%(decay_time, implant_time))
+    print('efficiencies with these settings:')
 
-print('20Mg efficiency = ', get_efficiency(implant_time, Mg20_half_life, dead_time_start, dead_time_end, decay_time))
+    print('20Mg efficiency = ', get_efficiency(implant_time, Mg20_half_life, dead_time_start, dead_time_end, decay_time))
