@@ -49,11 +49,12 @@ print('total alphas in 60Ga runs: ', n_alphas_Ga)
 alpha_spectrum_Ga = ROOT.TH1D('alpha_spectrum_60Ga', 'Alpha Spectrum from 60Ga Runs', 350, 2, 9)
 alpha_spectrum_Ga.FillN(n_alphas_Ga, tpc_energy_Ga[alpha_mask_Ga], np.ones(n_alphas_Ga, dtype='float64'))
 
+
 zn_run_cross_scint_counts = 0
 for ddas_run in np.array(e23035_runs.run_df['DDAS'][e23035_runs.run_df['GET'].isin(get_runs_Zn)]):
-     zn_run_cross_scint_counts += ddas_interface.get_cross_scint_counts(ddas_run) #TODO: use only cross scintilator counts during this get run
-ga_in_ga_runs = ddas_interface.get_counts_in_pid_cut(240, '60Ga')/ddas_interface.get_cross_scint_counts(240)*zn_run_cross_scint_counts
-zn_in_ga_runs = ddas_interface.get_counts_in_pid_cut(240, '59Zn')/ddas_interface.get_cross_scint_counts(240)*zn_run_cross_scint_counts
+    zn_run_cross_scint_counts += ddas_interface.get_cross_scint_counts(ddas_run) #TODO: use only cross scintilator counts during this get run
+ga_in_zn_runs = ddas_interface.get_counts_in_pid_cut(240, '60Ga')/ddas_interface.get_cross_scint_counts(240)*zn_run_cross_scint_counts
+zn_in_zn_runs = ddas_interface.get_counts_in_pid_cut(240, '59Zn')/ddas_interface.get_cross_scint_counts(240)*zn_run_cross_scint_counts
 
 ga_run_cross_scint_counts = 0
 for ddas_run in np.array(e23035_runs.run_df['DDAS'][e23035_runs.run_df['GET'].isin(get_runs_Ga)]):
