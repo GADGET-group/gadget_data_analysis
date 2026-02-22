@@ -350,7 +350,7 @@ def make_merged_root_file(ddas_run):
                 if ch_names[i] == 'beam_off' and multiplicities[i] == 1:
                     last_beam_off_time = times[i]/1e9
             
-            tsbo[0] = last_beam_off_time
+            tsbo[0] = np.max(times)/1e9 - last_beam_off_time
 
             record_get_event = False
             if multiplicities[get_trig_accepted_index] == 1:

@@ -41,6 +41,7 @@ def merge_ddas(ddas_run, remerge=True):
         else:
             print('merging ddas run %d'%ddas_run)
             ddas_interface.make_merged_root_file(ddas_run)
+            print('finished merging ddas run %d'%ddas_run)
     except Exception as e:
         print('error merging ddas run ', ddas_run)
         print(e)
@@ -50,7 +51,7 @@ if __name__ == '__main__':
     import numpy as np
     if True:
         ddas_runs = range(0, 284)
-        with multiprocessing.Pool(100) as pool:
+        with multiprocessing.Pool() as pool:
             pool.map(merge_ddas, ddas_runs)
     if False:
         #runs = run_df['GET'][np.isfinite(run_df['GET'])]
