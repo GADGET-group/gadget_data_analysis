@@ -60,14 +60,16 @@ alpha_spectrum_Ga.FillN(n_alphas_Ga, tpc_energy_Ga[alpha_mask_Ga], np.ones(n_alp
 zn_run_cross_scint_counts = 0
 for ddas_run in np.array(e23035_runs.run_df['DDAS'][e23035_runs.run_df['GET'].isin(get_runs_Zn)]):
     zn_run_cross_scint_counts += ddas_interface.get_cross_scint_counts(ddas_run) #TODO: use only cross scintilator counts during this get run
-ga_in_zn_runs = ddas_interface.get_counts_in_pid_cut(240, '60Ga')/ddas_interface.get_cross_scint_counts(240)*zn_run_cross_scint_counts*Ga60_cycle_efficiency
-zn_in_zn_runs = ddas_interface.get_counts_in_pid_cut(240, '59Zn')/ddas_interface.get_cross_scint_counts(240)*zn_run_cross_scint_counts*Zn59_cycle_efficiency
+zn_pid_run_cross_scint_counts = ddas_interface.get_cross_scint_counts(262)
+ga_in_zn_runs = ddas_interface.get_counts_in_pid_cut(262, '60Ga')/zn_pid_run_cross_scint_counts*zn_run_cross_scint_counts*Ga60_cycle_efficiency
+zn_in_zn_runs = ddas_interface.get_counts_in_pid_cut(262, '59Zn')/zn_pid_run_cross_scint_counts*zn_run_cross_scint_counts*Zn59_cycle_efficiency
 
 ga_run_cross_scint_counts = 0
 for ddas_run in np.array(e23035_runs.run_df['DDAS'][e23035_runs.run_df['GET'].isin(get_runs_Ga)]):
      ga_run_cross_scint_counts += ddas_interface.get_cross_scint_counts(ddas_run) #TODO: use only cross scintilator counts during this get run
-ga_in_ga_runs = ddas_interface.get_counts_in_pid_cut(240, '60Ga')/ddas_interface.get_cross_scint_counts(240)*ga_run_cross_scint_counts*Ga60_cycle_efficiency
-zn_in_ga_runs = ddas_interface.get_counts_in_pid_cut(240, '59Zn')/ddas_interface.get_cross_scint_counts(240)*ga_run_cross_scint_counts*Zn59_cycle_efficiency
+ga_pid_run_cross_scint_counts = ddas_interface.get_cross_scint_counts(240)
+ga_in_ga_runs = ddas_interface.get_counts_in_pid_cut(240, '60Ga')/ga_pid_run_cross_scint_counts*ga_run_cross_scint_counts*Ga60_cycle_efficiency
+zn_in_ga_runs = ddas_interface.get_counts_in_pid_cut(240, '59Zn')/ga_pid_run_cross_scint_counts*ga_run_cross_scint_counts*Zn59_cycle_efficiency
 
 peaks_to_fit = [[0.913], [1.063], [0.913, 1.063, 1.1, 1.264, 1.331,1.376]]
 peaks_60Ga_to_fit = [0.72, 1.11, 1.2]

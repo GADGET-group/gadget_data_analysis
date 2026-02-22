@@ -34,7 +34,7 @@ def process_run(run):
         print('error processing run ', run)
         print(e)
 
-def merge_ddas(ddas_run, remerge=False):
+def merge_ddas(ddas_run, remerge=True):
     try:
         if os.path.exists(ddas_interface.get_merged_root_file_path(ddas_run)) and not remerge:
             print('ddas run %d already merged\n')

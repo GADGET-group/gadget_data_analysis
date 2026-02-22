@@ -327,6 +327,9 @@ def make_merged_root_file(ddas_run):
         last_ddas_time, last_get_time = np.nan, np.nan
         GET_DDAS_TIME_MATCH_TRHESHOLD = 10e-6
 
+        last_beam_off_time = np.nan
+        chopper_off_index = np.where('chopper_off_m'==ch_names)
+
         for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
             #copy over ddas values with calibration factors applied
             in_tree.GetEntry(ddas_index)
@@ -339,9 +342,15 @@ def make_merged_root_file(ddas_run):
                 else:
                     branch_evals[i][0] = 0
                     branch_tvals[i][0] = np.nan
-                # if ch_names[i]=='msx100' and branch_mvals[i] > 0:
-                #     print(branch_evals[i], branch_mvals[i], branch_tvals[i])
-
+                #check if beam just turned off
+                #note that this uses the beam off signal and not chopper signal
+                #and so is offset by 2 ms from the true beam off. This is desirable
+                #because the chopper pules off briefl during beam on time for
+                #diagnostic reasons
+                if ch_names[i] == 'beam_off' and multiplicities[i] == 1:
+                    last_beam_off_time = times[i]/1e9
+            
+            tsbo[0] = last_beam_off_time
 
             record_get_event = False
             if multiplicities[get_trig_accepted_index] == 1:
