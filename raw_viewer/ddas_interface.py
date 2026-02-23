@@ -328,7 +328,6 @@ def make_merged_root_file(ddas_run):
         GET_DDAS_TIME_MATCH_TRHESHOLD = 10e-6
 
         last_beam_off_time = np.nan
-        chopper_off_index = np.where('chopper_off_m'==ch_names)
 
         for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
             #copy over ddas values with calibration factors applied
@@ -347,8 +346,8 @@ def make_merged_root_file(ddas_run):
                 #and so is offset by 2 ms from the true beam off. This is desirable
                 #because the chopper pules off briefl during beam on time for
                 #diagnostic reasons
-                if ch_names[i] == 'beam_off' and multiplicities[i] == 1:
-                    last_beam_off_time = times[i]/1e9
+                if ch_names[i] == 'beam_off' and multiplicities[ch_indexes[i]] == 1:
+                    last_beam_off_time = times[ch_indexes[i]]/1e9
             
             tsbo[0] = np.max(times)/1e9 - last_beam_off_time
 
