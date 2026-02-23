@@ -15,7 +15,7 @@ from  raw_viewer import raw_h5_file
 from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 
-experiment = 'e23035'#_prep_vault'
+experiment = 'e25058'#_prep_vault'
  
 if experiment == 'e23035':
     #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
@@ -31,6 +31,8 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
     run_range = [73]#[61, 62, 63]
+if experiment == 'e25058':
+    run_range=[70]
     
 
 # else: #during experiment
@@ -68,7 +70,8 @@ if load_ddas:
         times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
         print(get_run, len(times_since_beam_off[-1]), len(get_ts))
     times_since_beam_off = np.concatenate(times_since_beam_off)
-
+else:
+    times_since_beam_off = process_runs.get_time_since_beam_off(experiment, get_runs)
 veto_thresh = 500#np.inf
 rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 1001)
@@ -86,7 +89,7 @@ charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
 if experiment == 'e23035':
     energy = e23035_runs.get_energy_MeV(get_runs)
 else:
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+    gain_match_path = '/egr/research-tpc/shared/e25058_analysis/fft6_res3.pkl'
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
     #pad_gains = gain_match_result.x[:1024]
@@ -96,16 +99,16 @@ angles = process_runs.get_angle(experiment, get_runs)
 
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
-pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
-num_pads_railed = np.array([len(prl) for prl in pads_railed])
+# pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
+# num_pads_railed = np.array([len(prl) for prl in pads_railed])
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(get_runs)
     endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
-    veto_mask = (veto_max < veto_thresh)
-veto_mask = veto_mask & (num_pads_railed==0)# & (angles>np.radians(8)) 
+    veto_mask = (veto_max < veto_thresh) & (times_since_beam_off>0.1)
+veto_mask = veto_mask# & (num_pads_railed==0)# & (angles>np.radians(8)) 
 
     
 if load_ddas:
