@@ -11,12 +11,12 @@ total_ranges = []
 total_veto =[]
 dxy = []
 dt = []
-
+runs = []
 zscale = 0.65
 
 for run in tqdm(production_runs):
     # if run > 140:
-    if False:
+    if True:
         # print("Currently on Run %d"%run)
         length = []
         total_counts = np.concatenate([total_counts, np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/counts.npy'%(run,run))])
@@ -29,8 +29,9 @@ for run in tqdm(production_runs):
         # dt = np.load('/mnt/daqtesting/protondet2024/interesting_events_without_run_number_in_event_name_without_event_447/interesting_events_without_run_number_in_event_name_without_event_447p10_2000torr/dt.npy')
         for event in range(len(dxy)):
             length.append((dxy[event]**2 + zscale*dt[event]**2)**0.5)
+            runs.append(run)
         total_ranges = np.concatenate([total_ranges,length])
-    if True:
+    if False:
         length = []
         counts = np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/counts.npy'%(run,run))
         veto = np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/veto.npy'%(run,run))
@@ -38,21 +39,47 @@ for run in tqdm(production_runs):
         dt = np.load('/mnt/daqtesting/protondet2024/h5/run_%04d/run_%04dp10_2000torr/dt.npy'%(run,run))
         for event in range(len(dxy)):
             length.append((dxy[event]**2 + zscale*dt[event]**2)**0.5)
-        print(np.size(length))
-        mask = np.logical_and.reduce((veto<300,
-                              counts<np.inf,
-                              counts>-np.inf,
-                              ))
-        plt.figure(figsize=(8,6))
-        # plt.title('Range versus Energy for Run %d'%run, fontsize=20)
-        plt.hist2d(counts, length, 300, norm=mpl.colors.LogNorm(), range=[[0,8.2e5],[0,60]])
-        # plt.hist(total_counts[mask], bins=200)
-        plt.colorbar()
-        plt.xlabel('Energy (ADC counts)',fontsize=16)
-        plt.ylabel('Range (mm)',fontsize=16)
-        plt.tick_params(axis='both', labelsize=16)
+            runs.append(run)
+        # print(np.size(length))
+        # mask = np.logical_and.reduce((veto<300,
+        #                       counts<np.inf,
+        #                       counts>-np.inf,
+        #                       ))
+        # plt.figure(figsize=(8,6))
+        # # plt.title('Range versus Energy for Run %d'%run, fontsize=20)
+        # plt.hist2d(counts, length, 300, norm=mpl.colors.LogNorm(), range=[[0,8.2e5],[0,60]])
+        # # plt.hist(total_counts[mask], bins=200)
+        # plt.colorbar()
+        # plt.xlabel('Energy (ADC counts)',fontsize=16)
+        # plt.ylabel('Run Number',fontsize=16)
+        # # plt.ylabel('Range (mm)',fontsize=16)
+        # plt.tick_params(axis='both', labelsize=16)
         # plt.show()
-        plt.savefig('RvE_run_%d_veto_300.png'%run,dpi=600)
+        # # plt.savefig('RvE_run_%d_veto_300.png'%run,dpi=600)
+        
+plt.figure(figsize=(8,6))
+# plt.title('Range versus Energy for Run %d'%run, fontsize=20)
+plt.hist2d(total_counts, runs,bins=555, norm=mpl.colors.LogNorm(), range=[[0,1.2e6],[0,555]])
+# plt.hist(total_counts[mask], bins=200)
+plt.colorbar()
+plt.xlabel('Energy (ADC counts)',fontsize=16)
+plt.ylabel('Run Number',fontsize=16)
+# plt.ylabel('Range (mm)',fontsize=16)
+plt.tick_params(axis='both', labelsize=16)
+plt.show()
+# plt.savefig('RvE_run_%d_veto_300.png'%run,dpi=600)
+
+plt.figure(figsize=(8,6))
+# plt.title('Range versus Energy for Run %d'%run, fontsize=20)
+plt.hist2d(total_ranges, runs,bins=555, norm=mpl.colors.LogNorm(), range=[[0,60],[0,555]])
+# plt.hist(total_counts[mask], bins=200)
+plt.colorbar()
+plt.xlabel('Range (mm)',fontsize=16)
+plt.ylabel('Run Number',fontsize=16)
+# plt.ylabel('Range (mm)',fontsize=16)
+plt.tick_params(axis='both', labelsize=16)
+plt.show()
+# plt.savefig('RvE_run_%d_veto_300.png'%run,dpi=600)
 
 # Create 6 MeV mask for plotting
 # mask = np.logical_and.reduce((total_veto<np.inf,
@@ -94,7 +121,7 @@ plt.hist2d(total_counts[mask], total_ranges[mask], 300, norm=mpl.colors.LogNorm(
 plt.colorbar()
 plt.xlabel('Energy (ADC counts)')
 plt.ylabel('Range (mm)')
-# plt.show()
+plt.show()
 # plt.savefig('RvE_for_all_runs.png')
 
 # plt.figure(1)
