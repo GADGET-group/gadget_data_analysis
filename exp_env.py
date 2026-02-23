@@ -50,7 +50,7 @@ if __name__ == '__main__':
     from e23035_analysis.e23035_runs import run_df
     import numpy as np
     if True:
-        ddas_runs = range(0, 284)
+        ddas_runs = range(0, 287)
         with multiprocessing.Pool() as pool:
             pool.map(merge_ddas, ddas_runs)
     if False:
