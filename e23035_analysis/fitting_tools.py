@@ -85,9 +85,9 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
 
     # 6. Perform Fit
     # "S": Return Result, "0": Do not draw, "Q": Quiet
-    fit_res = spectrum_to_plot.Fit(f_to_fit, "S0") 
+    fit_res = spectrum_to_plot.Fit(f_to_fit, "SL0") 
     if not fit_res.IsValid():
-        fit_res = spectrum_to_plot.Fit(f_to_fit, "S0")
+        fit_res = spectrum_to_plot.Fit(f_to_fit, "SL0")
 
     # --- Convert Function to Histogram for Residual Plot ---
     h_fit = spectrum_to_plot.Clone(f"h_fit_{unique_id}")
@@ -128,6 +128,91 @@ def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window):
     peaks.SetParameters(fit_params[:-2])
     
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+
+def fit_func(histogram, function_string, initial_values, bounds, fit_range): 
+    """
+    Fits a user-defined function to a histogram and plots the residuals.
+    
+    Args:
+        histogram: The ROOT TH1 object to fit.
+        function_string (str): The ROOT TF1 string (e.g., '[0] + [1]*x + [2]*exp(-0.5*((x-[3])/[4])^2)').
+        initial_values (list): Initial guesses for parameters [val0, val1, ...].
+        bounds (list of tuples): Limits for each parameter [(min0, max0), (min1, max1), ...].
+        fit_range (tuple): The (x_min, x_max) range to perform the fit.
+    """
+    # 1. Unique ID & Setup
+    unique_id = uuid.uuid4().hex[:8]
+    canvas_name = f"c_fit_{unique_id}"
+    canvas = ROOT.TCanvas(canvas_name, f"Fit Result: {function_string}", 800, 600)
+
+    e_low, e_high = fit_range
+
+    # 2. Create Subset Histogram (The "Cut" for a clean plot)
+    bin_width = histogram.GetBinWidth(1)
+    n_bins_new = int((e_high - e_low) / bin_width + 0.5)
+    
+    sub_hist = ROOT.TH1D(f"sub_{unique_id}", "Data vs Fit", n_bins_new, e_low, e_high)
+    
+    for i in range(1, n_bins_new + 1):
+        center = sub_hist.GetBinCenter(i)
+        source_bin = histogram.FindBin(center)
+        sub_hist.SetBinContent(i, histogram.GetBinContent(source_bin))
+        sub_hist.SetBinError(i, histogram.GetBinError(source_bin))
+
+    # 3. Fit Function Setup
+    func_name = f'to_fit_{unique_id}'
+    f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high)
+    
+    # Ensure inputs match
+    n_params = len(initial_values)
+    if len(bounds) != n_params:
+        raise ValueError("Length of initial_values must match length of bounds.")
+    
+    # Apply initial values and limits
+    for i in range(n_params):
+        f_to_fit.SetParameter(i, initial_values[i])
+        f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
+        f_to_fit.SetParName(i, f'p{i}') # Generic naming
+
+    f_to_fit.SetNpx(1000) # Smooth line drawing
+
+    # 4. Perform Fit
+    fit_res = sub_hist.Fit(f_to_fit, "S0QL") 
+    if not fit_res.IsValid():
+        # Optional: Could add a print statement here to warn the user it failed
+        fit_res = sub_hist.Fit(f_to_fit, "S0QL")
+
+    # 5. Convert Function to Histogram for Residual Plot
+    h_fit = sub_hist.Clone(f"h_fit_{unique_id}")
+    h_fit.Reset() 
+    for i in range(1, h_fit.GetNbinsX() + 1):
+        val = f_to_fit.Eval(h_fit.GetBinCenter(i))
+        h_fit.SetBinContent(i, val)
+        h_fit.SetBinError(i, 0)
+        
+    h_fit.SetLineColor(ROOT.kRed)
+    h_fit.SetLineWidth(2)
+
+    # 6. Draw TRatioPlot (Residuals)
+    canvas.cd()
+    rp = ROOT.TRatioPlot(sub_hist, h_fit, "diff")
+    
+    rp.SetH1DrawOpt("E")      # Data: Points w/ Error
+    rp.SetH2DrawOpt("L")      # Fit: Line
+    rp.SetGraphDrawOpt("P")   # Residuals: Points
+    
+    rp.Draw()
+
+    # Style Residuals
+    rp.GetLowerRefYaxis().SetTitle("Resid. (Data-Fit)")
+    rp.GetLowerRefGraph().SetMarkerStyle(20)
+    rp.GetLowerRefGraph().SetMarkerSize(0.6)
+    rp.GetLowerPad().SetGridy()
+    
+    canvas.Update()
+
+    # 7. Return everything to prevent garbage collection
+    return fit_res, rp, canvas, sub_hist, f_to_fit, h_fit
 
 def fit_multiple_peaks_sigma_free(spectrum, energy_guesses, energy_wiggle, energy_window):
     function_string = '[0] + [1]*x'

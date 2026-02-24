@@ -411,12 +411,6 @@ def get_pid_cut(ddas_run, species):
         timing_offset = (-6.24407e-7 + 6.22262e-7)
     elif ddas_run == 262:
         timing_offset = -6.2222e-7 + 6.20086e-7
-    # if ddas_run == 262:
-    #     if species == '60Ga':
-    #         points = [(-6.24497e-7,6759.02),(-6.2187e-7,6759.02),(-6.2187e-7,6578.56),(-6.24555e-7,6545.71)]
-    #     elif species == '59Zn':
-    #         points=[(-6.22727e-7,6451.17),(-6.20798e-7,6631.63),(-6.18756e-7,6514.86),(-6.189e-7,6260),(-6.2077e-7,6090),(-6.22642e-7,6249)]
-    # elif ddas_run == 113:
     points_arr = np.array(points, dtype=np.float64)
     xs = np.ascontiguousarray(points_arr[:,0], dtype=np.float64) + timing_offset
     ys = np.ascontiguousarray(points_arr[:,1], dtype=np.float64)
@@ -463,7 +457,14 @@ def get_cross_scint_counts_during_get_run(get_run):
 def get_ddas_run_duration(ddas_run):
     pass#TODO
 
-
+def get_summed_gamma_e_str():
+    to_return = ''
+    for num in [1,2,3,5,6,7,9,10,11]:
+        for letter in ('a','b','c','d'):
+            if len(to_return) > 0:
+                to_return += ' + '
+            to_return += ' clover_%d%s_e'%(num, letter)
+    return to_return
 
 #code used to generate "channel_map.csv"
 # gamma_cal_table = np.genfromtxt('e23035_analysis/init_ge_cal.csv', delimiter=',', skip_header=1)
