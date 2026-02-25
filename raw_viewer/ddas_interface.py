@@ -467,16 +467,10 @@ def get_summed_gamma_e_str():
             to_return += ' clover_%d%s_e'%(num, letter)
     return to_return
 
-def is_iterable_runs(obj):
-    """Check if an object is iterable, explicitly excluding strings."""
-    if isinstance(obj, (str, bytes)):
-        return False
-    try:
-        iter(obj)
-        return True
-    except TypeError:
-        return False
-
+import os
+import hashlib
+import ROOT
+import concurrent.futures
 
 def is_iterable_runs(obj):
     """Check if an object is iterable, explicitly excluding strings."""
@@ -488,60 +482,26 @@ def is_iterable_runs(obj):
     except TypeError:
         return False
 
-def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False):
-    '''
-    Get a histogram from the merged data for a ddas run (or iterable of runs). 
-    Individual histograms are cached natively in a ROOT file using hashed parameters.
-    If an iterable of runs is provided, the function retrieves/caches each run individually 
-    and returns their sum.
-
-    ddas_run: run number to use (int/str) OR iterable of run numbers
-    binning: tuple of (number of bins, low, high) for TH1D, or (nx, xmin, xmax, ny, ymin, ymax) for TH2D
-    hist_name, hist_title: name and title to give the created histogram
-    var_exp: Selection to pass to TTree.Draw. If a ':' is present, a TH2D is created.
-    selection: Selection string or cut to pass to TTree.Draw. Defaults to "".
-    force_recreate: If true, refill the histogram from the root file, bypassing the cache.
-    '''
-    
-    # 1. Handle iterables of runs recursively
-    if is_iterable_runs(ddas_run):
-        sum_hist = None
-        for run in ddas_run:
-            temp_name = f"{hist_name}_run{run}"
-            hist = get_histogram(run, binning, temp_name, hist_title, var_exp, selection, force_recreate)
-            
-            if sum_hist is None:
-                sum_hist = hist.Clone(hist_name)
-                sum_hist.SetDirectory(0)
-            else:
-                sum_hist.Add(hist)
-                
-        return sum_hist
-
-    # 2. Setup Cache Directory and File
-    cache_dir = 'e23035_analysis'
+def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
+    """
+    Top-level worker function for parallel processing.
+    Handles checking/filling the cache for a single run.
+    Returns the file path and hash name so the main process can safely load it.
+    """
+    # 1. Setup isolated cache file for this specific run and cut
+    cache_dir = os.path.join('e23035_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file_path = os.path.join(cache_dir, 'hist_cache.root')
     
-    # 3. Generate a unique, ROOT-safe hash for this specific histogram configuration
-    unique_string = str((ddas_run, tuple(binning), var_exp, selection)).encode('utf-8')
+    unique_string = str((run, tuple(binning), var_exp, selection)).encode('utf-8')
     hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
-
-    # 4. Try to load from the ROOT cache file
+    cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
+    
+    # 2. Check if already cached
     if not force_recreate and os.path.exists(cache_file_path):
-        cache_file = ROOT.TFile.Open(cache_file_path, 'READ')
-        if cache_file and not cache_file.IsZombie():
-            cached_obj = cache_file.Get(hash_name)
-            if cached_obj:
-                final_hist = cached_obj.Clone(hist_name)
-                final_hist.SetTitle(hist_title)
-                final_hist.SetDirectory(0)  # Detach before closing cache_file
-                cache_file.Close()
-                return final_hist
-            cache_file.Close()
+        return cache_file_path, hash_name
 
-    # 5. If not in cache (or force_recreate), fill from the raw merged data
-    data_file_path = get_merged_root_file_path(ddas_run) 
+    # 3. Fill from raw data if not cached
+    data_file_path = get_merged_root_file_path(run) # Assuming globally accessible
     data_file = ROOT.TFile.Open(data_file_path, 'READ')
     
     if not data_file or data_file.IsZombie():
@@ -553,30 +513,90 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
         raise ValueError(f"Could not find TTree 'merged_data' in {data_file_path}.")
         
     if ':' in var_exp:
-        raw_hist = ROOT.TH2D(hash_name, hist_title, *binning)
+        raw_hist = ROOT.TH2D(hash_name, "", *binning)
     else:
-        raw_hist = ROOT.TH1D(hash_name, hist_title, *binning)
+        raw_hist = ROOT.TH1D(hash_name, "", *binning)
         
-    # Draw directly into our hashed-name histogram
     tree.Draw(f'{var_exp}>>{hash_name}', selection, 'goff')
-    
-    # Detach from data_file BEFORE closing it
     raw_hist.SetDirectory(0)
     data_file.Close()
 
-    # 6. Save the new histogram to the cache file using UPDATE mode
-    cache_file = ROOT.TFile.Open(cache_file_path, 'UPDATE')
+    # 4. Save to its own unique cache file using RECREATE
+    cache_file = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     raw_hist.SetDirectory(cache_file)
     raw_hist.Write("", ROOT.TObject.kOverwrite)
-    
-    # Detach from cache_file BEFORE closing it
     raw_hist.SetDirectory(0)
     cache_file.Close()
 
-    # 7. Prepare the final histogram to return to the user
-    raw_hist.SetName(hist_name)
+    return cache_file_path, hash_name
+
+
+def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1):
+    '''
+    Get a histogram from the merged data for a ddas run (or iterable of runs). 
+    Individual run histograms are cached natively in a ROOT folder using hashed names.
     
-    return raw_hist
+    ddas_run: run number to use (int/str) OR iterable of run numbers
+    binning: tuple of (number of bins, low, high) for TH1D, or (nx, xmin, xmax, ny, ymin, ymax) for TH2D
+    hist_name, hist_title: name and title to give the created histogram
+    var_exp: Selection to pass to TTree.Draw. If a ':' is present, a TH2D is created.
+    selection: Selection string or cut to pass to TTree.Draw. Defaults to "".
+    force_recreate: If true, refill the histogram from the root file, bypassing the cache.
+    num_workers: Number of CPU cores to use when processing an iterable of runs.
+    '''
+    
+    # --- MULTIPLE RUNS LOGIC ---
+    if is_iterable_runs(ddas_run):
+        sum_hist = None
+        
+        if num_workers > 1:
+            # PARALLEL PROCESSING
+            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all runs to the pool
+                futures = [
+                    executor.submit(_worker_fill_run, run, binning, var_exp, selection, force_recreate) 
+                    for run in ddas_run
+                ]
+                
+                # Process them as they finish
+                for future in concurrent.futures.as_completed(futures):
+                    cache_file_path, hash_name = future.result()
+                    
+                    cf = ROOT.TFile.Open(cache_file_path, 'READ')
+                    hist = cf.Get(hash_name).Clone(f"{hist_name}_temp")
+                    hist.SetDirectory(0)
+                    cf.Close()
+                    
+                    if sum_hist is None:
+                        sum_hist = hist.Clone(hist_name)
+                        sum_hist.SetTitle(hist_title)
+                        sum_hist.SetDirectory(0)
+                    else:
+                        sum_hist.Add(hist)
+        else:
+            # SEQUENTIAL PROCESSING (Fallback)
+            for run in ddas_run:
+                temp_name = f"{hist_name}_run{run}"
+                hist = get_histogram(run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1)
+                
+                if sum_hist is None:
+                    sum_hist = hist.Clone(hist_name)
+                    sum_hist.SetDirectory(0)
+                else:
+                    sum_hist.Add(hist)
+                    
+        return sum_hist
+
+    # --- SINGLE RUN LOGIC ---
+    cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate)
+    
+    cf = ROOT.TFile.Open(cache_file_path, 'READ')
+    final_hist = cf.Get(hash_name).Clone(hist_name)
+    final_hist.SetTitle(hist_title)
+    final_hist.SetDirectory(0)
+    cf.Close()
+    
+    return final_hist
 
 #code used to generate "channel_map.csv"
 # gamma_cal_table = np.genfromtxt('e23035_analysis/init_ge_cal.csv', delimiter=',', skip_header=1)
