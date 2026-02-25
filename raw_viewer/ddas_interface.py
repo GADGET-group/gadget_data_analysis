@@ -1,3 +1,4 @@
+import hashlib
 import os
 import pickle
 import gzip
@@ -466,10 +467,16 @@ def get_summed_gamma_e_str():
             to_return += ' clover_%d%s_e'%(num, letter)
     return to_return
 
-import os
-import gzip
-import pickle
-import ROOT
+def is_iterable_runs(obj):
+    """Check if an object is iterable, explicitly excluding strings."""
+    if isinstance(obj, (str, bytes)):
+        return False
+    try:
+        iter(obj)
+        return True
+    except TypeError:
+        return False
+
 
 def is_iterable_runs(obj):
     """Check if an object is iterable, explicitly excluding strings."""
@@ -481,21 +488,7 @@ def is_iterable_runs(obj):
     except TypeError:
         return False
 
-import os
-import hashlib
-import ROOT
-
-def is_iterable_runs(obj):
-    """Check if an object is iterable, explicitly excluding strings."""
-    if isinstance(obj, (str, bytes)):
-        return False
-    try:
-        iter(obj)
-        return True
-    except TypeError:
-        return False
-
-def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection='1', force_recreate=False):
+def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False):
     '''
     Get a histogram from the merged data for a ddas run (or iterable of runs). 
     Individual histograms are cached natively in a ROOT file using hashed parameters.
@@ -506,7 +499,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection='
     binning: tuple of (number of bins, low, high) for TH1D, or (nx, xmin, xmax, ny, ymin, ymax) for TH2D
     hist_name, hist_title: name and title to give the created histogram
     var_exp: Selection to pass to TTree.Draw. If a ':' is present, a TH2D is created.
-    selection: Selection string or cut to pass to TTree.Draw. Default value will include all values
+    selection: Selection string or cut to pass to TTree.Draw. Defaults to "".
     force_recreate: If true, refill the histogram from the root file, bypassing the cache.
     '''
     
@@ -531,7 +524,6 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection='
     cache_file_path = os.path.join(cache_dir, 'hist_cache.root')
     
     # 3. Generate a unique, ROOT-safe hash for this specific histogram configuration
-    # We prefix with "h_" because ROOT object names must start with a letter
     unique_string = str((ddas_run, tuple(binning), var_exp, selection)).encode('utf-8')
     hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
 
@@ -541,10 +533,9 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection='
         if cache_file and not cache_file.IsZombie():
             cached_obj = cache_file.Get(hash_name)
             if cached_obj:
-                # Found it! Clone, rename, detach, and return
                 final_hist = cached_obj.Clone(hist_name)
                 final_hist.SetTitle(hist_title)
-                final_hist.SetDirectory(0)
+                final_hist.SetDirectory(0)  # Detach before closing cache_file
                 cache_file.Close()
                 return final_hist
             cache_file.Close()
@@ -561,27 +552,29 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection='
         data_file.Close()
         raise ValueError(f"Could not find TTree 'merged_data' in {data_file_path}.")
         
-    # Create the histogram using the HASH as its internal name so it saves correctly
     if ':' in var_exp:
         raw_hist = ROOT.TH2D(hash_name, hist_title, *binning)
     else:
         raw_hist = ROOT.TH1D(hash_name, hist_title, *binning)
         
-    raw_hist.SetDirectory(0)
-    
     # Draw directly into our hashed-name histogram
     tree.Draw(f'{var_exp}>>{hash_name}', selection, 'goff')
+    
+    # Detach from data_file BEFORE closing it
+    raw_hist.SetDirectory(0)
     data_file.Close()
 
     # 6. Save the new histogram to the cache file using UPDATE mode
-    # UPDATE mode creates the file if it doesn't exist, or modifies it if it does
     cache_file = ROOT.TFile.Open(cache_file_path, 'UPDATE')
     raw_hist.SetDirectory(cache_file)
     raw_hist.Write("", ROOT.TObject.kOverwrite)
-    # 7. Prepare the final histogram to return to the user
+    
+    # Detach from cache_file BEFORE closing it
     raw_hist.SetDirectory(0)
-    raw_hist.SetName(hist_name)
     cache_file.Close()
+
+    # 7. Prepare the final histogram to return to the user
+    raw_hist.SetName(hist_name)
     
     return raw_hist
 
