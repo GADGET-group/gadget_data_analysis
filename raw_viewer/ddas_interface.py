@@ -5,6 +5,9 @@ import gzip
 import re
 import subprocess
 
+import concurrent.futures
+from tqdm import tqdm
+
 import ROOT
 import numpy as np
 import matplotlib.pylab as plt
@@ -468,12 +471,13 @@ def get_summed_gamma_e_str():
     return to_return
 
 import os
+import sys
 import hashlib
-import ROOT
 import concurrent.futures
+import ROOT
+from tqdm import tqdm
 
 def is_iterable_runs(obj):
-    """Check if an object is iterable, explicitly excluding strings."""
     if isinstance(obj, (str, bytes)):
         return False
     try:
@@ -483,12 +487,6 @@ def is_iterable_runs(obj):
         return False
 
 def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
-    """
-    Top-level worker function for parallel processing.
-    Handles checking/filling the cache for a single run.
-    Returns the file path and hash name so the main process can safely load it.
-    """
-    # 1. Setup isolated cache file for this specific run and cut
     cache_dir = os.path.join('e23035_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -496,12 +494,10 @@ def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
     hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
     cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
     
-    # 2. Check if already cached
     if not force_recreate and os.path.exists(cache_file_path):
         return cache_file_path, hash_name
 
-    # 3. Fill from raw data if not cached
-    data_file_path = get_merged_root_file_path(run) # Assuming globally accessible
+    data_file_path = get_merged_root_file_path(run) 
     data_file = ROOT.TFile.Open(data_file_path, 'READ')
     
     if not data_file or data_file.IsZombie():
@@ -521,7 +517,6 @@ def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
     raw_hist.SetDirectory(0)
     data_file.Close()
 
-    # 4. Save to its own unique cache file using RECREATE
     cache_file = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     raw_hist.SetDirectory(cache_file)
     raw_hist.Write("", ROOT.TObject.kOverwrite)
@@ -532,34 +527,20 @@ def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
 
 
 def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1):
-    '''
-    Get a histogram from the merged data for a ddas run (or iterable of runs). 
-    Individual run histograms are cached natively in a ROOT folder using hashed names.
-    
-    ddas_run: run number to use (int/str) OR iterable of run numbers
-    binning: tuple of (number of bins, low, high) for TH1D, or (nx, xmin, xmax, ny, ymin, ymax) for TH2D
-    hist_name, hist_title: name and title to give the created histogram
-    var_exp: Selection to pass to TTree.Draw. If a ':' is present, a TH2D is created.
-    selection: Selection string or cut to pass to TTree.Draw. Defaults to "".
-    force_recreate: If true, refill the histogram from the root file, bypassing the cache.
-    num_workers: Number of CPU cores to use when processing an iterable of runs.
-    '''
-    
     # --- MULTIPLE RUNS LOGIC ---
     if is_iterable_runs(ddas_run):
         sum_hist = None
+        run_list = list(ddas_run) 
         
         if num_workers > 1:
-            # PARALLEL PROCESSING
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-                # Submit all runs to the pool
                 futures = [
                     executor.submit(_worker_fill_run, run, binning, var_exp, selection, force_recreate) 
-                    for run in ddas_run
+                    for run in run_list
                 ]
                 
-                # Process them as they finish
-                for future in concurrent.futures.as_completed(futures):
+                # Forced stdout and dynamic columns
+                for future in tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)", file=sys.stdout, dynamic_ncols=True, leave=True):
                     cache_file_path, hash_name = future.result()
                     
                     cf = ROOT.TFile.Open(cache_file_path, 'READ')
@@ -574,8 +555,8 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
                     else:
                         sum_hist.Add(hist)
         else:
-            # SEQUENTIAL PROCESSING (Fallback)
-            for run in ddas_run:
+            # Forced stdout and dynamic columns
+            for run in tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
                 temp_name = f"{hist_name}_run{run}"
                 hist = get_histogram(run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1)
                 
@@ -588,7 +569,10 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
         return sum_hist
 
     # --- SINGLE RUN LOGIC ---
-    cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate)
+    # Wrapped in a 1-step progress bar so you always see it
+    with tqdm(total=1, desc=f"Filling {hist_name} (Single)", file=sys.stdout, dynamic_ncols=True, leave=True) as pbar:
+        cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate)
+        pbar.update(1)
     
     cf = ROOT.TFile.Open(cache_file_path, 'READ')
     final_hist = cf.Get(hash_name).Clone(hist_name)
