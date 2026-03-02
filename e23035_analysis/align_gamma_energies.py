@@ -1,15 +1,23 @@
+import os
+
+import numpy as np
 import ROOT
 
 from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools
+from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
 
 '''
 Notes on peak finding an automatic fitting
 https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
 '''
-n_workers=10
 gamma_binning = (12000-1,1,12000)
-runs=235
+run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
+runs = []
+for run in run_candidates:
+    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
+        if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
+            runs.append(run)
+n_workers=min(200, len(runs))
 
 def make_energy_calibration(ddas_run, branch_name, binning_for_fit, peak1, peak2=[], selection_string=''):
     '''

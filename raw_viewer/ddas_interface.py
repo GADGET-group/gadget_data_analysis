@@ -8,7 +8,7 @@ import re
 import subprocess
 
 import concurrent.futures
-from tqdm import tqdm
+import tqdm
 
 import ROOT
 import numpy as np
@@ -383,7 +383,7 @@ def get_crystal_histograms(ddas_run, binning):
     for clover_string in get_clover_strings():
         name = f'run{ddas_run}_{clover_string}'
         if is_iterable_runs(ddas_run):
-            n_workers = min(200, ddas_run)
+            n_workers = min(200, len(ddas_run))
         else:
             n_workers = 1
         to_return[clover_string] = get_histogram(ddas_run, binning, name, name, clover_string, num_workers=n_workers)
