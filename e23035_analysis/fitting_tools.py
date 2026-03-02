@@ -1,137 +1,19 @@
 import os
+import uuid
 
 import ROOT
 import numpy as np
 
 from e23035_analysis import e23035_runs
 
-import uuid # Import this to generate unique IDs
-
 import ROOT
 import numpy as np
 import uuid
 
-import ROOT
-import numpy as np
-import uuid
-
-import ROOT
-import numpy as np
-import uuid
-
-import ROOT
-import numpy as np
-import uuid
-
-def fit_peaks(spectrum, energy_guesses, energy_wiggle, energy_window): 
-    # 1. Unique ID
-    unique_id = uuid.uuid4().hex[:8]
-    
-    # 2. Canvas
-    canvas_name = f"c_fit_{unique_id}"
-    canvas = ROOT.TCanvas(canvas_name, f"Fit {energy_guesses[0]:.1f} keV", 800, 600)
-
-    # 3. Create Subset Histogram (The "Cut")
-    #    We calculate the exact range and binning to match the original
-    e_low = energy_window[0]
-    e_high = energy_window[1]
-    
-    bin_width = spectrum.GetBinWidth(1)
-    # Calculate number of bins in this window (rounding safe)
-    n_bins_new = int((e_high - e_low) / bin_width + 0.5)
-    
-    # Create the fresh histogram
-    spectrum_to_plot = ROOT.TH1D(f"sub_{unique_id}", "Data vs Fit", n_bins_new, e_low, e_high)
-    
-    # Copy data from the original spectrum to the subset
-    for i in range(1, n_bins_new + 1):
-        center = spectrum_to_plot.GetBinCenter(i)
-        source_bin = spectrum.FindBin(center)
-        
-        content = spectrum.GetBinContent(source_bin)
-        error = spectrum.GetBinError(source_bin)
-        
-        spectrum_to_plot.SetBinContent(i, content)
-        spectrum_to_plot.SetBinError(i, error)
-
-    # 4. String Construction
-    peaks_string = ''
-    n_peaks = len(energy_guesses)
-    for i in range(n_peaks):
-        if i > 0: peaks_string += ' + '
-        sigma_string = '(0.011107*[%d] + 0.008813049)' % (2*i+1) 
-        peaks_string += '[%d]*exp(-0.5*((x-[%d])/%s)^2)/(%s *sqrt(2*pi))*%f' % (
-            2*i, 2*i+1, sigma_string, sigma_string, bin_width
-        )
-    
-    bg_idx_1 = 2 * n_peaks
-    bg_idx_2 = 2 * n_peaks + 1
-    background_string = '[%d] + [%d]*x' % (bg_idx_1, bg_idx_2)
-    function_string = background_string + ' + ' + peaks_string
-    
-    # 5. Fit Function Setup
-    func_name = f'to_fit_{unique_id}'
-    f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high)
-    
-    for i in range(n_peaks):
-        f_to_fit.SetParameter(2*i, 100) 
-        f_to_fit.SetParLimits(2*i, 0, np.inf)
-        f_to_fit.SetParName(2*i, f'A_{i}')
-        f_to_fit.SetParameter(2*i+1, energy_guesses[i])
-        f_to_fit.SetParLimits(2*i+1, energy_guesses[i] - energy_wiggle, energy_guesses[i] + energy_wiggle)
-        f_to_fit.SetParName(2*i+1, f'mu_{i}')
-
-    f_to_fit.SetNpx(1000) 
-
-    # 6. Perform Fit
-    # "S": Return Result, "0": Do not draw, "Q": Quiet
-    fit_res = spectrum_to_plot.Fit(f_to_fit, "SL0") 
-    if not fit_res.IsValid():
-        fit_res = spectrum_to_plot.Fit(f_to_fit, "SL0")
-
-    # --- Convert Function to Histogram for Residual Plot ---
-    h_fit = spectrum_to_plot.Clone(f"h_fit_{unique_id}")
-    h_fit.Reset() 
-    for i in range(1, h_fit.GetNbinsX() + 1):
-        val = f_to_fit.Eval(h_fit.GetBinCenter(i))
-        h_fit.SetBinContent(i, val)
-    h_fit.SetLineColor(ROOT.kRed)
-    h_fit.SetLineWidth(2)
-
-    # 7. Draw TRatioPlot
-    canvas.cd()
-    # (Data, Fit) -> Residuals = Data - Fit
-    rp = ROOT.TRatioPlot(spectrum_to_plot, h_fit, "diff")
-    
-    rp.SetH1DrawOpt("E")      # Data: Points w/ Error
-    rp.SetH2DrawOpt("L")      # Fit: Line
-    rp.SetGraphDrawOpt("P")   # Residuals: Points
-    
-    rp.Draw()
-
-    # Style Residuals
-    rp.GetLowerRefYaxis().SetTitle("Resid. (Data-Fit)")
-    rp.GetLowerRefGraph().SetMarkerStyle(20)
-    rp.GetLowerRefGraph().SetMarkerSize(0.6)
-    rp.GetLowerPad().SetGridy()
-    
-    canvas.Update()
-
-    # 8. Return
-    fit_params = np.array(fit_res.Parameters())
-    bg_name = f'background_{unique_id}'
-    background = ROOT.TF1(bg_name, background_string, e_low, e_high)
-    background.SetParameters(fit_params[-2:])
-    
-    pk_name = f'peaks_{unique_id}'
-    peaks = ROOT.TF1(pk_name, peaks_string, e_low, e_high)
-    peaks.SetParameters(fit_params[:-2])
-    
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
-
-def fit_func(histogram, function_string, initial_values, bounds, fit_range): 
+def fit_func(histogram, function_string, initial_values, bounds, fit_range, names=None): 
     """
-    Fits a user-defined function to a histogram and plots the residuals.
+    Fits a user-defined function to a histogram using Poisson statistics (Log-Likelihood) 
+    and plots the residuals.
     
     Args:
         histogram: The ROOT TH1 object to fit.
@@ -139,6 +21,7 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range):
         initial_values (list): Initial guesses for parameters [val0, val1, ...].
         bounds (list of tuples): Limits for each parameter [(min0, max0), (min1, max1), ...].
         fit_range (tuple): The (x_min, x_max) range to perform the fit.
+        names (list of str, optional): Names for each parameter. Defaults to None (p0, p1, ...).
     """
     # 1. Unique ID & Setup
     unique_id = uuid.uuid4().hex[:8]
@@ -167,20 +50,25 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range):
     n_params = len(initial_values)
     if len(bounds) != n_params:
         raise ValueError("Length of initial_values must match length of bounds.")
+    if names is not None and len(names) != n_params:
+        raise ValueError("Length of names must match length of initial_values.")
     
-    # Apply initial values and limits
+    # Apply initial values, limits, and names
     for i in range(n_params):
         f_to_fit.SetParameter(i, initial_values[i])
         f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
-        f_to_fit.SetParName(i, f'p{i}') # Generic naming
+        
+        if names:
+            f_to_fit.SetParName(i, names[i])
+        else:
+            f_to_fit.SetParName(i, f'p{i}')
 
-    f_to_fit.SetNpx(1000) # Smooth line drawing
+    f_to_fit.SetNpx(1000)
 
-    # 4. Perform Fit
-    fit_res = sub_hist.Fit(f_to_fit, "S0QL") 
+    # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
+    fit_res = sub_hist.Fit(f_to_fit, "LS0Q") 
     if not fit_res.IsValid():
-        # Optional: Could add a print statement here to warn the user it failed
-        fit_res = sub_hist.Fit(f_to_fit, "S0QL")
+        fit_res = sub_hist.Fit(f_to_fit, "LS0Q")
 
     # 5. Convert Function to Histogram for Residual Plot
     h_fit = sub_hist.Clone(f"h_fit_{unique_id}")
@@ -211,55 +99,124 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range):
     
     canvas.Update()
 
-    # 7. Return everything to prevent garbage collection
     return fit_res, rp, canvas, sub_hist, f_to_fit, h_fit
 
-def fit_multiple_peaks_sigma_free(spectrum, energy_guesses, energy_wiggle, energy_window):
-    function_string = '[0] + [1]*x'
-    for i in range(len(energy_guesses)):
-        function_string += ' + [%d]*exp(-0.5*((x-[%d])/[2])^2)/([2] *sqrt(2*pi))*%f'%(2*i+3, 2*i+4, spectrum.GetBinWidth(0))
-    #use [2] for sigma
-    f_to_fit = ROOT.TF1('to_fit', function_string, energy_window[0], energy_window[1])
-    f_to_fit.SetParLimits(0, 0, np.inf)
-    for i in range(len(energy_guesses)):
-        f_to_fit.SetParameter(2*i+3, 100) #magnitude
-        f_to_fit.SetParLimits(2*i+3,0,np.inf)
-        f_to_fit.SetParName(2*i+3, 'A_%d'%i)
+def extract_fit_params(fit_res):
+    """
+    Extracts parameter names, values, uncertainties, and fit quality metrics 
+    from a ROOT TFitResultPtr into a Python dictionary.
+    """
+    if not fit_res.IsValid():
+        print("Warning: The fit result is marked as invalid. Check your initial guesses/bounds.")
 
-        f_to_fit.SetParameter(2*i+4, energy_guesses[i])
-        f_to_fit.SetParLimits(2*i+4,energy_guesses[i] - energy_wiggle,energy_guesses[i] + energy_wiggle)
-        f_to_fit.SetParName(2*i+4, 'mu_%d'%i)
+    fit_info = {
+        'metrics': {
+            'is_valid': fit_res.IsValid(),
+            'status': fit_res.Status(), # 0 usually means success
+            'chi2': fit_res.Chi2(),
+            'ndf': fit_res.Ndf(),
+            'chi2_over_ndf': fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else float('inf'),
+            'prob': fit_res.Prob()
+        },
+        'parameters': {}
+    }
 
-    f_to_fit.SetParameter(2, 0.05)
-    f_to_fit.SetParLimits(2,0.005, 0.5)
-    f_to_fit.SetParName(2, 'sigma')
-    f_to_fit.SetNpx(3000)
+    n_params = fit_res.NPar()
+    for i in range(n_params):
+        name = fit_res.GetParName(i)
+        val = fit_res.Parameter(i)
+        err = fit_res.ParError(i)
+        
+        fit_info['parameters'][name] = {
+            'value': val,
+            'error': err
+        }
 
-    f_to_fit.SetNpx(3000)
-    done = False
-    while not done:
-        fit_res = spectrum.Fit(f_to_fit, "LRS")
-        done = fit_res.IsValid()
-    #spectrum.Draw()
-    rp = ROOT.TRatioPlot(spectrum)
-    rp.Draw()
-    fit_res.Print()
-    return fit_res, rp
+    return fit_info
 
-def get_residuals(histogram, function:ROOT.TF1, residual_hist_name=None, plot=True):
-    '''
-    Subtract function from histogram and return residuals histogram.
-    If plot is True, the original histogram will be plotted with the function
-    above the residuals.
-    Residuals histogram will use the bin spacing of the original histogram but only cover the 
-    portion of the histogram that is on top of the function.
-    '''
-    if type(residual_hist_name) == type(None):
-        residual_hist_name = histogram.GetName() + '_residuals'
-    xmin, xmax = function.GetXmin(), function.GetXmax()
-    first_bin, last_bin = histogram.FindBin(xmin), histogram.FindBin(xmax)
-    residuals = []
-    for i in range(first_bin, last_bin+1):
-        bin_center  = histogram.GetBinCenter(i)
-        residuals.append()
-  
+def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, free_sigma=False): 
+    # Extract the fit range
+    e_low, e_high = energy_window[0], energy_window[1]
+    bin_width = spectrum.GetBinWidth(1)
+
+    # Prepare lists for the generalized fit_func
+    initial_values = []
+    bounds = []
+    names = []
+    
+    # 1. String Construction & Parameter Setup for Peaks
+    peaks_string = ''
+    n_peaks = len(energy_guesses)
+    
+    # Track how many parameters each peak consumes to keep ROOT indices aligned
+    params_per_peak = 3 if free_sigma else 2
+    
+    for i in range(n_peaks):
+        if i > 0: peaks_string += ' + '
+        
+        # Calculate ROOT parameter indices for this specific peak
+        amp_idx = params_per_peak * i
+        mean_idx = params_per_peak * i + 1
+        
+        # Setup Amplitude (A_i)
+        initial_values.append(100.0)
+        bounds.append((0.0, np.inf))
+        names.append(f'A_{i}')
+        
+        # Setup Mean (mu_i)
+        initial_values.append(energy_guesses[i])
+        bounds.append((energy_guesses[i] - energy_wiggle, energy_guesses[i] + energy_wiggle))
+        names.append(f'mu_{i}')
+
+        # Setup Sigma
+        if free_sigma:
+            sigma_idx = params_per_peak * i + 2
+            sigma_string = f'[{sigma_idx}]'
+            
+            # Use the empirical formula to provide an excellent initial guess!
+            sigma_guess = 0.011107 * energy_guesses[i] + 0.008813049
+            initial_values.append(sigma_guess)
+            bounds.append((0.001, np.inf)) # Prevent sigma from hitting exactly 0 (divide by zero error)
+            names.append(f'sigma_{i}')
+        else:
+            # Lock sigma to the formula using the mean parameter's index
+            sigma_string = f'(0.011107*[{mean_idx}] + 0.008813049)'
+            
+        # Build the math string using f-strings for readability
+        peaks_string += f'[{amp_idx}]*exp(-0.5*((x-[{mean_idx}])/{sigma_string})^2)/({sigma_string} *sqrt(2*pi))*{bin_width}'
+
+    # 2. String Construction & Parameter Setup for Background
+    bg_idx_1 = params_per_peak * n_peaks
+    bg_idx_2 = params_per_peak * n_peaks + 1
+    background_string = f'[{bg_idx_1}] + [{bg_idx_2}]*x'
+    
+    initial_values.extend([0.0, 0.0])
+    bounds.extend([(-np.inf, np.inf), (-np.inf, np.inf)])
+    names.extend(["bg_offset", "bg_slope"])
+
+    # Combine strings
+    function_string = f'{background_string} + {peaks_string}'
+
+    # 3. Call our generalized fit engine
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+        histogram=spectrum, 
+        function_string=function_string, 
+        initial_values=initial_values, 
+        bounds=bounds, 
+        fit_range=energy_window, 
+        names=names
+    )
+
+    # 4. Reconstruct individual TF1 components for return
+    comp_id = uuid.uuid4().hex[:6]
+    fit_params = np.array(fit_res.Parameters())
+    
+    # Background is always the last 2 parameters, regardless of sigma mode
+    background = ROOT.TF1(f'bg_{comp_id}', background_string, e_low, e_high)
+    background.SetParameters(fit_params[-2:])
+    
+    # Peaks take all parameters EXCEPT the last 2
+    peaks = ROOT.TF1(f'peaks_{comp_id}', peaks_string, e_low, e_high)
+    peaks.SetParameters(fit_params[:-2])
+    
+    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit

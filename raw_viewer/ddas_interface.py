@@ -1,3 +1,5 @@
+
+import sys
 import hashlib
 import os
 import pickle
@@ -12,7 +14,6 @@ import ROOT
 import numpy as np
 import matplotlib.pylab as plt
 import matplotlib.colors
-import tqdm
 
 from e23035_analysis import e23035_runs
 from raw_viewer import process_runs
@@ -96,8 +97,6 @@ class CH_MAP:
     #list of crystal ids corresponding to the above inecies
     GE_CALIBRATION_INDEXES = np.array([0,1,2,3,4,5,6,7,8,9,10,11,16,17,18,19,20,21,22,23,24,25,26,27,32,33,34,35,36,37,38,39,40,41,42,43])
 
-
-
 def get_root_file_path(experiment, run):
     base_path = f'/egr/research-tpc/shared/proc_runs/{experiment}/ddas/'
     file_name = 'run-%04d.root'%run
@@ -107,23 +106,6 @@ def get_gadget_root_file_path(experiment, run):
     base_path = f'/egr/research-tpc/shared/proc_runs/{experiment}/ddas/'
     file_name = 'run-%04d_gadget.root'%run
     return base_path + file_name
-
-def extract_all_data(experiment, run):
-    file = ROOT.TFile(get_root_file_path(experiment, run), "READ")
-    tree = file.Get("tree")
-    energies, times, multiplicities = np.zeros(NUM_TOTAL_CH, dtype=np.int32), np.zeros(NUM_TOTAL_CH), np.zeros(NUM_TOTAL_CH,dtype=np.int32)
-    tree.SetBranchAddress("energies", energies)
-    tree.SetBranchAddress("times", times)
-    tree.SetBranchAddress("multiplicity", multiplicities)
-    shape = (tree.GetEntries(), NUM_TOTAL_CH)
-    es, ts, ms = np.zeros(shape), np.zeros(shape), np.zeros(shape), 
-    for i in range(tree.GetEntries()):
-        tree.GetEntry(i)
-        es[i,:] = energies
-        ts[i,:] = times
-        ms[i,:] = multiplicities
-    return es, ts, ms
-    return np.array(es), np.array(ts), np.array(ms)
 
 def extract_get_event_data(experiment, run):
     save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
@@ -186,56 +168,6 @@ def get_time_since_beam_off(experiment, run):
         with gzip.open(pkl_fname, 'wb') as save_file:
             pickle.dump(to_return, save_file)
         return to_return
-
-def time_since_beam_off(ts, ch_select):
-    '''
-    Get time since beam as turned off for each accepted trigger
-    ''' 
-    beam_off_times = ts[:, CH_MAP.BEAM_OFF]
-    beam_off_times = beam_off_times[beam_off_times >= 0]
-    event_times = np.max(ts[:, ch_select], axis=1)
-    event_times = event_times[event_times >= 0]
-    
-    to_return = np.zeros(len(event_times))
-    i, j = 0,0
-    while i < len(event_times):
-        while (j < len(beam_off_times) - 1) and (beam_off_times[j+1] < event_times[i]):
-            j += 1
-        to_return[i] = event_times[i] - beam_off_times[j]
-        i += 1
-    return to_return/1e9
-
-
-def show_dE_dt_pid(es, ts, ms):
-    dE_ch = CH_MAP.MSX100
-    t_start_ch = CH_MAP.DB_5_SCINT
-    t_stop_ch = CH_MAP.CROSS_SCINT_B2
-    dt = ts[:, t_stop_ch] - ts[:,t_start_ch]
-    dE = es[:, dE_ch]
-    plt_mask = (dt<-580) & (dt>-680) & (dE>0)
-    plt.figure()
-    plt.hist2d(dt[plt_mask], dE[plt_mask], 1000,norm=matplotlib.colors.LogNorm())
-    plt.colorbar()
-    plt.show(block=False)
-
-def show_gamma_energy_alignment_plot(es):
-    energy_bins = np.linspace(0,2**22, 1000)
-    image = np.zeros(len(CH_MAP.GE_INDECIES), len(energy_bins))
-
-def get_calibrated_gamma_energies(es, file='e23035_analysis/init_ge_cal.csv'):
-    '''
-    [CLOVER_1_INDECIES, CLOVER_2_INDECIES, CLOVER_3_INDECIES, CLOVER_5_INDECIES,
-                              CLOVER_6_INDECIES, CLOVER_7_INDECIES, CLOVER_9_INDECIES, CLOVER_10_INDECIES,
-                              CLOVER_11_INDECIES])
-    '''
-    cal_table = np.genfromtxt(file, delimiter=',', skip_header=1)
-    slopes = cal_table[:, 2]
-    offsets = cal_table[:, 1]
-    to_return = np.zeros((len(es), len(CH_MAP.GE_INDECIES)))
-    for i in range(len(CH_MAP.GE_INDECIES)):
-        cal_index = CH_MAP.GE_CALIBRATION_INDEXES[i]
-        to_return[:, i] = offsets[cal_index] + slopes[cal_index]*es[:, CH_MAP.GE_INDECIES[i]]
-    return to_return
 
 def get_merged_root_file_path(ddas_run):
     root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
@@ -397,33 +329,6 @@ def make_merged_root_file(ddas_run):
 
         output_file.WriteObject(out_tree, "merged_data")
 
-pid_cuts = {}
-def get_pid_cut(ddas_run, species):
-    global pid_cuts
-    name = 'run%d_%s_cut'%(ddas_run, species)
-    if name in pid_cuts:
-        return pid_cuts[name]
-    
-    if species == '60Ga':
-        points = [(-6.22262e-7,6715.99),(-6.20756e-7,6829.88),(-6.19298e-7,6768.19),(-6.19465e-7,6635.32),(-6.2066e-7,6540.42),(-6.21903e-7,6583.12)]
-    elif species == '59Zn':
-        points=[(-6.20086e-7,6417.04),(-6.18461e-7,6554.65),(-6.16429e-7,6438.47),(-6.16429e-7,6307.9),(-6.18556e-7,6208.25),(-6.19943e-7,6269.94)]
-    points.append(points[0])
-    if ddas_run == 113:
-        timing_offset = 0
-    elif ddas_run == 177 or ddas_run == 240:
-        timing_offset = (-6.24407e-7 + 6.22262e-7)
-    elif ddas_run == 262:
-        timing_offset = -6.2222e-7 + 6.20086e-7
-    points_arr = np.array(points, dtype=np.float64)
-    xs = np.ascontiguousarray(points_arr[:,0], dtype=np.float64) + timing_offset
-    ys = np.ascontiguousarray(points_arr[:,1], dtype=np.float64)
-    to_return =  ROOT.TCutG(name, len(xs), xs, ys)
-    to_return.SetVarX("cross_scint_b2_t - db_5_scint_t")
-    to_return.SetVarY("msx100_e")
-    pid_cuts[name] = to_return
-    return to_return
-
 
 current_run, current_file, current_data = np.nan, None, None
 def show_pid(ddas_run):
@@ -435,18 +340,6 @@ def show_pid(ddas_run):
         current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
         current_data = current_file.Get('merged_data')
     current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)>>(1000,-0.63e-6,-0.6e-6,1000,4000,8000)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1', 'colz')
-
-def get_counts_in_pid_cut(ddas_run, species):
-    global current_run
-    global current_file
-    global current_data
-    if current_run != ddas_run:
-        current_run = ddas_run
-        current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
-        current_data = current_file.Get('merged_data')
-    cut = get_pid_cut(ddas_run, species)
-    cut_name = 'run%d_%s_cut'%(ddas_run, species)
-    return current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1 && %s'%cut_name, 'goff')
 
 rdataframes = {}
 def get_cross_scint_counts(ddas_run):
@@ -461,21 +354,20 @@ def get_cross_scint_counts_during_get_run(get_run):
 def get_ddas_run_duration(ddas_run):
     pass#TODO
 
-def get_summed_gamma_e_str():
-    to_return = ''
+def get_clover_strings():
+    to_return = []
     for num in [1,2,3,5,6,7,9,10,11]:
         for letter in ('a','b','c','d'):
-            if len(to_return) > 0:
-                to_return += ' + '
-            to_return += ' clover_%d%s_e'%(num, letter)
+            to_return.append('clover_%d%s_e'%(num, letter))
     return to_return
 
-import os
-import sys
-import hashlib
-import concurrent.futures
-import ROOT
-from tqdm import tqdm
+def get_summed_gamma_e_str():
+    to_return = ''
+    for clover_string in get_clover_strings():
+        if len(to_return) > 0:
+            to_return += ' + '
+        to_return += clover_string
+    return to_return
 
 def is_iterable_runs(obj):
     if isinstance(obj, (str, bytes)):
@@ -485,6 +377,17 @@ def is_iterable_runs(obj):
         return True
     except TypeError:
         return False
+
+def get_crystal_histograms(ddas_run, binning):
+    to_return = {}
+    for clover_string in get_clover_strings():
+        name = f'run{ddas_run}_{clover_string}'
+        if is_iterable_runs(ddas_run):
+            n_workers = min(200, ddas_run)
+        else:
+            n_workers = 1
+        to_return[clover_string] = get_histogram(ddas_run, binning, name, name, clover_string, num_workers=n_workers)
+    return to_return
 
 def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
     cache_dir = os.path.join('e23035_analysis', 'hist_cache')
@@ -540,7 +443,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
                 ]
                 
                 # Forced stdout and dynamic columns
-                for future in tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)", file=sys.stdout, dynamic_ncols=True, leave=True):
+                for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)", file=sys.stdout, dynamic_ncols=True, leave=True):
                     cache_file_path, hash_name = future.result()
                     
                     cf = ROOT.TFile.Open(cache_file_path, 'READ')
@@ -556,7 +459,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
                         sum_hist.Add(hist)
         else:
             # Forced stdout and dynamic columns
-            for run in tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
+            for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
                 temp_name = f"{hist_name}_run{run}"
                 hist = get_histogram(run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1)
                 

@@ -158,6 +158,44 @@ def get_alpha_mask(get_run):
     lengths = get_length_mm(get_run)
     energy = get_energy_MeV(get_run)
     veto_mask = get_veto_mask(get_run)
-    lower_band, upper_band = get_alpha_mask_min_max_range(get_run, energy)
-    
+    lower_band, upper_band = get_alpha_mask_min_max_range(get_run, energy)    
     return veto_mask & (lengths > lower_band) & (lengths < upper_band)
+
+pid_cuts = {}
+def get_pid_cut(ddas_run, species):
+    global pid_cuts
+    name = 'run%d_%s_cut'%(ddas_run, species)
+    if name in pid_cuts:
+        return pid_cuts[name]
+    
+    if species == '60Ga':
+        points = [(-6.22262e-7,6715.99),(-6.20756e-7,6829.88),(-6.19298e-7,6768.19),(-6.19465e-7,6635.32),(-6.2066e-7,6540.42),(-6.21903e-7,6583.12)]
+    elif species == '59Zn':
+        points=[(-6.20086e-7,6417.04),(-6.18461e-7,6554.65),(-6.16429e-7,6438.47),(-6.16429e-7,6307.9),(-6.18556e-7,6208.25),(-6.19943e-7,6269.94)]
+    points.append(points[0])
+    if ddas_run == 113:
+        timing_offset = 0
+    elif ddas_run == 177 or ddas_run == 240:
+        timing_offset = (-6.24407e-7 + 6.22262e-7)
+    elif ddas_run == 262:
+        timing_offset = -6.2222e-7 + 6.20086e-7
+    points_arr = np.array(points, dtype=np.float64)
+    xs = np.ascontiguousarray(points_arr[:,0], dtype=np.float64) + timing_offset
+    ys = np.ascontiguousarray(points_arr[:,1], dtype=np.float64)
+    to_return =  ROOT.TCutG(name, len(xs), xs, ys)
+    to_return.SetVarX("cross_scint_b2_t - db_5_scint_t")
+    to_return.SetVarY("msx100_e")
+    pid_cuts[name] = to_return
+    return to_return
+
+def get_counts_in_pid_cut(ddas_run, species):
+    global current_run
+    global current_file
+    global current_data
+    if current_run != ddas_run:
+        current_run = ddas_run
+        current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
+        current_data = current_file.Get('merged_data')
+    cut = get_pid_cut(ddas_run, species)
+    cut_name = 'run%d_%s_cut'%(ddas_run, species)
+    return current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1 && %s'%cut_name, 'goff')
