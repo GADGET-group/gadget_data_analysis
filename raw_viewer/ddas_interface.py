@@ -473,7 +473,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
 
     # --- SINGLE RUN LOGIC ---
     # Wrapped in a 1-step progress bar so you always see it
-    with tqdm(total=1, desc=f"Filling {hist_name} (Single)", file=sys.stdout, dynamic_ncols=True, leave=True) as pbar:
+    with tqdm.tqdm(total=1, desc=f"Filling {hist_name} (Single)", file=sys.stdout, dynamic_ncols=True, leave=True) as pbar:
         cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate)
         pbar.update(1)
     
@@ -484,6 +484,21 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
     cf.Close()
     
     return final_hist
+
+def get_first_and_last_ddas_time(ddas_run):
+    '''
+    Get first and last time stamps in the run in seconds
+    '''
+    with ROOT.TFile(get_root_file_path('e23035', ddas_run), 'READ') as f:
+        tree = f.Get('tree')
+        times = np.zeros(NUM_TOTAL_CH)
+        tree.SetBranchAddress('times', times)
+        tree.GetEntry(0)
+        start_time = np.min(times[times>0])
+        tree.GetEntry(tree.GetEntries()-1)
+        stop_time = np.max(times)
+        return start_time/1e9, stop_time/1e9
+
 
 #code used to generate "channel_map.csv"
 # gamma_cal_table = np.genfromtxt('e23035_analysis/init_ge_cal.csv', delimiter=',', skip_header=1)

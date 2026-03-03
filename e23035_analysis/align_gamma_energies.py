@@ -17,6 +17,10 @@ for run in run_candidates:
     if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
+runs=[126]
+
+background_run = 91
+
 n_workers=min(200, len(runs))
 
 def make_energy_calibration(ddas_run, branch_name, binning_for_fit, peak1, peak2=[], selection_string=''):
@@ -32,5 +36,21 @@ def save_energy_calibration(run, calibration):
 
 gammas = ddas_interface.get_histogram(runs, gamma_binning, 'gammas', 'summed gamma spectrum', ddas_interface.get_summed_gamma_e_str(), num_workers=n_workers)
 crystal_hists = ddas_interface.get_crystal_histograms(runs, gamma_binning)
-c,l = root_vis_tools.draw_overlaid_histograms(crystal_hists)
-ROOT.gPad.SetLogy(1)
+
+background_gammas = ddas_interface.get_histogram(background_run, gamma_binning, 'gammas', 'summed gamma spectrum', ddas_interface.get_summed_gamma_e_str(), num_workers=n_workers)
+
+background_crystal_hists = ddas_interface.get_crystal_histograms(background_run, gamma_binning)
+
+c1, h1 = root_vis_tools.plot_crystal_vs_time(background_run, '3c')
+c2, h2 = root_vis_tools.plot_crystal_vs_time(runs[0], '3c')
+c3, h3 = root_vis_tools.plot_crystal_vs_time(runs[0], '5a')
+c4, h4 = root_vis_tools.plot_crystal_vs_time(runs[0], '7b')
+
+#canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(crystal_hists)
+#canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(background_crystal_hists)
+#ROOT.gPad.SetLogy(1)
+
+# canvas, legend, stack = root_vis_tools.draw_overlaid_histograms({'background run 91':background_gammas, '60Ga run 235':gammas},x_label='keV')
+
+canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_hists)
+ROOT.gPad.SetLogz(1)
