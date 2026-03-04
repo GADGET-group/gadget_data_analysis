@@ -51,7 +51,7 @@ if __name__ == '__main__':
     import numpy as np
     if True:
         ddas_runs = range(0, 287)
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(200) as pool:
             pool.map(merge_ddas, ddas_runs)
     if False:
         #runs = run_df['GET'][np.isfinite(run_df['GET'])]
