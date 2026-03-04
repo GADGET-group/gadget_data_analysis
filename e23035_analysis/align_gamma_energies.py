@@ -10,7 +10,8 @@ from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
 Notes on peak finding an automatic fitting
 https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
 '''
-gamma_binning = (12000-1,1,12000)
+gamma_bin_size = 0.1 #keV
+gamma_binning = (int((7000-0)/gamma_bin_size),0,7000) #was 1-12000 w/ 1 keV bins
 run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 runs = []
 for run in run_candidates:
@@ -41,16 +42,18 @@ background_gammas = ddas_interface.get_histogram(background_run, gamma_binning, 
 
 background_crystal_hists = ddas_interface.get_crystal_histograms(background_run, gamma_binning)
 
-c1, h1 = root_vis_tools.plot_crystal_vs_time(background_run, '3c')
-c2, h2 = root_vis_tools.plot_crystal_vs_time(runs[0], '3c')
-c3, h3 = root_vis_tools.plot_crystal_vs_time(runs[0], '5a')
-c4, h4 = root_vis_tools.plot_crystal_vs_time(runs[0], '7b')
+# c1, h1 = root_vis_tools.plot_crystal_vs_time(background_run, '3c')
+# c2, h2 = root_vis_tools.plot_crystal_vs_time(runs[0], '3c')
+# c3, h3 = root_vis_tools.plot_crystal_vs_time(runs[0], '5a')
+# c4, h4 = root_vis_tools.plot_crystal_vs_time(runs[0], '7b')
 
 #canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(crystal_hists)
 #canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(background_crystal_hists)
 #ROOT.gPad.SetLogy(1)
 
 # canvas, legend, stack = root_vis_tools.draw_overlaid_histograms({'background run 91':background_gammas, '60Ga run 235':gammas},x_label='keV')
+fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit=fitting_tools.fit_gaussian_peaks(crystal_hists['clover_3c_e'], [511],30,(490,530) ,True, background_type='constant')
 
-canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_hists)
-ROOT.gPad.SetLogz(1)
+
+# canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_hists)
+# ROOT.gPad.SetLogz(1)

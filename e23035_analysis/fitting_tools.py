@@ -134,7 +134,11 @@ def extract_fit_params(fit_res):
 
     return fit_info
 
-def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, free_sigma=False): 
+def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, free_sigma=False, sigma_guess=None, background_type='linear'): 
+    '''
+    
+    background_type = none, constant, or linear
+    '''
     # Extract the fit range
     e_low, e_high = energy_window[0], energy_window[1]
     bin_width = spectrum.GetBinWidth(1)
@@ -173,13 +177,14 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
             sigma_idx = params_per_peak * i + 2
             sigma_string = f'[{sigma_idx}]'
             
-            # Use the empirical formula to provide an excellent initial guess!
-            sigma_guess = 0.011107 * energy_guesses[i] + 0.008813049
+            if sigma_guess is None:
+                sigma_guess = 0.011107 * energy_guesses[i] + 0.008813049 #formula for TPC energy resolution in MeV as a guess
             initial_values.append(sigma_guess)
             bounds.append((0.001, np.inf)) # Prevent sigma from hitting exactly 0 (divide by zero error)
             names.append(f'sigma_{i}')
         else:
             # Lock sigma to the formula using the mean parameter's index
+            #TODO: allo this to be a for gammas too
             sigma_string = f'(0.011107*[{mean_idx}] + 0.008813049)'
             
         # Build the math string using f-strings for readability
@@ -188,11 +193,20 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     # 2. String Construction & Parameter Setup for Background
     bg_idx_1 = params_per_peak * n_peaks
     bg_idx_2 = params_per_peak * n_peaks + 1
-    background_string = f'[{bg_idx_1}] + [{bg_idx_2}]*x'
-    
-    initial_values.extend([0.0, 0.0])
-    bounds.extend([(-np.inf, np.inf), (-np.inf, np.inf)])
-    names.extend(["bg_offset", "bg_slope"])
+    if background_type == 'linear':
+        background_string = f'[{bg_idx_1}] + [{bg_idx_2}]*x'
+        initial_values.extend([0.0, 0.0])
+        bounds.extend([(-np.inf, np.inf), (-np.inf, np.inf)])
+        names.extend(["bg_offset", "bg_slope"])
+    elif background_type == 'constant':
+        background_string = f'[{bg_idx_1}]'
+        initial_values.extend([0])
+        bounds.extend([(0, np.inf)])
+        names.extend(['bg_offset'])
+    elif background_type == 'none':
+        background_string = '0'
+    else:
+        raise ValueError(f'invalid background type {background_type}')
 
     # Combine strings
     function_string = f'{background_string} + {peaks_string}'
