@@ -66,9 +66,11 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     f_to_fit.SetNpx(1000)
 
     # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
-    fit_res = sub_hist.Fit(f_to_fit, "LS0Q") 
-    if not fit_res.IsValid():
+    fit_res = sub_hist.Fit(f_to_fit, "LS0Q")
+    attempts = 0
+    while not fit_res.IsValid() and attempts < 10:
         fit_res = sub_hist.Fit(f_to_fit, "LS0Q")
+        attempts += 1
 
     # 5. Convert Function to Histogram for Residual Plot
     h_fit = sub_hist.Clone(f"h_fit_{unique_id}")
@@ -134,7 +136,19 @@ def extract_fit_params(fit_res):
 
     return fit_info
 
-def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, free_sigma=False, sigma_guess=None, background_type='linear'): 
+def get_sigma(data_source, energy):
+    if data_source == 'tpc':
+        sigma = 0.011107 * energy + 0.008813049 #formula for TPC energy resolution in MeV as a guess
+    elif data_source == 'gamma_adc':
+        sigma = 10
+    elif data_source == 'gamma_keV':
+        sigma = 2
+    else:
+        raise ValueError('unknown data source string%s'%data_source)
+    return sigma
+
+
+def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, free_sigma=False, data_source='tpc', background_type='linear'): 
     '''
     
     background_type = none, constant, or linear
@@ -176,16 +190,17 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
         if free_sigma:
             sigma_idx = params_per_peak * i + 2
             sigma_string = f'[{sigma_idx}]'
-            
-            if sigma_guess is None:
-                sigma_guess = 0.011107 * energy_guesses[i] + 0.008813049 #formula for TPC energy resolution in MeV as a guess
+            sigma_guess = get_sigma(data_source,energy_guesses[i])
             initial_values.append(sigma_guess)
             bounds.append((0.001, np.inf)) # Prevent sigma from hitting exactly 0 (divide by zero error)
             names.append(f'sigma_{i}')
         else:
             # Lock sigma to the formula using the mean parameter's index
-            #TODO: allo this to be a for gammas too
-            sigma_string = f'(0.011107*[{mean_idx}] + 0.008813049)'
+            #TODO: fit peaks to get energy dependence for gamma ray detectors
+            if data_source == 'tpc':
+                sigma_string = f'(0.011107*[{mean_idx}] + 0.008813049)'
+            else:
+                raise ValueError('invaclid data source for fixed sigma')
             
         # Build the math string using f-strings for readability
         peaks_string += f'[{amp_idx}]*exp(-0.5*((x-[{mean_idx}])/{sigma_string})^2)/({sigma_string} *sqrt(2*pi))*{bin_width}'
@@ -233,4 +248,86 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     peaks = ROOT.TF1(f'peaks_{comp_id}', peaks_string, e_low, e_high)
     peaks.SetParameters(fit_params[:-2])
     
+    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+
+def fit_emg_peak(spectrum, data_source, e_guess, e_wiggle, fit_window): 
+    """
+    Fits an Exponentially Modified Gaussian (low-energy tail) + constant background 
+    using the fit_func engine.
+
+    Fit window defines +/- window about e_guess. If a single number is passed in, us +/- this number.
+    """
+    try:
+        e_low, e_high = e_guess + min(fit_window), e_guess+max(fit_window)
+    except TypeError: #single number passed in
+        e_low, e_high = e_guess - fit_window, e_guess + fit_window
+
+    # 1. Construct the Mathematical Model
+    # [0]: Constant Background
+    # [1]: Amplitude (A)
+    # [2]: Mean (mu)
+    # [3]: Sigma (sigma)
+    # [4]: Tail decay parameter (tau)
+    
+    bg_string = "[0]"
+    
+    # ROOT's TMath::Erfc and TMath::Exp are used for stability. 
+    # 1.41421356 is used in place of sqrt(2) for parsing efficiency.
+    bin_width = spectrum.GetBinWidth(0)
+    norm_factor = f"([1] * {bin_width} / (2.0 * [4]))"
+    exp_term = "TMath::Exp((x-[2])/[4] + ([3]*[3])/(2.0*[4]*[4]))"
+    erfc_term = "TMath::Erfc((x-[2])/(1.41421356*[3]) + [3]/(1.41421356*[4]))"
+    
+    emg_string = f"{norm_factor} * {exp_term} * {erfc_term}"
+    function_string = f"{bg_string} + {emg_string}"
+    
+    function_string = f"{bg_string} + {emg_string}"
+
+    # 2. Setup Parameters and Initial Guesses
+    # Calculate a good starting sigma using your empirical formula
+    sigma_guess = get_sigma(data_source, e_guess)
+    tau_guess = 100
+    A_guess = spectrum.GetBinContent(spectrum.GetMaximumBin())*bin_width#35413.4#
+
+    initial_values = [
+        0.0,          # p0: bg_const
+        A_guess,        # p1: amplitude
+        e_guess,      # p2: mu
+        sigma_guess,  # p3: sigma
+        tau_guess     # p4: tau (tail length)
+    ]
+
+    bounds = [
+        (0, np.inf),                                 # p0: bg_const
+        (0.0, np.inf),                                     # p1: amplitude
+        (e_guess - e_wiggle, e_guess + e_wiggle),          # p2: mu bounds
+        (0.00001, np.inf),                                   # p3: sigma (must be > 0)
+        (0, np.inf)                                    # p4: tau (must be > 0)
+    ]
+
+    names = ["bg_const", "amplitude", "mu", "sigma", "tau"]
+
+    # 3. Call our generalized fit engine
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+        histogram=spectrum, 
+        function_string=function_string, 
+        initial_values=initial_values, 
+        bounds=bounds, 
+        fit_range=(e_low, e_high), 
+        names=names
+    )
+
+    # 4. Reconstruct individual TF1 components for visualization/return
+    comp_id = uuid.uuid4().hex[:6]
+    fit_params = np.array(fit_res.Parameters())
+    
+    # Background component (just parameter 0)
+    background = ROOT.TF1(f'bg_{comp_id}', bg_string, e_low, e_high)
+    background.SetParameter(0, fit_params[0])
+    
+    # EMG Peak component (parameters 1 through 4)
+    peaks = ROOT.TF1(f'emg_{comp_id}', emg_string, e_low, e_high)
+    for i in range(1, 5):
+        peaks.SetParameter(i, fit_params[i])
+        
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit

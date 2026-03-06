@@ -16,8 +16,8 @@ if False: #subset of 60Ga
 
 n_workers = len(runs)
 
-gammas = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gammas', 'summed gamma spectrum', ddas_interface.get_summed_gamma_e_str(), num_workers=n_workers)
-s = ddas_interface.get_summed_gamma_e_str()
+gammas = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gammas', 'summed gamma spectrum', ddas_interface.get_add_back_gamma_str(), num_workers=n_workers)
+s = ddas_interface.get_add_back_gamma_str()
 tsbo = ddas_interface.get_histogram(runs, tsbo_bins, '60Ga_decay_times', 'Time since beam off for 60Ga gamma rays (1003 keV & 3848 keV)',
                                     'time_since_beam_off', '((%s>3840 && %s < 3855) || (%s > 1002 && %s < 1006))'%(s,s,s,s), num_workers=n_workers)
 

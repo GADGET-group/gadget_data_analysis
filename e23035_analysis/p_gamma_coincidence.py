@@ -16,10 +16,10 @@ for run in run_candidates:
 
 n_workers = min(len(runs), 150) #cap at 150 so as not to murder the TPCGPU
 
-gammas = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gammas', 'summed gamma spectrum', ddas_interface.get_summed_gamma_e_str(), num_workers=n_workers)
-s = ddas_interface.get_summed_gamma_e_str()
+gammas = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gammas', 'summed gamma spectrum', ddas_interface.get_add_back_gamma_str(), num_workers=n_workers)
+s = ddas_interface.get_add_back_gamma_str()
 gamma_gated_on_proton = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gamma_gated_on_protons', 'gamma rays gated on protons', 
-                ddas_interface.get_summed_gamma_e_str(), 'tpc_particle_id==1', num_workers=n_workers)
+                ddas_interface.get_add_back_gamma_str(), 'tpc_particle_id==1', num_workers=n_workers)
 
 protons = ddas_interface.get_histogram(runs, (3000, 0, 3000), 'protons', 'proton energy (keV)', 'tpc_energy', 'tpc_particle_id==1', num_workers=n_workers)
 protons_gated_on_gammas = ddas_interface.get_histogram(runs, (3000, 0, 3000), 'protons_gated_on_gammas', 'proton energy (keV) gated on gamma rays',
@@ -33,7 +33,7 @@ protons_gated_on_491 = ddas_interface.get_histogram(runs, (3000, 0, 3000), 'prot
 
 alphas = ddas_interface.get_histogram(runs, (int((9000-1500/50)), 1500, 9000), 'alphas', 'alpha energy (keV)', 'tpc_energy', 'tpc_particle_id==2', num_workers=n_workers)
 gamma_gated_on_alpha = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gamma_gated_on_alpha', 'gamma rays gated on alpha particle', 
-                ddas_interface.get_summed_gamma_e_str(), 'tpc_particle_id==2', num_workers=n_workers)
+                ddas_interface.get_add_back_gamma_str(), 'tpc_particle_id==2', num_workers=n_workers)
 
 c1,c2 = ROOT.TCanvas(), ROOT.TCanvas()
 c1.cd()

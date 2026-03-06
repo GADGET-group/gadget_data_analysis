@@ -365,7 +365,7 @@ def get_clover_strings():
             to_return.append('clover_%d%s_e'%(num, letter))
     return to_return
 
-def get_summed_gamma_e_str():
+def get_add_back_gamma_str():
     to_return = ''
     for clover_string in get_clover_strings():
         if len(to_return) > 0:
@@ -382,10 +382,13 @@ def is_iterable_runs(obj):
     except TypeError:
         return False
 
-def get_crystal_histograms(ddas_run, binning):
+def get_crystal_histograms(ddas_run, binning, hist_to_get):
+    '''
+    hist_to_get: c, t, m, or e
+    '''
     to_return = {}
     for clover_string in get_clover_strings():
-        name = f'run{ddas_run}_{clover_string}'
+        name = f'run{ddas_run}_{clover_string}_{hist_to_get}'
         if is_iterable_runs(ddas_run):
             n_workers = min(200, len(ddas_run))
         else:
