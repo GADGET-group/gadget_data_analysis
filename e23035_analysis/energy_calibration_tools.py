@@ -3,7 +3,9 @@ import pickle
 import ROOT
 import numpy as np
 from pathlib import Path
-from e23035_analysis import fitting_tools, ddas_interface
+
+from e23035_analysis import fitting_tools
+from raw_viewer import ddas_interface
 
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, selection_string='', data_source='gamma_adc'):
     '''
@@ -11,11 +13,11 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
     ddas_run: single run or iterable
     calibration_name: name by which the generated slope/offset will be saved and may be retrieved
-    branch_name: name of the branch to retrieve data from (eg clover_1a_m, tpc_energy, etc)
+    branch_name: name of the branch to retrieve data from (eg clover_1a_e, tpc_energy, etc)
     binning_for_fit: tuple specifying TH1D binning
     peaks: List of peaks to use to specify the calibration. Each list entry should contain tuples of 
-        (true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop). 
-        Will assume offset = 0 if length is 1.
+        (true energy, true energy_uncertainty, fit range start, fit range stop). 
+        Will assume offset = 0 if length is 1. The largest bin in the specified range will be used as a starting guess for the peak location.
     '''
     # Safely check if ddas_run is an iterable of runs or a single run
     try:
@@ -25,7 +27,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         
     hist_to_fit = ddas_interface.get_histogram(ddas_run, binning_for_fit, branch_name, branch_name, branch_name, selection_string, num_workers)
 
-    # TODO 1: Make folder using pathlib for clean cross-platform path handling
+    #  1: Make folder using pathlib for clean cross-platform path handling
     cal_dir = Path(f"e23035_analysis/calibrations/{calibration_name}")
     cal_dir.mkdir(parents=True, exist_ok=True)
 
@@ -33,46 +35,68 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     true_energies, true_energy_uncertainties, peak_locations, peak_location_uncertainties = [], [], [], []
     
     # Fit peaks
-    for true_energy, true_energy_err, location_guess, location_wiggle, fit_range_start, fit_range_stop in peaks:
+    for true_energy, true_energy_err, fit_range_start, fit_range_stop in peaks:
         true_energies.append(true_energy)
         true_energy_uncertainties.append(true_energy_err)
+        
+        location_wiggle = fit_range_stop - fit_range_start
+
+        hist_to_fit.GetXaxis().SetRangeUser(fit_range_start, fit_range_stop)
+        max_bin_in_range = hist_to_fit.GetMaximumBin()        
+        location_guess = hist_to_fit.GetXaxis().GetBinCenter(max_bin_in_range)
+        hist_to_fit.GetXaxis().UnZoom()
+
+        location_guess, location_wiggle,
         
         # Assuming fitting_tools is your module, or just call fit_emg_peak directly
         fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
             hist_to_fit, data_source, location_guess, location_wiggle, (fit_range_start, fit_range_stop)
         )
-        
-        # TODO 3: Add the fit peak location (mu) to peak_locations
-        # In fit_emg_peak, mu is parameter index 2
+          
+        #  2: Save the fit plot to a pdf, including parameter fit results and p-value
+        # ... inside the for loop ...
         mu_val = fit_res.Parameter(2)
         mu_err = fit_res.ParError(2)
-        p_value = fit_res.Prob()
-        
         peak_locations.append(mu_val)
         peak_location_uncertainties.append(mu_err)
+        p_value = fit_res.Prob()
         
+        # Calculate reduced chi-squared for goodness of fit
+        chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
+        
+
         # TODO 2: Save the fit plot to a pdf, including parameter fit results and p-value
         canvas.cd()
         upper_pad = rp.GetUpperPad()
         upper_pad.cd()
         
-        # Draw a stats box on the upper pad
-        stats_box = ROOT.TPaveText(0.65, 0.55, 0.88, 0.88, "NDC")
+        # Make the box taller (Y1 from 0.55 down to 0.35) to fit all parameters
+        stats_box = ROOT.TPaveText(0.60, 0.35, 0.88, 0.88, "NDC")
         stats_box.SetFillColor(ROOT.kWhite)
         stats_box.SetBorderSize(1)
+        stats_box.SetTextAlign(12) # Left-align the text so the list looks neat
+        
+        # Add general fit info
         stats_box.AddText(f"E_{{true}}: {true_energy} keV")
-        stats_box.AddText(f"#mu: {mu_val:.2f} #pm {mu_err:.2f}")
-        stats_box.AddText(f"P-value: {p_value:.4f}")
+        stats_box.AddText(f"P-value: {p_value:.4e}")
+        stats_box.AddText(f"#chi^{{2}}/ndf: {chi2_ndf:.2f}")
+        stats_box.AddLine(0, 0, 0, 0) # Draws a separator line
+        
+        # Dynamically loop over ALL parameters in the fit
+        for i in range(fit_res.NPar()):
+            p_name = f_to_fit.GetParName(i)  # <-- Pull the name from the TF1 instead
+            p_val = fit_res.Parameter(i)
+            p_err = fit_res.ParError(i)
+            
+            stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
+            
         stats_box.Draw("SAME")
         
         canvas.Update()
         plot_path = cal_dir / f"fit_{true_energy}keV.pdf"
         canvas.SaveAs(str(plot_path))
     
-    # TODO 4: Fit line to peak locations and save to a pkl file
-    # ... [previous code remains the same up to TODO 4] ...
-
-    # TODO 4: Fit line to peak locations and save to a pkl file
+    #  4: Fit line to peak locations and save to a pkl file
     calibration_results = {}
     
     if len(peaks) == 1:
@@ -97,13 +121,14 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         print(f"[{calibration_name}] 1-Point Cal: slope={slope:.4f} ± {sigma_slope:.4f}, offset=0")
         
     else:
+        print('fit peak locations: ', peak_locations)
         # Linear fit: y = mx + b  ->  Energy = slope * ADC + offset
         graph = ROOT.TGraphErrors(
             len(peaks), 
-            np.array(peak_locations, dtype=float), 
-            np.array(true_energies, dtype=float), 
-            np.array(peak_location_uncertainties, dtype=float), 
-            np.array(true_energy_uncertainties, dtype=float)
+            np.array(peak_locations, dtype=np.float64), 
+            np.array(true_energies, dtype=np.float64), 
+            np.array(peak_location_uncertainties, dtype=np.float64), 
+            np.array(true_energy_uncertainties, dtype=np.float64)
         )
         
         graph.SetTitle(f"Energy Calibration: {calibration_name};ADC Channel (#mu);True Energy (keV)")

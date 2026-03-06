@@ -250,17 +250,18 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:double, e_wiggle:double, fit_window): 
+def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:float, fit_window): 
     """
     Fits an Exponentially Modified Gaussian (low-energy tail) + constant background 
     using the fit_func engine.
 
     Fit window defines +/- window about e_guess. If a single number is passed in, us +/- this number.
     """
-    try:
-        e_low, e_high = e_guess + min(fit_window), e_guess+max(fit_window)
-    except TypeError: #single number passed in
-        e_low, e_high = e_guess - fit_window, e_guess + fit_window
+    # try:
+    #     e_low, e_high = e_guess + min(fit_window), e_guess+max(fit_window)
+    # except TypeError: #single number passed in
+    #     e_low, e_high = e_guess - fit_window, e_guess + fit_window
+    e_low, e_high = fit_window
 
     # 1. Construct the Mathematical Model
     # [0]: Constant Background
