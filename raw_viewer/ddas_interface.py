@@ -358,11 +358,11 @@ def get_cross_scint_counts_during_get_run(get_run):
 def get_ddas_run_duration(ddas_run):
     pass#TODO
 
-def get_clover_strings():
+def get_clover_strings(hist_to_get='e'):
     to_return = []
     for num in [1,2,3,5,6,7,9,10,11]:
         for letter in ('a','b','c','d'):
-            to_return.append('clover_%d%s_e'%(num, letter))
+            to_return.append('clover_%d%s_%s'%(num, letter, hist_to_get))
     return to_return
 
 def get_add_back_gamma_str():
@@ -387,7 +387,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get):
     hist_to_get: c, t, m, or e
     '''
     to_return = {}
-    for clover_string in get_clover_strings():
+    for clover_string in get_clover_strings(hist_to_get):
         name = f'run{ddas_run}_{clover_string}_{hist_to_get}'
         if is_iterable_runs(ddas_run):
             n_workers = min(200, len(ddas_run))

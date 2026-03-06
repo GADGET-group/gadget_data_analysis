@@ -250,7 +250,7 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_peak(spectrum, data_source, e_guess, e_wiggle, fit_window): 
+def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:double, e_wiggle:double, fit_window): 
     """
     Fits an Exponentially Modified Gaussian (low-energy tail) + constant background 
     using the fit_func engine.
@@ -331,3 +331,4 @@ def fit_emg_peak(spectrum, data_source, e_guess, e_wiggle, fit_window):
         peaks.SetParameter(i, fit_params[i])
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+
