@@ -10,6 +10,18 @@ from raw_viewer import ddas_interface
 def get_calibration_directory(ddas_run, calibration_name, branch_name):
     return f"e23035_analysis/calibrations/{ddas_run}/{calibration_name}/{branch_name}"
 
+def get_calibration_result(ddas_run, calibration_name, branch_name):
+    cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch_name))
+    pkl_path = cal_dir / f"{calibration_name}.pkl"
+    with open(pkl_path, 'rb') as f:
+        calibration_results = pickle.load(f)
+    return calibration_results
+
+def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
+    calibration_results = get_calibration_result(ddas_run, calibration_name, branch_name)
+    slope, offset = calibration_results['slope'], calibration_results['offset']
+    return f'({slope}*{branch_name} + {offset})'
+
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, selection_string='', data_source='gamma_adc'):
     '''
     Fit peaks to get energy calibration

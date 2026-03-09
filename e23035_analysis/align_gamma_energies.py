@@ -37,9 +37,12 @@ def do_gain_match(ddas_run):
     ddas_run
     clover: 1a, 1b, etc
     '''
+    original_batch_state = ROOT.gROOT.IsBatch()
+    ROOT.gROOT.SetBatch(True)
+    true_locations = [510.99895069, 2614.511]
+    true_location_uncertainties =  [16e-7, 1e-2]
+    
     for clover in clover_list:
-        true_locations = [510.99895069, 2614.511]
-        true_location_uncertainties =  [16e-7, 1e-2]
         peaks = []
         clover_str = f'clover_{clover}'
         init_slope, init_offset = init_cal_dict[clover_str]
@@ -50,7 +53,43 @@ def do_gain_match(ddas_run):
             search_window_width = 50/init_slope
             #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
             peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess-search_window_width, loc_guess+search_window_width), (-fit_window_width, fit_window_width)))
-        energy_calibration_tools.make_energy_calibration(ddas_run, f'clover{clover}_gm', adc_str, (2**16, 0, 2**16), peaks)
+        energy_calibration_tools.make_energy_calibration(ddas_run, 'gm', adc_str, (2**16, 0, 2**16), peaks)
+
+     #save histogram showing energy alignment 
+    crystal_e_hists = ddas_interface.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
+    canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
+    ROOT.gPad.SetLogz(1)
+    canvas.Update()
+    fname = "e23035_analysis/calibrations/initial_alignment.pdf"
+    canvas.Print(fname+'(')
+    dE_to_plot = 100
+    for loc in true_locations:
+        th2.GetXaxis().SetRangeUser(loc-dE_to_plot, loc+dE_to_plot)
+        canvas.Update()
+        if loc == true_locations[-1]:
+            canvas.Print(fname+')')
+        else:
+            canvas.Print(fname)
+
+    #save histogram showing enrgy alignment after gain matching
+    gm_e_hists = ddas_interface.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'cal', 'gm')
+    canvas, th2 = root_vis_tools.create_2d_hist_from_dict(gm_e_hists, "with gain match applied")
+    ROOT.gPad.SetLogz(1)
+    
+    canvas.Update()
+    fname = "e23035_analysis/calibrations/gain_match.pdf"
+    canvas.Print(fname+'(')
+    dE_to_plot = 100
+    for loc in true_locations:
+        th2.GetXaxis().SetRangeUser(loc-dE_to_plot, loc+dE_to_plot)
+        canvas.Update()
+        if loc == true_locations[-1]:
+            canvas.Print(fname+')')
+        else:
+            canvas.Print(fname)
+
+    ROOT.gROOT.SetBatch(original_batch_state)
+    
 
 clover_list = []
 for num in range(1, 12):

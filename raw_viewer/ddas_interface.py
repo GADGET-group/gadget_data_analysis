@@ -15,7 +15,7 @@ import numpy as np
 import matplotlib.pylab as plt
 import matplotlib.colors
 
-from e23035_analysis import e23035_runs
+from e23035_analysis import e23035_runs, energy_calibration_tools
 from raw_viewer import process_runs
 
 NUM_SLOTS = 10
@@ -382,18 +382,25 @@ def is_iterable_runs(obj):
     except TypeError:
         return False
 
-def get_crystal_histograms(ddas_run, binning, hist_to_get):
+def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name=''):
     '''
-    hist_to_get: c, t, m, or e
+    hist_to_get: c, t, m, e, or cal
+    If cal, cal_name must be give, and corresponding cal generated with  energy_calibration_tools will be applied
     '''
     to_return = {}
-    for clover_string in get_clover_strings(hist_to_get):
-        name = f'run{ddas_run}_{clover_string}_{hist_to_get}'
+    #var_str = f'{slope}*{clover_string} + {offset}'
+    if hist_to_get == 'cal':
+        clover_strings = [energy_calibration_tools.get_calibrated_energy_string(ddas_run, cal_name, s) for s in get_clover_strings('c')]
+        names = get_clover_strings(cal_name)
+    else:
+        clover_strings = get_clover_strings(hist_to_get)
+        names = clover_strings
+    for clover_string, name in zip(clover_strings, names):
         if is_iterable_runs(ddas_run):
             n_workers = min(200, len(ddas_run))
         else:
             n_workers = 1
-        to_return[clover_string] = get_histogram(ddas_run, binning, name, name, clover_string, num_workers=n_workers)
+        to_return[name] = get_histogram(ddas_run, binning, name, name, clover_string, num_workers=n_workers)
     return to_return
 
 def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
