@@ -16,7 +16,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     branch_name: name of the branch to retrieve data from (eg clover_1a_e, tpc_energy, etc)
     binning_for_fit: tuple specifying TH1D binning
     peaks: List of peaks to use to specify the calibration. Each list entry should contain tuples of 
-        (true energy, true energy_uncertainty, fit range start, fit range stop). 
+        (true energy, true energy_uncertainty, (search window start, stop), (fit window +, -). 
         Will assume offset = 0 if length is 1. The largest bin in the specified range will be used as a starting guess for the peak location.
     '''
     # Safely check if ddas_run is an iterable of runs or a single run
@@ -35,22 +35,20 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     true_energies, true_energy_uncertainties, peak_locations, peak_location_uncertainties = [], [], [], []
     
     # Fit peaks
-    for true_energy, true_energy_err, fit_range_start, fit_range_stop in peaks:
+    for true_energy, true_energy_err, search_window, fit_window in peaks:
         true_energies.append(true_energy)
         true_energy_uncertainties.append(true_energy_err)
         
-        location_wiggle = fit_range_stop - fit_range_start
+        location_wiggle = np.max(np.abs(fit_window))/2
 
-        hist_to_fit.GetXaxis().SetRangeUser(fit_range_start, fit_range_stop)
+        hist_to_fit.GetXaxis().SetRangeUser(*search_window)
         max_bin_in_range = hist_to_fit.GetMaximumBin()        
         location_guess = hist_to_fit.GetXaxis().GetBinCenter(max_bin_in_range)
         hist_to_fit.GetXaxis().UnZoom()
-
-        location_guess, location_wiggle,
         
         # Assuming fitting_tools is your module, or just call fit_emg_peak directly
         fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
-            hist_to_fit, data_source, location_guess, location_wiggle, (fit_range_start, fit_range_stop)
+            hist_to_fit, data_source, location_guess, location_wiggle, (location_guess + fit_window[0], location_guess + fit_window[1])
         )
           
         #  2: Save the fit plot to a pdf, including parameter fit results and p-value

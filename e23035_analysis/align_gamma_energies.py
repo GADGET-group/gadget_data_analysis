@@ -32,26 +32,34 @@ for i in range(len(ch_names)):
     init_cal_dict[ch_names[i]] = (init_slopes[i], init_offsets[i])
 
 
-def do_gain_match(ddas_run, clover):
+def do_gain_match(ddas_run):
     '''
     ddas_run
     clover: 1a, 1b, etc
     '''
-    true_locations = [510.99895069, 2614.511]
-    true_location_uncertainties =  [16e-7, 1e-2]
-    peaks = []
-    clover_str = f'clover_{clover}'
-    init_slope, init_offset = init_cal_dict[clover_str]
-    adc_str = f'clover_{clover}_c'
-    for i in range(len(true_locations)):
-        loc_guess = (true_locations[i] - init_offset)/init_slope
-        loc_wiggle = 30/init_slope
-        window_width = 50/init_slope
-        #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
-        peaks.append((true_locations[i], true_location_uncertainties[i],  loc_guess-window_width, loc_guess+window_width))
-    return energy_calibration_tools.make_energy_calibration(ddas_run, f'ddas{ddas_run}_clover{clover}_gm', adc_str, (2**16, 0, 2**16), peaks)
+    for clover in clover_list:
+        true_locations = [510.99895069, 2614.511]
+        true_location_uncertainties =  [16e-7, 1e-2]
+        peaks = []
+        clover_str = f'clover_{clover}'
+        init_slope, init_offset = init_cal_dict[clover_str]
+        adc_str = f'clover_{clover}_c'
+        for i in range(len(true_locations)):
+            loc_guess = (true_locations[i] - init_offset)/init_slope
+            fit_window_width = 0.01*loc_guess*np.sqrt(511/true_locations[i])
+            search_window_width = 50/init_slope
+            #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
+            peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess-search_window_width, loc_guess+search_window_width), (-fit_window_width, fit_window_width)))
+        energy_calibration_tools.make_energy_calibration(ddas_run, f'ddas{ddas_run}_clover{clover}_gm', adc_str, (2**16, 0, 2**16), peaks)
 
-do_gain_match(126, '3a')    
+clover_list = []
+for num in range(1, 12):
+    if num == 4 or num == 8:
+        continue
+    for letter in ['a', 'b', 'c', 'd']:
+        clover_list.append(f'{num}{letter}')
+
+do_gain_match(126)
 #h = ddas_interface.get_histogram(runs[0], (2**16, 0, 2**16), '3a_counts', '3a_counts', 'clover_3a_c')
 #guess = 3295.8#(511-2.609910)/0.154992 #9405
 # fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(h, 'gamma_adc',guess, 100, (-25,25))

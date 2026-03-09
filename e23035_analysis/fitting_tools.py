@@ -66,10 +66,11 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     f_to_fit.SetNpx(1000)
 
     # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
-    fit_res = sub_hist.Fit(f_to_fit, "LS0Q")
+    fit_options = 'LS0G'
+    fit_res = sub_hist.Fit(f_to_fit, fit_options)
     attempts = 0
-    while not fit_res.IsValid() and attempts < 10:
-        fit_res = sub_hist.Fit(f_to_fit, "LS0Q")
+    while not fit_res.IsValid() and attempts < 20:
+        fit_res = sub_hist.Fit(f_to_fit, fit_options)
         attempts += 1
 
     # 5. Convert Function to Histogram for Residual Plot
@@ -254,8 +255,6 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
     """
     Fits an Exponentially Modified Gaussian (low-energy tail) + constant background 
     using the fit_func engine.
-
-    Fit window defines +/- window about e_guess. If a single number is passed in, us +/- this number.
     """
     # try:
     #     e_low, e_high = e_guess + min(fit_window), e_guess+max(fit_window)
@@ -287,24 +286,37 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
     # 2. Setup Parameters and Initial Guesses
     # Calculate a good starting sigma using your empirical formula
     sigma_guess = get_sigma(data_source, e_guess)
-    tau_guess = 100
-    A_guess = spectrum.GetBinContent(spectrum.GetMaximumBin())*bin_width#35413.4#
+    tau_guess = 3
+    
+    spectrum.GetXaxis().SetRangeUser(*fit_window)
+
+    bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    A_guess = (spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess)*sigma_guess/bin_width#35413.4#
+    if data_source == 'gamma_adc':
+        tau_bounds = (0, 20)
+        sigma_bounds = (1,20)
+        A_bounds = ((spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess), np.inf)
+
+    spectrum.GetXaxis().UnZoom()
 
     initial_values = [
-        0.0,          # p0: bg_const
+        bg_guess,          # p0: bg_const
         A_guess,        # p1: amplitude
         e_guess,      # p2: mu
         sigma_guess,  # p3: sigma
         tau_guess     # p4: tau (tail length)
     ]
+    print('initial values: ',initial_values)
 
     bounds = [
         (0, np.inf),                                 # p0: bg_const
-        (0.0, np.inf),                                     # p1: amplitude
+        A_bounds,                             # p1: amplitude
         (e_guess - e_wiggle, e_guess + e_wiggle),          # p2: mu bounds
-        (0.00001, np.inf),                                   # p3: sigma (must be > 0)
-        (0, np.inf)                                    # p4: tau (must be > 0)
+        sigma_bounds,                                   # p3: sigma 
+        tau_bounds                                   # p4: tau 
     ]
+
+    print('bounds: ',bounds)
 
     names = ["bg_const", "amplitude", "mu", "sigma", "tau"]
 
