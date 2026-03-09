@@ -1,4 +1,5 @@
 import os
+import multiprocessing
 
 import numpy as np
 import ROOT
@@ -60,7 +61,7 @@ def do_gain_match(ddas_run):
     canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
     ROOT.gPad.SetLogz(1)
     canvas.Update()
-    fname = "e23035_analysis/calibrations/initial_alignment.pdf"
+    fname = f"e23035_analysis/calibrations/{ddas_run}/gm/initial_alignment.pdf"
     canvas.Print(fname+'(')
     dE_to_plot = 100
     for loc in true_locations:
@@ -77,7 +78,7 @@ def do_gain_match(ddas_run):
     ROOT.gPad.SetLogz(1)
     
     canvas.Update()
-    fname = "e23035_analysis/calibrations/gain_match.pdf"
+    fname = f"e23035_analysis/calibrations/{ddas_run}/gm/gain_match.pdf"
     canvas.Print(fname+'(')
     dE_to_plot = 100
     for loc in true_locations:
@@ -98,7 +99,10 @@ for num in range(1, 12):
     for letter in ['a', 'b', 'c', 'd']:
         clover_list.append(f'{num}{letter}')
 
-do_gain_match(126)
+def process_all():
+    runs = e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])]
+    with multiprocessing.Pool(50) as pool:
+        pool.map(do_gain_match, runs)
 #h = ddas_interface.get_histogram(runs[0], (2**16, 0, 2**16), '3a_counts', '3a_counts', 'clover_3a_c')
 #guess = 3295.8#(511-2.609910)/0.154992 #9405
 # fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(h, 'gamma_adc',guess, 100, (-25,25))
