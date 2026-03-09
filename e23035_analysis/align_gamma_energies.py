@@ -50,7 +50,7 @@ def do_gain_match(ddas_run):
             search_window_width = 50/init_slope
             #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
             peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess-search_window_width, loc_guess+search_window_width), (-fit_window_width, fit_window_width)))
-        energy_calibration_tools.make_energy_calibration(ddas_run, f'ddas{ddas_run}_clover{clover}_gm', adc_str, (2**16, 0, 2**16), peaks)
+        energy_calibration_tools.make_energy_calibration(ddas_run, f'clover{clover}_gm', adc_str, (2**16, 0, 2**16), peaks)
 
 clover_list = []
 for num in range(1, 12):

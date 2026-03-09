@@ -7,6 +7,9 @@ from pathlib import Path
 from e23035_analysis import fitting_tools
 from raw_viewer import ddas_interface
 
+def get_calibration_directory(ddas_run, calibration_name, branch_name):
+    return f"e23035_analysis/calibrations/{ddas_run}/{calibration_name}/{branch_name}"
+
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, selection_string='', data_source='gamma_adc'):
     '''
     Fit peaks to get energy calibration
@@ -19,6 +22,9 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         (true energy, true energy_uncertainty, (search window start, stop), (fit window +, -). 
         Will assume offset = 0 if length is 1. The largest bin in the specified range will be used as a starting guess for the peak location.
     '''
+    #turn off plotting so there aren't a bunch of pop ups
+    original_batch_state = ROOT.gROOT.IsBatch()
+    ROOT.gROOT.SetBatch(True)
     # Safely check if ddas_run is an iterable of runs or a single run
     try:
         num_workers = min(200, len(ddas_run))
@@ -28,7 +34,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     hist_to_fit = ddas_interface.get_histogram(ddas_run, binning_for_fit, branch_name, branch_name, branch_name, selection_string, num_workers)
 
     #  1: Make folder using pathlib for clean cross-platform path handling
-    cal_dir = Path(f"e23035_analysis/calibrations/{calibration_name}")
+    cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch_name))
     cal_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize lists
@@ -68,27 +74,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         upper_pad = rp.GetUpperPad()
         upper_pad.cd()
         
-        # Make the box taller (Y1 from 0.55 down to 0.35) to fit all parameters
-        stats_box = ROOT.TPaveText(0.60, 0.35, 0.88, 0.88, "NDC")
-        stats_box.SetFillColor(ROOT.kWhite)
-        stats_box.SetBorderSize(1)
-        stats_box.SetTextAlign(12) # Left-align the text so the list looks neat
-        
-        # Add general fit info
-        stats_box.AddText(f"E_{{true}}: {true_energy} keV")
-        stats_box.AddText(f"P-value: {p_value:.4e}")
-        stats_box.AddText(f"#chi^{{2}}/ndf: {chi2_ndf:.2f}")
-        stats_box.AddLine(0, 0, 0, 0) # Draws a separator line
-        
-        # Dynamically loop over ALL parameters in the fit
-        for i in range(fit_res.NPar()):
-            p_name = f_to_fit.GetParName(i)  # <-- Pull the name from the TF1 instead
-            p_val = fit_res.Parameter(i)
-            p_err = fit_res.ParError(i)
-            
-            stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
-            
-        stats_box.Draw("SAME")
+        ROOT.gStyle.SetOptFit(1111)
         
         canvas.Update()
         plot_path = cal_dir / f"fit_{true_energy}keV.pdf"
@@ -170,5 +156,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     pkl_path = cal_dir / f"{calibration_name}.pkl"
     with open(pkl_path, 'wb') as f:
         pickle.dump(calibration_results, f)
-        
+    
+    ROOT.gROOT.SetBatch(original_batch_state)
     return calibration_results
