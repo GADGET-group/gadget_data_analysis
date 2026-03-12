@@ -8,6 +8,7 @@ from e23035_analysis import fitting_tools
 from raw_viewer import ddas_interface
 
 def get_calibration_directory(ddas_run, calibration_name, branch_name):
+    ddas_run = int(ddas_run)
     return f"e23035_analysis/calibrations/{ddas_run}/{calibration_name}/{branch_name}"
 
 def get_calibration_result(ddas_run, calibration_name, branch_name):
