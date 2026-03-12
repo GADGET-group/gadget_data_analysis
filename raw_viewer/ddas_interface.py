@@ -390,6 +390,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name=''):
     to_return = {}
     #var_str = f'{slope}*{clover_string} + {offset}'
     if hist_to_get == 'cal':
+        #TODO: handle case where ddas_run is iterable
         clover_strings = [energy_calibration_tools.get_calibrated_energy_string(ddas_run, cal_name, s) for s in get_clover_strings('c')]
         names = get_clover_strings(cal_name)
     else:
@@ -402,6 +403,20 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name=''):
             n_workers = 1
         to_return[name] = get_histogram(ddas_run, binning, name, name, clover_string, num_workers=n_workers)
     return to_return
+
+def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init'):
+    '''
+    Sum histograms of individual crystals
+    '''
+    if cal_name == 'init': #use calibration applied for merging process
+        crystal_hists = get_crystal_histograms(ddas_run, binning, 'e')
+    else:
+        crystal_hists = get_crystal_histograms(ddas_run, binning, 'cal', cal_name)
+    to_return = ROOT.TH1D(f'summed_gammas_{ddas_run}', 'summed gamma spectrum', *binning)
+    for crystal in crystal_hists:
+        to_return.Add(crystal_hists[crystal])
+    return to_return
+
 
 def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
     cache_dir = os.path.join('e23035_analysis', 'hist_cache')

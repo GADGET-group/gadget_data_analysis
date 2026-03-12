@@ -16,6 +16,30 @@ for run in run_candidates:
 
 n_workers = min(len(runs), 150) #cap at 150 so as not to murder the TPCGPU
 
+ROOT.EnableImplicitMT()
+counts_branch_list = [f'clover_{clover}_c' for clover in clover_list]
+gm_branch_list = [s + '_gm' for s in counts_branch_list]
+df = energy_calibration_tools.get_run_dataframe(runs)
+df = energy_calibration_tools.apply_calibration(df, runs, counts_branch_list, 'gm')
+add_back_logic = ''
+crystal_strings_for_max = ''
+for i in range(len(gm_branch_list)):
+    if i != 0:
+        add_back_logic += '+'
+        crystal_strings_for_max += ','
+    add_back_logic += gm_branch_list[i]
+    crystal_strings_for_max += gm_branch_list[i]
+df = df.Define('add_back', add_back_logic)
+add_back_hist = df.Histo1D(("add_back", "add back", 6000, 0., 6000.), "add_back")
+df = df.Define("summed_gamma", "std::max({%s})"%crystal_strings_for_max)
+summed_hist = df.Histo1D(("summed_gamma", "summed gamma spectrum", 6000, 0., 6000.), "summed_gamma")
+#ddas_interface.get_summed_gamma_spectrum(run, (6000,0, 6000), 'gm')
+#root_vis_tools.draw_overlaid_histograms({'add back':add_back_hist, 'summed':summed_hist}, f'run {run}', 'keV')
+add_back_hist.Draw()
+ROOT.gPad.SetLogy(1)
+summed_hist.SetLineColor(ROOT.kRed)
+summed_hist.Draw("SAME")
+
 gammas = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gammas', 'summed gamma spectrum', ddas_interface.get_add_back_gamma_str(), num_workers=n_workers)
 s = ddas_interface.get_add_back_gamma_str()
 gamma_gated_on_proton = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gamma_gated_on_protons', 'gamma rays gated on protons', 

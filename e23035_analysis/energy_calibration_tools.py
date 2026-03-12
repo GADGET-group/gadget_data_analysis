@@ -81,7 +81,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
         
 
-        # TODO 2: Save the fit plot to a pdf, including parameter fit results and p-value
+        # 2: Save the fit plot to a pdf, including parameter fit results and p-value
         canvas.cd()
         upper_pad = rp.GetUpperPad()
         upper_pad.cd()
@@ -170,4 +170,116 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         pickle.dump(calibration_results, f)
     
     ROOT.gROOT.SetBatch(original_batch_state)
+
+    #save a root file with the following:
+    # TTree peak_fit_results which holds fit results for each peak
+    # TFitResult for energy calibration ecal_result
+    root_path = cal_dir / 'results.root'
+
     return calibration_results
+
+def get_run_dataframe(ddas_run, tree_name='merged_data'):
+    """
+    Retrieves the ROOT file for a given run and initializes an RDataFrame.
+    """
+    # TODO: Adapt this line to however your ddas_interface locates ROOT files
+    file_path = ddas_interface.get_merged_root_file_path(ddas_run)
+    
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Could not find ROOT file for run {ddas_run} at {file_path}")
+        
+    df = ROOT.RDataFrame(tree_name, file_path)
+    return df
+
+def apply_calibration(df, ddas_run, branch_list, calibration_name):
+    """
+    Reads calibration parameters and defines new calibrated columns in the RDataFrame.
+    Sets the calibrated energy to 0.0 if the corresponding multiplicity is 0.
+    Returns the updated RDataFrame node.
+    """
+    for branch in branch_list:
+        new_branch_name = f"{branch}_{calibration_name}"
+
+        # Only define the column if it hasn't been defined already in this graph
+        if not df.HasColumn(new_branch_name):
+            
+            # Dynamically determine the corresponding multiplicity branch
+            # e.g., 'clover_1a_c' -> 'clover_1a_m'
+            if branch.endswith('_c') or branch.endswith('_e'):
+                mult_branch = branch[:-2] + '_m'
+            else:
+                assert False #not implemented yet
+            
+            # Locate and load the pickle file
+            cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch))
+            pkl_path = cal_dir / f"{calibration_name}.pkl"
+                
+            with open(pkl_path, 'rb') as f:
+                cal_data = pickle.load(f)
+                
+            m = cal_data['slope']
+            b = cal_data['offset']
+
+            # Create the C++ logic string
+            # If multiplicity > 0, calculate energy. Otherwise, return 0.0.
+            cpp_logic = f"({mult_branch} > 0) ? ({m} * {branch} + {b}) : 0.0"
+
+            # Create the new node and update our df reference
+            df = df.Define(new_branch_name, cpp_logic)
+
+    return df
+
+
+def get_df_histogram(df, ddas_run, column_list, binning, cache_tag="calibrated", force_recreate=False):
+    """
+    Takes an RDataFrame, books 1D histograms for the requested columns, 
+    executes the event loop if needed, and caches the results to a .root file.
+    """
+    cache_dir = Path(f"e23035_analysis/cache/run_{ddas_run}")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"hists_{cache_tag}.root"
+
+    hist_dict = {}
+
+    # 1. Check Cache
+    if cache_file.exists() and not force_recreate:
+        f = ROOT.TFile(str(cache_file), "READ")
+        all_cached = True
+        
+        for col in column_list:
+            h = f.Get(f"h_{col}")
+            if h:
+                h.SetDirectory(0) # Detach from file
+                hist_dict[col] = h
+            else:
+                all_cached = False
+                break 
+                
+        f.Close()
+        if all_cached:
+            print(f"Loaded {len(column_list)} histograms from cache: {cache_file.name}")
+            return hist_dict
+
+    # 2. Book Histograms (Lazy)
+    hist_ptrs = {}
+    n_bins, x_min, x_max = binning
+
+    for col in column_list:
+        h_model = (f"h_{col}", f"{col};Energy (keV);Counts", n_bins, x_min, x_max)
+        hist_ptrs[col] = df.Histo1D(h_model, col)
+
+    # 3. Trigger Event Loop & Save to Cache
+    if hist_ptrs:
+        print(f"Executing RDataFrame loop to generate {len(hist_ptrs)} histograms...")
+        f = ROOT.TFile(str(cache_file), "RECREATE")
+        
+        for col, ptr in hist_ptrs.items():
+            # ptr.GetValue() triggers the loop for ALL booked pointers at once
+            h = ptr.GetValue() 
+            h.Write()
+            h.SetDirectory(0)
+            hist_dict[col] = h
+            
+        f.Close()
+
+    return hist_dict
