@@ -128,12 +128,12 @@ for i in range(len(gm_branch_list)):
     crystal_strings_for_max += gm_branch_list[i]
 df = df.Define('add_back', add_back_logic)
 add_back_hist = df.Histo1D(("add_back", "add back", 6000, 0., 6000.), "add_back")
-df = df.Define("summed_gamma", "std::max({%s})"%crystal_strings_for_max)
-summed_hist = df.Histo1D(("summed_gamma", "summed gamma", 6000, 0., 6000.), "add_back")
-#ddas_interface.get_summed_gamma_spectrum(run, (6000,0, 6000), 'gm')
+summed_hist = ddas_interface.get_summed_gamma_spectrum(run, (6000,0, 6000), 'gm')
+#df = df.Define("summed_gamma", "std::max({%s})"%crystal_strings_for_max)
+#df.Histo1D(("summed_gamma", "summed gamma", 6000, 0., 6000.), "add_back")
 #root_vis_tools.draw_overlaid_histograms({'add back':add_back_hist, 'summed':summed_hist}, f'run {run}', 'keV')
 
-# add_back_hist.Draw()
+add_back_hist.Draw()
 
 summed_hist.SetLineColor(ROOT.kRed)
 summed_hist.Draw("SAME")
