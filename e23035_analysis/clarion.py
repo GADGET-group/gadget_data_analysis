@@ -84,6 +84,9 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
     if is_iterable_runs(ddas_run):
         run_list = list(ddas_run)
         summed_hists = {}
+    
+        original_batch_mode = ROOT.gROOT.IsBatch()
+        ROOT.gROOT.SetBatch(True)
         
         if num_workers is None or num_workers > 1:
             # 1. PARALLEL CACHING: Spawn workers to process the TTrees and populate the disk caches.
@@ -111,7 +114,8 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
                 # Add subsequent runs
                 for name, hist in run_hists.items():
                     summed_hists[name].Add(hist)
-                    
+        
+        ROOT.gROOT.SetBatch(original_batch_mode)
         return summed_hists
 
     # --- SINGLE RUN LOGIC ---
@@ -278,29 +282,36 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, max_workers=None
             _ = iter(ddas_run)
             total_hist = None
             
-            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(get_addback_spectrum, run, adj_dict, cal_name, binning) 
-                    for run in ddas_run
-                ]
-                
-                for future in concurrent.futures.as_completed(futures):
-                    h = future.result() 
-                    
-                    if total_hist is None:
-                        # Establish the base histogram
-                        hash_str = hashlib.md5(str(ddas_run).encode()).hexdigest()
-                        total_hist = h.Clone(f"addback_combined_{hash_str}")
-                        total_hist.SetDirectory(0)
-                    else:
-                        # Add subsequent runs
-                        total_hist.Add(h)
-                        
-            return total_hist
+            # 1. Save the current state and force Batch Mode
+            original_batch_mode = ROOT.gROOT.IsBatch()
+            ROOT.gROOT.SetBatch(True)
             
+            try:
+                # 2. Run the multiprocessing safely without X11 crashes
+                with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [
+                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning) 
+                        for run in ddas_run
+                    ]
+                    
+                    for future in concurrent.futures.as_completed(futures):
+                        h = future.result() 
+                        
+                        if total_hist is None:
+                            hash_str = hashlib.md5(str(ddas_run).encode()).hexdigest()
+                            total_hist = h.Clone(f"gg_combined_{hash_str}")
+                            total_hist.SetDirectory(0)
+                        else:
+                            total_hist.Add(h)
+                            
+                return total_hist
+                
+            finally:
+                # 3. ALWAYS restore the original graphics state, even if an error occurs above
+                ROOT.gROOT.SetBatch(original_batch_mode)
+                
         except TypeError:
             pass # It's a single run, proceed below
-
     # ---------------------------------------------------------
     # 2. SINGLE RUN CACHE CHECKING
     # ---------------------------------------------------------

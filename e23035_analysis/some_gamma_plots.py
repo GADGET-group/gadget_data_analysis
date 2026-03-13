@@ -22,10 +22,10 @@ for run in run_candidates:
 
 adj_dict = clarion.get_adjacency_dict(30)
 
-# coinc_canvas = ROOT.TCanvas()
-# gg_hist = clarion.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning)
-# gg_hist.Draw('COLZ')
-# ROOT.gPad.SetLogz(1)
+coinc_canvas = ROOT.TCanvas()
+gg_hist = clarion.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning)
+gg_hist.Draw('COLZ')
+ROOT.gPad.SetLogz(1)
 
 ab_hist = clarion.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning)
 spec_canvas = ROOT.TCanvas()
