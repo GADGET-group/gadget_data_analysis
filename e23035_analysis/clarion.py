@@ -399,35 +399,76 @@ CoincPairs get_symmetric_pairs(const ROOT::RVec<double>& energies) {
     return pairs;
 }
 """)
+import os
+import hashlib
+import concurrent.futures
+import ROOT
 
 def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_workers=None):
     # ---------------------------------------------------------
-    # 1. PARALLEL RUN PROCESSING (If an iterable of runs is passed)
+    # 1. PARALLEL RUN PROCESSING & COMBINED CACHING
     # ---------------------------------------------------------
     if not isinstance(ddas_run, str):
         try:
             _ = iter(ddas_run)
-            total_hist = None
             
-            # Farm out the individual runs to multiple CPU processes
+            # Create a hash for the combined runs (sorted to ensure consistency)
+            sorted_runs = sorted(list(ddas_run))
+            combined_hash_str = hashlib.md5(
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict)).encode()
+            ).hexdigest()
+            
+            cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
+            os.makedirs(cache_dir, exist_ok=True)
+            
+            combined_hist_name = f"gg_combined_{combined_hash_str}"
+            combined_cache_file = os.path.join(cache_dir, f"{combined_hash_str}.root")
+            
+            # --- Check the Combined Cache ---
+            if os.path.exists(combined_cache_file):
+                try:
+                    cf = ROOT.TFile.Open(combined_cache_file, 'READ')
+                    if not cf or cf.IsZombie():
+                        print("Warning: Combined cache is corrupted. Recreating...")
+                        if cf: cf.Close()
+                        os.remove(combined_cache_file)
+                    else:
+                        hist = cf.Get(combined_hist_name)
+                        if hist: 
+                            hist.SetDirectory(0)
+                            cf.Close()
+                            print('loaded from cache:', combined_cache_file)
+                            return hist
+                        cf.Close()
+                        os.remove(combined_cache_file)
+                except OSError:
+                    print("Warning: Failed to open combined cache. Recreating...")
+                    if os.path.exists(combined_cache_file):
+                        os.remove(combined_cache_file)
+
+            # --- Not in Combined Cache: Farm out to Multiprocessing ---
+            total_hist = None
             with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all runs to the executor pool
                 futures = [
                     executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning) 
                     for run in ddas_run
                 ]
                 
-                # As each process finishes its run, grab the histogram and add it
                 for future in concurrent.futures.as_completed(futures):
-                    h = future.result() # Grabs the TH2D from the worker process
+                    h = future.result() 
                     
                     if total_hist is None:
-                        # Clone the first completed histogram to establish the base
-                        hash_str = hashlib.md5(str(ddas_run).encode()).hexdigest()
-                        total_hist = h.Clone(f"gg_combined_{hash_str}")
+                        total_hist = h.Clone(combined_hist_name)
+                        total_hist.SetTitle(f"Gamma-Gamma Coincidence (Runs: {sorted_runs[0]}...{sorted_runs[-1]})")
                         total_hist.SetDirectory(0)
                     else:
                         total_hist.Add(h)
+                        
+            # --- Save the Combined Cache ---
+            if total_hist:
+                cf = ROOT.TFile.Open(combined_cache_file, 'RECREATE')
+                total_hist.Write()
+                cf.Close()
                         
             return total_hist
             
@@ -447,13 +488,22 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_
     
     # Check cache first
     if os.path.exists(cache_file_path):
-        cf = ROOT.TFile.Open(cache_file_path, 'READ')
-        hist = cf.Get(hist_name)
-        if hist: 
-            hist.SetDirectory(0)
-            cf.Close()
-            return hist
-        cf.Close() 
+        try:
+            cf = ROOT.TFile.Open(cache_file_path, 'READ')
+            if not cf or cf.IsZombie():
+                if cf: cf.Close()
+                os.remove(cache_file_path)
+            else:
+                hist = cf.Get(hist_name)
+                if hist: 
+                    hist.SetDirectory(0)
+                    cf.Close()
+                    return hist
+                cf.Close()
+                os.remove(cache_file_path)
+        except OSError:
+            if os.path.exists(cache_file_path):
+                os.remove(cache_file_path)
 
     # Not in cache: build the DataFrame
     df = ROOT.RDataFrame(get_addback_tree(ddas_run, adj_dict, cal_name))
@@ -488,6 +538,9 @@ def get_gated_projection(h2_matrix, gate_energy, gate_width):
     - gate_energy: The center of the peak to gate on (in keV).
     - gate_width: The +/- range around the peak to include (in keV).
     """
+    h2_matrix.GetXaxis().UnZoom()
+    h2_matrix.GetYaxis().UnZoom()
+
     # 1. Define the physical energy boundaries of the gate
     energy_min = gate_energy - gate_width
     energy_max = gate_energy + gate_width
@@ -519,6 +572,9 @@ def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, 
     Slices a 2D matrix at a peak, slices it again at a background region, 
     scales the background, and subtracts it to return a clean 1D spectrum.
     """
+    h2_matrix.GetXaxis().UnZoom()
+    h2_matrix.GetYaxis().UnZoom()
+
     y_axis = h2_matrix.GetYaxis()
     
     # 1. Project the Peak + Background

@@ -22,15 +22,20 @@ for run in run_candidates:
 
 adj_dict = clarion.get_adjacency_dict(30)
 
-coinc_canvas = ROOT.TCanvas()
+#coinc_canvas = ROOT.TCanvas()
 gg_hist = clarion.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning)
-gg_hist.Draw('COLZ')
-ROOT.gPad.SetLogz(1)
-
+# gg_hist.Draw('COLZ')
+# ROOT.gPad.SetLogz(1)
+print('getting add back histogram')
 ab_hist = clarion.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning)
 spec_canvas = ROOT.TCanvas()
 ab_hist.Draw()
+print('getting sum histogram')
 sum_hist = clarion.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
 sum_hist.SetLineColor(ROOT.kRed)
 sum_hist.Draw('SAME')
 spec_canvas.SetLogy(1)
+
+gspec = clarion.get_bg_subtracted_projection(gg_hist, 2224, 2, 2230, 2)
+gspec.SetLineColor(ROOT.kGreen)
+gspec.Draw('SAME')
