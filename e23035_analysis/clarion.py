@@ -93,7 +93,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
                     for run in run_list
                 ]
                 
-                for _ in tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Caching {hist_to_get} (Parallel)"):
+                for _ in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Caching {hist_to_get} (Parallel)"):
                     pass
                     
         # 2. SEQUENTIAL SUMMING: All runs are safely cached on disk now.
