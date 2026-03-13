@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import ROOT
+ROOT.EnableImplicitMT()
 
 from raw_viewer import ddas_interface
 from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, clarion
@@ -21,11 +22,15 @@ for run in run_candidates:
 
 adj_dict = clarion.get_adjacency_dict(30)
 
-coinc_canvas = ROOT.TCanvas()
-gg_hist = clarion.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', (6000,0,6000))
-gg_hist.Draw('COLZ')
-ROOT.gPad.SetLogz(1)
+# coinc_canvas = ROOT.TCanvas()
+# gg_hist = clarion.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning)
+# gg_hist.Draw('COLZ')
+# ROOT.gPad.SetLogz(1)
 
-ab_hist = clarion.get_addback_spectrum(runs, adj_dict, 'gm', (6000, 0, 6000))
-ab_canvas = ROOT.TCanvas()
+ab_hist = clarion.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning)
+spec_canvas = ROOT.TCanvas()
 ab_hist.Draw()
+sum_hist = clarion.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
+sum_hist.SetLineColor(ROOT.kRed)
+sum_hist.Draw('SAME')
+spec_canvas.SetLogy(1)
