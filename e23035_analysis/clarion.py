@@ -290,7 +290,7 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, max_workers=None
                 # 2. Run the multiprocessing safely without X11 crashes
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
-                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning) 
+                        executor.submit(get_addback_spectrum, run, adj_dict, cal_name, binning) 
                         for run in ddas_run
                     ]
                     

@@ -28,14 +28,18 @@ gg_hist = clarion.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_b
 # ROOT.gPad.SetLogz(1)
 print('getting add back histogram')
 ab_hist = clarion.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning)
-spec_canvas = ROOT.TCanvas()
-ab_hist.Draw()
+
 print('getting sum histogram')
 sum_hist = clarion.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
 sum_hist.SetLineColor(ROOT.kRed)
-sum_hist.Draw('SAME')
-spec_canvas.SetLogy(1)
 
-gspec = clarion.get_bg_subtracted_projection(gg_hist, 2224, 2, 2230, 2)
+
+spec_canvas = ROOT.TCanvas()
+gspec = clarion.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 993, 2)
 gspec.SetLineColor(ROOT.kGreen)
+
+
+ab_hist.Draw()
+sum_hist.Draw('SAME')
 gspec.Draw('SAME')
+spec_canvas.SetLogy(1)
