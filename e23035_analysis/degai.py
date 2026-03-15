@@ -162,29 +162,25 @@ def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init'):
     return to_return
 
 
-def get_addback_tree(ddas_run, adj_dict, cal_name):
+def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=15000):
     '''
-    Make a ttree with the gamma ray add back. 
+    Make a ttree with the gamma ray add back, split into sub-events by time. 
     '''
-    #make cache directory
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'add_back_tree')
     os.makedirs(cache_dir, exist_ok=True)
     
-    #check if root file exists. Load it and return if it does.
-    adj_hash = hashlib.md5(str(adj_dict).encode()).hexdigest()
-    cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}.root")
-    # Check if root file exists. Load it and return if it does.
+    # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
+    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns)).encode()).hexdigest()
+    cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}.root")
+    
     # Check if root file exists. Load it and return if it does.
     if os.path.exists(cache_file_path):
         try:
             read_file = ROOT.TFile.Open(cache_file_path, 'READ')
-            
             if not read_file or read_file.IsZombie():
-                print(f"Warning: Cache file for run {ddas_run} is corrupted (Zombie). Deleting and recreating...")
-                if read_file: 
-                    read_file.Close()
-                os.remove(cache_file_path)  # Actively delete the bad file
-                
+                print(f"Warning: Cache file for run {ddas_run} is corrupted. Deleting and recreating...")
+                if read_file: read_file.Close()
+                os.remove(cache_file_path) 
             else:
                 out_tree = read_file.Get('add_back')
                 if out_tree: 
@@ -193,15 +189,12 @@ def get_addback_tree(ddas_run, adj_dict, cal_name):
                 else:
                     print(f"Warning: Tree missing in cache for run {ddas_run}. Deleting and recreating...")
                     read_file.Close()
-                    os.remove(cache_file_path)  # Actively delete the bad file
-                    
+                    os.remove(cache_file_path)
         except OSError:
-            # PyROOT raises this if the file is 0-bytes or completely unreadable C-side
-            print(f"Warning: PyROOT failed to open {cache_file_path}. It is likely empty. Deleting and recreating...")
-            os.remove(cache_file_path)
-            # Code naturally falls through to recreate the file
+            print(f"Warning: PyROOT failed to open {cache_file_path}. Deleting and recreating...")
+            if os.path.exists(cache_file_path): os.remove(cache_file_path)
 
-    #load energy calibrations
+    # Load energy calibrations
     slopes, offsets = [], []
     for s in clover_str_list:
         res = energy_calibration_tools.get_calibration_result(ddas_run, cal_name, s+'_c')
@@ -209,13 +202,17 @@ def get_addback_tree(ddas_run, adj_dict, cal_name):
         offsets.append(res['offset'])
     slopes, offsets = np.array(slopes), np.array(offsets)
 
-    #cached result doens't exist. Set up input file for reading
+    # Set up input file for reading
     infile = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(ddas_run))
     intree = infile.Get('merged_data')
+    
     invals = []
+    tvals = [] # NEW: Array to hold timestamps
     for s in clover_str_list:
         invals.append(np.zeros(1, dtype=np.int32))
+        tvals.append(np.zeros(1, dtype=np.float64))
         intree.SetBranchAddress(s+'_c', invals[-1])
+        intree.SetBranchAddress(s+'_t', tvals[-1]) # Load the timestamp
     
     # Build the add back tree
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
@@ -223,74 +220,137 @@ def get_addback_tree(ddas_run, adj_dict, cal_name):
     gamma_vec = ROOT.std.vector('double')()
     out_tree.Branch('energy', gamma_vec)
 
-    debug = False
+    dt_sec = dt_window_ns * 1e-9 # Convert ns to seconds for comparison
+
     for ddas_index in tqdm.tqdm(range(intree.GetEntries())):
-        if debug:
-            print('processing event %d'%ddas_index)
-        #load gamma ray energies for event and apply energy calibraiton 
         intree.GetEntry(ddas_index)
+        
         counts = np.array(invals, copy=True).flatten()
+        times = np.array(tvals, copy=True).flatten()
+        
         energies = np.zeros(len(counts))
-        nonzero_mask = counts>0
+        nonzero_mask = counts > 0
         energies[nonzero_mask] = counts[nonzero_mask]*slopes[nonzero_mask] + offsets[nonzero_mask]
-        gamma_vec.clear()
-
-        #choose which gammas are from the same original photon based on adj_dict
+        
         fired_indexes = np.where(nonzero_mask)[0].tolist()
-        if debug:
-            print('the following crystals fired:', [clover_list[i] for i in fired_indexes], '\n')
-        while len(fired_indexes) >0:
-            indexes_to_add_to_this_event = [fired_indexes.pop()]
-            indexes_in_this_event = []
-            while len(indexes_to_add_to_this_event) > 0:
-                i = indexes_to_add_to_this_event.pop()
-                indexes_in_this_event.append(i)
-                adj_clovers = adj_dict[clover_list[i]]
-                for clover in adj_clovers:
-                    if clover_to_index[clover] in fired_indexes:
-                        indexes_to_add_to_this_event.append(clover_to_index[clover])
-                        fired_indexes.remove(clover_to_index[clover])
-            if debug:
-                print('summing gammas from the following crystals: ', [clover_list[i] for i in indexes_in_this_event], '\n')
-            gamma_vec.push_back(np.sum(energies[indexes_in_this_event]))
-        out_tree.Fill()
+        
+        if len(fired_indexes) == 0:
+            continue
 
-    #save the tree, close the file, and return the tree
-    # 1. Write and close the RECREATE file to safely flush all buffers
+        # --- NEW TIMING CLUSTERING LOGIC ---
+        # 1. Pair each fired index with its timestamp and sort them chronologically
+        hit_data = [(idx, times[idx]) for idx in fired_indexes]
+        hit_data.sort(key=lambda x: x[1])
+        
+        # 2. Slice into time clusters
+        clusters = []
+        curr_cluster = [hit_data[0][0]]
+        cluster_start_t = hit_data[0][1] # Anchor the window to the first hit in the cluster
+        
+        for idx, t in hit_data[1:]:
+            if (t - cluster_start_t) <= dt_sec:
+                curr_cluster.append(idx)
+            else:
+                clusters.append(curr_cluster)   # Save the completed cluster
+                curr_cluster = [idx]            # Start a new cluster
+                cluster_start_t = t             # Reset the anchor time
+        clusters.append(curr_cluster) # Don't forget the last one!
+
+        # 3. Process Add-back for EACH time cluster independently
+        for cluster_idx_list in clusters:
+            gamma_vec.clear()
+            unprocessed = cluster_idx_list.copy()
+            
+            while len(unprocessed) > 0:
+                indexes_to_add_to_this_event = [unprocessed.pop()]
+                indexes_in_this_event = []
+                
+                while len(indexes_to_add_to_this_event) > 0:
+                    i = indexes_to_add_to_this_event.pop()
+                    indexes_in_this_event.append(i)
+                    adj_clovers = adj_dict[clover_list[i]]
+                    
+                    for clover in adj_clovers:
+                        c_idx = clover_to_index[clover]
+                        if c_idx in unprocessed:
+                            indexes_to_add_to_this_event.append(c_idx)
+                            unprocessed.remove(c_idx)
+                            
+            gamma_vec.push_back(np.sum(energies[indexes_in_this_event]))
+            
+            # Fill the tree ONCE PER TIME CLUSTER (Sub-event)
+            if gamma_vec.size() > 0:
+                out_tree.Fill()
+
     cf.Write()
     cf.Close()
 
-    # 2. Re-open the file in READ mode
     read_file = ROOT.TFile.Open(cache_file_path, 'READ')
     out_tree = read_file.Get('add_back')
-
-    # 3. Attach the file to the tree so it doesn't get garbage collected!
     out_tree._keepalive_file = read_file
-    
     return out_tree
 
-def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, max_workers=None):
+def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, max_workers=None):
     """
     Generates a 1D add-back energy spectrum for a single run or list of runs.
-    Utilizes multiprocessing for multiple runs and caches individual results.
+    Utilizes multiprocessing for multiple runs, caching both individual and combined results.
+    Includes time-clustering to prevent accidental coincidences.
     """
     # ---------------------------------------------------------
-    # 1. PARALLEL RUN PROCESSING
+    # 1. PARALLEL RUN PROCESSING & COMBINED CACHING
     # ---------------------------------------------------------
     if not isinstance(ddas_run, str):
         try:
             _ = iter(ddas_run)
+            
+            # --- Setup Combined Hash and Paths ---
+            sorted_runs = sorted(list(ddas_run))
+            # CRITICAL: Include dt_window_ns in the hash!
+            combined_hash_str = hashlib.md5(
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns)).encode()
+            ).hexdigest()
+            
+            cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
+            os.makedirs(cache_dir, exist_ok=True)
+            
+            combined_hist_name = f"h1_combined_{combined_hash_str}"
+            combined_cache_file = os.path.join(cache_dir, f"h1_combined_{combined_hash_str}.root")
+            
+            # --- Check the Combined Cache ---
+            if os.path.exists(combined_cache_file):
+                try:
+                    cf = ROOT.TFile.Open(combined_cache_file, 'READ')
+                    if not cf or cf.IsZombie():
+                        print("Warning: Combined 1D cache is corrupted. Recreating...")
+                        if cf: cf.Close()
+                        os.remove(combined_cache_file)
+                    else:
+                        hist = cf.Get(combined_hist_name)
+                        # Ensure it's a true 1D histogram
+                        if isinstance(hist, ROOT.TH1) and hist.GetDimension() == 1:
+                            hist.SetDirectory(0)
+                            cf.Close()
+                            print('loaded from cache:', combined_cache_file)
+                            return hist
+                        cf.Close()
+                        os.remove(combined_cache_file)
+                except OSError:
+                    print("Warning: Failed to open combined 1D cache. Recreating...")
+                    if os.path.exists(combined_cache_file):
+                        os.remove(combined_cache_file)
+
+            # --- Not in Combined Cache: Farm out to Multiprocessing ---
             total_hist = None
             
-            # 1. Save the current state and force Batch Mode
+            # Save the current state and force Batch Mode to prevent X11 crashes
             original_batch_mode = ROOT.gROOT.IsBatch()
             ROOT.gROOT.SetBatch(True)
             
             try:
-                # 2. Run the multiprocessing safely without X11 crashes
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
-                        executor.submit(get_addback_spectrum, run, adj_dict, cal_name, binning) 
+                        # Pass dt_window_ns down to the workers
+                        executor.submit(get_addback_spectrum, run, adj_dict, cal_name, binning, dt_window_ns) 
                         for run in ddas_run
                     ]
                     
@@ -298,76 +358,72 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, max_workers=None
                         h = future.result() 
                         
                         if total_hist is None:
-                            hash_str = hashlib.md5(str(ddas_run).encode()).hexdigest()
-                            total_hist = h.Clone(f"gg_combined_{hash_str}")
+                            total_hist = h.Clone(combined_hist_name)
+                            total_hist.SetTitle(f"Addback Energy (Runs: {sorted_runs[0]}...{sorted_runs[-1]}, dt={dt_window_ns}ns);Energy (keV);Counts")
                             total_hist.SetDirectory(0)
                         else:
                             total_hist.Add(h)
-                            
-                return total_hist
-                
             finally:
-                # 3. ALWAYS restore the original graphics state, even if an error occurs above
+                # ALWAYS restore the original graphics state
                 ROOT.gROOT.SetBatch(original_batch_mode)
+            
+            # --- Save the Combined Cache ---
+            if total_hist:
+                cf = ROOT.TFile.Open(combined_cache_file, 'RECREATE')
+                total_hist.Write()
+                cf.Close()
+                
+            return total_hist
                 
         except TypeError:
             pass # It's a single run, proceed below
+
     # ---------------------------------------------------------
-    # 2. SINGLE RUN CACHE CHECKING
+    # 2. SINGLE RUN PROCESSING
     # ---------------------------------------------------------
-    # I've put this in a separate 'histograms_1d' folder to keep it 
-    # cleanly separated from your 2D matrices.
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict)).encode()).hexdigest()
+    ddas_run = int(ddas_run)
+    # CRITICAL: Include dt_window_ns in the single-run hash!
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns)).encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
     os.makedirs(cache_dir, exist_ok=True)
     
-    hist_name = f"h1_addback_{hash_str}"
-    cache_file_path = os.path.join(cache_dir, f"{hash_str}.root")
+    hist_name = f"h1_{hash_str}"
+    cache_file_path = os.path.join(cache_dir, f"h1_{hash_str}.root")
     
+    # --- Check Cache ---
     if os.path.exists(cache_file_path):
         try:
             read_file = ROOT.TFile.Open(cache_file_path, 'READ')
             
             if not read_file or read_file.IsZombie():
-                print(f"Warning: 1D Cache for run {ddas_run} is corrupted. Recreating...")
-                if read_file: 
-                    read_file.Close()
+                if read_file: read_file.Close()
                 os.remove(cache_file_path)
             else:
                 hist = read_file.Get(hist_name)
-                if hist: 
+                if isinstance(hist, ROOT.TH1) and hist.GetDimension() == 1: 
                     hist.SetDirectory(0)
                     read_file.Close()
                     return hist
-                else:
-                    read_file.Close()
-                    os.remove(cache_file_path)
-                    
+                read_file.Close()
+                os.remove(cache_file_path)
         except OSError:
-            print(f"Warning: PyROOT failed to open 1D cache {cache_file_path}. Recreating...")
-            os.remove(cache_file_path)
+            if os.path.exists(cache_file_path):
+                os.remove(cache_file_path)
 
-    # ---------------------------------------------------------
-    # 3. GENERATE HISTOGRAM
-    # ---------------------------------------------------------
-    # Note: ensure get_addback_tree is accessible in this scope 
-    # (e.g., clarion.get_addback_tree if imported)
-    tree = get_addback_tree(ddas_run, adj_dict, cal_name)
+    # --- Generate Histogram ---
+    # Pass dt_window_ns down to the tree builder!
+    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns)
     df = ROOT.RDataFrame(tree)
     
-    # RDataFrame automatically flattens the std::vector 'energy' 
     h1_ptr = df.Histo1D(
-        (hist_name, f"Addback Energy (Run {ddas_run});Energy (keV);Counts", *binning), 
+        (hist_name, f"Addback Energy (Run {ddas_run}, dt={dt_window_ns}ns);Energy (keV);Counts", *binning), 
         "energy"
     )
     
-    # Force evaluation
     hist = h1_ptr.GetValue()
     hist.SetDirectory(0)
     
-    # ---------------------------------------------------------
-    # 4. WRITE CACHE
-    # ---------------------------------------------------------
+    # --- Write Cache ---
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     hist.Write()
     cf.Close()
@@ -399,12 +455,8 @@ CoincPairs get_symmetric_pairs(const ROOT::RVec<double>& energies) {
     return pairs;
 }
 """)
-import os
-import hashlib
-import concurrent.futures
-import ROOT
 
-def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_workers=None):
+def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, max_workers=None):
     # ---------------------------------------------------------
     # 1. PARALLEL RUN PROCESSING & COMBINED CACHING
     # ---------------------------------------------------------
@@ -412,29 +464,27 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_
         try:
             _ = iter(ddas_run)
             
-            # Create a hash for the combined runs (sorted to ensure consistency)
             sorted_runs = sorted(list(ddas_run))
+            # CRITICAL: Include dt_window_ns in the hash!
             combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict)).encode()
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns)).encode()
             ).hexdigest()
             
             cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
             os.makedirs(cache_dir, exist_ok=True)
             
             combined_hist_name = f"gg_combined_{combined_hash_str}"
-            combined_cache_file = os.path.join(cache_dir, f"{combined_hash_str}.root")
+            combined_cache_file = os.path.join(cache_dir, f"gg_combined_{combined_hash_str}.root")
             
-            # --- Check the Combined Cache ---
             if os.path.exists(combined_cache_file):
                 try:
                     cf = ROOT.TFile.Open(combined_cache_file, 'READ')
                     if not cf or cf.IsZombie():
-                        print("Warning: Combined cache is corrupted. Recreating...")
                         if cf: cf.Close()
                         os.remove(combined_cache_file)
                     else:
                         hist = cf.Get(combined_hist_name)
-                        if hist: 
+                        if isinstance(hist, ROOT.TH2): 
                             hist.SetDirectory(0)
                             cf.Close()
                             print('loaded from cache:', combined_cache_file)
@@ -442,29 +492,31 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_
                         cf.Close()
                         os.remove(combined_cache_file)
                 except OSError:
-                    print("Warning: Failed to open combined cache. Recreating...")
-                    if os.path.exists(combined_cache_file):
-                        os.remove(combined_cache_file)
+                    if os.path.exists(combined_cache_file): os.remove(combined_cache_file)
 
-            # --- Not in Combined Cache: Farm out to Multiprocessing ---
             total_hist = None
-            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning) 
-                    for run in ddas_run
-                ]
-                
-                for future in concurrent.futures.as_completed(futures):
-                    h = future.result() 
+            
+            original_batch_mode = ROOT.gROOT.IsBatch()
+            ROOT.gROOT.SetBatch(True)
+            try:
+                with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [
+                        # Pass dt_window_ns down to the workers
+                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns) 
+                        for run in ddas_run
+                    ]
                     
-                    if total_hist is None:
-                        total_hist = h.Clone(combined_hist_name)
-                        total_hist.SetTitle(f"Gamma-Gamma Coincidence (Runs: {sorted_runs[0]}...{sorted_runs[-1]})")
-                        total_hist.SetDirectory(0)
-                    else:
-                        total_hist.Add(h)
+                    for future in concurrent.futures.as_completed(futures):
+                        h = future.result() 
+                        if total_hist is None:
+                            total_hist = h.Clone(combined_hist_name)
+                            total_hist.SetTitle(f"Gamma-Gamma Coincidence (Runs: {sorted_runs[0]}...{sorted_runs[-1]}, dt={dt_window_ns}ns)")
+                            total_hist.SetDirectory(0)
+                        else:
+                            total_hist.Add(h)
+            finally:
+                ROOT.gROOT.SetBatch(original_batch_mode)
                         
-            # --- Save the Combined Cache ---
             if total_hist:
                 cf = ROOT.TFile.Open(combined_cache_file, 'RECREATE')
                 total_hist.Write()
@@ -473,20 +525,19 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_
             return total_hist
             
         except TypeError:
-            pass # It's a single run (e.g., an int), drop down to the main logic
+            pass 
 
     # ---------------------------------------------------------
-    # 2. SINGLE RUN PROCESSING (The main logic)
+    # 2. SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict)).encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns)).encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"gg_{hash_str}"
-    cache_file_path = os.path.join(cache_dir, f"{hash_str}.root")
+    cache_file_path = os.path.join(cache_dir, f"gg_{hash_str}.root")
     
-    # Check cache first
     if os.path.exists(cache_file_path):
         try:
             cf = ROOT.TFile.Open(cache_file_path, 'READ')
@@ -495,18 +546,18 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_
                 os.remove(cache_file_path)
             else:
                 hist = cf.Get(hist_name)
-                if hist: 
+                if isinstance(hist, ROOT.TH2): 
                     hist.SetDirectory(0)
                     cf.Close()
                     return hist
                 cf.Close()
                 os.remove(cache_file_path)
         except OSError:
-            if os.path.exists(cache_file_path):
-                os.remove(cache_file_path)
+            if os.path.exists(cache_file_path): os.remove(cache_file_path)
 
-    # Not in cache: build the DataFrame
-    df = ROOT.RDataFrame(get_addback_tree(ddas_run, adj_dict, cal_name))
+    # Pass the window down to the tree builder!
+    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns)
+    df = ROOT.RDataFrame(tree)
     df = df.Define("pairs", "get_symmetric_pairs(energy)")
     df = df.Define("energy_x", "pairs.x")
     df = df.Define("energy_y", "pairs.y")
@@ -521,7 +572,6 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, max_
     hist = h2_matrix.GetValue()
     hist.SetDirectory(0) 
     
-    # Write to cache
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     hist.Write() 
     cf.Close()

@@ -22,27 +22,28 @@ for run in run_candidates:
 
 adj_dict = degai.get_adjacency_dict(30)#clarion.get_adjacency_dict(30) #I've saved 1 deg (eg no add back) and 30 deg (adjacent crystals) before
 
-if False:
-    #coinc_canvas = ROOT.TCanvas()
-    gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning)
-    # gg_hist.Draw('COLZ')
-    # ROOT.gPad.SetLogz(1)
-    print('getting add back histogram')
-    ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning)
+event_build_window = 500 #ns
 
-    print('getting sum histogram')
-    sum_hist = degai.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
-    sum_hist.SetLineColor(ROOT.kRed)
+#coinc_canvas = ROOT.TCanvas()
+gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window)
+# gg_hist.Draw('COLZ')
+# ROOT.gPad.SetLogz(1)
+print('getting add back histogram')
+ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window)
 
-
-    spec_canvas = ROOT.TCanvas()
-    gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1045, 2)
-    gspec.SetLineColor(ROOT.kGreen)
+print('getting sum histogram')
+sum_hist = degai.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
+sum_hist.SetLineColor(ROOT.kRed)
 
 
-    ab_hist.Draw()
-    sum_hist.Draw('SAME')
-    gspec.Draw('SAME')
-    spec_canvas.SetLogy(1)
+spec_canvas = ROOT.TCanvas()
+gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1045, 2)
+gspec.SetLineColor(ROOT.kGreen)
+
+
+ab_hist.Draw()
+sum_hist.Draw('SAME')
+gspec.Draw('SAME')
+spec_canvas.SetLogy(1)
 
 timing_hist = degai.get_adjacent_timing_spectrum(126, adj_dict, (1500, 0, 15000))
