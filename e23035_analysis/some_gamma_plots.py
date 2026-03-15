@@ -5,7 +5,7 @@ import ROOT
 #ROOT.EnableImplicitMT()
 
 from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, clarion
+from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, degai
 
 '''
 Notes on peak finding an automatic fitting
@@ -20,26 +20,29 @@ for run in run_candidates:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
 
-adj_dict = clarion.get_adjacency_dict(30)
+adj_dict = degai.get_adjacency_dict(30)#clarion.get_adjacency_dict(30) #I've saved 1 deg (eg no add back) and 30 deg (adjacent crystals) before
 
-#coinc_canvas = ROOT.TCanvas()
-gg_hist = clarion.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning)
-# gg_hist.Draw('COLZ')
-# ROOT.gPad.SetLogz(1)
-print('getting add back histogram')
-ab_hist = clarion.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning)
+if False:
+    #coinc_canvas = ROOT.TCanvas()
+    gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning)
+    # gg_hist.Draw('COLZ')
+    # ROOT.gPad.SetLogz(1)
+    print('getting add back histogram')
+    ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning)
 
-print('getting sum histogram')
-sum_hist = clarion.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
-sum_hist.SetLineColor(ROOT.kRed)
-
-
-spec_canvas = ROOT.TCanvas()
-gspec = clarion.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 993, 2)
-gspec.SetLineColor(ROOT.kGreen)
+    print('getting sum histogram')
+    sum_hist = degai.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
+    sum_hist.SetLineColor(ROOT.kRed)
 
 
-ab_hist.Draw()
-sum_hist.Draw('SAME')
-gspec.Draw('SAME')
-spec_canvas.SetLogy(1)
+    spec_canvas = ROOT.TCanvas()
+    gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1045, 2)
+    gspec.SetLineColor(ROOT.kGreen)
+
+
+    ab_hist.Draw()
+    sum_hist.Draw('SAME')
+    gspec.Draw('SAME')
+    spec_canvas.SetLogy(1)
+
+timing_hist = degai.get_adjacent_timing_spectrum(126, adj_dict, (1500, 0, 15000))

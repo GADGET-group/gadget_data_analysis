@@ -611,3 +611,113 @@ def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, 
     
     return h1_peak
 
+import os
+import hashlib
+import numpy as np
+import ROOT
+
+def get_adjacent_timing_spectrum(ddas_run, adj_dict, binning):
+    """
+    Creates a histogram of time differences (in nanoseconds) between 
+    adjacent crystals that fired in the same event, with custom binning.
+    """
+    # ---------------------------------------------------------
+    # 1. SETUP & CACHE CHECKING
+    # ---------------------------------------------------------
+    ddas_run = int(ddas_run)
+    # CRITICAL: Add str(binning) to the hash so different binnings don't overwrite each other!
+    hash_str = hashlib.md5((str(ddas_run) + str(binning) + str(adj_dict)).encode()).hexdigest()
+    
+    cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'timing')
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    hist_name = f"dt_{hash_str}"
+    cache_file_path = os.path.join(cache_dir, f"dt_{hash_str}.root")
+    
+    if os.path.exists(cache_file_path):
+        try:
+            cf = ROOT.TFile.Open(cache_file_path, 'READ')
+            if not cf or cf.IsZombie():
+                if cf: cf.Close()
+                os.remove(cache_file_path)
+            else:
+                hist = cf.Get(hist_name)
+                if isinstance(hist, ROOT.TH1) and hist.GetDimension() == 1: 
+                    hist.SetDirectory(0)
+                    cf.Close()
+                    return hist
+                cf.Close()
+                os.remove(cache_file_path)
+        except OSError:
+            if os.path.exists(cache_file_path): os.remove(cache_file_path)
+
+    # ---------------------------------------------------------
+    # 2. READ THE RAW TREE
+    # ---------------------------------------------------------
+    in_filepath = ddas_interface.get_merged_root_file_path(ddas_run)
+    infile = ROOT.TFile.Open(in_filepath, 'READ')
+    if not infile or infile.IsZombie():
+        raise RuntimeError(f"Cannot open {in_filepath}")
+        
+    intree = infile.Get('merged_data')
+    
+    counts_vals, time_vals = [], []
+    for s in clover_str_list:
+        c_val = np.zeros(1, dtype=np.int32)
+        t_val = np.zeros(1, dtype=np.float64) 
+        
+        intree.SetBranchAddress(s + '_c', c_val)
+        intree.SetBranchAddress(s + '_t', t_val)
+        
+        counts_vals.append(c_val)
+        time_vals.append(t_val)
+
+    # Unpack the custom binning using *binning
+    hist = ROOT.TH1D(
+        hist_name, 
+        f"Adjacent Crystal Time Difference (Run {ddas_run});#Delta t (ns);Counts / bin", 
+        *binning
+    )
+
+    # ---------------------------------------------------------
+    # 3. PROCESS EVENTS
+    # ---------------------------------------------------------
+    entries = intree.GetEntries()
+    for evt in tqdm.tqdm(range(entries)):
+        intree.GetEntry(evt)
+        
+        c_arr = np.array(counts_vals, copy=True).flatten()
+        t_arr = np.array(time_vals, copy=True).flatten()
+        
+        fired_indexes = np.where(c_arr > 0)[0]
+        
+        if len(fired_indexes) < 2:
+            continue
+            
+        # ITERATE WITHOUT DOUBLE COUNTING (Combinations, not Permutations)
+        for i in range(len(fired_indexes)):
+            idx1 = fired_indexes[i]
+            
+            # Start the inner loop one index past the current outer loop index
+            for j in range(i + 1, len(fired_indexes)):
+                idx2 = fired_indexes[j]
+                
+                name1 = clover_list[idx1]
+                name2 = clover_list[idx2]
+                
+                if name2 in adj_dict[name1]:
+                    # Take the absolute time difference
+                    dt_ns = abs(t_arr[idx1] - t_arr[idx2]) * 1e9
+                    hist.Fill(dt_ns)
+
+    hist.SetDirectory(0)
+    infile.Close()
+
+    # ---------------------------------------------------------
+    # 4. SAVE CACHE
+    # ---------------------------------------------------------
+    cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
+    hist.Write()
+    cf.Close()
+
+    return hist
