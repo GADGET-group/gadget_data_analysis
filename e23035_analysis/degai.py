@@ -64,6 +64,14 @@ def get_adjacency_dict(max_angle):
                 to_return[(clover, crystal)].append((clover2, crystal2))
     return to_return
 
+#adjacency dictionairy which treats crystals as adjacent iff they are in the same clover
+clover_adj_dict = {}
+for clover, crystal in clover_list:
+    clover_adj_dict[(clover, crystal)] = []
+    for crystal2 in range(1,5):
+        if crystal2 != crystal:
+            clover_adj_dict[(clover, crystal)].append((clover, crystal2))
+
 def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name):
     """
     Helper function for the parallel worker. 
@@ -162,7 +170,7 @@ def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init'):
     return to_return
 
 
-def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=15000):
+def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns):
     '''
     Make a ttree with the gamma ray add back, split into sub-events by time. 
     '''
@@ -276,7 +284,7 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=15000):
                             indexes_to_add_to_this_event.append(c_idx)
                             unprocessed.remove(c_idx)
                             
-            gamma_vec.push_back(np.sum(energies[indexes_in_this_event]))
+                gamma_vec.push_back(np.sum(energies[indexes_in_this_event]))
             
             # Fill the tree ONCE PER TIME CLUSTER (Sub-event)
             if gamma_vec.size() > 0:

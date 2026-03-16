@@ -20,7 +20,7 @@ for run in run_candidates:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
 
-adj_dict = degai.get_adjacency_dict(30)#clarion.get_adjacency_dict(30) #I've saved 1 deg (eg no add back) and 30 deg (adjacent crystals) before
+adj_dict = degai.clover_adj_dict #degai.get_adjacency_dict(30)#clarion.get_adjacency_dict(30) #I've saved 1 deg (eg no add back) and 30 deg (adjacent crystals) before
 
 event_build_window = 500 #ns
 
