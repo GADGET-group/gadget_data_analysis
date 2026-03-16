@@ -60,7 +60,7 @@ def get_adjacency_dict(max_angle):
         to_return[(clover, crystal)] = []
         for clover2, crystal2 in clover_list:
             angle = get_angle_between_crystals(clover, crystal, clover2, crystal2)
-            if angle > 0 and angle < max_angle:
+            if (clover2 != clover or crystal2 != crystal) and angle < max_angle:
                 to_return[(clover, crystal)].append((clover2, crystal2))
     return to_return
 
