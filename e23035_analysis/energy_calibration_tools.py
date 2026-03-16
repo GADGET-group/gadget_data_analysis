@@ -191,10 +191,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                         bc_term = 2.0 * exp 
                     
                     total_chi2 += bc_term
-                    slice_ndf += 1
+                    total_ndf += 1
                     
-            if slice_ndf > 0:
-                total_ndf += (slice_ndf - 1)
 
         # Update ROOT internals so it knows exactly how much data to draw
         hist_residuals.SetEntries(actual_entries)
