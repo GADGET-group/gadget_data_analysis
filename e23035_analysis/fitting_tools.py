@@ -306,7 +306,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
         sigma_guess,  # p3: sigma
         tau_guess     # p4: tau (tail length)
     ]
-    print('initial values: ',initial_values)
+    #print('initial values: ',initial_values)
 
     bounds = [
         (0, np.inf),                                 # p0: bg_const
@@ -316,7 +316,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
         tau_bounds                                   # p4: tau 
     ]
 
-    print('bounds: ',bounds)
+    #print('bounds: ',bounds)
 
     names = ["bg_const", "amplitude", "mu", "sigma", "tau"]
 

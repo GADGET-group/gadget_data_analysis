@@ -5,7 +5,7 @@ import numpy as np
 import ROOT
 
 from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, energy_calibration_tools
+from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, energy_calibration_tools, degai
 
 '''
 Notes on peak finding an automatic fitting
@@ -64,7 +64,7 @@ def do_gain_match(ddas_run):
         energy_calibration_tools.make_energy_calibration(ddas_run, 'gm', adc_str, (2**16, 0, 2**16), peaks)
 
      #save histogram showing energy alignment 
-    crystal_e_hists = ddas_interface.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
+    crystal_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
     canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
     ROOT.gPad.SetLogz(1)
     canvas.Update()
@@ -79,8 +79,8 @@ def do_gain_match(ddas_run):
         else:
             canvas.Print(fname)
 
-    #save histogram showing enrgy alignment after gain matching
-    gm_e_hists = ddas_interface.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'cal', 'gm')
+    #save histogram showing energy alignment after gain matching
+    gm_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'cal', 'gm')
     canvas, th2 = root_vis_tools.create_2d_hist_from_dict(gm_e_hists, "with gain match applied")
     ROOT.gPad.SetLogz(1)
     
@@ -112,37 +112,3 @@ def process_all():
 
 # crystal_m_hists = ddas_interface.get_crystal_histograms(runs, (10, -0.5, 9.5), 'm')
 # root_vis_tools.create_2d_hist_from_dict(crystal_m_hists, "crystal multiplicities")
-ROOT.EnableImplicitMT()
-run = 126
-counts_branch_list = [f'clover_{clover}_c' for clover in clover_list]
-gm_branch_list = [s + '_gm' for s in counts_branch_list]
-df = energy_calibration_tools.get_run_dataframe(run)
-df = energy_calibration_tools.apply_calibration(df, run, counts_branch_list, 'gm')
-add_back_logic = ''
-crystal_strings_for_max = ''
-for i in range(len(gm_branch_list)):
-    if i != 0:
-        add_back_logic += '+'
-        crystal_strings_for_max += ','
-    add_back_logic += gm_branch_list[i]
-    crystal_strings_for_max += gm_branch_list[i]
-df = df.Define('add_back', add_back_logic)
-add_back_hist = df.Histo1D(("add_back", "add back", 6000, 0., 6000.), "add_back")
-summed_hist = ddas_interface.get_summed_gamma_spectrum(run, (6000,0, 6000), 'gm')
-#df = df.Define("summed_gamma", "std::max({%s})"%crystal_strings_for_max)
-#df.Histo1D(("summed_gamma", "summed gamma", 6000, 0., 6000.), "add_back")
-#root_vis_tools.draw_overlaid_histograms({'add back':add_back_hist, 'summed':summed_hist}, f'run {run}', 'keV')
-
-add_back_hist.Draw()
-
-summed_hist.SetLineColor(ROOT.kRed)
-summed_hist.Draw("SAME")
-
-from e23035_analysis import clarion
-adj_30_add_back_tree = clarion.get_addback_tree(run, clarion.get_adjacency_dict(30), 'gm')
-df_adj = ROOT.RDataFrame(adj_30_add_back_tree)
-adj_hist = df_adj.Histo1D(("h_energy", "Addback Energy;Energy (keV);Counts", 6000, 0, 6000), "energy")
-adj_hist.SetLineColor(ROOT.kGreen)
-adj_hist.Draw("SAME")
-
-ROOT.gPad.SetLogy(1)

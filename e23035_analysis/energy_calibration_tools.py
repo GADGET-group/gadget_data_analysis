@@ -23,7 +23,8 @@ def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
     slope, offset = calibration_results['slope'], calibration_results['offset']
     return f'({slope}*{branch_name} + {offset})'
 
-def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, selection_string='', data_source='gamma_adc'):
+def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
+                            selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=600):
     '''
     Fit peaks to get energy calibration
 
@@ -34,10 +35,13 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     peaks: List of peaks to use to specify the calibration. Each list entry should contain tuples of 
         (true energy, true energy_uncertainty, (search window start, stop), (fit window +, -). 
         Will assume offset = 0 if length is 1. The largest bin in the specified range will be used as a starting guess for the peak location.
+    time_branch: will default to changing "_c" ending of branch name to _t
+    time_bin_size: bin size to use for testing if gain is stable over time, in seconds. Defaults to 10 minutes.
     '''
-    #turn off plotting so there aren't a bunch of pop ups
+    # turn off plotting so there aren't a bunch of pop ups
     original_batch_state = ROOT.gROOT.IsBatch()
     ROOT.gROOT.SetBatch(True)
+    
     # Safely check if ddas_run is an iterable of runs or a single run
     try:
         num_workers = min(200, len(ddas_run))
@@ -46,54 +50,217 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         
     hist_to_fit = ddas_interface.get_histogram(ddas_run, binning_for_fit, branch_name, branch_name, branch_name, selection_string, num_workers)
 
-    #  1: Make folder using pathlib for clean cross-platform path handling
+    # Time-dependent histogram setup
+    if time_branch == '':
+        time_branch = branch_name[:-2] + '_t'
+        
+    start_time, stop_time = ddas_interface.get_first_and_last_ddas_time(ddas_run)
+    
+    # Ensure num_bins is an integer for ROOT
+    num_time_bins = int(np.ceil((stop_time - start_time) / time_bin_size))
+    if num_time_bins < 1: num_time_bins = 1 
+    time_bins = (num_time_bins, start_time, stop_time)
+    
+    time_dependent_binning = (*binning_for_fit, *time_bins)
+    time_dep_exp = '%s:%s' % (time_branch, branch_name)
+    
+    # Pass time_dep_exp explicitly to var_exp
+    time_dependent_hist = ddas_interface.get_histogram(
+        ddas_run=ddas_run, 
+        binning=time_dependent_binning, 
+        hist_name=f"{branch_name}_time_dep", 
+        hist_title=f"{branch_name} Time Stability", 
+        var_exp=time_dep_exp, 
+        selection=selection_string, 
+        num_workers=num_workers
+    )
+
+    # Make folder using pathlib for clean cross-platform path handling
     cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch_name))
     cal_dir.mkdir(parents=True, exist_ok=True)
 
+    # Open ROOT file to save the individual peak fit results safely
+    results_file = ROOT.TFile(str(cal_dir / f"{calibration_name}_results.root"), "RECREATE")
+
     # Initialize lists
     true_energies, true_energy_uncertainties, peak_locations, peak_location_uncertainties = [], [], [], []
-    
+    peak_p_values = []
+    peak_time_independent_p_values = []
+
     # Fit peaks
     for true_energy, true_energy_err, search_window, fit_window in peaks:
         true_energies.append(true_energy)
         true_energy_uncertainties.append(true_energy_err)
         
-        location_wiggle = np.max(np.abs(fit_window))/2
+        location_wiggle = np.max(np.abs(fit_window)) / 2
 
         hist_to_fit.GetXaxis().SetRangeUser(*search_window)
         max_bin_in_range = hist_to_fit.GetMaximumBin()        
         location_guess = hist_to_fit.GetXaxis().GetBinCenter(max_bin_in_range)
         hist_to_fit.GetXaxis().UnZoom()
         
-        # Assuming fitting_tools is your module, or just call fit_emg_peak directly
+        # Call to fitting tools
         fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
             hist_to_fit, data_source, location_guess, location_wiggle, (location_guess + fit_window[0], location_guess + fit_window[1])
         )
+        peak_p_values.append(fit_res.Prob())
+
+        # Write result to file
+        results_file.WriteObject(fit_res, f'peak_fit_res_{true_energy}')
           
-        #  2: Save the fit plot to a pdf, including parameter fit results and p-value
-        # ... inside the for loop ...
         mu_val = fit_res.Parameter(2)
         mu_err = fit_res.ParError(2)
         peak_locations.append(mu_val)
         peak_location_uncertainties.append(mu_err)
-        p_value = fit_res.Prob()
         
-        # Calculate reduced chi-squared for goodness of fit
-        chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
-        
-
-        # 2: Save the fit plot to a pdf, including parameter fit results and p-value
+        # 1D plot handling
         canvas.cd()
         upper_pad = rp.GetUpperPad()
         upper_pad.cd()
-        
         ROOT.gStyle.SetOptFit(1111)
-        
         canvas.Update()
-        plot_path = cal_dir / f"fit_{true_energy}keV.pdf"
-        canvas.SaveAs(str(plot_path))
-    
-    #  4: Fit line to peak locations and save to a pkl file
+        
+        plot_path = str(cal_dir / f"fit_{true_energy}keV.pdf")
+        canvas.SaveAs(plot_path + "(") # Append '(' to open multi-page PDF
+
+        # --- Time Dependence & Baker-Cousins Residuals ---
+        raw_start_x = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[0])
+        raw_stop_x  = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[1])
+        
+        bin_start_x = min(raw_start_x, raw_stop_x)
+        bin_stop_x  = max(raw_start_x, raw_stop_x)
+        
+        time_dependent_hist.GetXaxis().SetRange(bin_start_x, bin_stop_x)
+        
+        hist_residuals = time_dependent_hist.Clone(f"residuals_{true_energy}")
+        hist_residuals.Reset()
+        hist_residuals.SetTitle(f"Residuals (Data - Fit) {true_energy} keV;ADC Channel;Time [s]")
+        
+        total_chi2 = 0.0
+        total_ndf = 0
+        actual_entries = 0
+        max_res = 0.0 
+        
+        n_time_bins = time_dependent_hist.GetNbinsY()
+        
+        # --- PRE-LOOP DIAGNOSTICS ---
+        print(f"\n[PRE-LOOP] Energy: {true_energy}")
+        print(f"[PRE-LOOP] n_time_bins: {n_time_bins}")
+        print(f"[PRE-LOOP] start_bin: {bin_start_x}, stop_bin: {bin_stop_x}")
+        # ----------------------------
+
+        debug_prints = 0 
+        
+        # --- Time Dependence & Baker-Cousins Residuals ---
+        raw_start_x = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[0])
+        raw_stop_x  = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[1])
+        
+        bin_start_x = min(raw_start_x, raw_stop_x)
+        bin_stop_x  = max(raw_start_x, raw_stop_x)
+        
+        hist_residuals = time_dependent_hist.Clone(f"residuals_{true_energy}")
+        hist_residuals.Reset()
+        hist_residuals.SetTitle(f"Residuals (Data - Fit) {true_energy} keV;ADC Channel;Time [s]")
+        
+        total_chi2 = 0.0
+        total_ndf = 0
+        actual_entries = 0
+        max_res = 0.0 
+        
+        n_time_bins = time_dependent_hist.GetNbinsY()
+        x_axis = time_dependent_hist.GetXaxis()
+        
+        for iy in range(1, n_time_bins + 1):
+            observed_counts = []
+            expected_unscaled = []
+            
+            # Read directly from 2D histogram (Bypasses ProjectionX entirely)
+            for ix in range(bin_start_x, bin_stop_x + 1):
+                obs = time_dependent_hist.GetBinContent(ix, iy)
+                observed_counts.append(obs)
+                
+                x_val = x_axis.GetBinCenter(ix)
+                exp = f_to_fit.Eval(x_val)
+                expected_unscaled.append(exp)
+                
+            sum_observed = sum(observed_counts)
+            sum_expected = sum(expected_unscaled)
+
+            # The 'sum_expected == sum_expected' check safely filters out NaNs
+            if sum_expected > 0 and sum_observed > 0 and sum_expected == sum_expected:
+                scale_factor = sum_observed / sum_expected
+                
+                slice_ndf = 0
+                for i, ix in enumerate(range(bin_start_x, bin_stop_x + 1)):
+                    obs = observed_counts[i]
+                    exp = expected_unscaled[i] * scale_factor
+                    
+                    residual = obs - exp
+                    hist_residuals.SetBinContent(ix, iy, residual)
+                    actual_entries += 1
+                    
+                    if abs(residual) > max_res:
+                        max_res = abs(residual)
+                    
+                    if exp > 0:
+                        if obs > 0:
+                            bc_term = 2.0 * (exp - obs + obs * np.log(obs / exp))
+                        else:
+                            bc_term = 2.0 * exp 
+                        
+                        total_chi2 += bc_term
+                        slice_ndf += 1
+                        
+                if slice_ndf > 0:
+                    total_ndf += (slice_ndf - 1)
+
+        # Update ROOT internals so it knows exactly how much data to draw
+        hist_residuals.SetEntries(actual_entries)
+        hist_residuals.ResetStats() 
+
+        # Diagnostic check to see if we actually filled anything
+        print(f"[{calibration_name} - {true_energy} keV] Time-slice bins filled: {actual_entries} | Max residual: {max_res:.2f}")
+
+        # Calculate a single, global p-value for the entire 2D histogram
+        time_indep_p_value = ROOT.TMath.Prob(total_chi2, total_ndf) if total_ndf > 0 else 0.0
+        peak_time_independent_p_values.append(time_indep_p_value)
+
+        # Save 2D Data to middle page
+        c_time = ROOT.TCanvas(f"c_time_{true_energy}", "2D Time vs Energy", 800, 600)
+        time_dependent_hist.Draw("COLZ")
+        c_time.SaveAs(plot_path)
+
+        # Save 2D Residuals to last page and close PDF
+        c_res = ROOT.TCanvas(f"c_res_{true_energy}", "Time Residuals", 800, 600)
+        
+        # Center the color scale on 0 for symmetric visualization of the raw residuals
+        # CRITICAL FIX: Use SetMinimum/SetMaximum for TH2 COLZ, not GetZaxis().SetRangeUser
+        if max_res > 0:
+            hist_residuals.SetMinimum(-max_res)
+            hist_residuals.SetMaximum(max_res)
+            
+        hist_residuals.Draw("COLZ")
+
+        # Create a text box to overlay the global P-Value and total chi2
+        pave = ROOT.TPaveText(0.12, 0.75, 0.38, 0.88, "NDC")
+        pave.SetFillColor(ROOT.kWhite)
+        pave.SetBorderSize(1)
+        pave.SetTextAlign(12)
+        pave.AddText(f"Overall p-value = {time_indep_p_value:.3e}")
+        pave.AddText(f"Total #chi^{{2}} / ndf = {total_chi2:.1f} / {total_ndf}")
+        pave.Draw()
+        
+        c_res.Update() # Force ROOT to render the canvas before saving
+        c_res.SaveAs(plot_path + ")") # Append ')' to close PDF
+        
+        # Memory cleanup
+        c_time.Close()
+        c_res.Close()
+
+    # Close the ROOT file where peak fits are stored
+    results_file.Close()
+
+    # Fit line to peak locations and save to a pkl file
     calibration_results = {}
     
     if len(peaks) == 1:
@@ -101,7 +268,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         slope = true_energies[0] / peak_locations[0]
         offset = 0.0
         
-        # Error propagation for 1-point slope: sigma_m = m * sqrt((sigma_E/E)^2 + (sigma_mu/mu)^2)
         rel_err_E = true_energy_uncertainties[0] / true_energies[0] if true_energies[0] != 0 else 0
         rel_err_mu = peak_location_uncertainties[0] / peak_locations[0]
         sigma_slope = slope * np.sqrt(rel_err_E**2 + rel_err_mu**2)
@@ -113,13 +279,15 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 'var_offset': 0.0,
                 'var_slope': sigma_slope**2,
                 'cov_offset_slope': 0.0
-            }
+            },
+            'cal_p_value': 1.0,
+            'peak_p_values': peak_p_values,
+            'peak_time_independent_p_values': peak_time_independent_p_values
         }
         print(f"[{calibration_name}] 1-Point Cal: slope={slope:.4f} ± {sigma_slope:.4f}, offset=0")
         
     else:
         print('fit peak locations: ', peak_locations)
-        # Linear fit: y = mx + b  ->  Energy = slope * ADC + offset
         graph = ROOT.TGraphErrors(
             len(peaks), 
             np.array(peak_locations, dtype=np.float64), 
@@ -134,26 +302,22 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         cal_canvas = ROOT.TCanvas(f"c_cal_{calibration_name}", "Calibration Curve", 800, 600)
         graph.Draw("AP")
         
-        # Fit a 1st degree polynomial
         cal_fit = ROOT.TF1("cal_fit", "pol1", min(peak_locations)*0.8, max(peak_locations)*1.2)
-        
-        # "S": Return TFitResultPtr, "Q": Quiet
         cal_fit_res = graph.Fit(cal_fit, "SQ")
         
         offset = cal_fit.GetParameter(0)
         slope = cal_fit.GetParameter(1)
         
-        # Extract Covariance Matrix elements
-        # Index 0 is parameter 0 (offset), Index 1 is parameter 1 (slope)
         var_offset = cal_fit_res.CovMatrix(0, 0)
         var_slope = cal_fit_res.CovMatrix(1, 1)
-        cov_offset_slope = cal_fit_res.CovMatrix(0, 1) # Same as CovMatrix(1, 0)
+        cov_offset_slope = cal_fit_res.CovMatrix(0, 1) 
         
-        # Display fit parameters on the plot
         ROOT.gStyle.SetOptFit(1111)
         cal_canvas.Update()
         cal_canvas.SaveAs(str(cal_dir / "calibration_curve.pdf"))
         
+        p_value = cal_fit_res.Prob() if len(peaks) > 2 else 1.0
+
         calibration_results = {
             'slope': slope, 
             'offset': offset,
@@ -161,7 +325,10 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 'var_offset': var_offset,
                 'var_slope': var_slope,
                 'cov_offset_slope': cov_offset_slope
-            }
+            },
+            'cal_p_value': p_value,
+            'peak_p_values': peak_p_values,
+            'peak_time_independent_p_values': peak_time_independent_p_values
         }
         print(f"[{calibration_name}] Linear Cal: slope={slope:.4f}, offset={offset:.4f}")
         
@@ -171,11 +338,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         pickle.dump(calibration_results, f)
     
     ROOT.gROOT.SetBatch(original_batch_state)
-
-    #save a root file with the following:
-    # TTree peak_fit_results which holds fit results for each peak
-    # TFitResult for energy calibration ecal_result
-    root_path = cal_dir / 'results.root'
 
     return calibration_results
 
