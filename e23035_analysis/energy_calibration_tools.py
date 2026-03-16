@@ -24,7 +24,7 @@ def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
     return f'({slope}*{branch_name} + {offset})'
 
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
-                            selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=600):
+                            selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800):
     '''
     Fit peaks to get energy calibration
 
@@ -143,14 +143,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         
         n_time_bins = time_dependent_hist.GetNbinsY()
         
-        # --- PRE-LOOP DIAGNOSTICS ---
-        print(f"\n[PRE-LOOP] Energy: {true_energy}")
-        print(f"[PRE-LOOP] n_time_bins: {n_time_bins}")
-        print(f"[PRE-LOOP] start_bin: {bin_start_x}, stop_bin: {bin_stop_x}")
-        # ----------------------------
-
-        debug_prints = 0 
-        
         # --- Time Dependence & Baker-Cousins Residuals ---
         raw_start_x = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[0])
         raw_stop_x  = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[1])
@@ -171,48 +163,38 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         x_axis = time_dependent_hist.GetXaxis()
         
         for iy in range(1, n_time_bins + 1):
-            observed_counts = []
-            expected_unscaled = []
+            slice_ndf = 0
             
-            # Read directly from 2D histogram (Bypasses ProjectionX entirely)
             for ix in range(bin_start_x, bin_stop_x + 1):
                 obs = time_dependent_hist.GetBinContent(ix, iy)
-                observed_counts.append(obs)
-                
                 x_val = x_axis.GetBinCenter(ix)
-                exp = f_to_fit.Eval(x_val)
-                expected_unscaled.append(exp)
                 
-            sum_observed = sum(observed_counts)
-            sum_expected = sum(expected_unscaled)
-
-            # The 'sum_expected == sum_expected' check safely filters out NaNs
-            if sum_expected > 0 and sum_observed > 0 and sum_expected == sum_expected:
-                scale_factor = sum_observed / sum_expected
+                # Evaluate expectation directly. 
+                # Note: Add "/ n_time_bins" here if f_to_fit was fit to the full integrated projection.
+                exp = f_to_fit.Eval(x_val)/n_time_bins
                 
-                slice_ndf = 0
-                for i, ix in enumerate(range(bin_start_x, bin_stop_x + 1)):
-                    obs = observed_counts[i]
-                    exp = expected_unscaled[i] * scale_factor
+                # Standard residual: strictly observed - expected
+                residual = obs - exp
+                
+                hist_residuals.SetBinContent(ix, iy, residual)
+                actual_entries += 1
+                
+                if abs(residual) > max_res:
+                    max_res = abs(residual)
+                
+                # Baker-Cousins Chi^2 Calculation
+                if exp > 0:
+                    if obs > 0:
+                        bc_term = 2.0 * (exp - obs + obs * np.log(obs / exp))
+                    else:
+                        # As O -> 0, O*ln(O/E) -> 0. Limits to 2E.
+                        bc_term = 2.0 * exp 
                     
-                    residual = obs - exp
-                    hist_residuals.SetBinContent(ix, iy, residual)
-                    actual_entries += 1
+                    total_chi2 += bc_term
+                    slice_ndf += 1
                     
-                    if abs(residual) > max_res:
-                        max_res = abs(residual)
-                    
-                    if exp > 0:
-                        if obs > 0:
-                            bc_term = 2.0 * (exp - obs + obs * np.log(obs / exp))
-                        else:
-                            bc_term = 2.0 * exp 
-                        
-                        total_chi2 += bc_term
-                        slice_ndf += 1
-                        
-                if slice_ndf > 0:
-                    total_ndf += (slice_ndf - 1)
+            if slice_ndf > 0:
+                total_ndf += (slice_ndf - 1)
 
         # Update ROOT internals so it knows exactly how much data to draw
         hist_residuals.SetEntries(actual_entries)
