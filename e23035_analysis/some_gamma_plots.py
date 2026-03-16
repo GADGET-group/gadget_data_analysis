@@ -20,30 +20,40 @@ for run in run_candidates:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
 
-adj_dict = degai.clover_adj_dict #degai.get_adjacency_dict(30)#clarion.get_adjacency_dict(30) #I've saved 1 deg (eg no add back) and 30 deg (adjacent crystals) before
-
 event_build_window = 500 #ns
 
+clover_dict = degai.clover_adj_dict ##clarion.get_adjacency_dict(30) #I've saved 1 deg (eg no add back) and 30 deg (adjacent crystals) before
+clover_ab_hist = degai.get_addback_spectrum(runs, clover_dict, 'gm', gamma_binning, event_build_window)
+
+
+
 #coinc_canvas = ROOT.TCanvas()
-gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window)
+gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(30), 'gm', gamma_binning, event_build_window)
 # gg_hist.Draw('COLZ')
 # ROOT.gPad.SetLogz(1)
 print('getting add back histogram')
-ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window)
+adj_ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window)
 
 print('getting sum histogram')
 sum_hist = degai.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
 sum_hist.SetLineColor(ROOT.kRed)
 
+#this should be equivalent to sum spectrum
+addback_1deg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window)
 
-spec_canvas = ROOT.TCanvas()
+
+# spec_canvas = ROOT.TCanvas()
 gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1045, 2)
-gspec.SetLineColor(ROOT.kGreen)
+# gspec.SetLineColor(ROOT.kGreen)
 
 
-ab_hist.Draw()
-sum_hist.Draw('SAME')
-gspec.Draw('SAME')
-spec_canvas.SetLogy(1)
+# adj_ab_hist.Draw()
+# sum_hist.Draw('SAME')
+# gspec.Draw('SAME')
+# spec_canvas.SetLogy(1)
+adj_addback_1ns_build_window = gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(30), 'gm', gamma_binning, 1)
+plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist, 'summed spectrum':sum_hist, '1deg addback':addback_1deg_hist, 'adj addback w/ 1ns event window':adj_addback_1ns_build_window}
+canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(plot_hist_dic, 'gamma spectrum from 60Ga runs', "keV", "counts/1 keV")
 
-timing_hist = degai.get_adjacent_timing_spectrum(126, adj_dict, (1500, 0, 15000))
+
+#timing_hist = degai.get_adjacent_timing_spectrum(126, degai.get_adjacency_dict(180), (1500, 0, 15000))
