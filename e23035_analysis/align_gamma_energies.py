@@ -42,6 +42,7 @@ for num in range(1, 12):
 
 true_locations = [510.99895069, 2614.511]
 true_location_uncertainties =  [16e-7, 1e-2]
+norm_dict = {true_locations[0]:'slice', true_locations[1]: 'total'}
 
 def do_gain_match(ddas_run):
     '''
@@ -62,7 +63,7 @@ def do_gain_match(ddas_run):
             search_window_width = 50/init_slope
             #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
             peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess-search_window_width, loc_guess+search_window_width), (-fit_window_width, fit_window_width)))
-        energy_calibration_tools.make_energy_calibration(ddas_run, 'gm', adc_str, (2**16, 0, 2**16), peaks)
+        energy_calibration_tools.make_energy_calibration(ddas_run, 'gm', adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict)
 
      #save histogram showing energy alignment 
     crystal_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
@@ -108,10 +109,12 @@ def process_all():
     #runs = np.array(e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])], dtype=int)
     with multiprocessing.Pool(n_workers) as pool:
         pool.map(do_gain_match, runs)
+    make_summary_pdf()
 
+def make_summary_pdf():
     pvalue_threshold_dict = {
-        true_locations[0]:{'1d':0.005, 't_indep':0.1},
-        true_locations[1]:{'1d':0.005, 't_indep':0.5}
+        true_locations[0]:{'1d':0.005, 't_indep':0.005},
+        true_locations[1]:{'1d':0.005, 't_indep':0.005}
     }
     energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict, runs)
 

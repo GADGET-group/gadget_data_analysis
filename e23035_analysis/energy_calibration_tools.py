@@ -28,7 +28,8 @@ def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
     return f'({slope}*{branch_name} + {offset})'
 
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
-                            selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800):
+                            selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800,
+                            normalization_dict=None):
     '''
     Fit peaks to get energy calibration
 
@@ -41,7 +42,12 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         Will assume offset = 0 if length is 1. The largest bin in the specified range will be used as a starting guess for the peak location.
     time_branch: will default to changing "_c" ending of branch name to _t
     time_bin_size: bin size to use for testing if gain is stable over time, in seconds. Defaults to 10 minutes.
+    normalization_dict: Used to choose if time dependent histogram should be normalized on a per slice basis, for beam products or daughters ith
+                        short decay timescales. Use "slice" for this case, or "total" for room background lines which should have truely time
+                        independent rates.
     '''
+    if normalization_dict is None:
+        normalization_dict = {}
     # turn off plotting so there aren't a bunch of pop ups
     original_batch_state = ROOT.gROOT.IsBatch()
     ROOT.gROOT.SetBatch(True)
@@ -157,6 +163,10 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         # --- Time Dependence & Baker-Cousins Residuals ---
         # ... [Your existing range setup code] ...
         
+        # NEW: Check which normalization method to use for this specific peak
+        # Defaults to 'slice' if the true_energy isn't explicitly in the dictionary
+        norm_method = normalization_dict.get(true_energy, 'slice')
+        
         total_chi2 = 0.0
         total_ndf = 0
         actual_entries = 0
@@ -165,56 +175,71 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         n_time_bins = time_dependent_hist.GetNbinsY()
         x_axis = time_dependent_hist.GetXaxis()
         
-        # Grab the number of fit parameters for NDF correction later
         n_fit_params = f_to_fit.GetNpar()
-        
-        # Determine the total integral of the 1D peak in this window
         hist_integral = hist_to_fit.Integral(bin_start_x, bin_stop_x)
         
+        # Grab the peak width parameters from the 1D fit
+        mu = fit_res.Parameter(2)
+        sigma = fit_res.Parameter(3)
+        
+        # Define a strict statistical testing window (+/- 3 sigma)
+        chi2_start_x = time_dependent_hist.GetXaxis().FindBin(mu - 3.0 * sigma)
+        chi2_stop_x  = time_dependent_hist.GetXaxis().FindBin(mu + 3.0 * sigma)
+
         for iy in range(1, n_time_bins + 1):
             slice_ndf = 0
             
-            # NEW: Calculate the normalization factor for this specific time slice.
-            # This safely absorbs missing timestamps, source decay, or beam fluctuations!
-            slice_integral = time_dependent_hist.Integral(bin_start_x, bin_stop_x, iy, iy)
-            scale_factor = slice_integral / hist_integral if hist_integral > 0 else 1.0
+            # --- NORMALIZATION LOGIC ---
+            # Keep using the FULL wide window to accurately calculate the total slice area
+            if norm_method == 'total':
+                scale_factor = 1.0 / n_time_bins
+            else:
+                slice_integral = time_dependent_hist.Integral(bin_start_x, bin_stop_x, iy, iy)
+                scale_factor = slice_integral / hist_integral if hist_integral > 0 else 1.0
             
             for ix in range(bin_start_x, bin_stop_x + 1):
                 obs = time_dependent_hist.GetBinContent(ix, iy)
                 x_val = x_axis.GetBinCenter(ix)
                 
-                # Scale the expected shape by the true intensity of this time slice
                 exp = f_to_fit.Eval(x_val) * scale_factor
-                
                 residual = obs - exp
                 
+                # Plotting: We fill the visual histogram for ALL bins in the wide window
                 hist_residuals.SetBinContent(ix, iy, residual)
                 actual_entries += 1
                 
                 if abs(residual) > max_res:
                     max_res = abs(residual)
                 
-                # Strict Baker-Cousins Chi^2 Calculation
-                if exp > 0:
-                    if obs > 0:
-                        bc_term = 2.0 * (exp - obs + obs * np.log(obs / exp))
-                    else:
-                        bc_term = 2.0 * exp 
+                # --- NEW: STRICT STATISTICAL GATE ---
+                # Only calculate Chi2 and NDF if the bin is inside the core peak region!
+                if ix >= chi2_start_x and ix <= chi2_stop_x:
+                    if exp > 0:
+                        if obs > 0:
+                            bc_term = 2.0 * (exp - obs + obs * np.log(obs / exp))
+                        else:
+                            bc_term = 2.0 * exp 
+                        
+                        total_chi2 += bc_term
+                        slice_ndf += 1
                     
-                    total_chi2 += bc_term
-                    slice_ndf += 1
-                    
+            # --- NDF LOGIC ---
             if slice_ndf > 0:
-                total_ndf += slice_ndf - 1 #minus 1 accounts for scale factor
+                if norm_method == 'total':
+                    total_ndf += slice_ndf      
+                else:
+                    total_ndf += (slice_ndf - 1)
 
-        # NEW: Subtract the fit parameters to get true degrees of freedom
-        total_ndf = max(1, total_ndf - n_fit_params)
+        # Subtract the 1D shape parameters. 
+        # If 'slice', the amplitude parameter was overridden, so we subtract (n_fit_params - 1).
+        # If 'total', we used the amplitude parameter directly, so we subtract n_fit_params.
+        params_to_subtract = n_fit_params if norm_method == 'total' else (n_fit_params - 1)
+        total_ndf = max(1, total_ndf - params_to_subtract)
 
         # Update ROOT internals
         hist_residuals.SetEntries(actual_entries)
         hist_residuals.ResetStats() 
 
-        # Calculate a single, global p-value
         time_indep_p_value = ROOT.TMath.Prob(total_chi2, total_ndf) if total_ndf > 0 else 0.0
         emg_fit_parameters[true_energy]['t_indep_p_value'] = time_indep_p_value
 
@@ -228,6 +253,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
         # Save 2D Data to middle page
         c_time = ROOT.TCanvas(f"c_time_{true_energy}", "2D Time vs Energy", 800, 600)
+        time_dependent_hist.SetStats(0)
         time_dependent_hist.Draw("COLZ")
         c_time.SaveAs(plot_path)
 
@@ -238,7 +264,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         if max_res > 0:
             hist_residuals.SetMinimum(-max_res)
             hist_residuals.SetMaximum(max_res)
-            
+        
+        hist_residuals.SetStats(0)
         hist_residuals.Draw("COLZ")
 
         # Create a text box to overlay the global P-Value and total chi2
