@@ -40,6 +40,9 @@ for num in range(1, 12):
     for letter in ['a', 'b', 'c', 'd']:
         clover_list.append(f'{num}{letter}')
 
+true_locations = [510.99895069, 2614.511]
+true_location_uncertainties =  [16e-7, 1e-2]
+
 def do_gain_match(ddas_run):
     '''
     ddas_run
@@ -47,8 +50,6 @@ def do_gain_match(ddas_run):
     '''
     original_batch_state = ROOT.gROOT.IsBatch()
     ROOT.gROOT.SetBatch(True)
-    true_locations = [510.99895069, 2614.511]
-    true_location_uncertainties =  [16e-7, 1e-2]
     
     for clover in clover_list:
         peaks = []
@@ -105,6 +106,12 @@ def process_all():
     runs = np.array(e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])], dtype=int)
     with multiprocessing.Pool(50) as pool:
         pool.map(do_gain_match, runs)
+
+pvalue_threshold_dict = {
+    true_locations[0]:{'1d':0.005, 't_indep':0.1},
+    true_locations[1]:{'1d':0.005, 't_indep':0.5}
+}
+energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict)
 #h = ddas_interface.get_histogram(runs[0], (2**16, 0, 2**16), '3a_counts', '3a_counts', 'clover_3a_c')
 #guess = 3295.8#(511-2.609910)/0.154992 #9405
 # fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(h, 'gamma_adc',guess, 100, (-25,25))

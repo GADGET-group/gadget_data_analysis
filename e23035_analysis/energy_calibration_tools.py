@@ -1,8 +1,12 @@
+import re
 import os
 import pickle
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 import ROOT
 import numpy as np
-from pathlib import Path
 
 from e23035_analysis import fitting_tools
 from raw_viewer import ddas_interface
@@ -84,8 +88,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
     # Initialize lists
     true_energies, true_energy_uncertainties, peak_locations, peak_location_uncertainties = [], [], [], []
-    peak_p_values = []
-    peak_time_independent_p_values = []
+    emg_fit_parameters = {} # Dictionary to store all fit parameters & p-values
 
     # Fit peaks
     for true_energy, true_energy_err, search_window, fit_window in peaks:
@@ -103,10 +106,25 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
             hist_to_fit, data_source, location_guess, location_wiggle, (location_guess + fit_window[0], location_guess + fit_window[1])
         )
-        peak_p_values.append(fit_res.Prob())
 
         # Write result to file
         results_file.WriteObject(fit_res, f'peak_fit_res_{true_energy}')
+          
+        # Extract ALL parameters to save to pickle
+        peak_params = {}
+        for i in range(f_to_fit.GetNpar()):
+            p_name = f_to_fit.GetParName(i)
+            peak_params[p_name] = {
+                'value': fit_res.Parameter(i),
+                'error': fit_res.ParError(i)
+            }
+        
+        # Adding Chi2, NDF, and 1D p-value to the dict
+        peak_params['chi2'] = fit_res.Chi2()
+        peak_params['ndf'] = fit_res.Ndf()
+        peak_params['1d_p_value'] = fit_res.Prob()
+        
+        emg_fit_parameters[true_energy] = peak_params
           
         mu_val = fit_res.Parameter(2)
         mu_err = fit_res.ParError(2)
@@ -131,24 +149,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         bin_stop_x  = max(raw_start_x, raw_stop_x)
         
         time_dependent_hist.GetXaxis().SetRange(bin_start_x, bin_stop_x)
-        
-        hist_residuals = time_dependent_hist.Clone(f"residuals_{true_energy}")
-        hist_residuals.Reset()
-        hist_residuals.SetTitle(f"Residuals (Data - Fit) {true_energy} keV;ADC Channel;Time [s]")
-        
-        total_chi2 = 0.0
-        total_ndf = 0
-        actual_entries = 0
-        max_res = 0.0 
-        
-        n_time_bins = time_dependent_hist.GetNbinsY()
-        
-        # --- Time Dependence & Baker-Cousins Residuals ---
-        raw_start_x = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[0])
-        raw_stop_x  = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[1])
-        
-        bin_start_x = min(raw_start_x, raw_stop_x)
-        bin_stop_x  = max(raw_start_x, raw_stop_x)
         
         hist_residuals = time_dependent_hist.Clone(f"residuals_{true_energy}")
         hist_residuals.Reset()
@@ -191,19 +191,18 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                         bc_term = 2.0 * exp 
                     
                     total_chi2 += bc_term
-                    total_ndf += 1
+                    slice_ndf += 1
                     
+            if slice_ndf > 0:
+                total_ndf += (slice_ndf - 1)
 
         # Update ROOT internals so it knows exactly how much data to draw
         hist_residuals.SetEntries(actual_entries)
         hist_residuals.ResetStats() 
 
-        # Diagnostic check to see if we actually filled anything
-        print(f"[{calibration_name} - {true_energy} keV] Time-slice bins filled: {actual_entries} | Max residual: {max_res:.2f}")
-
-        # Calculate a single, global p-value for the entire 2D histogram
+        # Calculate a single, global p-value for the entire 2D histogram & store it
         time_indep_p_value = ROOT.TMath.Prob(total_chi2, total_ndf) if total_ndf > 0 else 0.0
-        peak_time_independent_p_values.append(time_indep_p_value)
+        emg_fit_parameters[true_energy]['t_indep_p_value'] = time_indep_p_value
 
         # Save 2D Data to middle page
         c_time = ROOT.TCanvas(f"c_time_{true_energy}", "2D Time vs Energy", 800, 600)
@@ -214,7 +213,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         c_res = ROOT.TCanvas(f"c_res_{true_energy}", "Time Residuals", 800, 600)
         
         # Center the color scale on 0 for symmetric visualization of the raw residuals
-        # CRITICAL FIX: Use SetMinimum/SetMaximum for TH2 COLZ, not GetZaxis().SetRangeUser
         if max_res > 0:
             hist_residuals.SetMinimum(-max_res)
             hist_residuals.SetMaximum(max_res)
@@ -261,13 +259,11 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 'cov_offset_slope': 0.0
             },
             'cal_p_value': 1.0,
-            'peak_p_values': peak_p_values,
-            'peak_time_independent_p_values': peak_time_independent_p_values
+            'emg_fit_parameters': emg_fit_parameters
         }
         print(f"[{calibration_name}] 1-Point Cal: slope={slope:.4f} ± {sigma_slope:.4f}, offset=0")
         
     else:
-        print('fit peak locations: ', peak_locations)
         graph = ROOT.TGraphErrors(
             len(peaks), 
             np.array(peak_locations, dtype=np.float64), 
@@ -307,8 +303,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 'cov_offset_slope': cov_offset_slope
             },
             'cal_p_value': p_value,
-            'peak_p_values': peak_p_values,
-            'peak_time_independent_p_values': peak_time_independent_p_values
+            'emg_fit_parameters': emg_fit_parameters
         }
         print(f"[{calibration_name}] Linear Cal: slope={slope:.4f}, offset={offset:.4f}")
         
@@ -426,3 +421,185 @@ def get_df_histogram(df, ddas_run, column_list, binning, cache_tag="calibrated",
         f.Close()
 
     return hist_dict
+
+def create_calibration_summary(cal_name, pvalue_threshold_dict):
+    '''
+    Create a PDF file summarizing the calibration for all runs that have it.
+    
+    cal_name: the name of the calibration to summarize
+    pvalue_threshold_dict: Specifies threshold at which p-values should be flagged. 
+        May specify thresholds with the following keys:
+        - ['cal'] : threshold for the overall linear fit p-value
+        - [peak_energy]['1d'] : threshold for the 1D EMG fit p-value
+        - [peak_energy]['t_indep'] : threshold for the 2D time-independence p-value
+        Not all possible entries need to be included.
+    '''
+    
+    # 1. Automatically scoop up all fit results matching the calibration name
+    cal_data = {}
+    # Search specifically inside the known analysis directory structure
+    pkl_files = list(Path('.').rglob(f"e23035_analysis/calibrations/*/{cal_name}/*/{cal_name}.pkl"))
+    
+    # Fallback just in case the script is run from inside the calibrations folder itself
+    if not pkl_files:
+        pkl_files = list(Path('.').rglob(f"{cal_name}.pkl"))
+
+    if not pkl_files:
+        print(f"No calibration files found for '{cal_name}'.")
+        return
+
+    for pkl_path in pkl_files:
+        # Path structure: .../{ddas_run}/{cal_name}/{branch_name}/{cal_name}.pkl
+        branch_name = pkl_path.parent.name
+        
+        try:
+            # The run number is exactly 3 folders up from the .pkl file
+            run_num = int(pkl_path.parent.parent.parent.name)
+        except ValueError:
+            print(f"Warning: Could not parse run number from path {pkl_path}. Skipping.")
+            continue
+        
+        with open(pkl_path, 'rb') as f:
+            data = pickle.load(f)
+            
+        if run_num not in cal_data:
+            cal_data[run_num] = {}
+        cal_data[run_num][branch_name] = data
+
+    runs = sorted(cal_data.keys())
+    all_branches = set(b for r in runs for b in cal_data[r].keys())
+
+    # 2. Check thresholds and prepare the flagged summary
+    flagged_issues = []
+    
+    for run in runs:
+        for branch, data in cal_data[run].items():
+            
+            # Check Overall Cal P-value
+            if 'cal' in pvalue_threshold_dict:
+                p_val = data.get('cal_p_value', 1.0)
+                if p_val < pvalue_threshold_dict['cal']:
+                    flagged_issues.append(f"Run {run} [{branch}] - Overall Cal p-value: {p_val:.2e}")
+            
+            # Check individual peak P-values
+            emg_params = data.get('emg_fit_parameters', {})
+            for peak_energy, params in emg_params.items():
+                if peak_energy in pvalue_threshold_dict:
+                    
+                    if '1d' in pvalue_threshold_dict[peak_energy]:
+                        p_1d = params.get('1d_p_value', 1.0)
+                        if p_1d < pvalue_threshold_dict[peak_energy]['1d']:
+                            flagged_issues.append(f"Run {run} [{branch}] - {peak_energy} keV 1D p-value: {p_1d:.2e}")
+                            
+                    if 't_indep' in pvalue_threshold_dict[peak_energy]:
+                        p_t = params.get('t_indep_p_value', 1.0)
+                        if p_t < pvalue_threshold_dict[peak_energy]['t_indep']:
+                            flagged_issues.append(f"Run {run} [{branch}] - {peak_energy} keV Time-Indep p-value: {p_t:.2e}")
+
+    # 3. Generate the PDF
+    pdf_filename = f"{cal_name}_summary.pdf"
+    with PdfPages(pdf_filename) as pdf:
+        
+        # --- Page 1: Text Summary of Flags ---
+        fig, ax = plt.subplots(figsize=(8.5, 11))
+        ax.axis('off')
+        
+        y_pos = 0.95
+        ax.text(0.05, y_pos, f"Calibration Summary: {cal_name}", fontsize=16, fontweight='bold')
+        y_pos -= 0.05
+        
+        if not flagged_issues:
+            ax.text(0.05, y_pos, "All p-values are above the specified thresholds.", fontsize=12)
+        else:
+            ax.text(0.05, y_pos, "Flagged Fits (Below Threshold):", fontsize=12, fontweight='bold')
+            y_pos -= 0.03
+            for issue in flagged_issues:
+                if y_pos < 0.05: # Create a new page if we run out of vertical space
+                    pdf.savefig(fig)
+                    plt.close(fig)
+                    fig, ax = plt.subplots(figsize=(8.5, 11))
+                    ax.axis('off')
+                    y_pos = 0.95
+                ax.text(0.05, y_pos, issue, fontsize=10)
+                y_pos -= 0.015
+                
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        # Helper function for scatter plots
+        def make_scatter_page(title, y_label, extract_func, is_log=False):
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.set_title(title)
+            ax.set_xlabel("Run Number")
+            ax.set_ylabel(y_label)
+            if is_log:
+                ax.set_yscale('log')
+                
+            plotted_anything = False
+            for branch in all_branches:
+                x_vals, y_vals = [], []
+                for run in runs:
+                    if branch in cal_data[run]:
+                        val = extract_func(cal_data[run][branch])
+                        if val is not None:
+                            x_vals.append(run)
+                            y_vals.append(val)
+                if x_vals:
+                    ax.scatter(x_vals, y_vals, label=branch, alpha=0.7)
+                    plotted_anything = True
+                    
+            if plotted_anything:
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                fig.tight_layout()
+                ax.grid(True, linestyle='--', alpha=0.6)
+                pdf.savefig(fig)
+            plt.close(fig)
+
+        # --- Plot: Overall Slope/Offset Cal P-Value ---
+        make_scatter_page(
+            "Overall Slope & Offset Fit P-Value", "p-value",
+            lambda d: d.get('cal_p_value'), is_log=True
+        )
+
+        # --- Get list of all peak energies found across all files ---
+        all_peaks = set()
+        for r in runs:
+            for b, d in cal_data[r].items():
+                all_peaks.update(d.get('emg_fit_parameters', {}).keys())
+        all_peaks = sorted(list(all_peaks))
+
+        # --- Plots per Peak ---
+        for peak in all_peaks:
+            
+            # 1D P-values
+            make_scatter_page(
+                f"{peak} keV - 1D Fit P-Values", "p-value",
+                lambda d: d.get('emg_fit_parameters', {}).get(peak, {}).get('1d_p_value'), is_log=True
+            )
+            
+            # Time-Indep P-values
+            make_scatter_page(
+                f"{peak} keV - Time Independence P-Values", "p-value",
+                lambda d: d.get('emg_fit_parameters', {}).get(peak, {}).get('t_indep_p_value'), is_log=True
+            )
+            
+            # Fit Parameters
+            sample_params = None
+            for r in runs:
+                for b, d in cal_data[r].items():
+                    if peak in d.get('emg_fit_parameters', {}):
+                        sample_params = d['emg_fit_parameters'][peak]
+                        break
+                if sample_params: break
+            
+            if sample_params:
+                # Exclude the metrics we already plotted
+                param_names = [k for k in sample_params.keys() if k not in ('1d_p_value', 't_indep_p_value', 'chi2', 'ndf')]
+                
+                for param in param_names:
+                    make_scatter_page(
+                        f"{peak} keV Fit Parameter: {param}", param,
+                        lambda d, p=param: d.get('emg_fit_parameters', {}).get(peak, {}).get(p, {}).get('value')
+                    )
+
+    print(f"Summary saved to {pdf_filename}")
