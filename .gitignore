@@ -1,0 +1,11 @@
+e23035_analysis/calibrations/
+e23035_analysis/clarion_cache
+e23035_analysis/hist_cache
+*.pyc
+old_gm/
+old_mcmc_results/
+old_track_fitting/
+/raw_viewer/veto_conditioner/e23035
+run124_mcmc/
+run124_palpha_mcmc
+*.pkl
