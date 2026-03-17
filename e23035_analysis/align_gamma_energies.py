@@ -19,7 +19,7 @@ for run in run_candidates:
     if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
-runs=[126] #126 production run, 91 is bg
+
 n_workers=min(200, len(runs))
 
 #get pre-experiment energy calibration to make finding the 511 and 2614 keV peaks easier
@@ -98,24 +98,20 @@ def do_gain_match(ddas_run):
             canvas.Print(fname)
 
     ROOT.gROOT.SetBatch(original_batch_state)
+
+    print('gain match of run %d is complete'%ddas_run)
     
 
 
 
 def process_all():
-    runs = np.array(e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])], dtype=int)
-    with multiprocessing.Pool(50) as pool:
+    #runs = np.array(e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])], dtype=int)
+    with multiprocessing.Pool(n_workers) as pool:
         pool.map(do_gain_match, runs)
 
-pvalue_threshold_dict = {
-    true_locations[0]:{'1d':0.005, 't_indep':0.1},
-    true_locations[1]:{'1d':0.005, 't_indep':0.5}
-}
-energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict)
-#h = ddas_interface.get_histogram(runs[0], (2**16, 0, 2**16), '3a_counts', '3a_counts', 'clover_3a_c')
-#guess = 3295.8#(511-2.609910)/0.154992 #9405
-# fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(h, 'gamma_adc',guess, 100, (-25,25))
-# fit_res2, background2, peaks2, rp2, canvas2, spectrum_to_plot2, f_to_fit2, h_fit2=fitting_tools.fit_gaussian_peaks(h, [guess],20,(guess-25, guess+25) ,True, background_type='constant')
+    pvalue_threshold_dict = {
+        true_locations[0]:{'1d':0.005, 't_indep':0.1},
+        true_locations[1]:{'1d':0.005, 't_indep':0.5}
+    }
+    energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict, runs)
 
-# crystal_m_hists = ddas_interface.get_crystal_histograms(runs, (10, -0.5, 9.5), 'm')
-# root_vis_tools.create_2d_hist_from_dict(crystal_m_hists, "crystal multiplicities")

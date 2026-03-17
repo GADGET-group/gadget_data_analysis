@@ -154,6 +154,9 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         hist_residuals.Reset()
         hist_residuals.SetTitle(f"Residuals (Data - Fit) {true_energy} keV;ADC Channel;Time [s]")
         
+        # --- Time Dependence & Baker-Cousins Residuals ---
+        # ... [Your existing range setup code] ...
+        
         total_chi2 = 0.0
         total_ndf = 0
         actual_entries = 0
@@ -162,18 +165,27 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         n_time_bins = time_dependent_hist.GetNbinsY()
         x_axis = time_dependent_hist.GetXaxis()
         
+        # Grab the number of fit parameters for NDF correction later
+        n_fit_params = f_to_fit.GetNpar()
+        
+        # Determine the total integral of the 1D peak in this window
+        hist_integral = hist_to_fit.Integral(bin_start_x, bin_stop_x)
+        
         for iy in range(1, n_time_bins + 1):
             slice_ndf = 0
+            
+            # NEW: Calculate the normalization factor for this specific time slice.
+            # This safely absorbs missing timestamps, source decay, or beam fluctuations!
+            slice_integral = time_dependent_hist.Integral(bin_start_x, bin_stop_x, iy, iy)
+            scale_factor = slice_integral / hist_integral if hist_integral > 0 else 1.0
             
             for ix in range(bin_start_x, bin_stop_x + 1):
                 obs = time_dependent_hist.GetBinContent(ix, iy)
                 x_val = x_axis.GetBinCenter(ix)
                 
-                # Evaluate expectation directly. 
-                # Note: Add "/ n_time_bins" here if f_to_fit was fit to the full integrated projection.
-                exp = f_to_fit.Eval(x_val)/n_time_bins
+                # Scale the expected shape by the true intensity of this time slice
+                exp = f_to_fit.Eval(x_val) * scale_factor
                 
-                # Standard residual: strictly observed - expected
                 residual = obs - exp
                 
                 hist_residuals.SetBinContent(ix, iy, residual)
@@ -182,19 +194,29 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 if abs(residual) > max_res:
                     max_res = abs(residual)
                 
-                # Baker-Cousins Chi^2 Calculation
+                # Strict Baker-Cousins Chi^2 Calculation
                 if exp > 0:
                     if obs > 0:
                         bc_term = 2.0 * (exp - obs + obs * np.log(obs / exp))
                     else:
-                        # As O -> 0, O*ln(O/E) -> 0. Limits to 2E.
                         bc_term = 2.0 * exp 
                     
                     total_chi2 += bc_term
                     slice_ndf += 1
                     
             if slice_ndf > 0:
-                total_ndf += (slice_ndf - 1)
+                total_ndf += slice_ndf - 1 #minus 1 accounts for scale factor
+
+        # NEW: Subtract the fit parameters to get true degrees of freedom
+        total_ndf = max(1, total_ndf - n_fit_params)
+
+        # Update ROOT internals
+        hist_residuals.SetEntries(actual_entries)
+        hist_residuals.ResetStats() 
+
+        # Calculate a single, global p-value
+        time_indep_p_value = ROOT.TMath.Prob(total_chi2, total_ndf) if total_ndf > 0 else 0.0
+        emg_fit_parameters[true_energy]['t_indep_p_value'] = time_indep_p_value
 
         # Update ROOT internals so it knows exactly how much data to draw
         hist_residuals.SetEntries(actual_entries)
@@ -422,7 +444,8 @@ def get_df_histogram(df, ddas_run, column_list, binning, cache_tag="calibrated",
 
     return hist_dict
 
-def create_calibration_summary(cal_name, pvalue_threshold_dict):
+
+def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
     '''
     Create a PDF file summarizing the calibration for all runs that have it.
     
@@ -433,10 +456,16 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict):
         - [peak_energy]['1d'] : threshold for the 1D EMG fit p-value
         - [peak_energy]['t_indep'] : threshold for the 2D time-independence p-value
         Not all possible entries need to be included.
+    run_list: Optional list of integer run numbers to include. If provided, 
+        only these runs will be processed. Missing runs are safely ignored.
     '''
     
     # 1. Automatically scoop up all fit results matching the calibration name
     cal_data = {}
+    
+    # Convert run_list to a set for faster lookups (if it was provided)
+    valid_runs = set(run_list) if run_list is not None else None
+    
     # Search specifically inside the known analysis directory structure
     pkl_files = list(Path('.').rglob(f"e23035_analysis/calibrations/*/{cal_name}/*/{cal_name}.pkl"))
     
@@ -458,6 +487,10 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict):
         except ValueError:
             print(f"Warning: Could not parse run number from path {pkl_path}. Skipping.")
             continue
+            
+        # If the user provided a list of runs, skip any run not in that list
+        if valid_runs is not None and run_num not in valid_runs:
+            continue
         
         with open(pkl_path, 'rb') as f:
             data = pickle.load(f)
@@ -465,6 +498,11 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict):
         if run_num not in cal_data:
             cal_data[run_num] = {}
         cal_data[run_num][branch_name] = data
+
+    # Check if we actually found data for the requested runs
+    if not cal_data:
+        print("No valid calibration data found for the requested runs.")
+        return
 
     runs = sorted(cal_data.keys())
     all_branches = set(b for r in runs for b in cal_data[r].keys())
@@ -496,8 +534,11 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict):
                         if p_t < pvalue_threshold_dict[peak_energy]['t_indep']:
                             flagged_issues.append(f"Run {run} [{branch}] - {peak_energy} keV Time-Indep p-value: {p_t:.2e}")
 
-    # 3. Generate the PDF
-    pdf_filename = f"{cal_name}_summary.pdf"
+    # 3. Generate the PDF in the specified analysis directory
+    output_dir = Path("e23035_analysis/calibrations")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pdf_filename = output_dir / f"{cal_name}_summary.pdf"
+    
     with PdfPages(pdf_filename) as pdf:
         
         # --- Page 1: Text Summary of Flags ---
