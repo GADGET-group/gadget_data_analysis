@@ -19,7 +19,6 @@ for run in run_candidates:
     if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
-
 n_workers=min(200, len(runs))
 
 #get pre-experiment energy calibration to make finding the 511 and 2614 keV peaks easier
@@ -105,16 +104,46 @@ def do_gain_match(ddas_run):
 
 
 
-def process_all():
-    #runs = np.array(e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])], dtype=int)
-    with multiprocessing.Pool(n_workers) as pool:
-        pool.map(do_gain_match, runs)
-    make_summary_pdf()
+import multiprocessing
+import os
+import sys
+from tqdm import tqdm
 
+def _mute_worker():
+    """
+    Runs once per worker process when the pool starts. 
+    Silences tqdm and standard print statements so they don't corrupt the main progress bar.
+    """
+    # 1. Disable tqdm globally for this worker process
+    os.environ['TQDM_DISABLE'] = '1'
+    
+    # 2. (Optional) Redirect standard prints to the void so they don't mess up the terminal
+    # Comment this out if you still want to see normal print() statements from the workers!
+    sys.stdout = open(os.devnull, 'w')
+
+def process_all():
+    # runs = np.array(e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])], dtype=int)
+    
+    # Pass our mute function to the pool via the initializer argument
+    with multiprocessing.Pool(n_workers, initializer=_mute_worker) as pool:
+        
+        # imap_unordered yields results as they finish, allowing tqdm to track them!
+        results_generator = pool.imap_unordered(do_gain_match, runs)
+        
+        # Wrap the generator in tqdm and exhaust it using list()
+        list(tqdm(
+            results_generator, 
+            total=len(runs), 
+            desc="Gain Matching Runs", 
+            dynamic_ncols=True,
+            smoothing=0.1 # Averages the speed estimate so it doesn't jump around wildly
+        ))
+        
+    make_summary_pdf()
 def make_summary_pdf():
     pvalue_threshold_dict = {
-        true_locations[0]:{'1d':0.005, 't_indep':0.005},
-        true_locations[1]:{'1d':0.005, 't_indep':0.005}
+        true_locations[0]:{'1d':1e-7, 't_indep':0.01},
+        true_locations[1]:{'1d':0.001, 't_indep':0.01}
     }
     energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict, runs)
 

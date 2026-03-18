@@ -364,6 +364,13 @@ def is_iterable_runs(obj):
     except TypeError:
         return False
 
+import os
+import sys
+import hashlib
+import concurrent.futures
+import tqdm
+import ROOT
+
 def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
     cache_dir = os.path.join('e23035_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
@@ -372,9 +379,30 @@ def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
     hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
     cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
     
+    # --- LAYER 1: PROACTIVE CACHE HEALTH CHECK ---
     if not force_recreate and os.path.exists(cache_file_path):
-        return cache_file_path, hash_name
+        is_healthy = False
+        try:
+            cf = ROOT.TFile.Open(cache_file_path, 'READ')
+            if cf and not cf.IsZombie():
+                # Verify the histogram actually exists inside the file
+                if cf.Get(hash_name): 
+                    is_healthy = True
+            if cf: 
+                cf.Close()
+        except OSError:
+            pass
+            
+        if is_healthy:
+            return cache_file_path, hash_name
+        else:
+            # The file exists but is corrupted/empty. Delete it.
+            try:
+                os.remove(cache_file_path)
+            except OSError:
+                pass
 
+    # --- BUILD THE HISTOGRAM ---
     data_file_path = get_merged_root_file_path(run) 
     data_file = ROOT.TFile.Open(data_file_path, 'READ')
     
@@ -421,8 +449,18 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
                 for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)", file=sys.stdout, dynamic_ncols=True, leave=True):
                     cache_file_path, hash_name = future.result()
                     
+                    # --- LAYER 2: RACE CONDITION FAILSAFE ---
                     cf = ROOT.TFile.Open(cache_file_path, 'READ')
-                    hist = cf.Get(hash_name).Clone(f"{hist_name}_temp")
+                    temp_hist = cf.Get(hash_name)
+                    
+                    if not temp_hist:
+                        cf.Close()
+                        print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
+                        cache_file_path, hash_name = _worker_fill_run(run, binning, var_exp, selection, force_recreate=True)
+                        cf = ROOT.TFile.Open(cache_file_path, 'READ')
+                        temp_hist = cf.Get(hash_name)
+                        
+                    hist = temp_hist.Clone(f"{hist_name}_temp")
                     hist.SetDirectory(0)
                     cf.Close()
                     
@@ -452,8 +490,18 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
         cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate)
         pbar.update(1)
     
+    # --- LAYER 2: SINGLE RUN FAILSAFE ---
     cf = ROOT.TFile.Open(cache_file_path, 'READ')
-    final_hist = cf.Get(hash_name).Clone(hist_name)
+    temp_hist = cf.Get(hash_name)
+    
+    if not temp_hist:
+        cf.Close()
+        print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
+        cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate=True)
+        cf = ROOT.TFile.Open(cache_file_path, 'READ')
+        temp_hist = cf.Get(hash_name)
+        
+    final_hist = temp_hist.Clone(hist_name)
     final_hist.SetTitle(hist_title)
     final_hist.SetDirectory(0)
     cf.Close()
