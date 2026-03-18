@@ -39,9 +39,24 @@ for num in range(1, 12):
     for letter in ['a', 'b', 'c', 'd']:
         clover_list.append(f'{num}{letter}')
 
-true_locations = [510.99895069, 2614.511]
-true_location_uncertainties =  [16e-7, 1e-2]
-norm_dict = {true_locations[0]:'slice', true_locations[1]: 'total'}
+# #true_locations = [510.99895069, 2614.511]
+# true_location_uncertainties =  [16e-7, 1e-2]
+# norm_dict = {true_locations[0]:'slice', true_locations[1]: 'total'}
+# pvalue_threshold_dict = {
+#         true_locations[0]:{'1d':1e-7, 't_indep':0.01},
+#         true_locations[1]:{'1d':0.001, 't_indep':0.01}
+#     }
+
+true_locations = [510.99895069, 1003.72, 2614.511, 3848.3] #511, 60Ga, 208Tl, 60Ga
+true_location_uncertainties =  [16e-7, 0.2, 0.01, 0.7]
+norm_dict = {true_locations[0]:'slice', true_locations[1]: 'slice', true_locations[2]: 'slice'}
+pvalue_threshold_dict = {
+        'cal':0.01,
+        true_locations[0]:{'1d':1e-7, 't_indep':0.01},
+        true_locations[1]:{'1d':0.001, 't_indep':0.01},
+        true_locations[2]:{'1d':0.001, 't_indep':0.01},
+        true_locations[3]:{'1d':0.001, 't_indep':0.01}
+    }
 
 def do_gain_match(ddas_run):
     '''
@@ -140,10 +155,7 @@ def process_all():
         ))
         
     make_summary_pdf()
+    
 def make_summary_pdf():
-    pvalue_threshold_dict = {
-        true_locations[0]:{'1d':1e-7, 't_indep':0.01},
-        true_locations[1]:{'1d':0.001, 't_indep':0.01}
-    }
     energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict, runs)
 
