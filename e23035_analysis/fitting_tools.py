@@ -293,7 +293,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
     A_guess = (spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess)*sigma_guess/bin_width#35413.4#
     if data_source == 'gamma_adc':
-        tau_bounds = (0, 20)
+        tau_bounds = (1e-4, 20)
         sigma_bounds = (1,20)
         A_bounds = ((spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess), np.inf)
 

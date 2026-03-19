@@ -1,6 +1,9 @@
 import os
 import multiprocessing
 
+import sys
+from tqdm import tqdm
+
 import numpy as np
 import ROOT
 
@@ -119,41 +122,73 @@ def do_gain_match(ddas_run):
 
 
 
-import multiprocessing
-import os
-import sys
-from tqdm import tqdm
+# Global variable to hold the shared dictionary inside each worker process
+worker_status_dict = None
 
-def _mute_worker():
+def _tracking_initializer(shared_dict):
     """
-    Runs once per worker process when the pool starts. 
-    Silences tqdm and standard print statements so they don't corrupt the main progress bar.
+    Initializes the worker, hands it the shared dictionary, and mutes terminal spam.
     """
-    # 1. Disable tqdm globally for this worker process
-    os.environ['TQDM_DISABLE'] = '1'
+    global worker_status_dict
+    worker_status_dict = shared_dict
     
-    # 2. (Optional) Redirect standard prints to the void so they don't mess up the terminal
-    # Comment this out if you still want to see normal print() statements from the workers!
+    # Silence tqdm and standard print statements for the workers
+    os.environ['TQDM_DISABLE'] = '1'
     sys.stdout = open(os.devnull, 'w')
+
+def _tracked_gain_match(run):
+    """
+    Wrapper function that updates the shared dictionary before and after processing.
+    """
+    global worker_status_dict
+    
+    # 1. Update status to show this run is actively chewing up CPU
+    worker_status_dict[run] = "RUNNING"
+    
+    try:
+        # 2. Call your actual heavy function
+        do_gain_match(run)
+        
+        # 3. Mark as finished and return the run number back to the main thread
+        worker_status_dict[run] = "FINISHED"
+        return run, True
+        
+    except Exception as e:
+        # If it crashes, mark it failed so we know!
+        worker_status_dict[run] = "FAILED"
+        return run, False
 
 def process_all():
     # runs = np.array(e23035_runs.run_df['DDAS'][np.isfinite(e23035_runs.run_df['DDAS'])], dtype=int)
     
-    # Pass our mute function to the pool via the initializer argument
-    with multiprocessing.Pool(n_workers, initializer=_mute_worker) as pool:
+    # 1. Create the shared memory Manager
+    with multiprocessing.Manager() as manager:
+        status_dict = manager.dict()
         
-        # imap_unordered yields results as they finish, allowing tqdm to track them!
-        results_generator = pool.imap_unordered(do_gain_match, runs)
-        
-        # Wrap the generator in tqdm and exhaust it using list()
-        list(tqdm(
-            results_generator, 
-            total=len(runs), 
-            desc="Gain Matching Runs", 
-            dynamic_ncols=True,
-            smoothing=0.1 # Averages the speed estimate so it doesn't jump around wildly
-        ))
-        
+        # Pre-fill the status board so everything starts as "QUEUED"
+        for r in runs:
+            status_dict[r] = "QUEUED"
+            
+        # 2. Start the pool, passing the shared dictionary via initargs
+        with multiprocessing.Pool(n_workers, initializer=_tracking_initializer, initargs=(status_dict,)) as pool:
+            
+            # Point the pool at our new wrapper function
+            results_generator = pool.imap_unordered(_tracked_gain_match, runs)
+            
+            # 3. Process the results manually with a tqdm loop
+            pbar = tqdm(total=len(runs), desc="Gain Matching", dynamic_ncols=True, smoothing=0.1)
+            
+            for run_id, success in results_generator:
+                pbar.update(1)
+                
+                # Scan the shared dictionary for runs that are currently pinned to a worker
+                active_runs = [r for r, status in status_dict.items() if status == "RUNNING"]
+                
+                # tqdm.write prints safely ABOVE the progress bar
+                tqdm.write(f"Run {run_id} finished. Actively running now: {sorted(active_runs)}")
+                
+            pbar.close()
+            
     make_summary_pdf()
     
 def make_summary_pdf():

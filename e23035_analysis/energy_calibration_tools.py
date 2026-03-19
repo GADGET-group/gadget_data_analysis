@@ -57,7 +57,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         num_workers = min(200, len(ddas_run))
     except TypeError:
         num_workers = 1
-        
+
+    print(f"[{branch_name}] Building 1D Histogram...", flush=True)    
     hist_to_fit = ddas_interface.get_histogram(ddas_run, binning_for_fit, branch_name, branch_name, branch_name, selection_string, num_workers)
 
     # Time-dependent histogram setup
@@ -75,6 +76,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     time_dep_exp = '%s:%s' % (time_branch, branch_name)
     
     # Pass time_dep_exp explicitly to var_exp
+    print(f"[{branch_name}] Building 2D Time Histogram...", flush=True)
+
     time_dependent_hist = ddas_interface.get_histogram(
         ddas_run=ddas_run, 
         binning=time_dependent_binning, 
