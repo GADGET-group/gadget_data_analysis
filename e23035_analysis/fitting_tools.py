@@ -66,7 +66,7 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     f_to_fit.SetNpx(1000)
 
     # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
-    fit_options = 'LS0QE'
+    fit_options = 'LS0QEG'
     fit_res = sub_hist.Fit(f_to_fit, fit_options)
     attempts = 0
     while not fit_res.IsValid() and attempts < 20:
