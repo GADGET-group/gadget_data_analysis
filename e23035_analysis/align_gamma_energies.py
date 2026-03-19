@@ -66,6 +66,7 @@ def do_gain_match(ddas_run):
     ddas_run
     clover: 1a, 1b, etc
     '''
+    ddas_run = int(ddas_run)
     original_batch_state = ROOT.gROOT.IsBatch()
     ROOT.gROOT.SetBatch(True)
     

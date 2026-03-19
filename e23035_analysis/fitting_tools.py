@@ -66,7 +66,7 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     f_to_fit.SetNpx(1000)
 
     # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
-    fit_options = 'LS0GQ'
+    fit_options = 'LS0QE'
     fit_res = sub_hist.Fit(f_to_fit, fit_options)
     attempts = 0
     while not fit_res.IsValid() and attempts < 20:
@@ -295,7 +295,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
     if data_source == 'gamma_adc':
         tau_bounds = (1e-4, 20)
         sigma_bounds = (1,20)
-        A_bounds = ((spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess), np.inf)
+        A_bounds = (1,np.inf)#((spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess), np.inf)
 
     spectrum.GetXaxis().UnZoom()
 
