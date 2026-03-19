@@ -19,9 +19,11 @@ gamma_binning = (int((7000-0)/gamma_bin_size),0,7000) #was 1-12000 w/ 1 keV bins
 run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 runs = []
 for run in run_candidates:
-    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
+    t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
+    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and (tf-t0)>600:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
+
 n_workers=min(200, len(runs))
 
 #get pre-experiment energy calibration to make finding the 511 and 2614 keV peaks easier
@@ -60,6 +62,7 @@ pvalue_threshold_dict = {
         true_locations[2]:{'1d':0.001, 't_indep':0.01},
         true_locations[3]:{'1d':0.001, 't_indep':0.01}
     }
+rebin_factors = [1,1,5,5]
 
 def do_gain_match(ddas_run):
     '''
@@ -80,7 +83,7 @@ def do_gain_match(ddas_run):
             fit_window_width = 0.01*loc_guess*np.sqrt(511/true_locations[i])
             search_window_width = 50/init_slope
             #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
-            peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess-search_window_width, loc_guess+search_window_width), (-fit_window_width, fit_window_width)))
+            peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess-search_window_width, loc_guess+search_window_width), (-fit_window_width, fit_window_width), rebin_factors[i]))
         energy_calibration_tools.make_energy_calibration(ddas_run, 'gm', adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict)
 
      #save histogram showing energy alignment 

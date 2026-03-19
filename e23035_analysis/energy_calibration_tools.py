@@ -29,7 +29,7 @@ def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
 
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
                             selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800,
-                            normalization_dict=None):
+                            normalization_dict=None, min_counts=30):
     '''
     Fit peaks to get energy calibration
 
@@ -38,7 +38,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     branch_name: name of the branch to retrieve data from (eg clover_1a_e, tpc_energy, etc)
     binning_for_fit: tuple specifying TH1D binning
     peaks: List of peaks to use to specify the calibration. Each list entry should contain tuples of 
-        (true energy, true energy_uncertainty, (search window start, stop), (fit window +, -). 
+        (true energy, true energy_uncertainty, (search window start, stop), (fit window +, -), rebin_factor). 
         Will assume offset = 0 if length is 1. The largest bin in the specified range will be used as a starting guess for the peak location.
     time_branch: will default to changing "_c" ending of branch name to _t
     time_bin_size: bin size to use for testing if gain is stable over time, in seconds. Defaults to 10 minutes.
@@ -100,21 +100,41 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     emg_fit_parameters = {} # Dictionary to store all fit parameters & p-values
 
     # Fit peaks
-    for true_energy, true_energy_err, search_window, fit_window in peaks:
-        true_energies.append(true_energy)
-        true_energy_uncertainties.append(true_energy_err)
+    for true_energy, true_energy_err, search_window, fit_window, rebin in peaks:
+        
+        # --- FIX 3: Clone the histogram so rebinning doesn't ruin the next peak! ---
+        hist_for_this_peak = hist_to_fit.Clone(f"hist_temp_{true_energy}")
+        
+        if rebin != 1:
+            hist_for_this_peak.Rebin(rebin)
+
+        hist_for_this_peak.GetXaxis().SetRangeUser(*search_window)
+        
+        # --- FIX 2: Calculate counts strictly inside the zoomed window ---
+        start_bin = hist_for_this_peak.GetXaxis().FindBin(search_window[0])
+        stop_bin = hist_for_this_peak.GetXaxis().FindBin(search_window[1])
+        counts_in_window = hist_for_this_peak.Integral(start_bin, stop_bin)
+        
+        # --- FIX 1: Use continue instead of break ---
+        if counts_in_window < min_counts:
+            print(f"[{branch_name}] WARNING: Skipping {true_energy} keV peak. Only {counts_in_window} counts.")
+            hist_for_this_peak.SetDirectory(0) # Memory cleanup
+            continue 
+            
+        max_bin_in_range = hist_for_this_peak.GetMaximumBin()        
+        location_guess = hist_for_this_peak.GetXaxis().GetBinCenter(max_bin_in_range)
+        hist_for_this_peak.GetXaxis().UnZoom()
         
         location_wiggle = np.max(np.abs(fit_window)) / 2
 
-        hist_to_fit.GetXaxis().SetRangeUser(*search_window)
-        max_bin_in_range = hist_to_fit.GetMaximumBin()        
-        location_guess = hist_to_fit.GetXaxis().GetBinCenter(max_bin_in_range)
-        hist_to_fit.GetXaxis().UnZoom()
-        
-        # Call to fitting tools
+        # Call to fitting tools (using the cloned, safely-rebinned histogram)
         fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
-            hist_to_fit, data_source, location_guess, location_wiggle, (location_guess + fit_window[0], location_guess + fit_window[1])
+            hist_for_this_peak, data_source, location_guess, location_wiggle, (location_guess + fit_window[0], location_guess + fit_window[1])
         )
+        
+        # Now it is safe to append the true energies!
+        true_energies.append(true_energy)
+        true_energy_uncertainties.append(true_energy_err)
 
         # Write result to file
         results_file.WriteObject(fit_res, f'peak_fit_res_{true_energy}')
@@ -148,22 +168,9 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         canvas.Update()
         
         plot_path = str(cal_dir / f"fit_{true_energy}keV.pdf")
-        canvas.SaveAs(plot_path + "(") # Append '(' to open multi-page PDF
+        canvas.SaveAs(plot_path + "(") 
 
-        # --- Time Dependence & Baker-Cousins Residuals ---
-        raw_start_x = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[0])
-        raw_stop_x  = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[1])
-        
-        bin_start_x = min(raw_start_x, raw_stop_x)
-        bin_stop_x  = max(raw_start_x, raw_stop_x)
-        
-        time_dependent_hist.GetXaxis().SetRange(bin_start_x, bin_stop_x)
-        
-        hist_residuals = time_dependent_hist.Clone(f"residuals_{true_energy}")
-        hist_residuals.Reset()
-        hist_residuals.SetTitle(f"Residuals (Data - Fit) {true_energy} keV;ADC Channel;Time [s]")
-        
-        # --- Time Dependence & Baker-Cousins Residuals ---
+        # --- FIX 4: Removed duplicate blocks below ---
         raw_start_x = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[0])
         raw_stop_x  = time_dependent_hist.GetXaxis().FindBin(location_guess + fit_window[1])
         
@@ -186,7 +193,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         n_time_bins = time_dependent_hist.GetNbinsY()
         x_axis = time_dependent_hist.GetXaxis()
         
-        # We need the integral of the 1D histogram to calculate the 'slice' scale_factor
+        # Calculate the base 1D expectation from our specific, rebinned clone!
+        # --- FIX: Use the original un-rebinned 1D data for the expectation! ---
         hist_integral = hist_to_fit.Integral(bin_start_x, bin_stop_x)
 
         for iy in range(1, n_time_bins + 1):
@@ -202,7 +210,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
             for ix in range(bin_start_x, bin_stop_x + 1):
                 obs = time_dependent_hist.GetBinContent(ix, iy)
                 
-                # NEW: Expectation is directly based on the raw 1D overall spectrum!
+                # --- FIX: Read from the un-rebinned hist_to_fit ---
                 base_exp = hist_to_fit.GetBinContent(ix)
                 exp = base_exp * scale_factor
                 
@@ -215,11 +223,12 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 if abs(residual) > max_res:
                     max_res = abs(residual)
                 
-                # --- NEW: THRESHOLD STATISTICAL GATE ---
-                # Only calculate Chi2 and NDF if expected counts are > 5
+                # --- THRESHOLD STATISTICAL GATE ---
                 if exp > 5 or obs > 5:
                     if obs > 0:
-                        bc_term = 2.0 * (exp - obs + obs * np.log(obs / exp))
+                        # --- FIX: Safety net to prevent ZeroDivisionError ---
+                        safe_exp = max(exp, 1e-9) 
+                        bc_term = 2.0 * (safe_exp - obs + obs * np.log(obs / safe_exp))
                     else:
                         bc_term = 2.0 * exp 
                     
@@ -233,25 +242,17 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 else:
                     total_ndf += (slice_ndf - 1)
 
-        # Because we used the raw 1D data directly rather than a derived fit model, 
-        # we do NOT subtract the 1D fit parameters from the NDF here.
         total_ndf = max(1, total_ndf)
 
         # Update ROOT internals
         hist_residuals.SetEntries(actual_entries)
         hist_residuals.ResetStats() 
 
-        # Calculate a single, global p-value for the entire 2D histogram & store it
         time_indep_p_value = ROOT.TMath.Prob(total_chi2, total_ndf) if total_ndf > 0 else 0.0
         emg_fit_parameters[true_energy]['t_indep_p_value'] = time_indep_p_value
-
-        # Update ROOT internals so it knows exactly how much data to draw
-        hist_residuals.SetEntries(actual_entries)
-        hist_residuals.ResetStats() 
-
-        # Calculate a single, global p-value for the entire 2D histogram & store it
-        time_indep_p_value = ROOT.TMath.Prob(total_chi2, total_ndf) if total_ndf > 0 else 0.0
-        emg_fit_parameters[true_energy]['t_indep_p_value'] = time_indep_p_value
+        
+        # Memory cleanup for the temporary 1D clone
+        hist_for_this_peak.SetDirectory(0)
 
         # Save 2D Data to middle page
         c_time = ROOT.TCanvas(f"c_time_{true_energy}", "2D Time vs Energy", 800, 600)
