@@ -56,7 +56,7 @@ true_locations = [510.99895069, 1003.72, 2614.511, 3848.3] #511, 60Ga, 208Tl, 60
 true_location_uncertainties =  [16e-7, 0.2, 0.01, 0.7]
 norm_dict = {true_locations[0]:'slice', true_locations[1]: 'slice', true_locations[2]: 'slice'}
 pvalue_threshold_dict = {
-        'cal':0.01,
+        'cal':1e-4,
         true_locations[0]:{'1d':1e-7, 't_indep':0.01},
         true_locations[1]:{'1d':0.001, 't_indep':0.01},
         true_locations[2]:{'1d':0.001, 't_indep':0.01},

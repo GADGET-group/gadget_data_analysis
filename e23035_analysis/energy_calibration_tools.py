@@ -193,8 +193,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         n_time_bins = time_dependent_hist.GetNbinsY()
         x_axis = time_dependent_hist.GetXaxis()
         
-        # Calculate the base 1D expectation from our specific, rebinned clone!
-        # --- FIX: Use the original un-rebinned 1D data for the expectation! ---
         hist_integral = hist_to_fit.Integral(bin_start_x, bin_stop_x)
 
         for iy in range(1, n_time_bins + 1):
@@ -290,16 +288,40 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     # Close the ROOT file where peak fits are stored
     results_file.Close()
 
-    # Fit line to peak locations and save to a pkl file
+    # --- NEW: Filter out any fits that returned NaN or <= 0 uncertainties ---
+    valid_indices = [
+        i for i, err in enumerate(peak_location_uncertainties) 
+        if not np.isnan(err) and not np.isnan(peak_locations[i]) and err > 0
+    ]
+
+    valid_peak_locs = [peak_locations[i] for i in valid_indices]
+    valid_peak_errs = [peak_location_uncertainties[i] for i in valid_indices]
+    valid_true_Es = [true_energies[i] for i in valid_indices]
+    valid_true_E_errs = [true_energy_uncertainties[i] for i in valid_indices]
+
     calibration_results = {}
     
-    if len(peaks) == 1:
+    # Check how many valid peaks survived the filtering
+    num_valid_peaks = len(valid_peak_locs)
+
+    if num_valid_peaks == 0:
+        print(f"[{calibration_name}] ERROR: All peak fits failed or returned NaN. Calibration aborted.")
+        # Return a dummy calibration so the pipeline doesn't crash
+        calibration_results = {
+            'slope': 1.0, 
+            'offset': 0.0,
+            'cov_matrix': {'var_offset': 0.0, 'var_slope': 0.0, 'cov_offset_slope': 0.0},
+            'cal_p_value': 0.0,
+            'emg_fit_parameters': emg_fit_parameters
+        }
+
+    elif num_valid_peaks == 1:
         # Offset = 0, E = m * ADC
-        slope = true_energies[0] / peak_locations[0]
+        slope = valid_true_Es[0] / valid_peak_locs[0]
         offset = 0.0
         
-        rel_err_E = true_energy_uncertainties[0] / true_energies[0] if true_energies[0] != 0 else 0
-        rel_err_mu = peak_location_uncertainties[0] / peak_locations[0]
+        rel_err_E = valid_true_E_errs[0] / valid_true_Es[0] if valid_true_Es[0] != 0 else 0
+        rel_err_mu = valid_peak_errs[0] / valid_peak_locs[0]
         sigma_slope = slope * np.sqrt(rel_err_E**2 + rel_err_mu**2)
         
         calibration_results = {
@@ -313,15 +335,15 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
             'cal_p_value': 1.0,
             'emg_fit_parameters': emg_fit_parameters
         }
-        print(f"[{calibration_name}] 1-Point Cal: slope={slope:.4f} ± {sigma_slope:.4f}, offset=0")
+        print(f"[{calibration_name}] 1-Point Cal (Fallback): slope={slope:.4f} ± {sigma_slope:.4f}, offset=0")
         
     else:
         graph = ROOT.TGraphErrors(
-            len(peaks), 
-            np.array(peak_locations, dtype=np.float64), 
-            np.array(true_energies, dtype=np.float64), 
-            np.array(peak_location_uncertainties, dtype=np.float64), 
-            np.array(true_energy_uncertainties, dtype=np.float64)
+            num_valid_peaks, 
+            np.array(valid_peak_locs, dtype=np.float64), 
+            np.array(valid_true_Es, dtype=np.float64), 
+            np.array(valid_peak_errs, dtype=np.float64), 
+            np.array(valid_true_E_errs, dtype=np.float64)
         )
         
         graph.SetTitle(f"Energy Calibration: {calibration_name};ADC Channel (#mu);True Energy (keV)")
@@ -330,7 +352,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         cal_canvas = ROOT.TCanvas(f"c_cal_{calibration_name}", "Calibration Curve", 800, 600)
         graph.Draw("AP")
         
-        cal_fit = ROOT.TF1("cal_fit", "pol1", min(peak_locations)*0.8, max(peak_locations)*1.2)
+        cal_fit = ROOT.TF1("cal_fit", "pol1", min(valid_peak_locs)*0.8, max(valid_peak_locs)*1.2)
         cal_fit_res = graph.Fit(cal_fit, "SQ")
         
         offset = cal_fit.GetParameter(0)
@@ -344,7 +366,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         cal_canvas.Update()
         cal_canvas.SaveAs(str(cal_dir / "calibration_curve.pdf"))
         
-        p_value = cal_fit_res.Prob() if len(peaks) > 2 else 1.0
+        p_value = cal_fit_res.Prob() if num_valid_peaks > 2 else 1.0
 
         calibration_results = {
             'slope': slope, 
@@ -355,7 +377,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 'cov_offset_slope': cov_offset_slope
             },
             'cal_p_value': p_value,
-            'emg_fit_parameters': emg_fit_parameters
+            'emg_fit_parameters': emg_fit_parameters,
+            'num_peaks_used': num_valid_peaks
         }
         print(f"[{calibration_name}] Linear Cal: slope={slope:.4f}, offset={offset:.4f}")
         
@@ -538,10 +561,28 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
     all_branches = set(b for r in runs for b in cal_data[r].keys())
 
     # 2. Check thresholds and prepare the flagged summary
+    # 2. Check thresholds and prepare the flagged summary
     flagged_issues = []
     
     for run in runs:
         for branch, data in cal_data[run].items():
+            
+            # --- NEW: Check for failed/fallback calibrations ---
+            # Default to 2 for older pickle files that might not have this key yet
+            num_peaks = data.get('num_peaks_used', 2) 
+            
+            if num_peaks == 0:
+                flagged_issues.append(f"CRITICAL: Run {run} [{branch}] - 0 peaks fit (Calibration FAILED)")
+            elif num_peaks == 1:
+                flagged_issues.append(f"WARNING: Run {run} [{branch}] - Only 1 peak fit (Assumed offset=0)")
+
+            # Check Overall Cal P-value
+            if 'cal' in pvalue_threshold_dict:
+                p_val = data.get('cal_p_value', 1.0)
+                if p_val < pvalue_threshold_dict['cal']:
+                    flagged_issues.append(f"Run {run} [{branch}] - Overall Cal p-value: {p_val:.2e}")
+            
+            # ... [Keep the rest of your p-value checking loop exactly the same] ...
             
             # Check Overall Cal P-value
             if 'cal' in pvalue_threshold_dict:
