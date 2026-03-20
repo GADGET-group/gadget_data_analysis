@@ -222,7 +222,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                     max_res = abs(residual)
                 
                 # --- THRESHOLD STATISTICAL GATE ---
-                if exp > 5 or obs > 5:
+                if exp > 10 or obs > 10:
                     if obs > 0:
                         # --- FIX: Safety net to prevent ZeroDivisionError ---
                         safe_exp = max(exp, 1e-9) 
@@ -338,12 +338,14 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         print(f"[{calibration_name}] 1-Point Cal (Fallback): slope={slope:.4f} ± {sigma_slope:.4f}, offset=0")
         
     else:
+        safe_true_E_errs = np.maximum(valid_true_E_errs, 0.001)
+
         graph = ROOT.TGraphErrors(
             num_valid_peaks, 
             np.array(valid_peak_locs, dtype=np.float64), 
             np.array(valid_true_Es, dtype=np.float64), 
             np.array(valid_peak_errs, dtype=np.float64), 
-            np.array(valid_true_E_errs, dtype=np.float64)
+            safe_true_E_errs # <-- Use the safe array here!
         )
         
         graph.SetTitle(f"Energy Calibration: {calibration_name};ADC Channel (#mu);True Energy (keV)")
@@ -576,14 +578,6 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
             elif num_peaks == 1:
                 flagged_issues.append(f"WARNING: Run {run} [{branch}] - Only 1 peak fit (Assumed offset=0)")
 
-            # Check Overall Cal P-value
-            if 'cal' in pvalue_threshold_dict:
-                p_val = data.get('cal_p_value', 1.0)
-                if p_val < pvalue_threshold_dict['cal']:
-                    flagged_issues.append(f"Run {run} [{branch}] - Overall Cal p-value: {p_val:.2e}")
-            
-            # ... [Keep the rest of your p-value checking loop exactly the same] ...
-            
             # Check Overall Cal P-value
             if 'cal' in pvalue_threshold_dict:
                 p_val = data.get('cal_p_value', 1.0)
