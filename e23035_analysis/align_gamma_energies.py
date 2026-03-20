@@ -20,7 +20,7 @@ run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60
 runs = []
 for run in run_candidates:
     t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
-    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and (tf-t0)>600:
+    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:# and (tf-t0)>600:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
 
@@ -56,7 +56,7 @@ true_locations = [510.99895069, 1003.72, 2614.511, 3848.3] #511, 60Ga, 208Tl, 60
 true_location_uncertainties =  [16e-7, 0.2, 0.01, 0.7]
 norm_dict = {true_locations[0]:'slice', true_locations[1]: 'slice', true_locations[2]: 'slice'}
 pvalue_threshold_dict = {
-        'cal':1e-4,
+        'cal':1e-3,
         true_locations[0]:{'1d':1e-7, 't_indep':0.01},
         true_locations[1]:{'1d':0.001, 't_indep':0.01},
         true_locations[2]:{'1d':0.001, 't_indep':0.01},
