@@ -27,6 +27,10 @@ def get_save_path(experiment):
             save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
         elif experiment == 'e25058_prep_vault':
             save_path = '/egr/research-tpc/shared/experiments/e25058/processed/proc_pkl'
+        elif experiment == 'e25058':
+            save_path = '/egr/research-tpc/shared/proc_runs/e25058/proc_new_pkl'
+        elif experiment == 'e25058_20Mg':
+            save_path = '/egr/research-tpc/shared/proc_runs/e25058/proc_new_pkl'
         
         else:
             save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
@@ -56,6 +60,9 @@ def get_h5_path(experiment, run_number):
         return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
     elif experiment == 'e25058':
         return '/egr/research-tpc/shared/experiments/e25058/h5/run_%04d.h5'%run_number
+    elif experiment == 'e25058_20Mg':
+        return '/egr/research-tpc/shared/experiments/e25058/h5/run_%04d.h5'%run_number
+    
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
@@ -96,6 +103,14 @@ def get_h5_file(experiment, run_number):
         h5file.smart2_min_sigma = 2
         h5file.cache_enable = True
     elif experiment == 'e25058':
+        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        h5file.length_counts_threshold = 100
+        h5file.ic_counts_threshold = 100
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 25
+        h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = True
+    elif experiment == 'e25058_20Mg':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
         h5file.ic_counts_threshold = 0

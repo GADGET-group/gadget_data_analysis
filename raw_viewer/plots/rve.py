@@ -31,10 +31,10 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
     run_range = [73]#[61, 62, 63]
-if experiment == 'e25058':
-    run_range=[70]
-    
-
+if experiment =='e25058':
+    run_range= [71]#[70,71,72,76,77,78,79,80,81,82,83]
+if experiment =='e25058_20Mg':
+    run_range =[228]
 # else: #during experiment
 #     #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
 #     #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
@@ -72,7 +72,7 @@ if load_ddas:
     times_since_beam_off = np.concatenate(times_since_beam_off)
 else:
     times_since_beam_off = process_runs.get_time_since_beam_off(experiment, get_runs)
-veto_thresh = 500#np.inf
+veto_thresh =  150 #np.inf
 rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 1001)
 alphahist_bins = 100
@@ -99,8 +99,8 @@ angles = process_runs.get_angle(experiment, get_runs)
 
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
-# pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
-# num_pads_railed = np.array([len(prl) for prl in pads_railed])
+pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
+num_pads_railed = np.array([len(prl) for prl in pads_railed])
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(get_runs)
     endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
@@ -108,7 +108,7 @@ if experiment == 'e23035':
     veto_mask = veto_mask&(min_z>5)
 else:
     veto_mask = (veto_max < veto_thresh) & (times_since_beam_off>0.1)
-veto_mask = veto_mask# & (num_pads_railed==0)# & (angles>np.radians(8)) 
+veto_mask = veto_mask & (num_pads_railed==0) #& (angles>np.radians(20)) 
 
     
 if load_ddas:
@@ -279,7 +279,7 @@ def define_cut_on_gui():
     #open a RvE histogram with the current settings
     fig, ax = plt.subplots()
     ax.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-    ax.set_xlabel('adc counts')
+    ax.set_xlabel('Energy (in MeV)')
     ax.set_ylabel('range (mm)')
     poly_selector = matplotlib.widgets.PolygonSelector(ax,set_cut_polygon)
     # if len(self.rve_cut_verticies) > 0:
@@ -299,3 +299,215 @@ def show_event(run, evt):
     h5file.show_2d_projection(evt, block=False)
     h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
     h5file.plot_traces(evt, block=False)
+
+def plot_energy_spectrum(bins=400):
+    """
+    Plots a 1D projection of the selected events onto the energy (X) axis.
+    Call this after define_cut_on_gui() to see the proton energy spectrum.
+    """
+    global rve_cut_select_mask
+   
+    # 1. Verification
+    if rve_cut_select_mask is None:
+        print("Error: No cut defined. Run define_cut_on_gui() first.")
+        return
+
+    # 2. Extract selected energy data
+    # plt_mask handles vetoes/timing; rve_cut_select_mask handles your GUI polygon
+    selected_energy = energy[plt_mask][rve_cut_select_mask]
+
+    if len(selected_energy) == 0:
+        print("Warning: No events found in the current cut.")
+        return
+
+    # 3. Plotting
+    plt.figure(figsize=(10, 6))
+    plt.hist(selected_energy, bins=bins, histtype='step', color='black', lw=1.5)
+   
+    plt.title(f'Energy Spectrum | Selected Protons (Run {get_runs})')
+    plt.xlabel('Energy (MeV)')
+    plt.ylabel('Counts')
+   
+    # Optional: Log scale helps see small peaks/background
+    # plt.yscale('log')
+   
+    plt.grid(True, alpha=0.3)
+    plt.show()
+   
+    print(f"Projected {len(selected_energy)} events onto the energy axis.")
+
+def plot_energy_spectrum_fixed_bin_width(bin_width=0.01):
+    """
+    Plots a 1D projection of the selected events onto the energy (X) axis.
+    Call this after define_cut_on_gui() to see the proton energy spectrum.
+    
+    bin_width: The width of each bin in MeV. Default is 0.01 MeV (10 keV).
+    """
+    global rve_cut_select_mask
+   
+    # 1. Verification
+    if rve_cut_select_mask is None:
+        print("Error: No cut defined. Run define_cut_on_gui() first.")
+        return
+
+    # 2. Extract selected energy data
+    selected_energy = energy[plt_mask][rve_cut_select_mask]
+
+    if len(selected_energy) == 0:
+        print("Warning: No events found in the current cut.")
+        return
+
+    # 3. Create fixed bins (from 0 to 8 MeV, stepping by bin_width)
+    # This guarantees the bins are always the exact same size regardless of the cut
+    fixed_bins = np.arange(0, 8.0, bin_width)
+
+    # 4. Plotting
+    plt.figure(figsize=(10, 6))
+    plt.hist(selected_energy, bins=fixed_bins, histtype='step', color='black', lw=1.5)
+   
+    plt.title(f'Energy Spectrum | Selected Protons (Run {get_runs})')
+    plt.xlabel('Energy (MeV)')
+    plt.ylabel(f'Counts / {bin_width*1000:.0f} keV') # Updates y-axis to show bin width
+   
+    plt.grid(True, alpha=0.3)
+    
+    # Optional: Automatically zoom the x-axis to the data you actually selected
+    plt.xlim(np.min(selected_energy) - 0.2, np.max(selected_energy) + 0.2)
+    
+    plt.show()
+   
+    print(f"Projected {len(selected_energy)} events onto the energy axis.")
+def save_spectrum_data(filename="proton_spectrum"):
+    """
+    Saves the energy values of events within the current GUI cut.
+    Path: wheel274/e25058_analysis/gadget_data_analysis/raw_viewer/plots/spectra
+    """
+    global rve_cut_select_mask
+   
+    # 1. Verification
+    if rve_cut_select_mask is None:
+        print("Error: No cut defined. Run define_cut_on_gui() first.")
+        return
+
+    # 2. Set the specific path requested
+    # Using absolute path to avoid ambiguity in the interpreter
+    save_dir = "/egr/research-tpc/wheel274/e25058_analysis/gadget_data_analysis/raw_viewer/plots/spectra"
+   
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        print(f"Created directory: {save_dir}")
+
+    # 3. Extract the energy data from the current selection
+    # Energy array is filtered by both the global veto/timing mask and your manual polygon
+    selected_energy = energy[plt_mask][rve_cut_select_mask]
+
+    if len(selected_energy) == 0:
+        print("Warning: Current selection is empty. Nothing to save.")
+        return
+
+    # 4. Save the data
+    if not filename.endswith(".npy"):
+        filename += ".npy"
+       
+    full_path = os.path.join(save_dir, filename)
+    np.save(full_path, selected_energy)
+   
+    print("-" * 30)
+    print(f"SUCCESS: Saved {len(selected_energy)} events.")
+    print(f"Location: {full_path}")
+    print("-" * 30)
+def fit_peak_and_calibrate(true_energy_mev):
+    """
+    Draws a 2D cut on the RvE plot and a 1D histogram side-by-side. 
+    Interactively updates the 1D Gaussian fit and calibration in real-time 
+    as the user adjusts the polygon cut.
+    """
+    # 1. Retrieve the uncalibrated ADC counts
+    raw_adc = energy[plt_mask]
+    raw_lengths = lengths[plt_mask]
+    
+    # Create a figure with two subplots side-by-side
+    fig, (ax_2d, ax_1d) = plt.subplots(1, 2, figsize=(15, 6))
+    fig.canvas.manager.set_window_title('Interactive Peak Fitter')
+    
+    # 2. Setup the 2D Histogram
+    counts, xedges, yedges, im = ax_2d.hist2d(raw_adc, raw_lengths, bins=rve_bins, norm=matplotlib.colors.LogNorm())
+    ax_2d.set_title("Draw/adjust polygon here")
+    ax_2d.set_xlabel("Integrated Charge (ADC)")
+    ax_2d.set_ylabel("Range (mm)")
+    
+    ax_1d.set_title("1D Fit will appear here")
+    ax_1d.set_xlabel("Integrated Charge (ADC)")
+    ax_1d.set_ylabel("Counts")
+    
+    # We need a dictionary to store the final results so we can return them after the window closes
+    results = {'centroid': None, 'calib_factor': None}
+    
+    # 3. The Interactive Callback
+    def onselect(verts):
+        path = matplotlib.path.Path(verts)
+        # Find all points inside the drawn polygon
+        inside = path.contains_points(np.column_stack([raw_adc, raw_lengths]))
+        gated_adc = raw_adc[inside]
+        
+        # Clear the 1D plot for the new updated data
+        ax_1d.clear()
+        
+        if len(gated_adc) < 10 or np.std(gated_adc) == 0:
+            ax_1d.set_title("Not enough points selected for a fit.")
+            fig.canvas.draw_idle()
+            return
+            
+        # Histogram the 1D data
+        hist, bin_edges = np.histogram(gated_adc, bins=50)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        
+        def gaussian(x, amp, mu, sigma):
+            return amp * np.exp(-(x - mu)**2 / (2 * sigma**2))
+        
+        initial_guess = [np.max(hist), np.mean(gated_adc), np.std(gated_adc)]
+        
+        try:
+            # Run the fit
+            popt, _ = optimize.curve_fit(gaussian, bin_centers, hist, p0=initial_guess, maxfev=100000)
+            amp, centroid, sigma = popt
+            
+            # Update the stored results
+            calibration_factor = true_energy_mev / centroid
+            results['centroid'] = centroid
+            results['calib_factor'] = calibration_factor
+            
+            # Plot the new histogram and fit line
+            ax_1d.hist(gated_adc, bins=50, alpha=0.6, label='Gated Data')
+            x_fit = np.linspace(np.min(gated_adc), np.max(gated_adc), 200)
+            ax_1d.plot(x_fit, gaussian(x_fit, *popt), 'r-', linewidth=2, label=f'Centroid: {centroid:.1f}')
+            
+            ax_1d.set_title(f"Calib Factor: {calibration_factor:.6e} MeV/ADC")
+            ax_1d.set_xlabel("Integrated Charge (ADC)")
+            ax_1d.set_ylabel("Counts")
+            ax_1d.legend()
+            
+        except Exception as e:
+            ax_1d.set_title("Fit failed to converge.")
+            print(f"Interactive fit failed: {e}")
+            
+        # Force matplotlib to redraw the figure with the new 1D plot
+        fig.canvas.draw_idle()
+
+    # Initialize the interactive polygon tool
+    selector = matplotlib.widgets.PolygonSelector(ax_2d, onselect, props=dict(color='r', alpha=0.5))
+    
+    print("Interactive window opened. Adjust the polygon. Close the window to save the calibration.")
+    plt.show(block=True) # Execution pauses here until the user closes the plot window
+    
+    # 4. Print and return the final stored results when the window is closed
+    if results['centroid'] is not None:
+        print(f"\n--- Final Calibration Results ---")
+        print(f"Target Energy: {true_energy_mev} MeV")
+        print(f"Centroid (ADC): {results['centroid']:.2f}")
+        print(f"Gain Match Factor: {results['calib_factor']:.6e} MeV/ADC")
+        print(f"To apply this calibration, multiply your raw ADC array by {results['calib_factor']:.6e}")
+        return results['centroid'], results['calib_factor']
+    else:
+        print("No valid fit was made. Returning None.")
+        return None, None
