@@ -345,3 +345,87 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
+def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:float, fit_window): 
+    """
+    Fits a standard Gaussian + constant background using the fit_func engine.
+    """
+    e_low, e_high = fit_window
+
+    # 1. Construct the Mathematical Model
+    # [0]: Constant Background
+    # [1]: Amplitude (Area)
+    # [2]: Mean (mu)
+    # [3]: Sigma (sigma)
+    
+    bg_string = "[0]"
+    
+    # Gaussian normalized to area [1]
+    # Using GetBinWidth(1) instead of 0, as 0 is technically the underflow bin in ROOT
+    bin_width = spectrum.GetBinWidth(1) 
+    
+    # 2.50662827 is sqrt(2*pi)
+    gaus_string = f"([1] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[2])/[3]) * ((x-[2])/[3]))"
+    function_string = f"{bg_string} + {gaus_string}"
+
+    # 2. Setup Parameters and Initial Guesses
+    sigma_guess = get_sigma(data_source, e_guess)
+    
+    spectrum.GetXaxis().SetRangeUser(*fit_window)
+
+    bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    
+    # Estimate Area: (Max Height - Background) * Sigma * sqrt(2*pi) / bin_width
+    max_height = spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess
+    A_guess = max_height * sigma_guess * 2.50662827 / bin_width
+    A_guess = max(A_guess, 1.0) # Prevent 0 or negative area guesses
+    
+    if data_source == 'gamma_adc':
+        sigma_bounds = (1, 20)
+        A_bounds = (1, np.inf)
+    else:
+        # Fallback bounds if other data sources are passed
+        sigma_bounds = (0.1, 100)
+        A_bounds = (0, np.inf)
+
+    spectrum.GetXaxis().UnZoom()
+
+    initial_values = [
+        bg_guess,      # p0: bg_const
+        A_guess,       # p1: amplitude
+        e_guess,       # p2: mu
+        sigma_guess    # p3: sigma
+    ]
+
+    bounds = [
+        (0, np.inf),                                 # p0: bg_const
+        A_bounds,                                    # p1: amplitude
+        (e_guess - e_wiggle, e_guess + e_wiggle),    # p2: mu bounds
+        sigma_bounds                                 # p3: sigma 
+    ]
+
+    names = ["bg_const", "amplitude", "mu", "sigma"]
+
+    # 3. Call our generalized fit engine
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+        histogram=spectrum, 
+        function_string=function_string, 
+        initial_values=initial_values, 
+        bounds=bounds, 
+        fit_range=(e_low, e_high), 
+        names=names
+    )
+
+    # 4. Reconstruct individual TF1 components for visualization/return
+    comp_id = uuid.uuid4().hex[:6]
+    fit_params = np.array(fit_res.Parameters())
+    
+    # Background component (just parameter 0)
+    background = ROOT.TF1(f'bg_{comp_id}', bg_string, e_low, e_high)
+    background.SetParameter(0, fit_params[0])
+    
+    # Gaussian Peak component (parameters 1 through 3)
+    peaks = ROOT.TF1(f'gaus_{comp_id}', gaus_string, e_low, e_high)
+    for i in range(1, 4):
+        peaks.SetParameter(i, fit_params[i])
+        
+    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit

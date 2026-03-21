@@ -20,7 +20,9 @@ run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60
 runs = []
 for run in run_candidates:
     t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
-    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:# and (tf-t0)>600:
+    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in [183]:# and (tf-t0)>600:
+        #only looking at runs later than 150 since these definitely use final beam settings
+        #don't include 183 since this has crap data
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
 
@@ -56,11 +58,11 @@ true_locations = [510.99895069, 1003.72, 2614.511, 3848.3] #511, 60Ga, 208Tl, 60
 true_location_uncertainties =  [16e-7, 0.2, 0.01, 0.7]
 norm_dict = {true_locations[0]:'slice', true_locations[1]: 'slice', true_locations[2]: 'slice'}
 pvalue_threshold_dict = {
-        'cal':1e-3,
-        true_locations[0]:{'1d':1e-7, 't_indep':0.01},
-        true_locations[1]:{'1d':0.001, 't_indep':0.01},
-        true_locations[2]:{'1d':0.001, 't_indep':0.01},
-        true_locations[3]:{'1d':0.001, 't_indep':0.01}
+        'cal':1e-6,
+        true_locations[0]:{'1d':1e-12, 't_indep':0.01},
+        true_locations[1]:{'1d':0.0001, 't_indep':0.01},
+        true_locations[2]:{'1d':0.0001, 't_indep':0.01},
+        true_locations[3]:{'1d':0.0001, 't_indep':0.01}
     }
 rebin_factors = [1,1,5,5]
 
@@ -198,3 +200,11 @@ def process_all():
 def make_summary_pdf():
     energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict, runs)
 
+t_tot = 0
+for run in runs:
+    t1, t2 =  ddas_interface.get_first_and_last_ddas_time(run)
+    t_tot += t2 - t1
+print(f'total run time: {t_tot/3600} hours')
+
+stability_binning = (int(7000/3), 0, 7000)
+energy_calibration_tools.create_stability_summary('gm', stability_binning, 0.01, 600, runs)

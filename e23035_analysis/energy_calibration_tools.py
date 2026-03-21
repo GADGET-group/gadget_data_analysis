@@ -29,7 +29,7 @@ def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
 
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
                             selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800,
-                            normalization_dict=None, min_counts=30):
+                            normalization_dict=None, min_counts=30, peak_model='gaus'):
     '''
     Fit peaks to get energy calibration
 
@@ -45,6 +45,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     normalization_dict: Used to choose if time dependent histogram should be normalized on a per slice basis, for beam products or daughters ith
                         short decay timescales. Use "slice" for this case, or "total" for room background lines which should have truely time
                         independent rates.
+    peak_model: gaus for gaussian, or emg for exponentially modified gaussian
     '''
     if normalization_dict is None:
         normalization_dict = {}
@@ -126,11 +127,22 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         hist_for_this_peak.GetXaxis().UnZoom()
         
         location_wiggle = np.max(np.abs(fit_window)) / 2
+        fit_range = (location_guess + fit_window[0], location_guess + fit_window[1])
 
-        # Call to fitting tools (using the cloned, safely-rebinned histogram)
-        fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
-            hist_for_this_peak, data_source, location_guess, location_wiggle, (location_guess + fit_window[0], location_guess + fit_window[1])
-        )
+        # --- NEW: Route to the correct fitting engine ---
+        if peak_model.lower() == 'gaus':
+            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_peak(
+                hist_for_this_peak, data_source, location_guess, location_wiggle, fit_range
+            )
+        elif peak_model.lower() == 'emg':
+            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
+                hist_for_this_peak, data_source, location_guess, location_wiggle, fit_range
+            )
+        else:
+            print(f"[{branch_name}] WARNING: Unknown peak_model '{peak_model}'. Defaulting to 'gaus'.")
+            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_peak(
+                hist_for_this_peak, data_source, location_guess, location_wiggle, fit_range
+            )
         
         # Now it is safe to append the true energies!
         true_energies.append(true_energy)
@@ -338,6 +350,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         print(f"[{calibration_name}] 1-Point Cal (Fallback): slope={slope:.4f} ± {sigma_slope:.4f}, offset=0")
         
     else:
+        # Enforce a minimum error of 0.001 keV to prevent weight overflow!
         safe_true_E_errs = np.maximum(valid_true_E_errs, 0.001)
 
         graph = ROOT.TGraphErrors(
@@ -345,16 +358,35 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
             np.array(valid_peak_locs, dtype=np.float64), 
             np.array(valid_true_Es, dtype=np.float64), 
             np.array(valid_peak_errs, dtype=np.float64), 
-            safe_true_E_errs # <-- Use the safe array here!
+            safe_true_E_errs
         )
         
-        graph.SetTitle(f"Energy Calibration: {calibration_name};ADC Channel (#mu);True Energy (keV)")
+        # Remove the X-axis title here so it doesn't get squashed between the pads
+        graph.SetTitle(f"Energy Calibration: {calibration_name};;True Energy (keV)")
         graph.SetMarkerStyle(20)
         
-        cal_canvas = ROOT.TCanvas(f"c_cal_{calibration_name}", "Calibration Curve", 800, 600)
+        # --- NEW: Make canvas slightly taller to fit the dual pads cleanly ---
+        cal_canvas = ROOT.TCanvas(f"c_cal_{calibration_name}", "Calibration Curve", 800, 800)
+        
+        # --- NEW: Setup the Upper Pad (70% height) ---
+        pad1 = ROOT.TPad("pad1", "pad1", 0.0, 0.3, 1.0, 1.0)
+        pad1.SetBottomMargin(0.02) # Leave a tiny gap between plots
+        pad1.Draw()
+        pad1.cd()
+        
         graph.Draw("AP")
         
+        # Style the main graph's Y-axis to look proportional in the split pad
+        graph.GetYaxis().SetTitleSize(0.045)
+        graph.GetYaxis().SetLabelSize(0.04)
+        graph.GetYaxis().SetTitleOffset(0.9)
+        
         cal_fit = ROOT.TF1("cal_fit", "pol1", min(valid_peak_locs)*0.8, max(valid_peak_locs)*1.2)
+        
+        # Give MINUIT a basic slope guess to prevent Effective Variance 0-division
+        guess_slope = (valid_true_Es[-1] - valid_true_Es[0]) / (valid_peak_locs[-1] - valid_peak_locs[0])
+        cal_fit.SetParameters(0.0, guess_slope)
+
         cal_fit_res = graph.Fit(cal_fit, "SQ")
         
         offset = cal_fit.GetParameter(0)
@@ -365,6 +397,52 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         cov_offset_slope = cal_fit_res.CovMatrix(0, 1) 
         
         ROOT.gStyle.SetOptFit(1111)
+        pad1.Update() # Force the stat box to draw on pad1
+        
+        # --- NEW: Setup the Lower Pad (30% height) for Residuals ---
+        cal_canvas.cd() # Return to main canvas before drawing pad2
+        pad2 = ROOT.TPad("pad2", "pad2", 0.0, 0.0, 1.0, 0.3)
+        pad2.SetTopMargin(0.02)
+        pad2.SetBottomMargin(0.3) # Need extra room on the bottom for the X-axis label
+        pad2.Draw()
+        pad2.cd()
+        
+        # Calculate residuals: True Energy - Fit(ADC)
+        res_y = [valid_true_Es[i] - cal_fit.Eval(valid_peak_locs[i]) for i in range(num_valid_peaks)]
+        
+        effective_err = np.sqrt(safe_true_E_errs**2 + (slope*np.array(valid_peak_errs))**2) # show error used in minimization of chi^2
+        print('effective chi^2 ', np.sum((np.array(res_y)/effective_err)**2))
+        graph_res = ROOT.TGraphErrors(
+            num_valid_peaks,
+            np.array(valid_peak_locs, dtype=np.float64),
+            np.array(res_y, dtype=np.float64),
+            #np.array(valid_peak_errs, dtype=np.float64),
+            np.zeros(len(valid_peak_errs)),
+            effective_err
+        )
+        
+        graph_res.SetTitle("")
+        graph_res.SetMarkerStyle(20)
+        graph_res.Draw("AP")
+        
+        # Because this pad is physically shorter, we have to scale up the text size 
+        # so it matches the font size of the upper pad!
+        graph_res.GetXaxis().SetTitle("ADC Channel (#mu)")
+        graph_res.GetXaxis().SetTitleSize(0.12)
+        graph_res.GetXaxis().SetLabelSize(0.10)
+        
+        graph_res.GetYaxis().SetTitle("Resid (keV)")
+        graph_res.GetYaxis().SetTitleSize(0.12)
+        graph_res.GetYaxis().SetLabelSize(0.10)
+        graph_res.GetYaxis().SetTitleOffset(0.4)
+        graph_res.GetYaxis().SetNdivisions(505) # Prevent crowded Y-axis labels
+        
+        # Draw a dashed reference line at Y=0
+        zero_line = ROOT.TLine(graph_res.GetXaxis().GetXmin(), 0, graph_res.GetXaxis().GetXmax(), 0)
+        zero_line.SetLineStyle(2)
+        zero_line.SetLineColor(ROOT.kBlack)
+        zero_line.Draw()
+        
         cal_canvas.Update()
         cal_canvas.SaveAs(str(cal_dir / "calibration_curve.pdf"))
         
@@ -563,7 +641,6 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
     all_branches = set(b for r in runs for b in cal_data[r].keys())
 
     # 2. Check thresholds and prepare the flagged summary
-    # 2. Check thresholds and prepare the flagged summary
     flagged_issues = []
     
     for run in runs:
@@ -709,3 +786,211 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
                     )
 
     print(f"Summary saved to {pdf_filename}")
+
+import os
+import ROOT
+from pathlib import Path
+
+def create_stability_summary(cal_name, binning, pvalue_threshold, energy_threshold, run_list=None):
+    '''
+    Generates a PDF summary of gain stability across runs for a given calibration.
+    Builds a calibrated sum of all runs, compares each run to the sum, and calculates a p-value.
+    '''
+    original_batch_state = ROOT.gROOT.IsBatch()
+    ROOT.gROOT.SetBatch(True)
+
+    # 1. Scope out all valid runs and branches from the file system
+    pkl_files = list(Path('.').rglob(f"e23035_analysis/calibrations/*/{cal_name}/*/{cal_name}.pkl"))
+    if not pkl_files:
+        pkl_files = list(Path('.').rglob(f"{cal_name}.pkl"))
+        
+    branch_run_map = {}
+    for p in pkl_files:
+        branch = p.parent.name
+        try:
+            run = int(p.parent.parent.parent.name)
+        except ValueError:
+            continue
+            
+        if run_list is not None and run not in run_list:
+            continue
+            
+        if branch not in branch_run_map:
+            branch_run_map[branch] = []
+        branch_run_map[branch].append(run)
+
+    if not branch_run_map:
+        print(f"No valid runs or branches found for calibration '{cal_name}'.")
+        return
+
+    # 2. Iterate through each crystal/branch
+    for ch, runs_for_ch in branch_run_map.items():
+        runs_for_ch = sorted(runs_for_ch)
+        print(f"[{ch}] Processing stability over {len(runs_for_ch)} runs...")
+        
+        # Create a blank master histogram for the sum
+        n_bins, x_min, x_max = binning
+        summed_hist = ROOT.TH1D(f'{ch}_all_run', f'Sum of {ch} for all runs', n_bins, x_min, x_max)
+        summed_hist.SetDirectory(0) # Keep alive in memory
+        
+        run_hists = []
+
+        # --- Loop 1: Build calibrated runs and add to master sum ---
+        for run in runs_for_ch:
+            # Inject the calibrated expression
+            cal_exp = get_calibrated_energy_string(run, cal_name, ch)
+            
+            h_run = ddas_interface.get_histogram(
+                run, binning, f'{ch}_{run}', f'{ch} Run {run}', cal_exp
+            )
+            h_run.SetDirectory(0) 
+            
+            run_hists.append((run, h_run))
+            summed_hist.Add(h_run) # Stack this run into the master sum
+
+        # Restrict the physical axis range to ignore low-energy noise
+        summed_hist.GetXaxis().SetRangeUser(energy_threshold, x_max)
+        sum_integral = summed_hist.Integral()
+        
+        if sum_integral == 0:
+            print(f"[{ch}] WARNING: Summed histogram is entirely empty above {energy_threshold} keV. Skipping.")
+            continue
+
+        run_data = []
+        flagged_runs = []
+        
+        # --- Loop 2: Fetch individual runs and compute p-values ---
+        for run, h_run in run_hists:
+            
+            # Apply the exact same threshold to the individual run
+            h_run.GetXaxis().SetRangeUser(energy_threshold, x_max)
+            
+            run_integral = h_run.Integral()
+            h_sum_scaled = summed_hist.Clone(f"{ch}_sum_scaled_{run}")
+            h_sum_scaled.SetDirectory(0)
+            
+            if run_integral > 10: 
+                # The Chi2Test automatically respects the X-axis bounds and handles empty bins
+                p_val = h_run.Chi2Test(summed_hist, "UU NORM")
+                
+                scale_factor = run_integral / sum_integral
+                h_sum_scaled.Scale(scale_factor)
+            else:
+                p_val = 0.0 
+                h_sum_scaled.Scale(0)
+                
+            if p_val < pvalue_threshold:
+                flagged_runs.append((run, p_val))
+                
+            run_data.append((run, p_val, h_run, h_sum_scaled))
+
+        # 4. Create the PDF Document using ROOT's TPDF Engine
+        out_dir = Path(f"e23035_analysis/calibrations/{cal_name}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = str(out_dir / f"{ch}_stability.pdf")
+        
+        c = ROOT.TCanvas(f"c_stab_{ch}", "Stability Summary", 1000, 800)
+        c.Print(pdf_path + "[") 
+        
+        # --- Draw Summary Page(s) ---
+        text = ROOT.TLatex()
+        text.SetNDC()
+        text.SetTextFont(42)
+        
+        def draw_header():
+            c.Clear()
+            text.SetTextSize(0.05)
+            text.SetTextColor(ROOT.kBlack)
+            text.DrawLatex(0.1, 0.9, f"Gain Stability Summary: {ch} (> {energy_threshold} keV)")
+            text.SetTextSize(0.035)
+            
+        draw_header()
+        y_pos = 0.82
+        
+        if not flagged_runs:
+            text.SetTextColor(ROOT.kGreen + 2)
+            text.DrawLatex(0.1, y_pos, f"All runs stable! (p > {pvalue_threshold})")
+            c.Print(pdf_path) 
+        else:
+            text.SetTextColor(ROOT.kRed)
+            text.DrawLatex(0.1, y_pos, f"Flagged Runs (p < {pvalue_threshold}):")
+            y_pos -= 0.05
+            text.SetTextColor(ROOT.kBlack)
+            
+            for run, pval in flagged_runs:
+                text.DrawLatex(0.15, y_pos, f"Run {run}: p-value = {pval:.2e}")
+                y_pos -= 0.04
+                
+                if y_pos < 0.05: 
+                    c.Print(pdf_path)
+                    draw_header()
+                    y_pos = 0.82
+            c.Print(pdf_path) 
+            
+        # --- Draw Individual Run Plots vs Sum ---
+        for run, pval, h_run, h_sum_scaled in run_data:
+            c.Clear()
+            
+            # Style the Run Data (Black Points)
+            h_run.SetLineColor(ROOT.kBlack)
+            h_run.SetMarkerStyle(20)
+            h_run.SetMarkerSize(0.8)
+            h_run.SetStats(0)
+            
+            # Prevent log(0) errors on empty background bins
+            h_run.SetMinimum(0.5) 
+            
+            # Style the Scaled Sum (Red Line / Shaded)
+            h_sum_scaled.SetLineColor(ROOT.kRed)
+            h_sum_scaled.SetLineWidth(2)
+            h_sum_scaled.SetFillColorAlpha(ROOT.kRed, 0.2)
+            h_sum_scaled.SetStats(0)
+            
+            # Use TRatioPlot for the Residuals ("diff" mode means Data - Fit)
+            rp = ROOT.TRatioPlot(h_run, h_sum_scaled, "diff")
+            rp.SetH1DrawOpt("E")
+            rp.SetH2DrawOpt("HIST")
+            rp.Draw()
+            
+            # --- NEW: Force the X-axis to obey the threshold ---
+            rp.GetXaxis().SetRangeUser(energy_threshold, binning[2])
+            
+            # --- NEW: Dynamically zoom the Y-axis to ignore bin 0 anomalies ---
+            max_res = 0.0
+            start_bin = h_run.GetXaxis().FindBin(energy_threshold)
+            stop_bin = h_run.GetXaxis().FindBin(binning[2])
+
+            for i in range(start_bin, stop_bin + 1):
+                res = abs(h_run.GetBinContent(i) - h_sum_scaled.GetBinContent(i))
+                if res > max_res:
+                    max_res = res
+
+            # Add a 20% visual buffer to the top and bottom
+            y_limit = max_res * 1.2 if max_res > 0 else 10.0
+            rp.GetLowerRefYaxis().SetRangeUser(-y_limit, y_limit)
+            
+            # Set the upper pad to a Log-Y scale
+            rp.GetUpperPad().SetLogy()
+            
+            rp.GetLowerRefYaxis().SetTitle("Resid (Run - Sum)")
+            rp.GetLowerPad().SetGridy()
+            
+            rp.GetUpperPad().cd()
+            pave = ROOT.TPaveText(0.70, 0.75, 0.88, 0.88, "NDC")
+            pave.SetFillColor(ROOT.kWhite)
+            pave.SetBorderSize(1)
+            pave.AddText(f"Run: {run}")
+            
+            pval_text = pave.AddText(f"p-value: {pval:.2e}")
+            if pval < pvalue_threshold:
+                pval_text.SetTextColor(ROOT.kRed)
+                
+            pave.Draw()
+            
+            c.Update()
+            c.Print(pdf_path) 
+            
+        c.Print(pdf_path + "]") 
+        
+    ROOT.gROOT.SetBatch(original_batch_state)
+    print("Stability generation complete!")
