@@ -66,7 +66,7 @@ clover_adj_dict = {}
 for clover, crystal in clover_list:
     clover_adj_dict[(clover, crystal)] = []
     for crystal2 in range(1,5):
-        if crystal2 != crystal and crystal2 in clover_list:
+        if crystal2 != crystal and (clover, crystal2) in clover_list:
             clover_adj_dict[(clover, crystal)].append((clover, crystal2))
 
 def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name):
