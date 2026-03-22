@@ -26,15 +26,16 @@ current_dir = Path(__file__).parent.resolve()
 det_loc_table = pd.read_csv(os.path.join(current_dir, 'clarion_det_locations.csv'))
 
 #include clover's used for the experiment here
+bad_clovers = [(1,'b'), (3, 'd'), (3, 'c')]
 clover_str_list = []
 clover_list = []
 for num in range(1, 12):
-    if num == 4 or num == 8:
+    if num not in [4,8]: #clovers not installed
         continue
-    for letter in ['a', 'b', 'c', 'd']:
-        clover_str_list.append(f'clover_{num}{letter}')
-    for i in range(1,5):
-        clover_list.append((num, i))
+    for letter, i in zip(['a', 'b', 'c', 'd'], range(1,5)):
+        if (num, letter) not in bad_clovers: #exclude bad clovers
+            clover_str_list.append(f'clover_{num}{letter}')
+            clover_list.append((num, i))
 clover_to_index = {clover_list[i]:i for i in range(len(clover_list))}
 
 def get_clover_strings(hist_to_get='e'):
@@ -42,7 +43,8 @@ def get_clover_strings(hist_to_get='e'):
     to_return = []
     for num in [1,2,3,5,6,7,9,10,11]:
         for letter in ('a','b','c','d'):
-            to_return.append('clover_%d%s_%s'%(num, letter, hist_to_get))
+            if (num, letter) not in bad_clovers:
+                to_return.append('clover_%d%s_%s'%(num, letter, hist_to_get))
     return to_return
 
 def get_angle_between_crystals(clover1, crystal1, clover2, crystal2):

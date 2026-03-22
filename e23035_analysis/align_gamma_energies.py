@@ -20,14 +20,15 @@ run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60
 runs = []
 for run in run_candidates:
     t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
-    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[169, 170,171, 172,173,174, 180, 181]:# and (tf-t0)>600:
+    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
         #only looking at runs later than 150 since these definitely use final beam settings
         #169-173: beam disruptions, and following short runs
         #174: attenuated beam
         #180, 181: grow in after PID
+        #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
-
+print(runs)
 n_workers=min(200, len(runs))
 
 #get pre-experiment energy calibration to make finding the 511 and 2614 keV peaks easier
@@ -209,4 +210,4 @@ for run in runs:
 print(f'total run time: {t_tot/3600} hours')
 
 stability_binning = (int(7000/5), 0, 7000)
-energy_calibration_tools.create_stability_summary('gm', stability_binning, 0.01, 100, runs)
+energy_calibration_tools.create_stability_summary('gm', stability_binning, 0.01, 200, runs)
