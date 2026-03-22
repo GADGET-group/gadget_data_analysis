@@ -39,13 +39,8 @@ for num in range(1, 12):
 clover_to_index = {clover_list[i]:i for i in range(len(clover_list))}
 
 def get_clover_strings(hist_to_get='e'):
-    #get list of strings as they appear in the merged root file
-    to_return = []
-    for num in [1,2,3,5,6,7,9,10,11]:
-        for letter in ('a','b','c','d'):
-            if (num, letter) not in bad_clovers:
-                to_return.append('clover_%d%s_%s'%(num, letter, hist_to_get))
-    return to_return
+    """Get list of strings as they appear in the merged root file."""
+    return [f'{s}_{hist_to_get}' for s in clover_str_list]
 
 def get_angle_between_crystals(clover1, crystal1, clover2, crystal2):
     theta1 = np.radians(det_loc_table['thetai'][(det_loc_table['det']==clover1)&(det_loc_table['deti']==crystal1)].iloc[0])
