@@ -30,7 +30,7 @@ bad_clovers = [(1,'b'), (3, 'd'), (3, 'c')]
 clover_str_list = []
 clover_list = []
 for num in range(1, 12):
-    if num not in [4,8]: #clovers not installed
+    if num in [4,8]: #clovers not installed
         continue
     for letter, i in zip(['a', 'b', 'c', 'd'], range(1,5)):
         if (num, letter) not in bad_clovers: #exclude bad clovers
@@ -71,7 +71,7 @@ clover_adj_dict = {}
 for clover, crystal in clover_list:
     clover_adj_dict[(clover, crystal)] = []
     for crystal2 in range(1,5):
-        if crystal2 != crystal:
+        if crystal2 != crystal and crystal2 in clover_list:
             clover_adj_dict[(clover, crystal)].append((clover, crystal2))
 
 def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name):

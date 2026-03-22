@@ -64,15 +64,16 @@ sum_hist = degai.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
 sum_hist.SetLineColor(ROOT.kRed)
 
 #this should be equivalent to sum spectrum
-addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window)
+# addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window)
 
-if False:
+if True:
     gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window)
     gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1045, 2)
 
 adj_addback_1ns_build_window = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(30), 'gm', gamma_binning, 1)
-plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist, 'summed spectrum':sum_hist, '1deg addback':addback_1deg_hist, \
-                    'adj addback w/ 1ns event window':adj_addback_1ns_build_window}
+plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist, 'summed spectrum':sum_hist} #\
+#, '1deg addback':addback_1deg_hist, \
+#                    'adj addback w/ 1ns event window':adj_addback_1ns_build_window}
 canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(plot_hist_dic, 'gamma spectrum from 60Ga runs', "keV", "counts/1 keV")
 canvas.SetLogy(1)
 
