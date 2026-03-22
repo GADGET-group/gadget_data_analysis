@@ -2,11 +2,13 @@ import re
 import os
 import pickle
 from pathlib import Path
+import concurrent.futures
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import ROOT
 import numpy as np
+import pandas as pd
 
 from e23035_analysis import fitting_tools
 from raw_viewer import ddas_interface
@@ -787,9 +789,26 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
 
     print(f"Summary saved to {pdf_filename}")
 
-import os
-import ROOT
-from pathlib import Path
+
+
+def _fetch_calibrated_run_hist(run, cal_name, ch, binning):
+    """
+    Worker function to fetch a single histogram in a parallel process.
+    Must be at the top level of the module to be picklable.
+    """
+    import ROOT # Ensure the worker process has ROOT loaded
+    
+    cal_exp = get_calibrated_energy_string(run, cal_name, ch)
+    h_run = ddas_interface.get_histogram(
+        run, binning, f'{ch}_{run}', f'{ch} Run {run}', cal_exp
+    )
+    
+    if h_run:
+        # CRITICAL: Detach the C++ object from the worker's memory 
+        # so it survives being serialized and sent back to the main process!
+        h_run.SetDirectory(0) 
+        
+    return run, h_run
 
 def create_stability_summary(cal_name, binning, pvalue_threshold, energy_threshold, run_list=None):
     '''
@@ -823,6 +842,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
         print(f"No valid runs or branches found for calibration '{cal_name}'.")
         return
 
+    p_value_matrix = {}
     # 2. Iterate through each crystal/branch
     for ch, runs_for_ch in branch_run_map.items():
         runs_for_ch = sorted(runs_for_ch)
@@ -833,20 +853,35 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
         summed_hist = ROOT.TH1D(f'{ch}_all_run', f'Sum of {ch} for all runs', n_bins, x_min, x_max)
         summed_hist.SetDirectory(0) # Keep alive in memory
         
+        # --- PARALLELIZED Loop 1: Build calibrated runs and add to master sum ---
         run_hists = []
+        
+        # Safely determine the number of cores to use (cap at 64 to avoid thrashing)
+        max_workers = min(os.cpu_count() or 4, len(runs_for_ch), 64)
+        print(f"[{ch}] Fetching histograms using {max_workers} parallel workers...")
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Dispatch all the runs to the worker pool
+            future_to_run = {
+                executor.submit(_fetch_calibrated_run_hist, run, cal_name, ch, binning): run 
+                for run in runs_for_ch
+            }
+            
+            # Collect them as they finish
+            for future in concurrent.futures.as_completed(future_to_run):
+                run = future_to_run[future]
+                try:
+                    ret_run, h_run = future.result()
+                    if h_run:
+                        h_run.SetDirectory(0) # Re-detach in the main process just to be safe
+                        run_hists.append((ret_run, h_run))
+                        summed_hist.Add(h_run)
+                except Exception as exc:
+                    print(f"[{ch}] ERROR: Run {run} generated an exception during fetch: {exc}")
 
-        # --- Loop 1: Build calibrated runs and add to master sum ---
-        for run in runs_for_ch:
-            # Inject the calibrated expression
-            cal_exp = get_calibrated_energy_string(run, cal_name, ch)
-            
-            h_run = ddas_interface.get_histogram(
-                run, binning, f'{ch}_{run}', f'{ch} Run {run}', cal_exp
-            )
-            h_run.SetDirectory(0) 
-            
-            run_hists.append((run, h_run))
-            summed_hist.Add(h_run) # Stack this run into the master sum
+        # Because parallel workers finish out of order, we MUST sort the 
+        # list back into chronological run order so your PDF pages make sense!
+        run_hists.sort(key=lambda x: x[0])
 
         # Restrict the physical axis range to ignore low-energy noise
         summed_hist.GetXaxis().SetRangeUser(energy_threshold, x_max)
@@ -858,6 +893,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
 
         run_data = []
         flagged_runs = []
+        p_value_matrix[ch] = {}
         
         # --- Loop 2: Fetch individual runs and compute p-values ---
         for run, h_run in run_hists:
@@ -882,6 +918,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
             if p_val < pvalue_threshold:
                 flagged_runs.append((run, p_val))
                 
+            p_value_matrix[ch][run] = p_val
             run_data.append((run, p_val, h_run, h_sum_scaled))
 
         # 4. Create the PDF Document using ROOT's TPDF Engine
@@ -992,5 +1029,13 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
             
         c.Print(pdf_path + "]") 
         
+    # 5. Save P-Value Matrix to CSV
+    out_dir = Path(f"e23035_analysis/calibrations/{cal_name}")
+    csv_path = out_dir / f"stability_p_values.csv"
+    df_pvals = pd.DataFrame(p_value_matrix)
+    df_pvals.index.name = 'run'
+    df_pvals.to_csv(csv_path)
+    print(f"P-value matrix saved to {csv_path}")
+
     ROOT.gROOT.SetBatch(original_batch_state)
     print("Stability generation complete!")
