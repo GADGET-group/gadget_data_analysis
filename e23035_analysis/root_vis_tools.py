@@ -161,3 +161,37 @@ def plot_crystal_vs_time(ddas_run, clover, seconds_per_tbin=360):
     canvas.Update()
     
     return canvas, hist_vs_t
+
+def label_peaks(hist, peaks, y_offset_factor=1.05, text_size=0.03, color=ROOT.kBlack, angle=90):
+    """
+    Labels peaks on a 1D ROOT histogram.
+
+    Args:
+        hist: The ROOT TH1 object to label.
+        peaks: A list of tuples, where each tuple is (label_string, x_location).
+        y_offset_factor: Factor by which to multiply the bin content to set the Y position of the label.
+        text_size: Size of the text.
+        color: Color of the text.
+        angle: Angle of the text in degrees.
+
+    Returns:
+        A list of ROOT.TLatex objects. This list MUST be kept alive in memory 
+        for the labels to remain visible on the canvas.
+    """
+    latex_labels = []
+    for label, x_loc in peaks:
+        bin_num = hist.GetXaxis().FindBin(x_loc)
+        y_val = hist.GetBinContent(bin_num)
+        
+        latex = ROOT.TLatex(x_loc, y_val * y_offset_factor, str(label))
+        latex.SetTextSize(text_size)
+        latex.SetTextColor(color)
+        latex.SetTextAngle(angle)
+        latex.SetTextAlign(12) 
+        
+        latex.Draw()
+        latex_labels.append(latex)
+        
+    return latex_labels
+
+    
