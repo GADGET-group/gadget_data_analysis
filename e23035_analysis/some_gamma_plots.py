@@ -52,22 +52,22 @@ def show_crystal_vs_run(crystal_name):
 # plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist, 'summed spectrum':sum_hist}
 # canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(plot_hist_dic, 'gamma spectrum from 60Ga runs', "keV", "counts/1 keV")
 
-
-clover_ab_hist = degai.get_addback_spectrum(runs, degai.clover_adj_dict, 'gm', gamma_binning, event_build_window)
+addback_ethresh = 150
+clover_ab_hist = degai.get_addback_spectrum(runs, degai.clover_adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh)
 
 adj_dict = degai.get_adjacency_dict(30)
 print('getting add back histogram')
-adj_ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window)
+adj_ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh)
 
 print('getting sum histogram')
 sum_hist = degai.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
 sum_hist.SetLineColor(ROOT.kRed)
 
 #this should be equivalent to sum spectrum
-addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window)
+addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh)
 
 # if True:
-gg_hist = degai.get_addback_coincidence_spectrum(runs,  degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window)#adj_dict
+gg_hist = degai.get_addback_coincidence_spectrum(runs,  degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window)#adj_dict
 cspec = ROOT.TCanvas()
 gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1045, 2)
 gspec2 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1141, 2)
@@ -77,8 +77,6 @@ gspec3 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1265, 2)
 gspec3.SetLineColor(ROOT.kGreen)
 gspec3.Draw('SAME')
 
-
-adj_addback_1ns_build_window = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(30), 'gm', gamma_binning, 1)
 plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist, 'summed spectrum':sum_hist, '1deg addback':addback_1deg_hist} #\
 #, , \
 #                    'adj addback w/ 1ns event window':adj_addback_1ns_build_window}
@@ -89,5 +87,5 @@ canvas.SetLogy(1)
 #timing_hist = degai.get_adjacent_timing_spectrum(126, degai.get_adjacency_dict(180), (1500, 0, 15000))
 if False:
     indiv_adj_dict = degai.get_adjacency_dict(1)
-    gg_hist = degai.get_addback_coincidence_spectrum(runs, indiv_adj_dict, 'gm', gamma_binning, event_build_window)
+    gg_hist = degai.get_addback_coincidence_spectrum(runs, indiv_adj_dict, 'gm', gamma_binning, event_build_window, 0, event_build_window)
     gspec = degai.get_bg_subtracted_projection(gg_hist, 2614, 1, 2700, 2)

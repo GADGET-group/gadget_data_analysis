@@ -169,14 +169,14 @@ def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init'):
 
 def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
     '''
-    Make a ttree with the gamma ray add back, split into sub-events by time. 
+    Make a ttree with the gamma ray add back, storing an array of energies and times per event.
     '''
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'add_back_tree')
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
-    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh)).encode()).hexdigest()
-    cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}.root")
+    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v2").encode()).hexdigest()
+    cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v2.root")
     
     # Check if root file exists. Load it and return if it does.
     if os.path.exists(cache_file_path):
@@ -223,7 +223,9 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     out_tree = ROOT.TTree('add_back', 'add_back')
     gamma_vec = ROOT.std.vector('double')()
+    time_vec = ROOT.std.vector('double')()
     out_tree.Branch('energy', gamma_vec)
+    out_tree.Branch('time', time_vec)
 
     dt_sec = dt_window_ns * 1e-9 # Convert ns to seconds for comparison
 
@@ -243,7 +245,6 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
         if len(fired_indexes) == 0:
             continue
 
-        # --- NEW TIMING CLUSTERING LOGIC ---
         # 1. Pair each fired index with its timestamp and sort them chronologically
         hit_data = [(idx, times[idx]) for idx in fired_indexes]
         hit_data.sort(key=lambda x: x[1])
@@ -262,9 +263,11 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
                 cluster_start_t = t             # Reset the anchor time
         clusters.append(curr_cluster) # Don't forget the last one!
 
+        gamma_vec.clear()
+        time_vec.clear()
+
         # 3. Process Add-back for EACH time cluster independently
         for cluster_idx_list in clusters:
-            gamma_vec.clear()
             unprocessed = cluster_idx_list.copy()
             
             while len(unprocessed) > 0:
@@ -283,10 +286,11 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
                             unprocessed.remove(c_idx)
                             
                 gamma_vec.push_back(np.sum(energies[indexes_in_this_event]))
+                time_vec.push_back(np.mean(times[indexes_in_this_event]))
             
-            # Fill the tree ONCE PER TIME CLUSTER (Sub-event)
-            if gamma_vec.size() > 0:
-                out_tree.Fill()
+        # Fill the tree ONCE PER ORIGINAL EVENT
+        if gamma_vec.size() > 0:
+            out_tree.Fill()
 
     cf.Write()
     cf.Close()
@@ -313,7 +317,7 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
             sorted_runs = sorted(list(ddas_run))
             # CRITICAL: Include dt_window_ns in the hash!
             combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh)).encode()
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v2").encode()
             ).hexdigest()
             
             cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
@@ -389,7 +393,7 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
     # CRITICAL: Include dt_window_ns in the single-run hash!
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh)).encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v2").encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -418,7 +422,7 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
 
     # --- Generate Histogram ---
     # Pass dt_window_ns down to the tree builder!
-    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh)
+    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh)
     df = ROOT.RDataFrame(tree)
     
     h1_ptr = df.Histo1D(
@@ -436,33 +440,44 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
 
     return hist
 
-ROOT.gInterpreter.Declare("""
-#include <ROOT/RVec.hxx>
+if not hasattr(ROOT, "get_symmetric_pairs_dt"):
+    ROOT.gInterpreter.Declare("""
+    #include <ROOT/RVec.hxx>
+    #include <cmath>
 
-struct CoincPairs {
-    std::vector<double> x;
-    std::vector<double> y;
-};
+    struct CoincPairsDT {
+        std::vector<double> x;
+        std::vector<double> y;
+    };
 
-CoincPairs get_symmetric_pairs(const ROOT::RVec<double>& energies) {
-    CoincPairs pairs;
-    
-    // Only process events with at least 2 gammas
-    if (energies.size() < 2) return pairs; 
-    
-    // Create all symmetric combinations (i != j)
-    for (size_t i = 0; i < energies.size(); ++i) {
-        for (size_t j = 0; j < energies.size(); ++j) {
-            if (i == j) continue; // Don't pair a gamma with itself
-            pairs.x.push_back(energies[i]);
-            pairs.y.push_back(energies[j]);
+    CoincPairsDT get_symmetric_pairs_dt(const ROOT::RVec<double>& energies, const ROOT::RVec<double>& times, double min_dt_ns, double max_dt_ns) {
+        CoincPairsDT pairs;
+        
+        // Only process events with at least 2 gammas
+        if (energies.size() < 2) return pairs; 
+        
+        // Create all symmetric combinations (i != j)
+        for (size_t i = 0; i < energies.size(); ++i) {
+            for (size_t j = 0; j < energies.size(); ++j) {
+                if (i == j) continue; 
+                
+                double dt_ns = std::abs(times[i] - times[j]) * 1e9;
+                if (dt_ns >= min_dt_ns && dt_ns <= max_dt_ns) {
+                    pairs.x.push_back(energies[i]);
+                    pairs.y.push_back(energies[j]);
+                }
+            }
         }
+        return pairs;
     }
-    return pairs;
-}
-""")
+    """)
 
-def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, max_workers=None):
+def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, max_workers=None):
+    if isinstance(dt_window_ns, (list, tuple)):
+        min_dt, max_dt = dt_window_ns
+    else:
+        min_dt, max_dt = 0, dt_window_ns
+
     # ---------------------------------------------------------
     # 1. PARALLEL RUN PROCESSING & COMBINED CACHING
     # ---------------------------------------------------------
@@ -473,7 +488,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             sorted_runs = sorted(list(ddas_run))
             # CRITICAL: Include dt_window_ns in the hash!
             combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh)).encode()
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + "v2").encode()
             ).hexdigest()
             
             cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
@@ -508,7 +523,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
                         # Pass dt_window_ns down to the workers
-                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh) 
+                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt) 
                         for run in ddas_run
                     ]
                     
@@ -516,7 +531,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
                         h = future.result() 
                         if total_hist is None:
                             total_hist = h.Clone(combined_hist_name)
-                            total_hist.SetTitle(f"Gamma-Gamma Coincidence (Runs: {sorted_runs[0]}...{sorted_runs[-1]}, dt={dt_window_ns}ns)")
+                            total_hist.SetTitle(f"Gamma-Gamma Coincidence (Runs: {sorted_runs[0]}...{sorted_runs[-1]}, dt={min_dt}-{max_dt}ns)")
                             total_hist.SetDirectory(0)
                         else:
                             total_hist.Add(h)
@@ -537,7 +552,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
     # 2. SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh)).encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + "v2").encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -562,14 +577,14 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             if os.path.exists(cache_file_path): os.remove(cache_file_path)
 
     # Pass the window down to the tree builder!
-    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh)
+    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh)
     df = ROOT.RDataFrame(tree)
-    df = df.Define("pairs", "get_symmetric_pairs(energy)")
+    df = df.Define("pairs", f"get_symmetric_pairs_dt(energy, time, {min_dt}, {max_dt})")
     df = df.Define("energy_x", "pairs.x")
     df = df.Define("energy_y", "pairs.y")
 
     h2_matrix = df.Histo2D(
-        (hist_name, f"Gamma-Gamma Coincidence (Run {ddas_run});Energy 1 (keV);Energy 2 (keV)", 
+        (hist_name, f"Gamma-Gamma Coincidence (Run {ddas_run}, dt={min_dt}-{max_dt}ns);Energy 1 (keV);Energy 2 (keV)", 
         *binning, *binning), 
         "energy_x", 
         "energy_y"
