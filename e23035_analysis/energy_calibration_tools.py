@@ -134,16 +134,16 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         # --- NEW: Route to the correct fitting engine ---
         if peak_model.lower() == 'gaus':
             fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_peak(
-                hist_for_this_peak, data_source, location_guess, location_wiggle, fit_range
+                hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
             )
         elif peak_model.lower() == 'emg':
             fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
-                hist_for_this_peak, data_source, location_guess, location_wiggle, fit_range
+                hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
             )
         else:
             print(f"[{branch_name}] WARNING: Unknown peak_model '{peak_model}'. Defaulting to 'gaus'.")
             fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_peak(
-                hist_for_this_peak, data_source, location_guess, location_wiggle, fit_range
+                hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
             )
         
         # Now it is safe to append the true energies!

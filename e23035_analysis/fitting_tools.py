@@ -251,15 +251,13 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:float, fit_window): 
+def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
     """
     Fits an Exponentially Modified Gaussian (low-energy tail) + constant background 
     using the fit_func engine.
     """
-    # try:
-    #     e_low, e_high = e_guess + min(fit_window), e_guess+max(fit_window)
-    # except TypeError: #single number passed in
-    #     e_low, e_high = e_guess - fit_window, e_guess + fit_window
+    if param_bounds is None:
+        param_bounds = {}
     e_low, e_high = fit_window
 
     # 1. Construct the Mathematical Model
@@ -296,6 +294,10 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
         tau_bounds = (0.01, 10)
         sigma_bounds = (1,20)
         A_bounds = (1,np.inf)#((spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess), np.inf)
+    else:
+        tau_bounds = (0.01, 100)
+        sigma_bounds = (0.1, 100)
+        A_bounds = (0, np.inf)
 
     spectrum.GetXaxis().UnZoom()
 
@@ -308,12 +310,18 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
     ]
     #print('initial values: ',initial_values)
 
+    bg_bounds = param_bounds.get('bg_const', (0, np.inf))
+    A_bounds = param_bounds.get('amplitude', A_bounds)
+    mu_bounds = param_bounds.get('mu', (e_low, e_high))
+    sigma_bounds = param_bounds.get('sigma', sigma_bounds)
+    tau_bounds = param_bounds.get('tau', tau_bounds)
+
     bounds = [
-        (0, np.inf),                                 # p0: bg_const
-        A_bounds,                             # p1: amplitude
-        (e_guess - e_wiggle, e_guess + e_wiggle),          # p2: mu bounds
-        sigma_bounds,                                   # p3: sigma 
-        tau_bounds                                   # p4: tau 
+        bg_bounds,       # p0: bg_const
+        A_bounds,        # p1: amplitude
+        mu_bounds,       # p2: mu bounds
+        sigma_bounds,    # p3: sigma 
+        tau_bounds       # p4: tau 
     ]
 
     #print('bounds: ',bounds)
@@ -345,10 +353,12 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:fl
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wiggle:float, fit_window): 
+def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
     """
     Fits a standard Gaussian + constant background using the fit_func engine.
     """
+    if param_bounds is None:
+        param_bounds = {}
     e_low, e_high = fit_window
 
     # 1. Construct the Mathematical Model
@@ -396,11 +406,16 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, e_wigg
         sigma_guess    # p3: sigma
     ]
 
+    bg_bounds = param_bounds.get('bg_const', (0, np.inf))
+    A_bounds = param_bounds.get('amplitude', A_bounds)
+    mu_bounds = param_bounds.get('mu', (e_low, e_high))
+    sigma_bounds = param_bounds.get('sigma', sigma_bounds)
+
     bounds = [
-        (0, np.inf),                                 # p0: bg_const
-        A_bounds,                                    # p1: amplitude
-        (e_guess - e_wiggle, e_guess + e_wiggle),    # p2: mu bounds
-        sigma_bounds                                 # p3: sigma 
+        bg_bounds,       # p0: bg_const
+        A_bounds,        # p1: amplitude
+        mu_bounds,       # p2: mu bounds
+        sigma_bounds     # p3: sigma 
     ]
 
     names = ["bg_const", "amplitude", "mu", "sigma"]

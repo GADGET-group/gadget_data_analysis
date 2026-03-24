@@ -15,13 +15,16 @@ class spectrum_fitter:
         self.peaks_to_fit = []
         self.peak_model = peak_model
 
-         #list where each entry corresponds to a peak that was fit
+         #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
 
     def fit_peaks(self):
         '''
         Fit each peak from peak_loc_guesses, and store the results
         '''
+        original_batch_state = ROOT.gROOT.IsBatch()
+        ROOT.gROOT.SetBatch(True)
+        
         for loc_guess, window_start, window_end in self.peaks_to_fit:
             # Define a fit window around the guess (e.g., +/- 2% of energy)
             fit_range = (window_start, window_end)
@@ -29,14 +32,33 @@ class spectrum_fitter:
 
             if self.peak_model.lower() == 'gaus':
                 res = fitting_tools.fit_gaussian_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, location_wiggle, fit_range
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds={'mu': (loc_guess - location_wiggle, loc_guess + location_wiggle)}
                 )
             elif self.peak_model.lower() == 'emg':
                 res = fitting_tools.fit_emg_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, location_wiggle, fit_range
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds={'mu': (loc_guess - location_wiggle, loc_guess + location_wiggle)}
                 )
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")
 
             # fitting_tools returns (fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit)
-            self.fit_results.append(res[0])
+            res_dict = {
+                'fit_res': res[0],
+                'background_func': res[1],
+                'peak_func': res[2],
+                'ratio_plot': res[3],
+                'canvas': res[4],
+                'spectrum_to_plot': res[5],
+                'f_to_fit': res[6],
+                'h_fit': res[7]
+            }
+            self.fit_results.append(res_dict)
+            
+        ROOT.gROOT.SetBatch(original_batch_state)
+
+    def show_fit_results(self, peak_index):
+        if 0 <= peak_index < len(self.fit_results):
+            canvas = self.fit_results[peak_index]['canvas']
+            canvas.Draw()
+        else:
+            print(f"Invalid peak index: {peak_index}")
