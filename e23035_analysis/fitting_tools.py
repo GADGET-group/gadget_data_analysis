@@ -30,15 +30,20 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
 
     e_low, e_high = fit_range
 
-    # 2. Create Subset Histogram (The "Cut" for a clean plot)
-    bin_width = histogram.GetBinWidth(1)
-    n_bins_new = int((e_high - e_low) / bin_width + 0.5)
+    # Snap e_low and e_high to the exact bin edges of the original histogram
+    x_axis = histogram.GetXaxis()
+    bin_low = x_axis.FindBin(e_low)
+    bin_high = x_axis.FindBin(e_high)
     
+    e_low = x_axis.GetBinLowEdge(bin_low)
+    e_high = x_axis.GetBinUpEdge(bin_high)
+    n_bins_new = bin_high - bin_low + 1
+
+    # 2. Create Subset Histogram (The "Cut" for a clean plot)
     sub_hist = ROOT.TH1D(f"sub_{unique_id}", "Data vs Fit", n_bins_new, e_low, e_high)
     
     for i in range(1, n_bins_new + 1):
-        center = sub_hist.GetBinCenter(i)
-        source_bin = histogram.FindBin(center)
+        source_bin = bin_low + i - 1
         sub_hist.SetBinContent(i, histogram.GetBinContent(source_bin))
         sub_hist.SetBinError(i, histogram.GetBinError(source_bin))
 
