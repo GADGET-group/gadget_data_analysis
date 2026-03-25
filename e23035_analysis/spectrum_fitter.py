@@ -18,15 +18,15 @@ class spectrum_fitter:
          #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
 
-    def find_peaks(self, reset_peaks=True, sigma=2.0, threshold=0.05, max_peaks=1000, window_width=None):
+    def find_peaks(self, reset_peaks=True, sigma=1.5, threshold=0.05, max_peaks=1000, window_width=None):
         '''
-        Use SNIP algorithm built into TSpectrum class to build a set of peak location guesses
-        and populate peaks_to_fit.
+        Use TSpectrum to build a set of peak location guesses and populate peaks_to_fit. 
+        (Uses SNIP for background removal, followed by smoothed 2nd derivatives for peak searching).
         
         sigma: expected width of the peaks (in bins).
         threshold: peaks with an amplitude less than threshold * highest_peak are ignored (0.0 to 1.0).
         max_peaks: absolute maximum number of peaks to allow.
-        window_width: +/- range around the peak for the fit window. If None, defaults to 5 * sigma * bin_width.
+        window_width: +/- range around the peak for the fit window. If None, defaults to 5 * sigma.
         '''
         if reset_peaks:
             self.peaks_to_fit = []
@@ -38,8 +38,7 @@ class spectrum_fitter:
         found_locs = [x_peaks[i] for i in range(n_found)]
         found_locs.sort()
         
-        bin_width = self.spectrum.GetBinWidth(1)
-        actual_width = window_width if window_width is not None else (5.0 * sigma * bin_width)
+        actual_width = window_width if window_width is not None else (5.0 * sigma)
         
         for loc in found_locs:
             self.peaks_to_fit.append((loc, loc - actual_width, loc + actual_width))
@@ -86,9 +85,16 @@ class spectrum_fitter:
 
     def show_fit_results(self, peak_index):
         if 0 <= peak_index < len(self.fit_results):
-            canvas = self.fit_results[peak_index]['canvas']
-            canvas.Draw()
+            orig_canvas = self.fit_results[peak_index]['canvas']
+            
+            # The original canvas was created in ROOT Batch mode, so it lacks a GUI window.
+            # We create a new canvas and clone the contents of the batch canvas into it.
+            new_canvas = ROOT.TCanvas(f"c_show_{peak_index}_{id(self)}", orig_canvas.GetTitle(), 800, 600)
+            orig_canvas.DrawClonePad()
+            new_canvas.Update()
+            
+            # Keep a reference to prevent garbage collection from immediately closing the window
+            self.fit_results[peak_index]['display_canvas'] = new_canvas
         else:
             print(f"Invalid peak index: {peak_index}")
-
     

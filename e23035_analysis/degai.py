@@ -167,16 +167,20 @@ def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init'):
     return to_return
 
 
-def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
+def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=False):
     '''
     Make a ttree with the gamma ray add back, storing an array of energies and times per event.
+    If sliding scale is true, adc counts will have a a uniform number from -0.5 to 0.5 added to them to prevent binning issues (see).
     '''
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'add_back_tree')
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
     adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v2").encode()).hexdigest()
-    cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v2.root")
+    if not sliding_scale:
+        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v2.root")
+    else:
+        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v2_ss.root")
     
     # Check if root file exists. Load it and return if it does.
     if os.path.exists(cache_file_path):
@@ -238,7 +242,9 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
         energies = np.zeros(len(counts))
         has_counts = counts > 0
         energies[has_counts] = counts[has_counts]*slopes[has_counts] + offsets[has_counts]
-        
+        if sliding_scale:
+            energies[has_counts] += np.random.uniform(-0.5, 0.5, size=len(energies[has_counts]))
+
         valid_mask = has_counts & (energies > e_thresh)
         fired_indexes = np.where(valid_mask)[0].tolist()
         
@@ -300,7 +306,7 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh):
     out_tree._keepalive_file = read_file
     return out_tree
 
-def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, max_workers=None):
+def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, sliding_scale=False, max_workers=None):
     """
     Generates a 1D add-back energy spectrum for a single run or list of runs.
     Utilizes multiprocessing for multiple runs, caching both individual and combined results.
@@ -317,14 +323,17 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
             sorted_runs = sorted(list(ddas_run))
             # CRITICAL: Include dt_window_ns in the hash!
             combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v2").encode()
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + "v2").encode()
             ).hexdigest()
             
             cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
             os.makedirs(cache_dir, exist_ok=True)
             
             combined_hist_name = f"h1_combined_{combined_hash_str}"
-            combined_cache_file = os.path.join(cache_dir, f"h1_combined_{combined_hash_str}.root")
+            if not sliding_scale:
+                combined_cache_file = os.path.join(cache_dir, f"h1_combined_{combined_hash_str}.root")
+            else:
+                combined_cache_file = os.path.join(cache_dir, f"h1_combined_{combined_hash_str}_ss.root")
             
             # --- Check the Combined Cache ---
             if os.path.exists(combined_cache_file):
@@ -360,7 +369,7 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
                         # Pass dt_window_ns down to the workers
-                        executor.submit(get_addback_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh) 
+                        executor.submit(get_addback_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, sliding_scale) 
                         for run in ddas_run
                     ]
                     
@@ -393,12 +402,15 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
     # CRITICAL: Include dt_window_ns in the single-run hash!
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v2").encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + "v2").encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"h1_{hash_str}"
-    cache_file_path = os.path.join(cache_dir, f"h1_{hash_str}.root")
+    if not sliding_scale:
+        cache_file_path = os.path.join(cache_dir, f"h1_{hash_str}.root")
+    else:
+        cache_file_path = os.path.join(cache_dir, f"h1_{hash_str}_ss.root")
     
     # --- Check Cache ---
     if os.path.exists(cache_file_path):
@@ -422,7 +434,7 @@ def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_
 
     # --- Generate Histogram ---
     # Pass dt_window_ns down to the tree builder!
-    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh)
+    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale)
     df = ROOT.RDataFrame(tree)
     
     h1_ptr = df.Histo1D(
@@ -472,7 +484,7 @@ if not hasattr(ROOT, "get_symmetric_pairs_dt"):
     }
     """)
 
-def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, max_workers=None):
+def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale=False, max_workers=None):
     if isinstance(dt_window_ns, (list, tuple)):
         min_dt, max_dt = dt_window_ns
     else:
@@ -488,14 +500,17 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             sorted_runs = sorted(list(ddas_run))
             # CRITICAL: Include dt_window_ns in the hash!
             combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + "v2").encode()
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v2").encode()
             ).hexdigest()
             
             cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
             os.makedirs(cache_dir, exist_ok=True)
             
             combined_hist_name = f"gg_combined_{combined_hash_str}"
-            combined_cache_file = os.path.join(cache_dir, f"gg_combined_{combined_hash_str}.root")
+            if not sliding_scale:
+                combined_cache_file = os.path.join(cache_dir, f"gg_combined_{combined_hash_str}.root")
+            else:
+                combined_cache_file = os.path.join(cache_dir, f"gg_combined_{combined_hash_str}_ss.root")
             
             if os.path.exists(combined_cache_file):
                 try:
@@ -523,7 +538,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
                         # Pass dt_window_ns down to the workers
-                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt) 
+                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale) 
                         for run in ddas_run
                     ]
                     
@@ -552,12 +567,15 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
     # 2. SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + "v2").encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v2").encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"gg_{hash_str}"
-    cache_file_path = os.path.join(cache_dir, f"gg_{hash_str}.root")
+    if not sliding_scale:
+        cache_file_path = os.path.join(cache_dir, f"gg_{hash_str}.root")
+    else:
+        cache_file_path = os.path.join(cache_dir, f"gg_{hash_str}_ss.root")
     
     if os.path.exists(cache_file_path):
         try:
@@ -577,7 +595,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             if os.path.exists(cache_file_path): os.remove(cache_file_path)
 
     # Pass the window down to the tree builder!
-    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh)
+    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh, sliding_scale=sliding_scale)
     df = ROOT.RDataFrame(tree)
     df = df.Define("pairs", f"get_symmetric_pairs_dt(energy, time, {min_dt}, {max_dt})")
     df = df.Define("energy_x", "pairs.x")
