@@ -20,17 +20,19 @@ run_df['GET'] = pd.to_numeric(run_df['GET'], errors='coerce', downcast='integer'
 run_df['DDAS'] = pd.to_numeric(run_df['DDAS'], errors='coerce', downcast='integer')
 run_df['degrader angle'] = pd.to_numeric(run_df['degrader angle'], errors='coerce', downcast='float')
 
-ddas_60Ga_run_candidates = run_df['DDAS'][(run_df['Run Type']=='60Ga')]
-ddas_60Ga_runs = []
-for run in ddas_60Ga_run_candidates:
-    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):
-        #only looking at runs later than 150 since these definitely use final beam settings
-        #169-173: beam disruptions, and following short runs
-        #174: attenuated beam
-        #180, 181: grow in after PID
-        #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
-        if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
-            ddas_60Ga_runs.append(run)
+def get_ddas_60_Ga_runs():
+    _ddas_60Ga_run_candidates = run_df['DDAS'][(run_df['Run Type']=='60Ga')]
+    runs = []
+    for run in _ddas_60Ga_run_candidates:
+        if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):
+            #only looking at runs later than 150 since these definitely use final beam settings
+            #169-173: beam disruptions, and following short runs
+            #174: attenuated beam
+            #180, 181: grow in after PID
+            #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
+            if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
+                runs.append(run)
+    return runs
 
 def is_iterable(obj):
     try:

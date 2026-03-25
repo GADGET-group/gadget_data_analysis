@@ -18,6 +18,34 @@ class spectrum_fitter:
          #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
 
+    def find_peaks(self, reset_peaks=True, sigma=2.0, threshold=0.05, max_peaks=1000, window_width=None):
+        '''
+        Use SNIP algorithm built into TSpectrum class to build a set of peak location guesses
+        and populate peaks_to_fit.
+        
+        sigma: expected width of the peaks (in bins).
+        threshold: peaks with an amplitude less than threshold * highest_peak are ignored (0.0 to 1.0).
+        max_peaks: absolute maximum number of peaks to allow.
+        window_width: +/- range around the peak for the fit window. If None, defaults to 5 * sigma * bin_width.
+        '''
+        if reset_peaks:
+            self.peaks_to_fit = []
+            
+        spec = ROOT.TSpectrum(max_peaks) 
+        n_found = spec.Search(self.spectrum, sigma, "new", threshold) 
+        
+        x_peaks = spec.GetPositionX()
+        found_locs = [x_peaks[i] for i in range(n_found)]
+        found_locs.sort()
+        
+        bin_width = self.spectrum.GetBinWidth(1)
+        actual_width = window_width if window_width is not None else (5.0 * sigma * bin_width)
+        
+        for loc in found_locs:
+            self.peaks_to_fit.append((loc, loc - actual_width, loc + actual_width))
+            
+        return self.peaks_to_fit
+
     def fit_peaks(self):
         '''
         Fit each peak from peak_loc_guesses, and store the results
@@ -62,3 +90,5 @@ class spectrum_fitter:
             canvas.Draw()
         else:
             print(f"Invalid peak index: {peak_index}")
+
+    
