@@ -60,7 +60,7 @@ print('getting sum histogram')
 addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh)
 
 # if True:
-gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window)#adj_dict
+gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window, True)#adj_dict
 cspec = ROOT.TCanvas()
 gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1024, 2)
 gspec.SetLineColor(ROOT.kRed)

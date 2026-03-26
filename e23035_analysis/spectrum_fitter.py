@@ -69,20 +69,28 @@ class spectrum_fitter:
         # --- 3. Filter candidates by significance ---
         valid_peaks = []
         for loc in candidate_locs:
-            bin_min = self.spectrum.GetXaxis().FindBin(loc - 2.0 * expected_peak_width)
-            bin_max = self.spectrum.GetXaxis().FindBin(loc + 2.0 * expected_peak_width)
-            
-            signal_sum = 0.0
-            err_sq_sum = 0.0
-            for i in range(bin_min, bin_max + 1):
-                signal_sum += (self.spectrum.GetBinContent(i) - bg_hist.GetBinContent(i))
-                err_sq_sum += self.spectrum.GetBinError(i)**2
-            
-            sig = signal_sum / (err_sq_sum**0.5) if err_sq_sum > 0 else 0.0
-            
-            if sig >= required_significance:
+            i = self.spectrum.GetXaxis().FindBin(loc)
+            bg_val = bg_hist.GetBinContent(i)
+            signal_val = self.spectrum.GetBinContent(i) - bg_val
+            err_val = self.spectrum.GetBinError(i)
+            if signal_val/err_val > required_significance:
                 y_val = self.spectrum.GetBinContent(self.spectrum.FindBin(loc))
                 valid_peaks.append((loc, y_val))
+
+            # bin_min = self.spectrum.GetXaxis().FindBin(loc - 2.0 * expected_peak_width)
+            # bin_max = self.spectrum.GetXaxis().FindBin(loc + 2.0 * expected_peak_width)
+            
+            # signal_sum = 0.0
+            # err_sq_sum = 0.0
+            # for i in range(bin_min, bin_max + 1):
+            #     signal_sum += (self.spectrum.GetBinContent(i) - bg_hist.GetBinContent(i))
+            #     err_sq_sum += self.spectrum.GetBinError(i)**2
+            
+            # sig = signal_sum / (err_sq_sum**0.5) if err_sq_sum > 0 else 0.0
+            
+            # if sig >= required_significance:
+            #     y_val = self.spectrum.GetBinContent(self.spectrum.FindBin(loc))
+            #     valid_peaks.append((loc, y_val))
         
         found_peaks = valid_peaks
             
