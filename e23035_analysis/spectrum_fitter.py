@@ -18,30 +18,111 @@ class spectrum_fitter:
          #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
 
-    def find_peaks(self, reset_peaks=True, sigma=1.5, threshold=0.05, max_peaks=1000, window_width=None):
+    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, max_peaks=1000, window_width=None, required_significance=3.0, plot=True):
         '''
-        Use TSpectrum to build a set of peak location guesses and populate peaks_to_fit. 
-        (Uses SNIP for background removal, followed by smoothed 2nd derivatives for peak searching).
+        Finds peaks by identifying all local maxima and filtering them based on statistical significance.
+        This method avoids a global threshold, making it suitable for spectra with peaks of varying amplitudes.
         
-        sigma: expected width of the peaks (in bins).
-        threshold: peaks with an amplitude less than threshold * highest_peak are ignored (0.0 to 1.0).
+        expected_peak_width: expected width of the peaks (in x-axis units).
         max_peaks: absolute maximum number of peaks to allow.
-        window_width: +/- range around the peak for the fit window. If None, defaults to 5 * sigma.
+        window_width: +/- range (in x-axis units) around the peak for the fit window. If None, defaults to 5 * expected_peak_width.
+        required_significance: The minimum significance (in sigma) for a local maximum to be considered a peak.
+        plot: If True, draws a TPolyMarker (stars) on the spectrum at the found peak locations.
         '''
         if reset_peaks:
             self.peaks_to_fit = []
             
-        spec = ROOT.TSpectrum(max_peaks) 
-        n_found = spec.Search(self.spectrum, sigma, "new", threshold) 
+        # --- 1. Generate the SNIP Background for Significance Testing ---
+        bin_width = self.spectrum.GetBinWidth(1)
+        expected_peak_width_bins = max(1, int(expected_peak_width / bin_width))
+            
+        spec_bg = ROOT.TSpectrum()
+        bg_hist = spec_bg.Background(self.spectrum, int(2 * expected_peak_width_bins), "goff")
+        bg_hist.SetDirectory(0)
+        self.bg_hist = bg_hist # Keep alive in memory
+
+        # --- NEW 2: Strict Local Maxima Search on the RAW Spectrum ---
+        candidate_locs = []
+        n_bins = self.spectrum.GetNbinsX()
         
-        x_peaks = spec.GetPositionX()
-        found_locs = [x_peaks[i] for i in range(n_found)]
-        found_locs.sort()
+        # Define how many bins left/right we check. Half the expected width is usually a safe net.
+        search_w = max(1, int(expected_peak_width_bins / 2)) 
+
+        for i in range(search_w + 1, n_bins - search_w):
+            val = self.spectrum.GetBinContent(i)
+            
+            # Fast skip for empty/dead noise regions
+            if val < 5: 
+                continue 
+
+            # Strict local maximum check: Must be >= all neighbors in the window
+            is_max = True
+            for j in range(i - search_w, i + search_w + 1):
+                if i == j: 
+                    continue
+                if self.spectrum.GetBinContent(j) > val:
+                    is_max = False
+                    break
+
+            if is_max:
+                candidate_locs.append(self.spectrum.GetXaxis().GetBinCenter(i))
+
+        # --- 3. Filter candidates by significance ---
+        valid_peaks = []
+        for loc in candidate_locs:
+            bin_min = self.spectrum.GetXaxis().FindBin(loc - 2.0 * expected_peak_width)
+            bin_max = self.spectrum.GetXaxis().FindBin(loc + 2.0 * expected_peak_width)
+            
+            signal_sum = 0.0
+            err_sq_sum = 0.0
+            for i in range(bin_min, bin_max + 1):
+                signal_sum += (self.spectrum.GetBinContent(i) - bg_hist.GetBinContent(i))
+                err_sq_sum += self.spectrum.GetBinError(i)**2
+            
+            sig = signal_sum / (err_sq_sum**0.5) if err_sq_sum > 0 else 0.0
+            
+            if sig >= required_significance:
+                y_val = self.spectrum.GetBinContent(self.spectrum.FindBin(loc))
+                valid_peaks.append((loc, y_val))
+                
+            # Stop if we hit the max requested peaks
+            if len(valid_peaks) >= max_peaks:
+                break
         
-        actual_width = window_width if window_width is not None else (5.0 * sigma)
+        found_peaks = valid_peaks
+            
+        # --- 4. Update the TPolyMarker for visualization ---
+        pm = self.spectrum.GetListOfFunctions().FindObject("TPolyMarker")
+        if pm:
+            self.spectrum.GetListOfFunctions().Remove(pm)
+            
+        if plot and len(found_peaks) > 0:
+            if not hasattr(self, '_peak_canvas') or not self._peak_canvas:
+                ROOT.gROOT.SetBatch(False) 
+                self._peak_canvas = ROOT.TCanvas(f"c_peaks_{id(self)}", f"Peak Search: {self.spectrum.GetName()}", 1000, 600)
+            
+            self._peak_canvas.cd()
+            self.spectrum.SetStats(0)
+            self.spectrum.Draw("HIST") 
+            
+            new_pm = ROOT.TPolyMarker(len(found_peaks))
+            new_pm.SetMarkerStyle(23)
+            new_pm.SetMarkerColor(ROOT.kRed)
+            new_pm.SetMarkerSize(1.3)
+            for i, (loc, y_val) in enumerate(found_peaks):
+                new_pm.SetPoint(i, loc, y_val)
+                
+            self.spectrum.GetListOfFunctions().Add(new_pm)
+            self._poly_marker = new_pm 
+            new_pm.Draw()
+            self._peak_canvas.Update()
+        
+        # --- 5. Prepare fit windows for the valid peaks ---
+        found_locs = [p[0] for p in found_peaks]
+        expected_width_x = window_width if window_width is not None else (5.0 * expected_peak_width)
         
         for loc in found_locs:
-            self.peaks_to_fit.append((loc, loc - actual_width, loc + actual_width))
+            self.peaks_to_fit.append((loc, loc - expected_width_x, loc + expected_width_x))
             
         return self.peaks_to_fit
 
