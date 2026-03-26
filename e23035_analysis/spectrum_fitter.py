@@ -18,13 +18,12 @@ class spectrum_fitter:
          #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
 
-    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, max_peaks=1000, window_width=None, required_significance=3.0, plot=True):
+    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, required_significance=3.0, plot=True):
         '''
         Finds peaks by identifying all local maxima and filtering them based on statistical significance.
         This method avoids a global threshold, making it suitable for spectra with peaks of varying amplitudes.
         
         expected_peak_width: expected width of the peaks (in x-axis units).
-        max_peaks: absolute maximum number of peaks to allow.
         window_width: +/- range (in x-axis units) around the peak for the fit window. If None, defaults to 5 * expected_peak_width.
         required_significance: The minimum significance (in sigma) for a local maximum to be considered a peak.
         plot: If True, draws a TPolyMarker (stars) on the spectrum at the found peak locations.
@@ -84,10 +83,6 @@ class spectrum_fitter:
             if sig >= required_significance:
                 y_val = self.spectrum.GetBinContent(self.spectrum.FindBin(loc))
                 valid_peaks.append((loc, y_val))
-                
-            # Stop if we hit the max requested peaks
-            if len(valid_peaks) >= max_peaks:
-                break
         
         found_peaks = valid_peaks
             
