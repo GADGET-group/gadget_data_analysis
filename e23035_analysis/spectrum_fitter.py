@@ -1,4 +1,6 @@
 import ROOT
+import numpy as np
+from tqdm import tqdm
 
 from e23035_analysis import fitting_tools
 
@@ -17,6 +19,20 @@ class spectrum_fitter:
 
          #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
+
+    def get_peak_index(self, peak_energy, etol=1):
+        '''
+        Gets index of peak with specified peak energy, if a peak exists within etol of this value
+        Raises value error if more than one peak exists, or if no peaks exist.
+        '''
+        peak_locs = np.array(self.peaks_to_fit)[:,0]
+        i = np.where(np.abs(peak_locs - peak_energy) < etol)[0]
+        if len(i) == 0:
+            raise ValueError('no peaks found')
+        elif len(i) > 1:
+            raise ValueError('more than one peak found')
+        else:
+            return i[0]
 
     def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, required_significance=3.0, plot=True):
         '''
@@ -94,12 +110,24 @@ class spectrum_fitter:
         
         found_peaks = valid_peaks
             
-        # --- 4. Update the TPolyMarker for visualization ---
+        # --- 4. Prepare fit windows for the valid peaks ---
+        found_locs = [p[0] for p in found_peaks]
+        expected_width_x = window_width if window_width is not None else (5.0 * expected_peak_width)
+        
+        for loc in found_locs:
+            self.peaks_to_fit.append((loc, loc - expected_width_x, loc + expected_width_x))
+            
+        if plot:
+            self.show_peak_locations()
+            
+        return self.peaks_to_fit
+
+    def show_peak_locations(self):
         pm = self.spectrum.GetListOfFunctions().FindObject("TPolyMarker")
         if pm:
             self.spectrum.GetListOfFunctions().Remove(pm)
             
-        if plot and len(found_peaks) > 0:
+        if len(self.peaks_to_fit) > 0:
             if not hasattr(self, '_peak_canvas') or not self._peak_canvas:
                 ROOT.gROOT.SetBatch(False) 
                 self._peak_canvas = ROOT.TCanvas(f"c_peaks_{id(self)}", f"Peak Search: {self.spectrum.GetName()}", 1000, 600)
@@ -108,26 +136,20 @@ class spectrum_fitter:
             self.spectrum.SetStats(0)
             self.spectrum.Draw("HIST") 
             
-            new_pm = ROOT.TPolyMarker(len(found_peaks))
+            new_pm = ROOT.TPolyMarker(len(self.peaks_to_fit))
             new_pm.SetMarkerStyle(23)
             new_pm.SetMarkerColor(ROOT.kRed)
             new_pm.SetMarkerSize(1.3)
-            for i, (loc, y_val) in enumerate(found_peaks):
+            for i, peak_info in enumerate(self.peaks_to_fit):
+                loc = peak_info[0]
+                y_val = self.spectrum.GetBinContent(self.spectrum.FindBin(loc))
                 new_pm.SetPoint(i, loc, y_val)
                 
             self.spectrum.GetListOfFunctions().Add(new_pm)
             self._poly_marker = new_pm 
             new_pm.Draw()
+            self._peak_canvas.SetLogy(1)
             self._peak_canvas.Update()
-        
-        # --- 5. Prepare fit windows for the valid peaks ---
-        found_locs = [p[0] for p in found_peaks]
-        expected_width_x = window_width if window_width is not None else (5.0 * expected_peak_width)
-        
-        for loc in found_locs:
-            self.peaks_to_fit.append((loc, loc - expected_width_x, loc + expected_width_x))
-            
-        return self.peaks_to_fit
 
     def fit_peaks(self):
         '''
@@ -136,7 +158,7 @@ class spectrum_fitter:
         original_batch_state = ROOT.gROOT.IsBatch()
         ROOT.gROOT.SetBatch(True)
         
-        for loc_guess, window_start, window_end in self.peaks_to_fit:
+        for loc_guess, window_start, window_end in tqdm(self.peaks_to_fit):
             # Define a fit window around the guess (e.g., +/- 2% of energy)
             fit_range = (window_start, window_end)
             location_wiggle = (window_end - window_start) / 2.0
@@ -166,6 +188,33 @@ class spectrum_fitter:
             self.fit_results.append(res_dict)
             
         ROOT.gROOT.SetBatch(original_batch_state)
+
+    def get_fit_param(self, param_name):
+        '''
+        Returns (param value array, param error array) containing values for all peaks
+        '''
+        vals = []
+        errs = []
+        for res in self.fit_results:
+            fit_res = res['fit_res']
+            f_to_fit = res['f_to_fit']
+            found = False
+            for i in range(f_to_fit.GetNpar()):
+                if f_to_fit.GetParName(i) == param_name:
+                    vals.append(fit_res.Parameter(i))
+                    errs.append(fit_res.ParError(i))
+                    found = True
+                    break
+            if not found:
+                raise ValueError('invalid parameter: %s'%param_name)
+        return np.array(vals), np.array(errs)
+
+
+    def get_fit_probs(self):
+        to_return = []
+        for res in self.fit_results:
+            to_return.append(res['fit_res'].Prob())
+        return to_return
 
     def show_fit_results(self, peak_index):
         if 0 <= peak_index < len(self.fit_results):

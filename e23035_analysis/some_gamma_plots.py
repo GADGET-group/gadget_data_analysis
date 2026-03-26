@@ -78,11 +78,18 @@ plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist
 canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(plot_hist_dic, 'gamma spectrum from 60Ga runs', "keV", "counts/1 keV")
 canvas.SetLogy(1)
 
-f = spectrum_fitter(adj_ab_hist, 'gaus')
-f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
-for i in range(len(f.peaks_to_fit)):
-    f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)
+f = spectrum_fitter(adj_ab_ss_hist, 'emg')
+# f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
+# for i in range(len(f.peaks_to_fit)):
+#     f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)
+f.find_peaks()
 f.fit_peaks()
+f.show_peak_locations()
+mu, mu_err = f.get_fit_param('mu')
+sigma, sigma_err = f.get_fit_param('sigma')
+tau, tau_err = f.get_fit_param('tau')
+probs = f.get_fit_probs()
+
 
 
 #timing_hist = degai.get_adjacent_timing_spectrum(126, degai.get_adjacency_dict(180), (1500, 0, 15000))

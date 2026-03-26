@@ -20,7 +20,7 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
         function_string (str): The ROOT TF1 string (e.g., '[0] + [1]*x + [2]*exp(-0.5*((x-[3])/[4])^2)').
         initial_values (list): Initial guesses for parameters [val0, val1, ...].
         bounds (list of tuples): Limits for each parameter [(min0, max0), (min1, max1), ...].
-        fit_range (tuple): The (x_min, x_max) range to perform the fit.
+        fit_range (tuple): The (x_min, x_max) range to perform the fit. Will be snapped to nearest bin edges in passed in histogram to preserve binning.
         names (list of str, optional): Names for each parameter. Defaults to None (p0, p1, ...).
     """
     # 1. Unique ID & Setup
