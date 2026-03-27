@@ -62,12 +62,15 @@ addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1)
 # if True:
 gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window, True)#adj_dict
 cspec = ROOT.TCanvas()
-gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1024, 2)
-gspec.SetLineColor(ROOT.kRed)
-gspec.Draw()
-gspec2 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1141, 2)
-gspec2.SetLineColor(ROOT.kBlue)
-gspec2.Draw('SAME')
+# gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1024, 2)
+# gspec.SetLineColor(ROOT.kRed)
+# gspec.Draw()
+# gspec2 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1141, 2)
+# gspec2.SetLineColor(ROOT.kBlue)
+# gspec2.Draw('SAME')
+no_bg_sub_spec = degai.get_gated_projection(gg_hist, 1003.6, 2)
+no_bg_sub_spec.SetLineColor(ROOT.kBlue)
+no_bg_sub_spec.Draw()
 gspec3 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1265, 2)
 gspec3.SetLineColor(ROOT.kGreen)
 gspec3.Draw('SAME')
@@ -77,18 +80,6 @@ plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist
 #                    'adj addback w/ 1ns event window':adj_addback_1ns_build_window}
 canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(plot_hist_dic, 'gamma spectrum from 60Ga runs', "keV", "counts/1 keV")
 canvas.SetLogy(1)
-
-f = spectrum_fitter(adj_ab_ss_hist, 'emg')
-# f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
-# for i in range(len(f.peaks_to_fit)):
-#     f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)
-f.find_peaks()
-f.fit_peaks()
-f.show_peak_locations()
-mu, mu_err = f.get_fit_param('mu')
-sigma, sigma_err = f.get_fit_param('sigma')
-tau, tau_err = f.get_fit_param('tau')
-probs = f.get_fit_probs()
 
 
 

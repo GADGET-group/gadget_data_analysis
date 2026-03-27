@@ -34,7 +34,7 @@ class spectrum_fitter:
         else:
             return i[0]
 
-    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, required_significance=3.0, plot=True):
+    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, required_significance=3.0):
         '''
         Finds peaks by identifying all local maxima and filtering them based on statistical significance.
         This method avoids a global threshold, making it suitable for spectra with peaks of varying amplitudes.
@@ -52,7 +52,7 @@ class spectrum_fitter:
         expected_peak_width_bins = max(1, int(expected_peak_width / bin_width))
             
         spec_bg = ROOT.TSpectrum()
-        bg_hist = spec_bg.Background(self.spectrum, int(2 * expected_peak_width_bins), "goff")
+        bg_hist = spec_bg.Background(self.spectrum, 20, "goff")
         bg_hist.SetDirectory(0)
         self.bg_hist = bg_hist # Keep alive in memory
 
@@ -117,37 +117,48 @@ class spectrum_fitter:
         for loc in found_locs:
             self.peaks_to_fit.append((loc, loc - expected_width_x, loc + expected_width_x))
             
-        if plot:
-            self.show_peak_locations()
-            
         return self.peaks_to_fit
 
-    def show_peak_locations(self):
-        pm = self.spectrum.GetListOfFunctions().FindObject("TPolyMarker")
-        if pm:
-            self.spectrum.GetListOfFunctions().Remove(pm)
+    def show_peak_locations(self, plot_background=False):
+        # Remove any existing TPolyMarker from the original spectrum
+        # This is important because TSpectrum.Search() adds it by default.
+        pm_orig = self.spectrum.GetListOfFunctions().FindObject("TPolyMarker")
+        if pm_orig:
+            self.spectrum.GetListOfFunctions().Remove(pm_orig)
             
         if len(self.peaks_to_fit) > 0:
             if not hasattr(self, '_peak_canvas') or not self._peak_canvas:
                 ROOT.gROOT.SetBatch(False) 
                 self._peak_canvas = ROOT.TCanvas(f"c_peaks_{id(self)}", f"Peak Search: {self.spectrum.GetName()}", 1000, 600)
             
+            # Clone the spectrum to avoid adding markers to the original histogram
+            display_spectrum = self.spectrum.Clone(f"{self.spectrum.GetName()}_display_{id(self)}")
+            display_spectrum.SetDirectory(0) # Detach from ROOT's memory management
+            self._display_spectrum = display_spectrum # Keep a reference to prevent GC
+
             self._peak_canvas.cd()
-            self.spectrum.SetStats(0)
-            self.spectrum.Draw("HIST") 
+            self._display_spectrum.SetStats(0)
+            self._display_spectrum.Draw("HIST") 
+
+            if plot_background and hasattr(self, 'bg_hist') and self.bg_hist:
+                self.bg_hist.SetLineColor(ROOT.kGreen+2)
+                self.bg_hist.SetLineStyle(2) # Dashed line
+                self.bg_hist.SetLineWidth(2)
+                self.bg_hist.Draw("HIST SAME")
             
-            new_pm = ROOT.TPolyMarker(len(self.peaks_to_fit))
+            new_pm = ROOT.TPolyMarker(len(self.peaks_to_fit)) # Create a new TPolyMarker
             new_pm.SetMarkerStyle(23)
             new_pm.SetMarkerColor(ROOT.kRed)
             new_pm.SetMarkerSize(1.3)
             for i, peak_info in enumerate(self.peaks_to_fit):
                 loc = peak_info[0]
-                y_val = self.spectrum.GetBinContent(self.spectrum.FindBin(loc))
+                # Get Y-value from the cloned spectrum
+                y_val = self._display_spectrum.GetBinContent(self._display_spectrum.FindBin(loc))
                 new_pm.SetPoint(i, loc, y_val)
                 
-            self.spectrum.GetListOfFunctions().Add(new_pm)
+            self._display_spectrum.GetListOfFunctions().Add(new_pm) # Add to the cloned spectrum
             self._poly_marker = new_pm 
-            new_pm.Draw()
+            new_pm.Draw("SAME")
             self._peak_canvas.SetLogy(1)
             self._peak_canvas.Update()
 
