@@ -449,3 +449,111 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
         peaks.SetParameter(i, fit_params[i])
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+
+def fit_gaussian_w_bg_shift_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
+    """
+    Fits a standard Gaussian + a step-like background shift using the fit_func engine.
+    """
+    if param_bounds is None:
+        param_bounds = {}
+    e_low, e_high = fit_window
+
+    # 1. Construct the Mathematical Model
+    # [0]: Constant Background
+    # [1]: Amplitude (Area)
+    # [2]: Mean (mu)
+    # [3]: Sigma (sigma)
+    # [4]: shift in background (right - left), (bg_shift)
+    
+    bg_string = "[0] + 0.5*[4]*(1 + TMath::Erf((x-[2])/(1.41421356*[3])))"
+    
+    # Gaussian normalized to area [1]
+    # Using GetBinWidth(1) instead of 0, as 0 is technically the underflow bin in ROOT
+    bin_width = spectrum.GetBinWidth(1) 
+    
+    # 2.50662827 is sqrt(2*pi)
+    gaus_string = f"([1] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[2])/[3]) * ((x-[2])/[3]))"
+    function_string = f"{bg_string} + {gaus_string}"
+
+    # 2. Setup Parameters and Initial Guesses
+    sigma_guess = get_sigma(data_source, e_guess)
+    
+    spectrum.GetXaxis().SetRangeUser(*fit_window)
+
+    bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    
+    # Calculate max and min within the zoomed fit window
+    max_bin = spectrum.GetMaximumBin()
+    min_bin = spectrum.GetMinimumBin()
+    max_val = spectrum.GetBinContent(max_bin)
+    min_val = spectrum.GetBinContent(min_bin)
+    
+    # Estimate Area: (Max Height - Background) * Sigma * sqrt(2*pi) / bin_width
+    max_height = max_val - bg_guess
+    A_guess = max_height * sigma_guess * 2.50662827 / bin_width
+    A_guess = max(A_guess, 1.0) # Prevent 0 or negative area guesses
+    
+    # The absolute maximum physical shift is the difference between the max and min bins
+    bg_shift_limit = max_val - min_val
+    
+    if data_source == 'gamma_adc':
+        sigma_bounds = (1, 20)
+        A_bounds = (1, np.inf)
+    else:
+        # Fallback bounds if other data sources are passed
+        sigma_bounds = (0.1, 100)
+        A_bounds = (0, np.inf)
+
+    spectrum.GetXaxis().UnZoom()
+
+    initial_values = [
+        bg_guess,      # p0: bg_const
+        A_guess,       # p1: amplitude
+        e_guess,       # p2: mu
+        sigma_guess,   # p3: sigma
+        0.0            # p4: bg_shift
+    ]
+
+    bg_bounds = param_bounds.get('bg_const', (0, np.inf))
+    A_bounds = param_bounds.get('amplitude', A_bounds)
+    mu_bounds = param_bounds.get('mu', (e_low, e_high))
+    sigma_bounds = param_bounds.get('sigma', sigma_bounds)
+    bg_shift_bounds = param_bounds.get('bg_shift', (-bg_shift_limit, bg_shift_limit))
+
+    bounds = [
+        bg_bounds,       # p0: bg_const
+        A_bounds,        # p1: amplitude
+        mu_bounds,       # p2: mu bounds
+        sigma_bounds,    # p3: sigma 
+        bg_shift_bounds  # p4: bg_shift
+    ]
+
+    names = ["bg_const", "amplitude", "mu", "sigma", "bg_shift"]
+
+    # 3. Call our generalized fit engine
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+        histogram=spectrum, 
+        function_string=function_string, 
+        initial_values=initial_values, 
+        bounds=bounds, 
+        fit_range=(e_low, e_high), 
+        names=names
+    )
+
+    # 4. Reconstruct individual TF1 components for visualization/return
+    comp_id = uuid.uuid4().hex[:6]
+    fit_params = np.array(fit_res.Parameters())
+    
+    # Background component (depends on 0, 2, 3, and 4)
+    background = ROOT.TF1(f'bg_{comp_id}', bg_string, e_low, e_high)
+    background.SetParameter(0, fit_params[0])
+    background.SetParameter(2, fit_params[2]) # Mu is needed to center the step
+    background.SetParameter(3, fit_params[3]) # Sigma is needed to angle the step
+    background.SetParameter(4, fit_params[4])
+    
+    # Gaussian Peak component (parameters 1 through 3)
+    peaks = ROOT.TF1(f'gaus_{comp_id}', gaus_string, e_low, e_high)
+    for i in range(1, 4):
+        peaks.SetParameter(i, fit_params[i])
+        
+    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit

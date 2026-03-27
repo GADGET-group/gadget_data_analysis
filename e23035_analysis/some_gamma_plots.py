@@ -58,9 +58,10 @@ print('getting sum histogram')
 
 #this should be equivalent to sum spectrum
 addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh)
+sum_ss_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh, True)
 
 # if True:
-gg_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window, True)#adj_dict
+gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window, True)#adj_dict
 cspec = ROOT.TCanvas()
 # gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1024, 2)
 # gspec.SetLineColor(ROOT.kRed)
@@ -75,7 +76,7 @@ gspec3 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1265, 2)
 gspec3.SetLineColor(ROOT.kGreen)
 gspec3.Draw('SAME')
 
-plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist,  '1deg addback':addback_1deg_hist, 'ss':adj_ab_ss_hist} #\'summed spectrum':sum_hist,
+plot_hist_dic = {'adjacent addback':adj_ab_hist, 'clover addback':clover_ab_hist,  '1deg addback':addback_1deg_hist, 'adjacent sliding scale':adj_ab_ss_hist, 'sum sliding scale':sum_ss_hist} #\'summed spectrum':sum_hist,
 #, , \
 #                    'adj addback w/ 1ns event window':adj_addback_1ns_build_window}
 canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(plot_hist_dic, 'gamma spectrum from 60Ga runs', "keV", "counts/1 keV")

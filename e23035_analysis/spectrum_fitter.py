@@ -34,14 +34,13 @@ class spectrum_fitter:
         else:
             return i[0]
 
-    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, required_significance=3.0):
+    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0):
         '''
         Finds peaks by identifying all local maxima and filtering them based on statistical significance.
-        This method avoids a global threshold, making it suitable for spectra with peaks of varying amplitudes.
         
         expected_peak_width: expected width of the peaks (in x-axis units).
         window_width: +/- range (in x-axis units) around the peak for the fit window. If None, defaults to 5 * expected_peak_width.
-        required_significance: The minimum significance (in sigma) for a local maximum to be considered a peak.
+        init_sig: The minimum significance (in sigma) for a local maximum to be considered a peak candidate.
         plot: If True, draws a TPolyMarker (stars) on the spectrum at the found peak locations.
         '''
         if reset_peaks:
@@ -89,7 +88,7 @@ class spectrum_fitter:
             bg_val = bg_hist.GetBinContent(i)
             signal_val = self.spectrum.GetBinContent(i) - bg_val
             err_val = self.spectrum.GetBinError(i)
-            if signal_val/err_val > required_significance:
+            if signal_val/err_val > init_sig:
                 y_val = self.spectrum.GetBinContent(self.spectrum.FindBin(loc))
                 valid_peaks.append((loc, y_val))
 
