@@ -26,12 +26,30 @@ def get_calibration_result(ddas_run, calibration_name, branch_name):
 
 def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
     calibration_results = get_calibration_result(ddas_run, calibration_name, branch_name)
-    slope, offset = calibration_results['slope'], calibration_results['offset']
-    return f'({slope}*{branch_name} + {offset})'
+    
+    # New format with polynomial parameters
+    if 'poly_params' in calibration_results:
+        params = calibration_results['poly_params']
+        cal_str = ""
+        for i, p in enumerate(params):
+            if i == 0:
+                cal_str += f"({p})"
+            else:
+                term = f"{p}"
+                for _ in range(i):
+                    term += f"*{branch_name}"
+                cal_str += f" + ({term})"
+        return f"({cal_str})"
+    # Old format for backward compatibility
+    elif 'slope' in calibration_results:
+        slope, offset = calibration_results['slope'], calibration_results['offset']
+        return f'({slope}*{branch_name} + {offset})'
+    else:
+        raise ValueError(f"Calibration file for run {ddas_run}, cal '{calibration_name}', branch '{branch_name}' has an unknown format.")
 
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
                             selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800,
-                            normalization_dict=None, min_counts=30, peak_model='gaus'):
+                            normalization_dict=None, min_counts=30, peak_model='gaus', poly_degree=1):
     '''
     Fit peaks to get energy calibration
 
@@ -47,6 +65,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     normalization_dict: Used to choose if time dependent histogram should be normalized on a per slice basis, for beam products or daughters ith
                         short decay timescales. Use "slice" for this case, or "total" for room background lines which should have truely time
                         independent rates.
+    poly_degree: The degree of the polynomial to use for the energy calibration fit. Defaults to 1 (linear).
     peak_model: gaus for gaussian, or emg for exponentially modified gaussian
     '''
     if normalization_dict is None:
@@ -105,7 +124,6 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     # Fit peaks
     for true_energy, true_energy_err, search_window, fit_window, rebin in peaks:
         
-        # --- FIX 3: Clone the histogram so rebinning doesn't ruin the next peak! ---
         hist_for_this_peak = hist_to_fit.Clone(f"hist_temp_{true_energy}")
         
         if rebin != 1:
@@ -113,12 +131,10 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
         hist_for_this_peak.GetXaxis().SetRangeUser(*search_window)
         
-        # --- FIX 2: Calculate counts strictly inside the zoomed window ---
         start_bin = hist_for_this_peak.GetXaxis().FindBin(search_window[0])
         stop_bin = hist_for_this_peak.GetXaxis().FindBin(search_window[1])
         counts_in_window = hist_for_this_peak.Integral(start_bin, stop_bin)
         
-        # --- FIX 1: Use continue instead of break ---
         if counts_in_window < min_counts:
             print(f"[{branch_name}] WARNING: Skipping {true_energy} keV peak. Only {counts_in_window} counts.")
             hist_for_this_peak.SetDirectory(0) # Memory cleanup
@@ -383,20 +399,16 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         graph.GetYaxis().SetLabelSize(0.04)
         graph.GetYaxis().SetTitleOffset(0.9)
         
-        cal_fit = ROOT.TF1("cal_fit", "pol1", min(valid_peak_locs)*0.8, max(valid_peak_locs)*1.2)
+        cal_fit = ROOT.TF1("cal_fit", f"pol{poly_degree}", min(valid_peak_locs)*0.8, max(valid_peak_locs)*1.2)
         
-        # Give MINUIT a basic slope guess to prevent Effective Variance 0-division
-        guess_slope = (valid_true_Es[-1] - valid_true_Es[0]) / (valid_peak_locs[-1] - valid_peak_locs[0])
-        cal_fit.SetParameters(0.0, guess_slope)
+        if poly_degree == 1 and num_valid_peaks > 1:
+            # Give MINUIT a basic slope guess to prevent Effective Variance 0-division
+            guess_slope = (valid_true_Es[-1] - valid_true_Es[0]) / (valid_peak_locs[-1] - valid_peak_locs[0])
+            cal_fit.SetParameters(0.0, guess_slope)
 
         cal_fit_res = graph.Fit(cal_fit, "SQ")
         
-        offset = cal_fit.GetParameter(0)
-        slope = cal_fit.GetParameter(1)
-        
-        var_offset = cal_fit_res.CovMatrix(0, 0)
-        var_slope = cal_fit_res.CovMatrix(1, 1)
-        cov_offset_slope = cal_fit_res.CovMatrix(0, 1) 
+        poly_params = [cal_fit.GetParameter(i) for i in range(poly_degree + 1)]
         
         ROOT.gStyle.SetOptFit(1111)
         pad1.Update() # Force the stat box to draw on pad1
@@ -412,13 +424,14 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         # Calculate residuals: True Energy - Fit(ADC)
         res_y = [valid_true_Es[i] - cal_fit.Eval(valid_peak_locs[i]) for i in range(num_valid_peaks)]
         
-        effective_err = np.sqrt(safe_true_E_errs**2 + (slope*np.array(valid_peak_errs))**2) # show error used in minimization of chi^2
+        # Propagate error from ADC uncertainty through the polynomial fit for residuals plot
+        derivs = np.array([cal_fit.Derivative(x) for x in valid_peak_locs])
+        effective_err = np.sqrt(safe_true_E_errs**2 + (derivs * np.array(valid_peak_errs))**2)
         print('effective chi^2 ', np.sum((np.array(res_y)/effective_err)**2))
         graph_res = ROOT.TGraphErrors(
             num_valid_peaks,
             np.array(valid_peak_locs, dtype=np.float64),
             np.array(res_y, dtype=np.float64),
-            #np.array(valid_peak_errs, dtype=np.float64),
             np.zeros(len(valid_peak_errs)),
             effective_err
         )
@@ -448,21 +461,28 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         cal_canvas.Update()
         cal_canvas.SaveAs(str(cal_dir / "calibration_curve.pdf"))
         
-        p_value = cal_fit_res.Prob() if num_valid_peaks > 2 else 1.0
+        p_value = cal_fit_res.Prob() if num_valid_peaks > (poly_degree + 1) else 1.0
+
+        cov_matrix_dict = {}
+        for i in range(poly_degree + 1):
+            for j in range(i, poly_degree + 1):
+                cov_matrix_dict[f'cov_p{i}_p{j}'] = cal_fit_res.CovMatrix(i, j)
 
         calibration_results = {
-            'slope': slope, 
-            'offset': offset,
-            'cov_matrix': {
-                'var_offset': var_offset,
-                'var_slope': var_slope,
-                'cov_offset_slope': cov_offset_slope
-            },
+            'poly_params': poly_params,
+            'poly_degree': poly_degree,
+            'cov_matrix': cov_matrix_dict,
             'cal_p_value': p_value,
             'emg_fit_parameters': emg_fit_parameters,
             'num_peaks_used': num_valid_peaks
         }
-        print(f"[{calibration_name}] Linear Cal: slope={slope:.4f}, offset={offset:.4f}")
+        
+        # For backward compatibility of NEWLY created linear files
+        if poly_degree == 1:
+            calibration_results['offset'] = poly_params[0]
+            calibration_results['slope'] = poly_params[1]
+
+        print(f"[{calibration_name}] {poly_degree}-degree Cal: params={poly_params}")
         
     # Save parameters to pickle file
     pkl_path = cal_dir / f"{calibration_name}.pkl"

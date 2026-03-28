@@ -10,7 +10,7 @@ class spectrum_fitter:
     '''
     def __init__(self, spectrum:ROOT.TH1D, peak_model:str):
         '''
-        peak_model: gaus for gaussian, or emg for exponentially modified gaussian
+        peak_model: gaus for gaussian, or emg for exponentially modified gaussian, bg_shift_gaus for gaussian with different background to the left and right
         '''
         self.spectrum = spectrum
         #peak location guesses should contain a list of (peak location guess, lower window, upper window)
@@ -19,6 +19,8 @@ class spectrum_fitter:
 
          #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
+
+        self.param_bound_functions = {} #parameter bounds as a function of energy. May be used to fix sigma, etc
 
     def get_peak_index(self, peak_energy, etol=1):
         '''
@@ -34,14 +36,14 @@ class spectrum_fitter:
         else:
             return i[0]
 
-    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0):
+    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0, fit_sig=0):
         '''
         Finds peaks by identifying all local maxima and filtering them based on statistical significance.
         
         expected_peak_width: expected width of the peaks (in x-axis units).
         window_width: +/- range (in x-axis units) around the peak for the fit window. If None, defaults to 5 * expected_peak_width.
-        init_sig: The minimum significance (in sigma) for a local maximum to be considered a peak candidate.
-        plot: If True, draws a TPolyMarker (stars) on the spectrum at the found peak locations.
+        init_sig: The minimum significance (in sigma) for a local maximum to be considered a peak candidate. 
+        fit_sig: If non-zero, each peak candidate will be fit, and included only if the amplitude/(amplitude uncertainty) > fit_sig
         '''
         if reset_peaks:
             self.peaks_to_fit = []
@@ -115,6 +117,22 @@ class spectrum_fitter:
         
         for loc in found_locs:
             self.peaks_to_fit.append((loc, loc - expected_width_x, loc + expected_width_x))
+
+        if fit_sig > 0:
+            self.fit_peaks()
+            
+            # Filter peaks based on significance after fitting
+            filtered_peaks_to_fit = []
+            filtered_fit_results = []
+            for i, res_dict in enumerate(self.fit_results):
+                amplitude_val, amplitude_err_val = self.get_fit_param_for_peak(i, 'amplitude')
+                significance = amplitude_val / amplitude_err_val if amplitude_err_val > 0 else 0
+                if significance >= fit_sig:
+                    filtered_peaks_to_fit.append(self.peaks_to_fit[i])
+                    filtered_fit_results.append(res_dict)
+            self.peaks_to_fit = filtered_peaks_to_fit
+            self.fit_results = filtered_fit_results
+
             
         return self.peaks_to_fit
 
@@ -165,6 +183,7 @@ class spectrum_fitter:
         '''
         Fit each peak from peak_loc_guesses, and store the results
         '''
+        self.fit_results = []
         original_batch_state = ROOT.gROOT.IsBatch()
         ROOT.gROOT.SetBatch(True)
         
@@ -173,14 +192,23 @@ class spectrum_fitter:
             fit_range = (window_start, window_end)
             location_wiggle = (window_end - window_start) / 2.0
 
+            param_bounds = {}
+            if 'mu' not in self.param_bound_functions:
+                param_bounds['mu'] = (loc_guess - location_wiggle, loc_guess + location_wiggle)
+            for p in self.param_bound_functions:
+                param_bounds[p] = self.param_bound_functions[p](loc_guess)
+
             if self.peak_model.lower() == 'gaus':
                 res = fitting_tools.fit_gaussian_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds={'mu': (loc_guess - location_wiggle, loc_guess + location_wiggle)}
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds
                 )
             elif self.peak_model.lower() == 'emg':
                 res = fitting_tools.fit_emg_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds={'mu': (loc_guess - location_wiggle, loc_guess + location_wiggle)}
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds
                 )
+            elif self.peak_model.lower() == 'bg_shift_gaus':
+                res = fitting_tools.fit_gaussian_w_bg_shift_peak(self.spectrum, 'gamma_adc', loc_guess, fit_range, 
+                                    param_bounds=param_bounds)
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")
 
@@ -219,6 +247,22 @@ class spectrum_fitter:
                 raise ValueError('invalid parameter: %s'%param_name)
         return np.array(vals), np.array(errs)
 
+    def get_fit_param_for_peak(self, peak_index, param_name):
+        '''
+        Returns (param value, param error) for a specific peak.
+        '''
+        if not (0 <= peak_index < len(self.fit_results)):
+            raise IndexError(f"Peak index {peak_index} is out of bounds.")
+
+        res = self.fit_results[peak_index]
+        fit_res = res['fit_res']
+        f_to_fit = res['f_to_fit']
+
+        for i in range(f_to_fit.GetNpar()):
+            if f_to_fit.GetParName(i) == param_name:
+                return fit_res.Parameter(i), fit_res.ParError(i)
+        
+        raise ValueError(f"Invalid parameter: {param_name} for peak {peak_index}")
 
     def get_fit_probs(self):
         to_return = []

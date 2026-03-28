@@ -204,12 +204,20 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
             if os.path.exists(cache_file_path): os.remove(cache_file_path)
 
     # Load energy calibrations
-    slopes, offsets = [], []
+    poly_params_list = []
+    max_degree = 1
     for s in clover_str_list:
         res = energy_calibration_tools.get_calibration_result(ddas_run, cal_name, s+'_c')
-        slopes.append(res['slope'])
-        offsets.append(res['offset'])
-    slopes, offsets = np.array(slopes), np.array(offsets)
+        if 'poly_params' in res:
+            params = res['poly_params']
+            max_degree = max(max_degree, len(params) - 1)
+            poly_params_list.append(params)
+        else:
+            poly_params_list.append([res.get('offset', 0.0), res.get('slope', 1.0)])
+            
+    poly_matrix = np.zeros((len(clover_str_list), max_degree + 1))
+    for i, params in enumerate(poly_params_list):
+        poly_matrix[i, :len(params)] = params
 
     # Set up input file for reading
     infile = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(ddas_run))
@@ -241,7 +249,15 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
         
         energies = np.zeros(len(counts))
         has_counts = counts > 0
-        energies[has_counts] = counts[has_counts]*slopes[has_counts] + offsets[has_counts]
+        
+        if np.any(has_counts):
+            valid_counts = counts[has_counts].astype(np.float64) # Force float64 to avoid overflow when squaring large ADCs
+            valid_poly = poly_matrix[has_counts]
+            calculated_energies = np.zeros_like(valid_counts, dtype=np.float64)
+            for deg in range(poly_matrix.shape[1]):
+                calculated_energies += valid_poly[:, deg] * (valid_counts ** deg)
+            energies[has_counts] = calculated_energies
+            
         if sliding_scale:
             energies[has_counts] += np.random.uniform(-0.5, 0.5, size=len(energies[has_counts]))
 

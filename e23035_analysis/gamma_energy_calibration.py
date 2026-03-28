@@ -22,20 +22,21 @@ event_build_window = 500 #ns
 
 # from e23035_analysis.gamma_energy_calibration import *
 
-adj_dict = degai.get_adjacency_dict(30)
+adj_dict = degai.get_adjacency_dict(1) #use sum spectrum
 gamma_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh, True)
 
-f = spectrum_fitter(gamma_hist, 'gaus')
+f = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
 # f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
 # for i in range(len(f.peaks_to_fit)):
 #     f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)
 
 peaks = [('60Zn', 670.3, 0.3),
-         ('59Zn', 491.4, 0.1), ('59Zn', 914.2, 0.1),
+         ('59Zn', 491.4, 0.1), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
          ('60Ga', 1003.7, 0.2), ('60Ga', 1554.9, 0.6), ('60Ga', 2293.0, 1.0), ('60Ga', 2559.0, 0.8), ('60Ga', 3848.3, 0.7)]
 #f.find_peaks()
 for i in range(len(peaks)):
-    f.peaks_to_fit.append((peaks[i][1],peaks[i][1]*0.99, peaks[i][1]*1.01))
+    f.peaks_to_fit.append((peaks[i][1],peaks[i][1]-10, peaks[i][1]+10))
+f.param_bound_functions['sigma']=lambda E: (0.1, 10)
 f.fit_peaks()
 #f.show_peak_locations()
 mu, mu_err = f.get_fit_param('mu')
@@ -45,7 +46,16 @@ A, A_err = f.get_fit_param('amplitude')
 probs = f.get_fit_probs()
 
 #(label, energy, energy uncertainty)
+# graph = ROOT.TGraphErrors(
+#     len(peaks), 
+#     np.array(mu, dtype=np.float64), 
+#     np.array(sigma, dtype=np.float64), 
+#     np.array(mu_err, dtype=np.float64), 
+#     sigma_err
+# )
 
+# graph.SetMarkerStyle(20)
+# graph.Draw()
 
 #timing_hist = degai.get_adjacent_timing_spectrum(126, degai.get_adjacency_dict(180), (1500, 0, 15000))
 if False:
