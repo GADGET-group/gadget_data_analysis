@@ -23,7 +23,8 @@ event_build_window = 500 #ns
 # from e23035_analysis.gamma_energy_calibration import *
 
 adj_dict = degai.get_adjacency_dict(1) #use sum spectrum
-gamma_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh, True)
+cal_name = 'gm2'
+gamma_hist = degai.get_addback_spectrum(runs, adj_dict, cal_name, gamma_binning, event_build_window, addback_ethresh, True)
 
 f = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
 # f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]

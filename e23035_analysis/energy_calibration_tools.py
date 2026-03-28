@@ -66,7 +66,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                         short decay timescales. Use "slice" for this case, or "total" for room background lines which should have truely time
                         independent rates.
     poly_degree: The degree of the polynomial to use for the energy calibration fit. Defaults to 1 (linear).
-    peak_model: gaus for gaussian, or emg for exponentially modified gaussian
+    peak_model: gaus for gaussian, or emg for exponentially modified gaussian, bg_shift_gaus for gaussian with different background to left and right
     '''
     if normalization_dict is None:
         normalization_dict = {}
@@ -118,7 +118,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     results_file = ROOT.TFile(str(cal_dir / f"{calibration_name}_results.root"), "RECREATE")
 
     # Initialize lists
-    true_energies, true_energy_uncertainties, peak_locations, peak_location_uncertainties = [], [], [], []
+    true_energies, true_energy_uncertainties, peak_locations, peak_location_uncertainties, amplitudes, amplitude_uncertainties = [], [], [], [], [], []
+    probs = []
     emg_fit_parameters = {} # Dictionary to store all fit parameters & p-values
 
     # Fit peaks
@@ -156,11 +157,11 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
             fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
                 hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
             )
+        elif peak_model.lower() == 'bg_shift_gaus':
+            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_w_bg_shift_peak(
+                hist_for_this_peak, data_source, location_guess, fit_range,param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)})
         else:
-            print(f"[{branch_name}] WARNING: Unknown peak_model '{peak_model}'. Defaulting to 'gaus'.")
-            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_peak(
-                hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
-            )
+            raise ValueError(f'unknown peak model {peak_model}')
         
         # Now it is safe to append the true energies!
         true_energies.append(true_energy)
@@ -189,6 +190,9 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         mu_err = fit_res.ParError(2)
         peak_locations.append(mu_val)
         peak_location_uncertainties.append(mu_err)
+        amplitudes.append(fit_res.Parameter(1))
+        amplitude_uncertainties.append(fit_res.ParError(1))
+        probs.append(fit_res.Prob())
         
         # 1D plot handling
         canvas.cd()
@@ -321,7 +325,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     # --- NEW: Filter out any fits that returned NaN or <= 0 uncertainties ---
     valid_indices = [
         i for i, err in enumerate(peak_location_uncertainties) 
-        if not np.isnan(err) and not np.isnan(peak_locations[i]) and err > 0.01
+        if not np.isnan(err) and not np.isnan(peak_locations[i]) and err > 0.01 and amplitudes[i]/amplitude_uncertainties[i]>3 and probs[i]>0.01
     ]
 
     valid_peak_locs = [peak_locations[i] for i in valid_indices]

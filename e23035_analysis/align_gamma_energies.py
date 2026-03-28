@@ -20,7 +20,7 @@ run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60
 runs = []
 for run in run_candidates:
     t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
-    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[159, 169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
+    if True: #not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[159, 169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
         #only looking at runs later than 150 since these definitely use final beam settings
         #169-173: beam disruptions, and following short runs
         #174: attenuated beam
@@ -57,9 +57,14 @@ for num in range(1, 12):
 #         true_locations[1]:{'1d':0.001, 't_indep':0.01}
 #     }
 
-true_locations = [510.99895069, 1003.72, 2614.511, 3848.3] #511, 60Ga, 208Tl, 60Ga
-true_location_uncertainties =  [16e-7, 0.2, 0.01, 0.7]
-norm_dict = {true_locations[0]:'slice', true_locations[1]: 'slice', true_locations[2]: 'slice'}
+peaks = [('511', 510.99895069, 16e-7),
+         #('60Zn', 670.3, 0.3), #uncertainty estimated by evaluators, doesn't seem to match with other data poitns
+         ('59Zn', 491.4, 0.1), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
+         ('60Ga', 1003.7, 0.2), ('60Ga', 3848.3, 0.7), #('60Ga', 1554.9, 0.6), ('60Ga', 2293.0, 1.0), ('60Ga', 2559.0, 0.8),  #these are too weak
+         ('208Tl', 2614.511, 1e-2)]
+true_locations = [peak[1] for peak in peaks]
+true_location_uncertainties =  [peak[2] for peak in peaks]
+norm_dict = {loc:'slice' for loc in true_location_uncertainties}
 pvalue_threshold_dict = {
         'cal':1e-6,
         true_locations[0]:{'1d':1e-12, 't_indep':0.01},
@@ -67,7 +72,9 @@ pvalue_threshold_dict = {
         true_locations[2]:{'1d':0.0001, 't_indep':0.01},
         true_locations[3]:{'1d':0.0001, 't_indep':0.01}
     }
-rebin_factors = [1,1,5,5]
+rebin_factors = [1 for loc in true_locations]#1,1,5,5]
+poly_degree = 2
+gm_name = f'gm{poly_degree}'
 
 def do_gain_match(ddas_run):
     '''
@@ -86,17 +93,19 @@ def do_gain_match(ddas_run):
         for i in range(len(true_locations)):
             loc_guess = (true_locations[i] - init_offset)/init_slope
             fit_window_width = 0.01*loc_guess*np.sqrt(511/true_locations[i])
-            search_window_width = 50/init_slope
+            search_window_width = 20/init_slope
             #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
-            peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess-search_window_width, loc_guess+search_window_width), (-fit_window_width, fit_window_width), rebin_factors[i]))
-        energy_calibration_tools.make_energy_calibration(ddas_run, 'gm', adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict)
+            peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess*0.99, loc_guess*1.01), \
+                           (-fit_window_width, fit_window_width), rebin_factors[i]))
+        energy_calibration_tools.make_energy_calibration(ddas_run, gm_name, adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict, 
+                                                         poly_degree=poly_degree, peak_model='bg_shift_gaus')
 
      #save histogram showing energy alignment 
     crystal_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
     canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
     ROOT.gPad.SetLogz(1)
     canvas.Update()
-    fname = f"e23035_analysis/calibrations/{ddas_run}/gm/initial_alignment.pdf"
+    fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/initial_alignment.pdf"
     canvas.Print(fname+'(')
     dE_to_plot = 100
     for loc in true_locations:
@@ -108,12 +117,12 @@ def do_gain_match(ddas_run):
             canvas.Print(fname)
 
     #save histogram showing energy alignment after gain matching
-    gm_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'cal', 'gm')
+    gm_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'cal', gm_name)
     canvas, th2 = root_vis_tools.create_2d_hist_from_dict(gm_e_hists, "with gain match applied")
     ROOT.gPad.SetLogz(1)
     
     canvas.Update()
-    fname = f"e23035_analysis/calibrations/{ddas_run}/gm/gain_match.pdf"
+    fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/gain_match.pdf"
     canvas.Print(fname+'(')
     dE_to_plot = 100
     for loc in true_locations:
@@ -199,9 +208,12 @@ def process_all():
             pbar.close()
             
     make_summary_pdf()
+
+    stability_binning = (int(7000/5), 0, 7000)
+    energy_calibration_tools.create_stability_summary(gm_name, stability_binning, 0.01, 200, runs)
     
 def make_summary_pdf():
-    energy_calibration_tools.create_calibration_summary('gm', pvalue_threshold_dict, runs)
+    energy_calibration_tools.create_calibration_summary(gm_name, pvalue_threshold_dict, runs)
 
 t_tot = 0
 for run in runs:
@@ -209,5 +221,5 @@ for run in runs:
     t_tot += t2 - t1
 print(f'total run time: {t_tot/3600} hours')
 
-stability_binning = (int(7000/5), 0, 7000)
-energy_calibration_tools.create_stability_summary('gm', stability_binning, 0.01, 200, runs)
+
+    
