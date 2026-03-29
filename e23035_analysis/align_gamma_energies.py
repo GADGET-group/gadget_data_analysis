@@ -28,6 +28,7 @@ for run in run_candidates:
         #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
+runs = e23035_runs.get_ddas_60_Ga_runs()
 print(runs)
 n_workers=min(200, len(runs))
 
@@ -208,12 +209,12 @@ def process_all():
             pbar.close()
             
     make_summary_pdf()
-
-    stability_binning = (int(7000/5), 0, 7000)
-    energy_calibration_tools.create_stability_summary(gm_name, stability_binning, 0.01, 200, runs)
     
 def make_summary_pdf():
     energy_calibration_tools.create_calibration_summary(gm_name, pvalue_threshold_dict, runs)
+
+    stability_binning = (int(7000/5), 0, 7000)
+    energy_calibration_tools.create_stability_summary(gm_name, stability_binning, 0.01, 200, runs)
 
 t_tot = 0
 for run in runs:

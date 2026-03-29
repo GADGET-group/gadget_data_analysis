@@ -60,8 +60,11 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     
     # Apply initial values, limits, and names
     for i in range(n_params):
-        f_to_fit.SetParameter(i, initial_values[i])
-        f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
+        if bounds[i][0] == bounds[i][1]:
+            f_to_fit.FixParameter(i, bounds[i][0])
+        else:
+            f_to_fit.SetParameter(i, initial_values[i])
+            f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
         
         if names:
             f_to_fit.SetParName(i, names[i])

@@ -46,20 +46,30 @@ A, A_err = f.get_fit_param('amplitude')
 #tau, tau_err = f.get_fit_param('tau')
 probs = f.get_fit_probs()
 
-#(label, energy, energy uncertainty)
-# graph = ROOT.TGraphErrors(
-#     len(peaks), 
-#     np.array(mu, dtype=np.float64), 
-#     np.array(sigma, dtype=np.float64), 
-#     np.array(mu_err, dtype=np.float64), 
-#     sigma_err
-# )
+#fit function for peak width
+f_to_fit = ROOT.TF1("f_to_fit", "[0]*sqrt(x + [1])", 0, max(mu) * 1.2)
+f_to_fit.SetParameters(0.05, 0.0) # initial guesses
 
-# graph.SetMarkerStyle(20)
-# graph.Draw()
+graph = ROOT.TGraphErrors(
+    len(mu), 
+    np.array(mu, dtype=np.float64), 
+    np.array(sigma, dtype=np.float64), 
+    np.array(mu_err, dtype=np.float64), 
+    np.array(sigma_err, dtype=np.float64)
+)
 
-#timing_hist = degai.get_adjacent_timing_spectrum(126, degai.get_adjacency_dict(180), (1500, 0, 15000))
-if False:
-    indiv_adj_dict = degai.get_adjacency_dict(1)
-    gg_hist = degai.get_addback_coincidence_spectrum(runs, indiv_adj_dict, 'gm', gamma_binning, event_build_window, 0, event_build_window)
-    gspec = degai.get_bg_subtracted_projection(gg_hist, 2614, 1, 2700, 2)
+c1 = ROOT.TCanvas("c_sigma", "Sigma vs Energy", 800, 600)
+graph.SetTitle("Peak Width vs Energy;Energy (keV);Sigma (keV)")
+graph.SetMarkerStyle(20)
+graph.Draw("AP")
+graph.Fit(f_to_fit)
+c1.Update()
+
+sigma_func = lambda E: 0.02456749968462633*(E + 905.0664550369642)**0.5
+# f_seak = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
+# f_seak.param_bound_functions['sigma'] = lambda E: (sigma_func(E), sigma_func(E))
+# f_seak.find_peaks(fit_sig=3)
+
+gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), cal_name, gamma_binning, event_build_window, addback_ethresh, event_build_window, True)
+h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
+
