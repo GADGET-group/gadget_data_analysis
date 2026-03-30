@@ -22,9 +22,9 @@ event_build_window = 500 #ns
 
 # from e23035_analysis.gamma_energy_calibration import *
 
-adj_dict = degai.get_adjacency_dict(1) #use sum spectrum
+adj_dict = degai.crystal_adj_dict #use sum spectrum
 cal_name = 'gm2'
-gamma_hist = degai.get_addback_spectrum(runs, adj_dict, cal_name, gamma_binning, event_build_window, addback_ethresh, True)
+gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True)
 
 f = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
 # f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
@@ -72,4 +72,3 @@ sigma_func = lambda E: 0.02456749968462633*(E + 905.0664550369642)**0.5
 
 gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), cal_name, gamma_binning, event_build_window, addback_ethresh, event_build_window, True)
 h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
-

@@ -69,6 +69,9 @@ for clover, crystal in clover_list:
         if crystal2 != crystal and (clover, crystal2) in clover_list:
             clover_adj_dict[(clover, crystal)].append((clover, crystal2))
 
+#no adjacency, equivalent to sum spectrum
+crystal_adj_dict = {(clover, crystal):[] for clover, crystal in clover_list}
+
 def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name):
     """
     Helper function for the parallel worker. 
@@ -176,11 +179,11 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
-    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v3").encode()).hexdigest()
+    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v4").encode()).hexdigest()
     if not sliding_scale:
-        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v3.root")
+        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v4.root")
     else:
-        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v3_ss.root")
+        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v4_ss.root")
     
     # Check if root file exists. Load it and return if it does.
     if os.path.exists(cache_file_path):
@@ -236,7 +239,7 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     out_tree = ROOT.TTree('add_back', 'add_back')
     gamma_vec = ROOT.std.vector('double')()
     time_vec = ROOT.std.vector('double')()
-    out_tree.Branch('energy', gamma_vec)
+    out_tree.Branch('addback_energy', gamma_vec)
     out_tree.Branch('time', time_vec)
 
     dt_sec = dt_window_ns * 1e-9 # Convert ns to seconds for comparison
@@ -322,160 +325,100 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     out_tree._keepalive_file = read_file
     return out_tree
 
-def get_addback_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, sliding_scale=False, max_workers=None, gate=''):
+def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=False, max_workers=None, force_recreate=False):
     """
-    Generates a 1D add-back energy spectrum for a single run or list of runs.
-    Utilizes multiprocessing for multiple runs, caching both individual and combined results.
-    Includes time-clustering to prevent accidental coincidences.
-    gate: string to use to gate on merged_data tree
+    Generates a 1D or 2D histogram using the add_back tree and merged_data tree.
+    Utilizes multiprocessing for multiple runs.
     """
-    # ---------------------------------------------------------
-    # 1. PARALLEL RUN PROCESSING & COMBINED CACHING
-    # ---------------------------------------------------------
-    if not isinstance(ddas_run, str):
+    if is_iterable_runs(ddas_run):
+        run_list = list(ddas_run)
+        sum_hist = None
+        
+        original_batch_mode = ROOT.gROOT.IsBatch()
+        ROOT.gROOT.SetBatch(True)
         try:
-            _ = iter(ddas_run)
-            
-            # --- Setup Combined Hash and Paths ---
-            sorted_runs = sorted(list(ddas_run))
-            # CRITICAL: Include dt_window_ns in the hash!
-            combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + "v3" + gate).encode()
-            ).hexdigest()
-            
-            cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
-            os.makedirs(cache_dir, exist_ok=True)
-            
-            combined_hist_name = f"h1_combined_{combined_hash_str}"
-            if not sliding_scale:
-                combined_cache_file = os.path.join(cache_dir, f"h1_combined_{combined_hash_str}.root")
-            else:
-                combined_cache_file = os.path.join(cache_dir, f"h1_combined_{combined_hash_str}_ss.root")
-            
-            # --- Check the Combined Cache ---
-            if os.path.exists(combined_cache_file):
-                try:
-                    cf = ROOT.TFile.Open(combined_cache_file, 'READ')
-                    if not cf or cf.IsZombie():
-                        print("Warning: Combined 1D cache is corrupted. Recreating...")
-                        if cf: cf.Close()
-                        os.remove(combined_cache_file)
-                    else:
-                        hist = cf.Get(combined_hist_name)
-                        # Ensure it's a true 1D histogram
-                        if isinstance(hist, ROOT.TH1) and hist.GetDimension() == 1:
-                            hist.SetDirectory(0)
-                            cf.Close()
-                            print('loaded from cache:', combined_cache_file)
-                            return hist
-                        cf.Close()
-                        os.remove(combined_cache_file)
-                except OSError:
-                    print("Warning: Failed to open combined 1D cache. Recreating...")
-                    if os.path.exists(combined_cache_file):
-                        os.remove(combined_cache_file)
-
-            # --- Not in Combined Cache: Farm out to Multiprocessing ---
-            total_hist = None
-            
-            # Save the current state and force Batch Mode to prevent X11 crashes
-            original_batch_mode = ROOT.gROOT.IsBatch()
-            ROOT.gROOT.SetBatch(True)
-            
-            try:
+            if max_workers is None or max_workers > 1:
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
-                        # Pass dt_window_ns down to the workers
-                        executor.submit(get_addback_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, sliding_scale, 1, gate) 
-                        for run in ddas_run
+                        executor.submit(get_histogram, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate) 
+                        for run in run_list
                     ]
-                    
-                    for future in concurrent.futures.as_completed(futures):
+                    for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)"):
                         h = future.result() 
-                        
-                        if total_hist is None:
-                            total_hist = h.Clone(combined_hist_name)
-                            total_hist.SetTitle(f"Addback Energy (Runs: {sorted_runs[0]}...{sorted_runs[-1]}, dt={dt_window_ns}ns);Energy (keV);Counts")
-                            total_hist.SetDirectory(0)
+                        if sum_hist is None:
+                            sum_hist = h.Clone(hist_name)
+                            sum_hist.SetTitle(hist_title)
+                            sum_hist.SetDirectory(0)
                         else:
-                            total_hist.Add(h)
-            finally:
-                # ALWAYS restore the original graphics state
-                ROOT.gROOT.SetBatch(original_batch_mode)
+                            sum_hist.Add(h)
+            else:
+                for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)"):
+                    h = get_histogram(run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate) 
+                    if sum_hist is None:
+                        sum_hist = h.Clone(hist_name)
+                        sum_hist.SetTitle(hist_title)
+                        sum_hist.SetDirectory(0)
+                    else:
+                        sum_hist.Add(h)
+        finally:
+            ROOT.gROOT.SetBatch(original_batch_mode)
             
-            # --- Save the Combined Cache ---
-            if total_hist:
-                cf = ROOT.TFile.Open(combined_cache_file, 'RECREATE')
-                total_hist.Write()
-                cf.Close()
-                
-            return total_hist
-                
-        except TypeError:
-            pass # It's a single run, proceed below
+        return sum_hist
 
     # ---------------------------------------------------------
-    # 2. SINGLE RUN PROCESSING
+    # SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    # CRITICAL: Include dt_window_ns in the single-run hash!
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + "v3" + gate).encode()).hexdigest()
-    cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_1d')
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + "v4").encode()).hexdigest()
+    cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_flex')
     os.makedirs(cache_dir, exist_ok=True)
     
-    hist_name = f"h1_{hash_str}"
-    if not sliding_scale:
-        cache_file_path = os.path.join(cache_dir, f"h1_{hash_str}.root")
-    else:
-        cache_file_path = os.path.join(cache_dir, f"h1_{hash_str}_ss.root")
+    hash_name = f"h_flex_{hash_str}"
+    cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
     
-    # --- Check Cache ---
-    if os.path.exists(cache_file_path):
+    if not force_recreate and os.path.exists(cache_file_path):
         try:
-            read_file = ROOT.TFile.Open(cache_file_path, 'READ')
-            
-            if not read_file or read_file.IsZombie():
-                if read_file: read_file.Close()
+            cf = ROOT.TFile.Open(cache_file_path, 'READ')
+            if not cf or cf.IsZombie():
+                if cf: cf.Close()
                 os.remove(cache_file_path)
             else:
-                hist = read_file.Get(hist_name)
-                if isinstance(hist, ROOT.TH1) and hist.GetDimension() == 1: 
-                    hist.SetDirectory(0)
-                    read_file.Close()
-                    return hist
-                read_file.Close()
+                hist = cf.Get(hash_name)
+                if hist:
+                    final_hist = hist.Clone(hist_name)
+                    final_hist.SetTitle(hist_title)
+                    final_hist.SetDirectory(0)
+                    cf.Close()
+                    return final_hist
+                cf.Close()
                 os.remove(cache_file_path)
         except OSError:
             if os.path.exists(cache_file_path):
                 os.remove(cache_file_path)
 
-    # --- Generate Histogram ---
-    # Pass dt_window_ns down to the tree builder!
     add_back_tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale)
     
     merged_file = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(ddas_run), 'READ')
     merged_tree = merged_file.Get('merged_data')
     merged_tree.AddFriend(add_back_tree)
 
-    df = ROOT.RDataFrame(merged_tree)
-    if gate != '':
-        df = df.Filter(gate)
-    
-    h1_ptr = df.Histo1D(
-        (hist_name, f"Addback Energy (Run {ddas_run}, dt={dt_window_ns}ns);Energy (keV);Counts", *binning), 
-        "energy"
-    )
-    
-    hist = h1_ptr.GetValue()
-    hist.SetDirectory(0)
+    if ':' in var_exp:
+        raw_hist = ROOT.TH2D(hash_name, "", *binning)
+    else:
+        raw_hist = ROOT.TH1D(hash_name, "", *binning)
+        
+    merged_tree.Draw(f'{var_exp}>>{hash_name}', selection, 'goff')
+    raw_hist.SetDirectory(0)
     merged_file.Close()
     
-    # --- Write Cache ---
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
-    hist.Write()
+    raw_hist.Write()
     cf.Close()
 
-    return hist
+    final_hist = raw_hist.Clone(hist_name)
+    final_hist.SetTitle(hist_title)
+    final_hist.SetDirectory(0)
+    return final_hist
 
 if not hasattr(ROOT, "get_symmetric_pairs_dt"):
     ROOT.gInterpreter.Declare("""
@@ -525,7 +468,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             sorted_runs = sorted(list(ddas_run))
             # CRITICAL: Include dt_window_ns in the hash!
             combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v3").encode()
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v4").encode()
             ).hexdigest()
             
             cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
@@ -592,7 +535,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
     # 2. SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v3").encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v4").encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -622,7 +565,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
     # Pass the window down to the tree builder!
     tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh, sliding_scale=sliding_scale)
     df = ROOT.RDataFrame(tree)
-    df = df.Define("pairs", f"get_symmetric_pairs_dt(energy, time, {min_dt}, {max_dt})")
+    df = df.Define("pairs", f"get_symmetric_pairs_dt(addback_energy, time, {min_dt}, {max_dt})")
     df = df.Define("energy_x", "pairs.x")
     df = df.Define("energy_y", "pairs.y")
 

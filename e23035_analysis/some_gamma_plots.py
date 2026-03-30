@@ -44,21 +44,21 @@ def show_crystal_vs_run(crystal_name):
 # canvas, legend, stack = root_vis_tools.draw_overlaid_histograms(plot_hist_dic, 'gamma spectrum from 60Ga runs', "keV", "counts/1 keV")
 
 
-clover_ab_hist = degai.get_addback_spectrum(runs, degai.clover_adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh)
+clover_ab_hist = degai.get_histogram(runs, degai.clover_adj_dict, 'gm', gamma_binning, 'clover_ab_hist', 'clover addback', 'addback_energy', '', event_build_window, addback_ethresh)
 
 adj_dict = degai.get_adjacency_dict(30)
 print('getting add back histogram')
-adj_ab_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh)
+adj_ab_hist = degai.get_histogram(runs, adj_dict, 'gm', gamma_binning, 'adj_ab_hist', 'adjacent addback', 'addback_energy', '', event_build_window, addback_ethresh)
 print('getting sliding scale with addback')
-adj_ab_ss_hist = degai.get_addback_spectrum(runs, adj_dict, 'gm', gamma_binning, event_build_window, addback_ethresh, True)
+adj_ab_ss_hist = degai.get_histogram(runs, adj_dict, 'gm', gamma_binning, 'adj_ab_ss_hist', 'adjacent sliding scale', 'addback_energy', '', event_build_window, addback_ethresh, True)
 
 print('getting sum histogram')
 # sum_hist = degai.get_summed_gamma_spectrum(runs, gamma_binning, 'gm')
 # sum_hist.SetLineColor(ROOT.kRed)
 
 #this should be equivalent to sum spectrum
-addback_1deg_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh)
-sum_ss_hist = degai.get_addback_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh, True)
+addback_1deg_hist = degai.get_histogram(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, 'addback_1deg_hist', '1deg addback', 'addback_energy', '', event_build_window, addback_ethresh)
+sum_ss_hist = degai.get_histogram(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, 'sum_ss_hist', 'sum sliding scale', 'addback_energy', '', event_build_window, addback_ethresh, True)
 
 # if True:
 gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window, True)#adj_dict
