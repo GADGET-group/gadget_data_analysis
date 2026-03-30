@@ -158,8 +158,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
                 hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
             )
         elif peak_model.lower() == 'bg_shift_gaus':
-            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_w_bg_shift_peak(
-                hist_for_this_peak, data_source, location_guess, fit_range,param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)})
+            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_w_bg_shift(
+                hist_for_this_peak, location_guess, fit_range,data_source, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)})
         else:
             raise ValueError(f'unknown peak model {peak_model}')
         

@@ -453,33 +453,61 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_w_bg_shift_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
+def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None): 
     """
     Fits a standard Gaussian + a step-like background shift using the fit_func engine.
+    data_source can be specified to get default guesses and values for sigma and A
     """
     if param_bounds is None:
         param_bounds = {}
     e_low, e_high = fit_window
+    
+    if not isinstance(e_guess, list) and not isinstance(e_guess, tuple):
+        e_guess_list = [e_guess]
+    else:
+        e_guess_list = e_guess
+        
+    n_peaks = len(e_guess_list)
 
     # 1. Construct the Mathematical Model
     # [0]: Constant Background
-    # [1]: Amplitude (Area)
-    # [2]: Mean (mu)
-    # [3]: Sigma (sigma)
-    # [4]: shift in background (right - left), (bg_shift)
-    
-    bg_string = "[0] + 0.5*[4]*(1 + TMath::Erf((x-[2])/(1.41421356*[3])))"
+    # [1]: Amplitude (Area) for peak 0
+    # [2]: Mean (mu) for peak 0
+    # [3]: Sigma (shared across all peaks)
+    # [4]: shift in background (right - left) as fraction of peak area
+    # If n_peaks > 1:
+    # [5]: Amplitude of peak 1
+    # [6]: Mean of peak 1
+    # ...
     
     # Gaussian normalized to area [1]
     # Using GetBinWidth(1) instead of 0, as 0 is technically the underflow bin in ROOT
     bin_width = spectrum.GetBinWidth(1) 
     
-    # 2.50662827 is sqrt(2*pi)
-    gaus_string = f"([1] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[2])/[3]) * ((x-[2])/[3]))"
-    function_string = f"{bg_string} + {gaus_string}"
+    bg_string = "[0]"
+    gaus_strings = []
+    
+    for i in range(n_peaks):
+        if i == 0:
+            amp_idx = 1
+            mu_idx = 2
+        else:
+            amp_idx = 3 + 2 * i
+            mu_idx = 4 + 2 * i
+            
+        bg_string += f" + 0.5*[{amp_idx}]*[4]*(1 + TMath::Erf((x-[{mu_idx}])/(1.41421356*[3])))"
+        
+        # 2.50662827 is sqrt(2*pi)
+        gaus_string = f"([{amp_idx}] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[3]) * ((x-[{mu_idx}])/[3]))"
+        gaus_strings.append(gaus_string)
+
+    function_string = f"{bg_string} + {' + '.join(gaus_strings)}"
 
     # 2. Setup Parameters and Initial Guesses
-    sigma_guess = get_sigma(data_source, e_guess)
+    if data_source is None:
+        sigma_guess = 1
+    else:
+        sigma_guess = get_sigma(data_source, e_guess)
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
 
@@ -497,41 +525,55 @@ def fit_gaussian_w_bg_shift_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:fl
     A_guess = max(A_guess, 1.0) # Prevent 0 or negative area guesses
     
     # The absolute maximum physical shift is the difference between the max and min bins
-    bg_shift_limit = max_val - min_val
+    bg_shift_limit = 1#max_val - min_val
     
-    if data_source == 'gamma_adc':
+    if data_source is None:
+        sigma_bounds = (0.1, 100)
+        A_bounds_default = (0, np.inf)
+    elif data_source == 'gamma_adc':
         sigma_bounds = (1, 20)
-        A_bounds = (1, np.inf)
+        A_bounds_default = (1, np.inf)
     else:
         # Fallback bounds if other data sources are passed
         sigma_bounds = (0.1, 100)
-        A_bounds = (0, np.inf)
+        A_bounds_default = (0, np.inf)
 
     spectrum.GetXaxis().UnZoom()
 
     initial_values = [
         bg_guess,      # p0: bg_const
-        A_guess,       # p1: amplitude
-        e_guess,       # p2: mu
+        A_guess,       # p1: amplitude 0
+        e_guess_list[0], # p2: mu 0
         sigma_guess,   # p3: sigma
         0.0            # p4: bg_shift
     ]
 
     bg_bounds = param_bounds.get('bg_const', (0, np.inf))
-    A_bounds = param_bounds.get('amplitude', A_bounds)
-    mu_bounds = param_bounds.get('mu', (e_low, e_high))
+    A_bounds = param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default))
+    mu_bounds = param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high)))
     sigma_bounds = param_bounds.get('sigma', sigma_bounds)
     bg_shift_bounds = param_bounds.get('bg_shift', (-bg_shift_limit, bg_shift_limit))
 
     bounds = [
         bg_bounds,       # p0: bg_const
-        A_bounds,        # p1: amplitude
-        mu_bounds,       # p2: mu bounds
+        A_bounds,        # p1: amplitude 0
+        mu_bounds,       # p2: mu 0
         sigma_bounds,    # p3: sigma 
         bg_shift_bounds  # p4: bg_shift
     ]
 
-    names = ["bg_const", "amplitude", "mu", "sigma", "bg_shift"]
+    if n_peaks == 1:
+        names = ["bg_const", "amplitude", "mu", "sigma", "bg_shift"]
+    else:
+        names = ["bg_const", "amplitude_0", "mu_0", "sigma", "bg_shift"]
+
+    for i in range(1, n_peaks):
+        initial_values.extend([A_guess, e_guess_list[i]])
+        bounds.extend([
+            param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
+            param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
+        ])
+        names.extend([f"amplitude_{i}", f"mu_{i}"])
 
     # 3. Call our generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
@@ -547,16 +589,15 @@ def fit_gaussian_w_bg_shift_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:fl
     comp_id = uuid.uuid4().hex[:6]
     fit_params = np.array(fit_res.Parameters())
     
-    # Background component (depends on 0, 2, 3, and 4)
+    # Background component
     background = ROOT.TF1(f'bg_{comp_id}', bg_string, e_low, e_high)
-    background.SetParameter(0, fit_params[0])
-    background.SetParameter(2, fit_params[2]) # Mu is needed to center the step
-    background.SetParameter(3, fit_params[3]) # Sigma is needed to angle the step
-    background.SetParameter(4, fit_params[4])
+    for i in range(len(fit_params)):
+        background.SetParameter(i, fit_params[i])
     
-    # Gaussian Peak component (parameters 1 through 3)
-    peaks = ROOT.TF1(f'gaus_{comp_id}', gaus_string, e_low, e_high)
-    for i in range(1, 4):
+    # Gaussian Peak component
+    gaus_combined_string = " + ".join(gaus_strings)
+    peaks = ROOT.TF1(f'gaus_{comp_id}', gaus_combined_string, e_low, e_high)
+    for i in range(len(fit_params)):
         peaks.SetParameter(i, fit_params[i])
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
