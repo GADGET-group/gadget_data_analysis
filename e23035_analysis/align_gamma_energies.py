@@ -225,6 +225,8 @@ def process_all():
             pbar.close()
             
     make_summary_pdf()
+
+    make_nonlinearity_correction()
     
 def make_summary_pdf():
     energy_calibration_tools.create_calibration_summary(gm_name, pvalue_threshold_dict, runs)
@@ -240,7 +242,8 @@ print(f'total run time: {t_tot/3600} hours')
 
 def make_nonlinearity_correction():
     peak_list = [('511', 510.99895069, 16e-7),
-         ('60Zn', 273.4, 0.4), ('60Zn', 334.4, 0.1), ('60Zn', 670.3, 0.3),
+         #('60Zn', 273.4, 0.4), ('60Zn', 334.4, 0.1), 
+         ('60Zn', 670.3, 0.3),
          ('59Zn', 491.4, 0.1), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
          ('60Ga', 1003.7, 0.2), ('60Ga', 3848.3, 0.7), ('60Ga', 1554.9, 0.6), ('60Ga', 2293.0, 1.0), ('60Ga', 2559.0, 0.8)
          ]
@@ -248,7 +251,7 @@ def make_nonlinearity_correction():
     true_location_uncertainties =  [peak_list[2] for peak_list in peak_list]
     peaks = []
     for i in range(len(true_locations)):
-        fit_window_width = 5
+        fit_window_width = 10
         #(true energy, true energy_uncertainty, (fit range start, fit range stop)
         peaks.append((true_locations[i], true_location_uncertainties[i], (-fit_window_width, fit_window_width)))
 

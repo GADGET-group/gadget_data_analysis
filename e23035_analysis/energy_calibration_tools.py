@@ -1218,20 +1218,41 @@ def create_nonlinearity_correction(runs:int|list, calibration_name:str, correcti
     res_y_err = np.sqrt(np.array(true_energy_errors)**2 + (derivs * np.array(measured_energy_errors))**2)
 
     graph_res = ROOT.TGraphErrors(len(measured_energies), np.array(measured_energies, dtype=np.float64), np.array(res_y, dtype=np.float64), np.array(measured_energy_errors, dtype=np.float64), res_y_err)
-    
+
     c_corr = ROOT.TCanvas("c_corr", "Non-linearity Correction", 800, 800)
-    rp = ROOT.TRatioPlot(graph, correction_fit_func)
-    rp.SetSeparationMargin(0.02)
-    rp.SetH1DrawOpt("AP")
-    rp.SetH2DrawOpt("L")
-    rp.Draw()
-    
-    # Manually draw the residuals with correct errors
-    rp.GetLowerPad().cd()
+    pad1 = ROOT.TPad("pad1", "pad1", 0.0, 0.3, 1.0, 1.0)
+    pad1.SetBottomMargin(0.02)
+    pad1.Draw()
+    pad1.cd()
+
+    graph.Draw("AP")
+
+    c_corr.cd()
+    pad2 = ROOT.TPad("pad2", "pad2", 0.0, 0.0, 1.0, 0.3)
+    pad2.SetTopMargin(0.02)
+    pad2.SetBottomMargin(0.3)
+    pad2.Draw()
+    pad2.cd()
+
+    graph_res.SetTitle("")
     graph_res.SetMarkerStyle(20)
     graph_res.Draw("AP")
-    rp.GetLowerRefYaxis().SetTitle("Residual (keV)")
-    
+
+    graph_res.GetXaxis().SetTitle("Measured Energy (keV)")
+    graph_res.GetXaxis().SetTitleSize(0.12)
+    graph_res.GetXaxis().SetLabelSize(0.10)
+
+    graph_res.GetYaxis().SetTitle("Resid (keV)")
+    graph_res.GetYaxis().SetTitleSize(0.12)
+    graph_res.GetYaxis().SetLabelSize(0.10)
+    graph_res.GetYaxis().SetTitleOffset(0.4)
+    graph_res.GetYaxis().SetNdivisions(505)
+
+    zero_line = ROOT.TLine(graph_res.GetXaxis().GetXmin(), 0, graph_res.GetXaxis().GetXmax(), 0)
+    zero_line.SetLineStyle(2)
+    zero_line.SetLineColor(ROOT.kBlack)
+    zero_line.Draw()
+
     c_corr.Update()
     c_corr.Print(pdf_path)
     pdf_canvas.Print(pdf_path + "]")

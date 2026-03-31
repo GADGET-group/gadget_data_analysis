@@ -1,6 +1,7 @@
 e23035_analysis/calibrations/
 e23035_analysis/clarion_cache
 e23035_analysis/hist_cache
+e23035_analysis/nonlinearity_corrections
 *.pyc
 old_gm/
 old_mcmc_results/
