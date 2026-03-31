@@ -58,26 +58,42 @@ for num in range(1, 12):
 #         true_locations[1]:{'1d':0.001, 't_indep':0.01}
 #     }
 
-peaks = [('511', 510.99895069, 16e-7),
+
+poly_degree = 1
+gm_label='511and2614'
+gm_name = f'gm_{gm_label}_{poly_degree}'
+
+if gm_label == '511and2614':
+    peaks = [('511', 510.99895069, 16e-7),
+         ('208Tl', 2614.511, 1e-2)]
+    true_locations = [peak[1] for peak in peaks]
+    true_location_uncertainties =  [peak[2] for peak in peaks]
+    norm_dict = {loc:'slice' for loc in true_location_uncertainties}
+    pvalue_threshold_dict = {
+            'cal':1e-6,
+            true_locations[0]:{'1d':0.001, 't_indep':0.01},
+            true_locations[1]:{'1d':0.001, 't_indep':0.01},
+        }
+    
+    rebin_factors = [1 for loc in true_locations]#1,1,5,5]
+elif False:
+    peaks = [('511', 510.99895069, 16e-7),
          #('60Zn', 670.3, 0.3), #uncertainty estimated by evaluators, doesn't seem to match with other data poitns
          ('59Zn', 491.4, 0.1), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
          ('60Ga', 1003.7, 0.2), ('60Ga', 3848.3, 0.7), #('60Ga', 1554.9, 0.6), ('60Ga', 2293.0, 1.0), ('60Ga', 2559.0, 0.8),  #these are too weak
          ('208Tl', 2614.511, 1e-2)]
-true_locations = [peak[1] for peak in peaks]
-true_location_uncertainties =  [peak[2] for peak in peaks]
-norm_dict = {loc:'slice' for loc in true_location_uncertainties}
-pvalue_threshold_dict = {
-        'cal':1e-6,
-        true_locations[0]:{'1d':1e-12, 't_indep':0.01},
-        true_locations[1]:{'1d':0.0001, 't_indep':0.01},
-        true_locations[2]:{'1d':0.0001, 't_indep':0.01},
-        true_locations[3]:{'1d':0.0001, 't_indep':0.01}
-    }
-rebin_factors = [1 for loc in true_locations]#1,1,5,5]
-poly_degree = 2
-gm_name = f'gm{poly_degree}'
+    true_locations = [peak[1] for peak in peaks]
+    true_location_uncertainties =  [peak[2] for peak in peaks]
+    norm_dict = {loc:'slice' for loc in true_location_uncertainties}
+    pvalue_threshold_dict = {
+            'cal':1e-6,
+            true_locations[0]:{'1d':1e-12, 't_indep':0.01},
+            true_locations[1]:{'1d':0.0001, 't_indep':0.01},
+            true_locations[2]:{'1d':0.0001, 't_indep':0.01},
+            true_locations[3]:{'1d':0.0001, 't_indep':0.01}
+        }
 
-def do_gain_match(ddas_run):
+def do_gain_match(ddas_run, save_init_alignment_pdf=False):
     '''
     ddas_run
     clover: 1a, 1b, etc
@@ -100,22 +116,22 @@ def do_gain_match(ddas_run):
                            (-fit_window_width, fit_window_width), rebin_factors[i]))
         energy_calibration_tools.make_energy_calibration(ddas_run, gm_name, adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict, 
                                                          poly_degree=poly_degree, peak_model='bg_shift_gaus')
-
-     #save histogram showing energy alignment 
-    crystal_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
-    canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
-    ROOT.gPad.SetLogz(1)
-    canvas.Update()
-    fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/initial_alignment.pdf"
-    canvas.Print(fname+'(')
-    dE_to_plot = 100
-    for loc in true_locations:
-        th2.GetXaxis().SetRangeUser(loc-dE_to_plot, loc+dE_to_plot)
+    if save_init_alignment_pdf:
+        #save histogram showing energy alignment 
+        crystal_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
+        canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
+        ROOT.gPad.SetLogz(1)
         canvas.Update()
-        if loc == true_locations[-1]:
-            canvas.Print(fname+')')
-        else:
-            canvas.Print(fname)
+        fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/initial_alignment.pdf"
+        canvas.Print(fname+'(')
+        dE_to_plot = 100
+        for loc in true_locations:
+            th2.GetXaxis().SetRangeUser(loc-dE_to_plot, loc+dE_to_plot)
+            canvas.Update()
+            if loc == true_locations[-1]:
+                canvas.Print(fname+')')
+            else:
+                canvas.Print(fname)
 
     #save histogram showing energy alignment after gain matching
     gm_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'cal', gm_name)
@@ -222,5 +238,22 @@ for run in runs:
     t_tot += t2 - t1
 print(f'total run time: {t_tot/3600} hours')
 
+def make_nonlinearity_correction():
+    peak_list = [('511', 510.99895069, 16e-7),
+         ('60Zn', 273.4, 0.4), ('60Zn', 334.4, 0.1), ('60Zn', 670.3, 0.3),
+         ('59Zn', 491.4, 0.1), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
+         ('60Ga', 1003.7, 0.2), ('60Ga', 3848.3, 0.7), ('60Ga', 1554.9, 0.6), ('60Ga', 2293.0, 1.0), ('60Ga', 2559.0, 0.8)
+         ]
+    true_locations = [peak_list[1] for peak_list in peak_list]
+    true_location_uncertainties =  [peak_list[2] for peak_list in peak_list]
+    peaks = []
+    for i in range(len(true_locations)):
+        fit_window_width = 5
+        #(true energy, true energy_uncertainty, (fit range start, fit range stop)
+        peaks.append((true_locations[i], true_location_uncertainties[i], (-fit_window_width, fit_window_width)))
+
+    for clover_str in degai.clover_str_list:
+        energy_calibration_tools.create_nonlinearity_correction(runs, calibration_name=gm_name, correction_name='c1', branch_name=clover_str+'_c',
+                                                                 binning_for_fit=gamma_binning, peaks=peaks, peak_model='bg_shift_gaus', poly_degree=2)
 
     

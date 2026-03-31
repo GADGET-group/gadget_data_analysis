@@ -22,9 +22,11 @@ event_build_window = 500 #ns
 
 # from e23035_analysis.gamma_energy_calibration import *
 
-adj_dict = degai.crystal_adj_dict #use sum spectrum
-cal_name = 'gm2'
-gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True)
+adj_dict = degai.crystal_adj_dict #degai.clover_adj_dict#use sum spectrum
+cal_name = 'gm'
+nlc_name = 'c1'
+gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+                                  nonlinearity_correction_name=nlc_name)
 
 f = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
 # f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
@@ -65,10 +67,12 @@ graph.Draw("AP")
 graph.Fit(f_to_fit)
 c1.Update()
 
-sigma_func = lambda E: 0.02456749968462633*(E + 905.0664550369642)**0.5
+sigma_func = lambda E: 0.02456749968462633*(E + 905.0664550369642)**0.5 #sum spectrum
+sigma_func = lambda E: 0.028389590048833593*(E + 781.8486169568944)**0.5 #clover add back spectrum
 # f_seak = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
 # f_seak.param_bound_functions['sigma'] = lambda E: (sigma_func(E), sigma_func(E))
 # f_seak.find_peaks(fit_sig=3)
 
-gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), cal_name, gamma_binning, event_build_window, addback_ethresh, event_build_window, True)
+gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), cal_name, gamma_binning, event_build_window, addback_ethresh, event_build_window, True, 
+                                                 nonlinearity_correction_name=nlc_name)
 h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)

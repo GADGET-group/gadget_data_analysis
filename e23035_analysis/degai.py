@@ -42,7 +42,7 @@ def get_clover_strings(hist_to_get='e'):
     """Get list of strings as they appear in the merged root file."""
     return [f'{s}_{hist_to_get}' for s in clover_str_list]
 
-def get_angle_between_crystals(clover1, crystal1, clover2, crystal2):
+def get_angle_between_crystals(clover1, crystal1, clover2, crystal2): # pragma: no cover
     theta1 = np.radians(det_loc_table['thetai'][(det_loc_table['det']==clover1)&(det_loc_table['deti']==crystal1)].iloc[0])
     theta2 = np.radians(det_loc_table['thetai'][(det_loc_table['det']==clover2)&(det_loc_table['deti']==crystal2)].iloc[0])
     phi1 = np.radians(det_loc_table['phii'][(det_loc_table['det']==clover1)&(det_loc_table['deti']==crystal1)].iloc[0])
@@ -51,7 +51,7 @@ def get_angle_between_crystals(clover1, crystal1, clover2, crystal2):
     rhat2 = [np.sin(theta2)*np.cos(phi2), np.sin(theta2)*np.sin(phi2), np.cos(theta2)]
     return np.degrees(np.arccos(np.clip(np.dot(rhat1, rhat2), -1.0, 1.0)))
 
-def get_adjacency_dict(max_angle):
+def get_adjacency_dict(max_angle): # pragma: no cover
     to_return = {}
     for clover, crystal  in clover_list:
         to_return[(clover, crystal)] = []
@@ -72,17 +72,17 @@ for clover, crystal in clover_list:
 #no adjacency, equivalent to sum spectrum
 crystal_adj_dict = {(clover, crystal):[] for clover, crystal in clover_list}
 
-def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name):
+def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name, nonlinearity_correction_name):
     """
     Helper function for the parallel worker. 
     It calls get_crystal_histograms for a single run just to force the 
     underlying get_histogram to write the results to the safe .root cache files.
     It returns only the run number (an integer) to avoid PyROOT pickling segfaults.
     """
-    _ = get_crystal_histograms(run, binning, hist_to_get, cal_name, num_workers=1)
+    _ = get_crystal_histograms(run, binning, hist_to_get, cal_name, nonlinearity_correction_name=nonlinearity_correction_name, num_workers=1)
     return run
 
-def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_workers=None):
+def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_workers=None, nonlinearity_correction_name=None):
     '''
     hist_to_get: c, t, m, e, or cal
     If cal, cal_name must be given, and corresponding cal generated with energy_calibration_tools will be applied.
@@ -100,7 +100,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
             # 1. PARALLEL CACHING: Spawn workers to process the TTrees and populate the disk caches.
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
-                    executor.submit(_worker_cache_crystal_run, run, binning, hist_to_get, cal_name)
+                    executor.submit(_worker_cache_crystal_run, run, binning, hist_to_get, cal_name, nonlinearity_correction_name)
                     for run in run_list
                 ]
                 
@@ -111,7 +111,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
         # Reading from the ROOT cache is nearly instantaneous, so we sum them safely in the main thread.
         for run in tqdm.tqdm(run_list, desc=f"Summing {hist_to_get}"):
             # Grab the dict of histograms for this specific run
-            run_hists = get_crystal_histograms(run, binning, hist_to_get, cal_name, num_workers=1)
+            run_hists = get_crystal_histograms(run, binning, hist_to_get, cal_name, num_workers=1, nonlinearity_correction_name=nonlinearity_correction_name)
             
             if not summed_hists:
                 # For the first run, clone the dictionaries to establish the baseline sum
@@ -130,8 +130,8 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
     to_return = {}
     
     if hist_to_get == 'cal':
-        clover_strings = [energy_calibration_tools.get_calibrated_energy_string(ddas_run, cal_name, s) for s in get_clover_strings('c')]
-        names = get_clover_strings(cal_name)
+        clover_strings = [energy_calibration_tools.get_calibrated_energy_string(ddas_run, cal_name, s, nonlinearity_correction_name=nonlinearity_correction_name) for s in get_clover_strings('c')]
+        names = get_clover_strings('keV')
     else:
         clover_strings = get_clover_strings(hist_to_get)
         names = clover_strings
@@ -142,13 +142,13 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
         
     return to_return
 
-def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init'):
+def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init', nonlinearity_correction_name=None):
     '''
     Sum histograms of individual crystals
     '''
     # 1. Let our newly parallelized function do all the heavy lifting
     if cal_name == 'init': #use calibration applied for merging process
-        crystal_hists = get_crystal_histograms(ddas_run, binning, 'e')
+        crystal_hists = get_crystal_histograms(ddas_run, binning, 'e', nonlinearity_correction_name=nonlinearity_correction_name)
     else:
         crystal_hists = get_crystal_histograms(ddas_run, binning, 'cal', cal_name)
         
@@ -169,8 +169,7 @@ def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init'):
         
     return to_return
 
-
-def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=False):
+def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=False, nonlinearity_correction_name=None):
     '''
     Make a ttree with the gamma ray add back, storing an array of energies and times per event.
     If sliding scale is true, adc counts will have a a uniform number from -0.5 to 0.5 added to them to prevent binning issues (see).
@@ -179,11 +178,11 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
-    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v4").encode()).hexdigest()
+    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v5" + str(nonlinearity_correction_name)).encode()).hexdigest()
     if not sliding_scale:
-        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v4.root")
+        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v5.root")
     else:
-        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v4_ss.root")
+        cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v5_ss.root")
     
     # Check if root file exists. Load it and return if it does.
     if os.path.exists(cache_file_path):
@@ -221,6 +220,21 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     poly_matrix = np.zeros((len(clover_str_list), max_degree + 1))
     for i, params in enumerate(poly_params_list):
         poly_matrix[i, :len(params)] = params
+
+    # Load non-linearity corrections if specified
+    nlc_poly_matrix = None
+    if nonlinearity_correction_name:
+        nlc_poly_params_list = []
+        nlc_max_degree = 1
+        for s in clover_str_list:
+            nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(nonlinearity_correction_name, s+'_c')
+            nlc_params = nlc_res['poly_params']
+            nlc_max_degree = max(nlc_max_degree, len(nlc_params) - 1)
+            nlc_poly_params_list.append(nlc_params)
+        
+        nlc_poly_matrix = np.zeros((len(clover_str_list), nlc_max_degree + 1))
+        for i, params in enumerate(nlc_poly_params_list):
+            nlc_poly_matrix[i, :len(params)] = params
 
     # Set up input file for reading
     infile = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(ddas_run))
@@ -260,6 +274,14 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
             for deg in range(poly_matrix.shape[1]):
                 calculated_energies += valid_poly[:, deg] * (valid_counts ** deg)
             energies[has_counts] = calculated_energies
+
+            if nonlinearity_correction_name:
+                base_energies = energies[has_counts]
+                valid_nlc_poly = nlc_poly_matrix[has_counts]
+                corrected_energies = np.zeros_like(base_energies, dtype=np.float64)
+                for deg in range(nlc_poly_matrix.shape[1]):
+                    corrected_energies += valid_nlc_poly[:, deg] * (base_energies ** deg)
+                energies[has_counts] = corrected_energies
             
         if sliding_scale:
             energies[has_counts] += np.random.uniform(-0.5, 0.5, size=len(energies[has_counts]))
@@ -325,9 +347,11 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     out_tree._keepalive_file = read_file
     return out_tree
 
-def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=False, max_workers=None, force_recreate=False):
+def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=False, max_workers=None, force_recreate=False, nonlinearity_correction_name=None):
     """
-    Generates a 1D or 2D histogram using the add_back tree and merged_data tree.
+    Generates a 1D or 2D histogram using the add_back tree and merged_data tree. Behaves just like the get_histogram function in ddas_interface, but allows refernces to 
+    a "addback_energy" branch.
+    adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale: used to specify which addback energy tree should be refernced.
     Utilizes multiprocessing for multiple runs.
     """
     if is_iterable_runs(ddas_run):
@@ -340,7 +364,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
             if max_workers is None or max_workers > 1:
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
-                        executor.submit(get_histogram, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate) 
+                        executor.submit(get_histogram, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name) 
                         for run in run_list
                     ]
                     for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)"):
@@ -353,7 +377,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
                             sum_hist.Add(h)
             else:
                 for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)"):
-                    h = get_histogram(run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate) 
+                    h = get_histogram(run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name) 
                     if sum_hist is None:
                         sum_hist = h.Clone(hist_name)
                         sum_hist.SetTitle(hist_title)
@@ -369,7 +393,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
     # SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + "v4").encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + "v5").encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_flex')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -396,7 +420,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
             if os.path.exists(cache_file_path):
                 os.remove(cache_file_path)
 
-    add_back_tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale)
+    add_back_tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name)
     
     merged_file = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(ddas_run), 'READ')
     merged_tree = merged_file.Get('merged_data')
@@ -452,7 +476,7 @@ if not hasattr(ROOT, "get_symmetric_pairs_dt"):
     }
     """)
 
-def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale=False, max_workers=None):
+def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale=False, max_workers=None, nonlinearity_correction_name=None):
     if isinstance(dt_window_ns, (list, tuple)):
         min_dt, max_dt = dt_window_ns
     else:
@@ -468,7 +492,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             sorted_runs = sorted(list(ddas_run))
             # CRITICAL: Include dt_window_ns in the hash!
             combined_hash_str = hashlib.md5(
-                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v4").encode()
+                (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + "v5").encode()
             ).hexdigest()
             
             cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
@@ -506,7 +530,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
                         # Pass dt_window_ns down to the workers
-                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale) 
+                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name) 
                         for run in ddas_run
                     ]
                     
@@ -535,7 +559,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
     # 2. SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + "v4").encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + "v5").encode()).hexdigest()
     cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -563,7 +587,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             if os.path.exists(cache_file_path): os.remove(cache_file_path)
 
     # Pass the window down to the tree builder!
-    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh, sliding_scale=sliding_scale)
+    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name)
     df = ROOT.RDataFrame(tree)
     df = df.Define("pairs", f"get_symmetric_pairs_dt(addback_energy, time, {min_dt}, {max_dt})")
     df = df.Define("energy_x", "pairs.x")

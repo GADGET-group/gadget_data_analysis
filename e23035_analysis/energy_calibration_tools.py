@@ -3,15 +3,19 @@ import os
 import pickle
 from pathlib import Path
 import concurrent.futures
+import hashlib
+import sys
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import ROOT
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from e23035_analysis import fitting_tools
 from raw_viewer import ddas_interface
+
 
 def get_calibration_directory(ddas_run, calibration_name, branch_name):
     ddas_run = int(ddas_run)
@@ -24,28 +28,56 @@ def get_calibration_result(ddas_run, calibration_name, branch_name):
         calibration_results = pickle.load(f)
     return calibration_results
 
-def get_calibrated_energy_string(ddas_run, calibration_name, branch_name):
+def get_nonlinearity_correction_result(correction_name, branch_name):
+    """Loads a non-linearity correction result from its pickle file."""
+    correction_dir = Path(f"e23035_analysis/nonlinearity_corrections/{correction_name}/{branch_name}")
+    pkl_path = correction_dir / f"{correction_name}.pkl"
+    if not pkl_path.exists():
+        raise FileNotFoundError(f"Non-linearity correction file not found at {pkl_path}")
+    with open(pkl_path, 'rb') as f:
+        return pickle.load(f)
+
+def get_calibrated_energy_string(ddas_run, calibration_name, branch_name, nonlinearity_correction_name=None):
+    # This part gets the initial calibration (e.g., ADC -> keV_measured)
     calibration_results = get_calibration_result(ddas_run, calibration_name, branch_name)
     
     # New format with polynomial parameters
     if 'poly_params' in calibration_results:
         params = calibration_results['poly_params']
-        cal_str = ""
+        base_cal_str = ""
         for i, p in enumerate(params):
             if i == 0:
-                cal_str += f"({p})"
+                base_cal_str += f"({p})"
             else:
                 term = f"{p}"
                 for _ in range(i):
                     term += f"*{branch_name}"
-                cal_str += f" + ({term})"
-        return f"({cal_str})"
+                base_cal_str += f" + ({term})"
+        base_cal_str = f"({base_cal_str})"
     # Old format for backward compatibility
     elif 'slope' in calibration_results:
         slope, offset = calibration_results['slope'], calibration_results['offset']
-        return f'({slope}*{branch_name} + {offset})'
+        base_cal_str = f'({slope}*{branch_name} + {offset})'
     else:
         raise ValueError(f"Calibration file for run {ddas_run}, cal '{calibration_name}', branch '{branch_name}' has an unknown format.")
+
+    # If a non-linearity correction is specified, wrap the base calibration string
+    if nonlinearity_correction_name:
+        nlc_results = get_nonlinearity_correction_result(nonlinearity_correction_name, branch_name)
+        nlc_params = nlc_results['poly_params']
+        
+        final_cal_str = ""
+        for i, p in enumerate(nlc_params):
+            if i == 0:
+                final_cal_str += f"({p})"
+            else:
+                term = f"({p})"
+                for _ in range(i):
+                    term += f"*{base_cal_str}"
+                final_cal_str += f" + {term}"
+        return f"({final_cal_str})"
+    else:
+        return base_cal_str
 
 def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
                             selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800,
@@ -497,112 +529,139 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
     return calibration_results
 
-def get_run_dataframe(ddas_run, tree_name='merged_data'):
-    """
-    Retrieves the ROOT file for a given run and initializes an RDataFrame.
-    """
-    # TODO: Adapt this line to however your ddas_interface locates ROOT files
-    file_path = ddas_interface.get_merged_root_file_path(ddas_run)
+def _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name):
+    cache_dir = os.path.join('e23035_analysis', 'hist_cache')
+    os.makedirs(cache_dir, exist_ok=True)
     
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Could not find ROOT file for run {ddas_run} at {file_path}")
-        
-    df = ROOT.RDataFrame(tree_name, file_path)
-    return df
-
-def apply_calibration(df, ddas_run, branch_list, calibration_name):
-    """
-    Reads calibration parameters and defines new calibrated columns in the RDataFrame.
-    Sets the calibrated energy to 0.0 if the corresponding multiplicity is 0.
-    Returns the updated RDataFrame node.
-    """
-    for branch in branch_list:
-        new_branch_name = f"{branch}_{calibration_name}"
-
-        # Only define the column if it hasn't been defined already in this graph
-        if not df.HasColumn(new_branch_name):
+    unique_string = str((ddas_run, tuple(binning), branch_name, 'cal_'+calibration_name, 'nlc_'+str(nonlinearity_correction_name), selection)).encode('utf-8')
+    hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
+    cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
+    
+    # --- LAYER 1: PROACTIVE CACHE HEALTH CHECK ---
+    if not force_recreate and os.path.exists(cache_file_path):
+        is_healthy = False
+        try:
+            cf = ROOT.TFile.Open(cache_file_path, 'READ')
+            if cf and not cf.IsZombie():
+                # Verify the histogram actually exists inside the file
+                if cf.Get(hash_name): 
+                    is_healthy = True
+            if cf: 
+                cf.Close()
+        except OSError:
+            pass
             
-            # Dynamically determine the corresponding multiplicity branch
-            # e.g., 'clover_1a_c' -> 'clover_1a_m'
-            if branch.endswith('_c') or branch.endswith('_e'):
-                mult_branch = branch[:-2] + '_m'
-            else:
-                assert False #not implemented yet
-            
-            # Locate and load the pickle file
-            cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch))
-            pkl_path = cal_dir / f"{calibration_name}.pkl"
-                
-            with open(pkl_path, 'rb') as f:
-                cal_data = pickle.load(f)
-                
-            m = cal_data['slope']
-            b = cal_data['offset']
+        if is_healthy:
+            return cache_file_path, hash_name
+        else:
+            # The file exists but is corrupted/empty. Delete it.
+            try:
+                os.remove(cache_file_path)
+            except OSError:
+                pass
 
-            # Create the C++ logic string
-            # If multiplicity > 0, calculate energy. Otherwise, return 0.0.
-            cpp_logic = f"({mult_branch} > 0) ? ({m} * {branch} + {b}) : 0.0"
-
-            # Create the new node and update our df reference
-            df = df.Define(new_branch_name, cpp_logic)
-
-    return df
-
-
-def get_df_histogram(df, ddas_run, column_list, binning, cache_tag="calibrated", force_recreate=False):
-    """
-    Takes an RDataFrame, books 1D histograms for the requested columns, 
-    executes the event loop if needed, and caches the results to a .root file.
-    """
-    cache_dir = Path(f"e23035_analysis/cache/run_{ddas_run}")
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / f"hists_{cache_tag}.root"
-
-    hist_dict = {}
-
-    # 1. Check Cache
-    if cache_file.exists() and not force_recreate:
-        f = ROOT.TFile(str(cache_file), "READ")
-        all_cached = True
+    # --- BUILD THE HISTOGRAM ---
+    data_file_path = ddas_interface.get_merged_root_file_path(ddas_run) 
+    data_file = ROOT.TFile.Open(data_file_path, 'READ')
+    
+    if not data_file or data_file.IsZombie():
+        raise FileNotFoundError(f"Could not open ROOT data file: {data_file_path}")
         
-        for col in column_list:
-            h = f.Get(f"h_{col}")
-            if h:
-                h.SetDirectory(0) # Detach from file
-                hist_dict[col] = h
-            else:
-                all_cached = False
-                break 
-                
-        f.Close()
-        if all_cached:
-            print(f"Loaded {len(column_list)} histograms from cache: {cache_file.name}")
-            return hist_dict
-
-    # 2. Book Histograms (Lazy)
-    hist_ptrs = {}
-    n_bins, x_min, x_max = binning
-
-    for col in column_list:
-        h_model = (f"h_{col}", f"{col};Energy (keV);Counts", n_bins, x_min, x_max)
-        hist_ptrs[col] = df.Histo1D(h_model, col)
-
-    # 3. Trigger Event Loop & Save to Cache
-    if hist_ptrs:
-        print(f"Executing RDataFrame loop to generate {len(hist_ptrs)} histograms...")
-        f = ROOT.TFile(str(cache_file), "RECREATE")
+    tree = data_file.Get('merged_data')
+    if not tree:
+        data_file.Close()
+        raise ValueError(f"Could not find TTree 'merged_data' in {data_file_path}.")
         
-        for col, ptr in hist_ptrs.items():
-            # ptr.GetValue() triggers the loop for ALL booked pointers at once
-            h = ptr.GetValue() 
-            h.Write()
-            h.SetDirectory(0)
-            hist_dict[col] = h
-            
-        f.Close()
+    raw_hist = ROOT.TH1D(hash_name, "", *binning)
 
-    return hist_dict
+    cal_string = get_calibrated_energy_string(ddas_run, calibration_name, branch_name, nonlinearity_correction_name)    
+    tree.Draw(f'{cal_string}>>{hash_name}', selection, 'goff')
+    raw_hist.SetDirectory(0)
+    data_file.Close()
 
+    cache_file = ROOT.TFile.Open(cache_file_path, 'RECREATE')
+    raw_hist.SetDirectory(cache_file)
+    raw_hist.Write("", ROOT.TObject.kOverwrite)
+    raw_hist.SetDirectory(0)
+    cache_file.Close()
+
+    return cache_file_path, hash_name
+
+def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, hist_title, branch_name, nonlinearity_correction_name=None, selection="", force_recreate=False, num_workers=1):
+    # --- MULTIPLE RUNS LOGIC ---
+    if ddas_interface.is_iterable_runs(ddas_run):
+        sum_hist = None
+        run_list = list(ddas_run) 
+        
+        if num_workers > 1:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+                future_to_run = {
+                    executor.submit(_fill_calibrated_histogram_worker, run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name): run
+                    for run in run_list
+                }
+                
+                # Forced stdout and dynamic columns
+                for future in tqdm(concurrent.futures.as_completed(future_to_run), total=len(run_list), desc=f"Filling {hist_name} (Parallel)", file=sys.stdout, dynamic_ncols=True, leave=True):
+                    run = future_to_run[future]
+                    cache_file_path, hash_name = future.result()
+                    
+                    # --- LAYER 2: RACE CONDITION FAILSAFE ---
+                    cf = ROOT.TFile.Open(cache_file_path, 'READ')
+                    temp_hist = cf.Get(hash_name)
+                    
+                    if not temp_hist: # pragma: no cover
+                        cf.Close()
+                        print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
+                        cache_file_path, hash_name = _fill_calibrated_histogram_worker(run, calibration_name, binning, branch_name, selection, force_recreate=True, nonlinearity_correction_name=nonlinearity_correction_name)
+                        cf = ROOT.TFile.Open(cache_file_path, 'READ')
+                        temp_hist = cf.Get(hash_name)
+                        
+                    hist = temp_hist.Clone(f"{hist_name}_temp")
+                    hist.SetDirectory(0)
+                    cf.Close()
+                    
+                    if sum_hist is None:
+                        sum_hist = hist.Clone(hist_name)
+                        sum_hist.SetTitle(hist_title)
+                        sum_hist.SetDirectory(0)
+                    else:
+                        sum_hist.Add(hist)
+        else:
+            # Forced stdout and dynamic columns
+            for run in tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
+                temp_name = f"{hist_name}_run{run}"
+                hist = get_calibrated_histogram(run, calibration_name, binning, temp_name, hist_title, branch_name, nonlinearity_correction_name, selection, force_recreate, num_workers=1)
+                
+                if sum_hist is None:
+                    sum_hist = hist.Clone(hist_name)
+                    sum_hist.SetTitle(hist_title)
+                    sum_hist.SetDirectory(0)
+                else:
+                    sum_hist.Add(hist)
+                    
+        return sum_hist
+
+    # --- SINGLE RUN LOGIC ---
+    with tqdm(total=1, desc=f"Filling {hist_name} (Single)", file=sys.stdout, dynamic_ncols=True, leave=True) as pbar:
+        cache_file_path, hash_name = _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name)
+        pbar.update(1)
+    
+    cf = ROOT.TFile.Open(cache_file_path, 'READ')
+    temp_hist = cf.Get(hash_name)
+    
+    if not temp_hist: # pragma: no cover
+        cf.Close()
+        print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
+        cache_file_path, hash_name = _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branch_name, selection, force_recreate=True, nonlinearity_correction_name=nonlinearity_correction_name)
+        cf = ROOT.TFile.Open(cache_file_path, 'READ')
+        temp_hist = cf.Get(hash_name)
+        
+    final_hist = temp_hist.Clone(hist_name)
+    final_hist.SetTitle(hist_title)
+    final_hist.SetDirectory(0)
+    cf.Close()
+    
+    return final_hist
 
 def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
     '''
@@ -813,27 +872,6 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
 
     print(f"Summary saved to {pdf_filename}")
 
-
-
-def _fetch_calibrated_run_hist(run, cal_name, ch, binning):
-    """
-    Worker function to fetch a single histogram in a parallel process.
-    Must be at the top level of the module to be picklable.
-    """
-    import ROOT # Ensure the worker process has ROOT loaded
-    
-    cal_exp = get_calibrated_energy_string(run, cal_name, ch)
-    h_run = ddas_interface.get_histogram(
-        run, binning, f'{ch}_{run}', f'{ch} Run {run}', cal_exp
-    )
-    
-    if h_run:
-        # CRITICAL: Detach the C++ object from the worker's memory 
-        # so it survives being serialized and sent back to the main process!
-        h_run.SetDirectory(0) 
-        
-    return run, h_run
-
 def create_stability_summary(cal_name, binning, pvalue_threshold, energy_threshold, run_list=None):
     '''
     Generates a PDF summary of gain stability across runs for a given calibration.
@@ -886,19 +924,22 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
         
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Dispatch all the runs to the worker pool
-            future_to_run = {
-                executor.submit(_fetch_calibrated_run_hist, run, cal_name, ch, binning): run 
-                for run in runs_for_ch
-            }
+            future_to_run = {}
+            for run in runs_for_ch:
+                cal_exp = get_calibrated_energy_string(run, cal_name, ch)
+                hist_name = f'{ch}_{run}'
+                hist_title = f'{ch} Run {run}'
+                future = executor.submit(ddas_interface.get_histogram, run, binning, hist_name, hist_title, cal_exp, num_workers=1)
+                future_to_run[future] = run
             
             # Collect them as they finish
             for future in concurrent.futures.as_completed(future_to_run):
                 run = future_to_run[future]
                 try:
-                    ret_run, h_run = future.result()
+                    h_run = future.result()
                     if h_run:
                         h_run.SetDirectory(0) # Re-detach in the main process just to be safe
-                        run_hists.append((ret_run, h_run))
+                        run_hists.append((run, h_run))
                         summed_hist.Add(h_run)
                 except Exception as exc:
                     print(f"[{ch}] ERROR: Run {run} generated an exception during fetch: {exc}")
@@ -1063,3 +1104,137 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
 
     ROOT.gROOT.SetBatch(original_batch_state)
     print("Stability generation complete!")
+
+def create_nonlinearity_correction(runs:int|list, calibration_name:str, correction_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
+                                   peak_model:str, poly_degree:int):
+    '''
+    Fit peaks in calibrated spectrum to get peak locations, and then fit a polynomial to these peak locations to get a non-linearity correction.
+    Saves results in e23035_analysis/nonlinearity_corrections/correction_name/.
+    Results will include a pickle file with the polynomial coefficients and fit information, and a pdf showing the fit to each peak.
+
+    runs: list of runs to use. Histograms from runs will be summed before fitting peaks.
+    calibration_name: calibration to apply before fitting peaks
+    branch_name: name of the branch to retrieve data from (eg clover_1a_e, tpc_energy, etc)
+    binning_for_fit: tuple specifying TH1D binning
+    peaks: List of peaks to use to specify the calibration. Each list entry should contain tuples of 
+        (true energy, true energy_uncertainty, (fit window +, -)). 
+    poly_degree: The degree of the polynomial to use for the correction.
+    peak_model: gaus for gaussian, or emg for exponentially modified gaussian, bg_shift_gaus for gaussian with different background to left and right
+
+    '''
+    original_batch_state = ROOT.gROOT.IsBatch()
+    ROOT.gROOT.SetBatch(True)
+
+    try:
+        num_workers = min(200, len(runs))
+    except TypeError:
+        num_workers = 1
+
+    print(f"[{branch_name}] Building calibrated histogram for non-linearity correction...", flush=True)
+    hist = get_calibrated_histogram(runs, calibration_name, binning_for_fit, f"{branch_name}_calibrated", f"{branch_name} Calibrated", branch_name, selection='', num_workers=num_workers)
+
+    measured_energies, measured_energy_errors, true_energies, true_energy_errors = [], [], [], []
+    all_peak_fit_params = {}
+
+    correction_dir = Path(f"e23035_analysis/nonlinearity_corrections/{correction_name}/{branch_name}")
+    correction_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = str(correction_dir / f'{correction_name}_peak_fits.pdf')
+
+    # Use a single canvas to open and close the PDF file
+    pdf_canvas = ROOT.TCanvas("pdf_canvas", "PDF Canvas")
+    pdf_canvas.Print(pdf_path + "[")
+
+    for true_energy, true_energy_err, fit_window in tqdm(peaks, desc=f"Fitting peaks for {branch_name}"):
+        location_guess = true_energy
+        fit_range = (location_guess + fit_window[0], location_guess + fit_window[1])
+        location_wiggle = (fit_range[1] - fit_range[0]) / 2.0
+        param_bounds = {'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
+
+        if peak_model.lower() == 'gaus':
+            res_tuple = fitting_tools.fit_gaussian_peak(hist, 'gamma_keV', location_guess, fit_range, param_bounds=param_bounds)
+        elif peak_model.lower() == 'emg':
+            res_tuple = fitting_tools.fit_emg_peak(hist, 'gamma_keV', location_guess, fit_range, param_bounds=param_bounds)
+        elif peak_model.lower() == 'bg_shift_gaus':
+            res_tuple = fitting_tools.fit_gaussian_w_bg_shift(hist, location_guess, fit_range, 'gamma_keV', param_bounds=param_bounds)
+        else:
+            ROOT.gROOT.SetBatch(original_batch_state)
+            raise ValueError(f"Unknown peak model: {peak_model}")
+
+        fit_res, _, _, _, canvas, _, f_to_fit, _ = res_tuple
+
+        if fit_res.IsValid():
+            mu_val = fit_res.Parameter(2)
+            mu_err = fit_res.ParError(2)
+
+            measured_energies.append(mu_val)
+            measured_energy_errors.append(mu_err)
+            true_energies.append(true_energy)
+            true_energy_errors.append(true_energy_err)
+
+            peak_params = {f_to_fit.GetParName(i): {'value': fit_res.Parameter(i), 'error': fit_res.ParError(i)} for i in range(f_to_fit.GetNpar())}
+            peak_params['p_value'] = fit_res.Prob()
+            all_peak_fit_params[true_energy] = peak_params
+
+            canvas.Print(pdf_path)
+
+    if len(measured_energies) <= poly_degree:
+        print(f"[{branch_name}] ERROR: Not enough valid peaks ({len(measured_energies)}) to perform a polynomial fit of degree {poly_degree}. Aborting.")
+        pdf_canvas.Print(pdf_path + "]")
+        ROOT.gROOT.SetBatch(original_batch_state)
+        return
+
+    graph = ROOT.TGraphErrors(
+        len(measured_energies),
+        np.array(measured_energies, dtype=np.float64),
+        np.array(true_energies, dtype=np.float64),
+        np.array(measured_energy_errors, dtype=np.float64),
+        np.array(true_energy_errors, dtype=np.float64)
+    )
+    graph.SetTitle(f"Non-linearity Correction: {correction_name};Measured Energy (keV);True Energy (keV)")
+    graph.SetMarkerStyle(20)
+
+    correction_fit_func = ROOT.TF1("correction_fit", f"pol{poly_degree}", min(measured_energies) * 0.9, max(measured_energies) * 1.1)
+    fit_res = graph.Fit(correction_fit_func, "SQ")
+
+    poly_params = [correction_fit_func.GetParameter(i) for i in range(poly_degree + 1)]
+    cov_matrix_dict = {f'cov_p{i}_p{j}': fit_res.CovMatrix(i, j) for i in range(poly_degree + 1) for j in range(i, poly_degree + 1)}
+
+    correction_results = {
+        'poly_params': poly_params,
+        'poly_degree': poly_degree,
+        'cov_matrix': cov_matrix_dict,
+        'fit_p_value': fit_res.Prob(),
+        'peak_fit_parameters': all_peak_fit_params
+    }
+
+    pkl_path = correction_dir / f"{correction_name}.pkl"
+    with open(pkl_path, 'wb') as f:
+        pickle.dump(correction_results, f)
+    print(f"Saved non-linearity correction to {pkl_path}")
+
+    # --- Create and save the final correction curve plot ---
+    res_y = [true_energies[i] - correction_fit_func.Eval(measured_energies[i]) for i in range(len(measured_energies))]
+    derivs = np.array([correction_fit_func.Derivative(x) for x in measured_energies])
+    res_y_err = np.sqrt(np.array(true_energy_errors)**2 + (derivs * np.array(measured_energy_errors))**2)
+
+    graph_res = ROOT.TGraphErrors(len(measured_energies), np.array(measured_energies, dtype=np.float64), np.array(res_y, dtype=np.float64), np.array(measured_energy_errors, dtype=np.float64), res_y_err)
+    
+    c_corr = ROOT.TCanvas("c_corr", "Non-linearity Correction", 800, 800)
+    rp = ROOT.TRatioPlot(graph, correction_fit_func)
+    rp.SetSeparationMargin(0.02)
+    rp.SetH1DrawOpt("AP")
+    rp.SetH2DrawOpt("L")
+    rp.Draw()
+    
+    # Manually draw the residuals with correct errors
+    rp.GetLowerPad().cd()
+    graph_res.SetMarkerStyle(20)
+    graph_res.Draw("AP")
+    rp.GetLowerRefYaxis().SetTitle("Residual (keV)")
+    
+    c_corr.Update()
+    c_corr.Print(pdf_path)
+    pdf_canvas.Print(pdf_path + "]")
+
+    ROOT.gROOT.SetBatch(original_batch_state)
+    print(f"Saved diagnostic plots to {pdf_path}")
