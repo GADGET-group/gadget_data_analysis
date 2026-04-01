@@ -178,7 +178,8 @@ def make_merged_root_file(ddas_run):
     array of unlabeled channels.
 
     Branches will be added for each channel in channel_map.csv, and given the specified name with a _t ending for ddas time,
-    _e for energy using the slope and offset in channel_map.csv, _c for raw adc counts, or _m for multiplicity. 
+    _e for energy using the slope and offset in channel_map.csv, _c for raw adc counts, or _m for multiplicity. A _cr branch will also
+    be created which has the adc_counts + uniform random number from -0.5 to 0.5.
     Additionally, the following branches will be added for GET data:
     Energy, track length, particle type (0=uncatagorized, 1=proton, 2=alpha), should_veto, get_timetamp
 
@@ -237,6 +238,7 @@ def make_merged_root_file(ddas_run):
         branch_tvals = [np.array([0], dtype=np.float64) for i in ch_names]
         branch_mvals = [np.array([0], dtype=np.int32) for i in ch_names]
         branch_counts = [np.array([0], dtype=np.int32) for i in ch_names]
+        branch_counts_ss = [np.array([0], dtype=np.float64) for i in ch_names] #sliding scale method counts
         tree_tpc_energy, tree_track_length = np.array([0.], dtype=np.float64), np.array([0.], dtype=np.float64)
         tree_ptype = np.array([0], dtype=np.int32)
         tree_should_veto = np.array([True], dtype=bool)
@@ -247,6 +249,7 @@ def make_merged_root_file(ddas_run):
             out_tree.Branch(ch_names[i]+'_t', branch_tvals[i], ch_names[i]+'_t/D')
             out_tree.Branch(ch_names[i]+'_m', branch_mvals[i], ch_names[i]+'_m/I')
             out_tree.Branch(ch_names[i]+'_c', branch_counts[i], ch_names[i]+'_c/I')
+            out_tree.Branch(ch_names[i]+'_cr', branch_counts_ss[i], ch_names[i]+'_cr/D')
         out_tree.Branch('tpc_energy', tree_tpc_energy, 'tpc_energy/D')
         out_tree.Branch('tpc_track_length', tree_track_length, 'tpc_track_length/D')
         out_tree.Branch('tpc_particle_id', tree_ptype, 'tpc_particle_id/I')
@@ -274,10 +277,12 @@ def make_merged_root_file(ddas_run):
                     #print(branch_evals[i])
                     branch_tvals[i][0] = times[ch_indexes[i]]/1e9 #store all times in seconds
                     branch_counts[i][0] = energies[ch_indexes[i]]
+                    branch_counts_ss[i][0] = energies[ch_indexes[i]] + np.random.uniform(-0.5, 0.5)
                 else:
                     branch_evals[i][0] = 0
                     branch_tvals[i][0] = np.nan
                     branch_counts[i][0] = -1 #set to -1 when multiplicity is 0
+                    branch_counts_ss[i][0] = -1
                 #check if beam just turned off
                 #note that this uses the beam off signal and not chopper signal
                 #and so is offset by 2 ms from the true beam off. This is desirable

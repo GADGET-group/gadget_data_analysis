@@ -92,7 +92,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     peaks: List of peaks to use to specify the calibration. Each list entry should contain tuples of 
         (true energy, true energy_uncertainty, (search window start, stop), (fit window +, -), rebin_factor). 
         Will assume offset = 0 if length is 1. The largest bin in the specified range will be used as a starting guess for the peak location.
-    time_branch: will default to changing "_c" ending of branch name to _t
+    time_branch: will default to changing "_c" or "_cr" ending of branch name to _t
     time_bin_size: bin size to use for testing if gain is stable over time, in seconds. Defaults to 10 minutes.
     normalization_dict: Used to choose if time dependent histogram should be normalized on a per slice basis, for beam products or daughters ith
                         short decay timescales. Use "slice" for this case, or "total" for room background lines which should have truely time
@@ -117,7 +117,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
     # Time-dependent histogram setup
     if time_branch == '':
-        time_branch = branch_name[:-2] + '_t'
+        time_branch = branch_name.rsplit('_', 1)[0] + '_t'
         
     start_time, stop_time = ddas_interface.get_first_and_last_ddas_time(ddas_run)
     
@@ -357,7 +357,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     # --- NEW: Filter out any fits that returned NaN or <= 0 uncertainties ---
     valid_indices = [
         i for i, err in enumerate(peak_location_uncertainties) 
-        if not np.isnan(err) and not np.isnan(peak_locations[i]) and err > 0.01 and amplitudes[i]/amplitude_uncertainties[i]>3 and probs[i]>0.01
+        if not np.isnan(err) and not np.isnan(peak_locations[i]) and err > 0.01 and amplitudes[i]/amplitude_uncertainties[i]>3# and probs[i]>0.01
     ]
 
     valid_peak_locs = [peak_locations[i] for i in valid_indices]
@@ -1225,8 +1225,10 @@ def create_nonlinearity_correction(runs:int|list, calibration_name:str, correcti
     pad1.Draw()
     pad1.cd()
 
+    ROOT.gStyle.SetOptFit(1111)
     graph.Draw("AP")
-
+    pad1.Update()
+    
     c_corr.cd()
     pad2 = ROOT.TPad("pad2", "pad2", 0.0, 0.0, 1.0, 0.3)
     pad2.SetTopMargin(0.02)

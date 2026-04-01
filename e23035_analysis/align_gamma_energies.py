@@ -106,7 +106,7 @@ def do_gain_match(ddas_run, save_init_alignment_pdf=False):
         peaks = []
         clover_str = f'clover_{clover}'
         init_slope, init_offset = init_cal_dict[clover_str]
-        adc_str = f'clover_{clover}_c'
+        adc_str = f'clover_{clover}_cr'
         for i in range(len(true_locations)):
             loc_guess = (true_locations[i] - init_offset)/init_slope
             fit_window_width = 0.01*loc_guess*np.sqrt(511/true_locations[i])
@@ -256,7 +256,7 @@ def make_nonlinearity_correction():
         peaks.append((true_locations[i], true_location_uncertainties[i], (-fit_window_width, fit_window_width)))
 
     for clover_str in degai.clover_str_list:
-        energy_calibration_tools.create_nonlinearity_correction(runs, calibration_name=gm_name, correction_name='c1', branch_name=clover_str+'_c',
+        energy_calibration_tools.create_nonlinearity_correction(runs, calibration_name=gm_name, correction_name='c1', branch_name=clover_str+'_cr',
                                                                  binning_for_fit=gamma_binning, peaks=peaks, peak_model='bg_shift_gaus', poly_degree=2)
 
     

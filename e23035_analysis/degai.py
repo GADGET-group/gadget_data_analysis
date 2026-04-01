@@ -82,7 +82,7 @@ def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name, nonlinearity_
     _ = get_crystal_histograms(run, binning, hist_to_get, cal_name, nonlinearity_correction_name=nonlinearity_correction_name, num_workers=1)
     return run
 
-def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_workers=None, nonlinearity_correction_name=None):
+def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_workers=None, nonlinearity_correction_name=None, sliding_scale=True):
     '''
     hist_to_get: c, t, m, e, or cal
     If cal, cal_name must be given, and corresponding cal generated with energy_calibration_tools will be applied.
@@ -130,7 +130,9 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
     to_return = {}
     
     if hist_to_get == 'cal':
-        clover_strings = [energy_calibration_tools.get_calibrated_energy_string(ddas_run, cal_name, s, nonlinearity_correction_name=nonlinearity_correction_name) for s in get_clover_strings('c')]
+        s = 'cr' if sliding_scale else 'c'
+        clover_strings = [energy_calibration_tools.get_calibrated_energy_string(ddas_run, cal_name, s,\
+                            nonlinearity_correction_name=nonlinearity_correction_name) for s in get_clover_strings(s)]
         names = get_clover_strings('keV')
     else:
         clover_strings = get_clover_strings(hist_to_get)
@@ -169,7 +171,7 @@ def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init', nonlinearity_c
         
     return to_return
 
-def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=False, nonlinearity_correction_name=None):
+def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=True, nonlinearity_correction_name=None):
     '''
     Make a ttree with the gamma ray add back, storing an array of energies and times per event.
     If sliding scale is true, adc counts will have a a uniform number from -0.5 to 0.5 added to them to prevent binning issues (see).
@@ -209,7 +211,10 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     poly_params_list = []
     max_degree = 1
     for s in clover_str_list:
-        res = energy_calibration_tools.get_calibration_result(ddas_run, cal_name, s+'_c')
+        if sliding_scale:
+            res = energy_calibration_tools.get_calibration_result(ddas_run, cal_name, s+'_cr')
+        else:
+            res = energy_calibration_tools.get_calibration_result(ddas_run, cal_name, s+'_c')
         if 'poly_params' in res:
             params = res['poly_params']
             max_degree = max(max_degree, len(params) - 1)
@@ -243,9 +248,13 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     invals = []
     tvals = [] # NEW: Array to hold timestamps
     for s in clover_str_list:
-        invals.append(np.zeros(1, dtype=np.int32))
+        if sliding_scale:
+            invals.append(np.zeros(1, dtype=np.float64))
+            intree.SetBranchAddress(s+'_cr', invals[-1])
+        else:    
+            invals.append(np.zeros(1, dtype=np.int32))
+            intree.SetBranchAddress(s+'_c', invals[-1])
         tvals.append(np.zeros(1, dtype=np.float64))
-        intree.SetBranchAddress(s+'_c', invals[-1])
         intree.SetBranchAddress(s+'_t', tvals[-1]) # Load the timestamp
     
     # Build the add back tree
@@ -283,8 +292,6 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
                     corrected_energies += valid_nlc_poly[:, deg] * (base_energies ** deg)
                 energies[has_counts] = corrected_energies
             
-        if sliding_scale:
-            energies[has_counts] += np.random.uniform(-0.5, 0.5, size=len(energies[has_counts]))
 
         valid_mask = has_counts & (energies > e_thresh)
         fired_indexes = np.where(valid_mask)[0].tolist()
