@@ -74,7 +74,7 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     f_to_fit.SetNpx(1000)
 
     # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
-    fit_options = 'LS0QEGI'
+    fit_options = 'LS0QEI'#G
     fit_res = sub_hist.Fit(f_to_fit, fit_options)
     attempts = 0
     while not fit_res.IsValid() and attempts < 20:
@@ -85,8 +85,11 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     h_fit = sub_hist.Clone(f"h_fit_{unique_id}")
     h_fit.Reset() 
     for i in range(1, h_fit.GetNbinsX() + 1):
-        val = f_to_fit.Eval(h_fit.GetBinCenter(i))
-        h_fit.SetBinContent(i, val)
+        # The 'I' fit option integrates the function over the bin. To plot the fit
+        # correctly for residuals, we must do the same.
+        bin_low = h_fit.GetXaxis().GetBinLowEdge(i)
+        bin_high = h_fit.GetXaxis().GetBinUpEdge(i)
+        h_fit.SetBinContent(i, f_to_fit.Integral(bin_low, bin_high))
         h_fit.SetBinError(i, 0)
         
     h_fit.SetLineColor(ROOT.kRed)
@@ -474,7 +477,7 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     # [1]: Amplitude (Area) for peak 0
     # [2]: Mean (mu) for peak 0
     # [3]: Sigma (shared across all peaks)
-    # [4]: shift in background (right - left) as fraction of peak area
+    # [4]: shift in background (left - right) as fraction of peak area, shared for all peaks
     # If n_peaks > 1:
     # [5]: Amplitude of peak 1
     # [6]: Mean of peak 1
@@ -495,7 +498,7 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
             amp_idx = 3 + 2 * i
             mu_idx = 4 + 2 * i
             
-        bg_string += f" + 0.5*[{amp_idx}]*[4]*(1 + TMath::Erf((x-[{mu_idx}])/(1.41421356*[3])))"
+        bg_string += f" + 0.5*[{amp_idx}]*[4]*(1 + TMath::Erfc((x-[{mu_idx}])/(1.41421356*[3])))"
         
         # 2.50662827 is sqrt(2*pi)
         gaus_string = f"([{amp_idx}] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[3]) * ((x-[{mu_idx}])/[3]))"
@@ -545,14 +548,14 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         A_guess,       # p1: amplitude 0
         e_guess_list[0], # p2: mu 0
         sigma_guess,   # p3: sigma
-        0.0            # p4: bg_shift
+        0.002            # p4: bg_shift
     ]
 
     bg_bounds = param_bounds.get('bg_const', (0, np.inf))
     A_bounds = param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default))
     mu_bounds = param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high)))
     sigma_bounds = param_bounds.get('sigma', sigma_bounds)
-    bg_shift_bounds = param_bounds.get('bg_shift', (-bg_shift_limit, bg_shift_limit))
+    bg_shift_bounds = param_bounds.get('bg_shift', (0, bg_shift_limit))
 
     bounds = [
         bg_bounds,       # p0: bg_const
