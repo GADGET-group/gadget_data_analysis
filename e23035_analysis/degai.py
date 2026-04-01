@@ -84,8 +84,9 @@ def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name, nonlinearity_
 
 def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_workers=None, nonlinearity_correction_name=None, sliding_scale=True):
     '''
-    hist_to_get: c, t, m, e, or cal
-    If cal, cal_name must be given, and corresponding cal generated with energy_calibration_tools will be applied.
+    hist_to_get: c, t, m, e, or cal.
+    If cal, cal_name must be given, and corresponding cal generated with energy_calibration_tools will be applied, and the
+    sliding_scale parameter will determine if the calibration is applied to the _c or _cr branch.
     '''
     
     # --- MULTIPLE RUNS LOGIC ---
@@ -232,7 +233,10 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
         nlc_poly_params_list = []
         nlc_max_degree = 1
         for s in clover_str_list:
-            nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(nonlinearity_correction_name, s+'_c')
+            if sliding_scale:
+                nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(nonlinearity_correction_name, s+'_cr')
+            else:
+                nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(nonlinearity_correction_name, s+'_c')
             nlc_params = nlc_res['poly_params']
             nlc_max_degree = max(nlc_max_degree, len(nlc_params) - 1)
             nlc_poly_params_list.append(nlc_params)
