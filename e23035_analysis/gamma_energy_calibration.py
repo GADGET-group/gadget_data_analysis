@@ -28,7 +28,7 @@ nlc_name = 'c1'
 gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
 
-f = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
+f = spectrum_fitter(gamma_hist, 'bg_shift_emg')
 # f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
 # for i in range(len(f.peaks_to_fit)):
 #     f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)

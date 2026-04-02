@@ -10,7 +10,8 @@ class spectrum_fitter:
     '''
     def __init__(self, spectrum:ROOT.TH1D, peak_model:str):
         '''
-        peak_model: gaus for gaussian, or emg for exponentially modified gaussian, bg_shift_gaus for gaussian with different background to the left and right
+        peak_model: gaus for gaussian, or emg for exponentially modified gaussian, bg_shift_gaus for gaussian with different background to the left and right,
+        or bg_shift_emg
         '''
         self.spectrum = spectrum
         #peak location guesses should contain a list of (peak location guess, lower window, upper window)
@@ -200,6 +201,9 @@ class spectrum_fitter:
                 )
             elif self.peak_model.lower() == 'bg_shift_gaus':
                 res = fitting_tools.fit_gaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
+                                    param_bounds=param_bounds)
+            elif self.peak_model.lower() == 'bg_shift_emg':
+                res = fitting_tools.fit_emg_w_bg_shift(self.spectrum, loc_guess, fit_range, 
                                     param_bounds=param_bounds)
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")

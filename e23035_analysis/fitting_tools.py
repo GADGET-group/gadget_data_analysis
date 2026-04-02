@@ -11,18 +11,6 @@ import numpy as np
 import uuid
 
 def fit_func(histogram, function_string, initial_values, bounds, fit_range, names=None): 
-    """
-    Fits a user-defined function to a histogram using Poisson statistics (Log-Likelihood) 
-    and plots the residuals.
-    
-    Args:
-        histogram: The ROOT TH1 object to fit.
-        function_string (str): The ROOT TF1 string (e.g., '[0] + [1]*x + [2]*exp(-0.5*((x-[3])/[4])^2)').
-        initial_values (list): Initial guesses for parameters [val0, val1, ...].
-        bounds (list of tuples): Limits for each parameter [(min0, max0), (min1, max1), ...].
-        fit_range (tuple): The (x_min, x_max) range to perform the fit. Will be snapped to nearest bin edges in passed in histogram to preserve binning.
-        names (list of str, optional): Names for each parameter. Defaults to None (p0, p1, ...).
-    """
     # 1. Unique ID & Setup
     unique_id = uuid.uuid4().hex[:8]
     canvas_name = f"c_fit_{unique_id}"
@@ -49,10 +37,15 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
 
     # 3. Fit Function Setup
     func_name = f'to_fit_{unique_id}'
-    f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high)
-    
-    # Ensure inputs match
     n_params = len(initial_values)
+    
+    if callable(function_string):
+        f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high, n_params)
+        f_to_fit._pyfunc = function_string # Keep a reference to prevent garbage collection
+    else:
+        f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high)
+        
+    # Ensure inputs match
     if len(bounds) != n_params:
         raise ValueError("Length of initial_values must match length of bounds.")
     if names is not None and len(names) != n_params:
@@ -74,10 +67,12 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     f_to_fit.SetNpx(1000)
 
     # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
-    fit_options = 'LS0QEI'#G
+    fit_options = 'LS0QEI'
     fit_res = sub_hist.Fit(f_to_fit, fit_options)
     attempts = 0
-    while not fit_res.IsValid() and attempts < 20:
+    
+    # Cleaned up overlapping while loop syntax
+    while (not fit_res.Get() or not fit_res.IsValid()) and attempts < 20:
         fit_res = sub_hist.Fit(f_to_fit, fit_options)
         attempts += 1
 
@@ -85,8 +80,6 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     h_fit = sub_hist.Clone(f"h_fit_{unique_id}")
     h_fit.Reset() 
     for i in range(1, h_fit.GetNbinsX() + 1):
-        # The 'I' fit option integrates the function over the bin, divided by the bin width. 
-        # To plot the fit correctly for residuals, we must do the same.
         bin_low = h_fit.GetXaxis().GetBinLowEdge(i)
         bin_high = h_fit.GetXaxis().GetBinUpEdge(i)
         bin_width = h_fit.GetXaxis().GetBinWidth(i)
@@ -100,13 +93,12 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     canvas.cd()
     rp = ROOT.TRatioPlot(sub_hist, h_fit, "diff")
     
-    rp.SetH1DrawOpt("E")      # Data: Points w/ Error
-    rp.SetH2DrawOpt("L")      # Fit: Line
-    rp.SetGraphDrawOpt("P")   # Residuals: Points
+    rp.SetH1DrawOpt("E")      
+    rp.SetH2DrawOpt("L")      
+    rp.SetGraphDrawOpt("P")   
     
     rp.Draw()
 
-    # Style Residuals
     rp.GetLowerRefYaxis().SetTitle("Resid. (Data-Fit)")
     rp.GetLowerRefGraph().SetMarkerStyle(20)
     rp.GetLowerRefGraph().SetMarkerSize(0.6)
@@ -264,48 +256,55 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
-    """
-    Fits an Exponentially Modified Gaussian (low-energy tail) + constant background 
-    using the fit_func engine.
-    """
+    from scipy.special import erfcx, erfc
     if param_bounds is None:
         param_bounds = {}
     e_low, e_high = fit_window
 
-    # 1. Construct the Mathematical Model
-    # [0]: Constant Background
-    # [1]: Amplitude (A)
-    # [2]: Mean (mu)
-    # [3]: Sigma (sigma)
-    # [4]: Tail decay parameter (tau)
+    bin_width = spectrum.GetBinWidth(1)
     
-    bg_string = "[0]"
-    
-    # ROOT's TMath::Erfc and TMath::Exp are used for stability. 
-    # 1.41421356 is used in place of sqrt(2) for parsing efficiency.
-    bin_width = spectrum.GetBinWidth(0)
-    norm_factor = f"([1] * {bin_width} / (2.0 * [4]))"
-    exp_term = "TMath::Exp((x-[2])/[4] + ([3]*[3])/(2.0*[4]*[4]))"
-    erfc_term = "TMath::Erfc((x-[2])/(1.41421356*[3]) + [3]/(1.41421356*[4]))"
-    
-    emg_string = f"{norm_factor} * {exp_term} * {erfc_term}"
-    function_string = f"{bg_string} + {emg_string}"
-    
-    function_string = f"{bg_string} + {emg_string}"
+    # Python evaluation function utilizing erfcx
+    def emg_eval(x, p):
+        val_x = x[0]
+        bg_const = p[0]
+        amp = p[1]
+        mu = p[2]
+        sigma = p[3]
+        tau = p[4]
+        
+        norm = amp * bin_width / (2.0 * tau)
+        
+        # Unified argument logic
+        z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
+        
+        if z_arg < -25: 
+            # Fallback to stable exp*erfc for extreme negative arguments
+            exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
+            if exp_arg > 700: 
+                peak_val = 0.0
+            else: 
+                peak_val = norm * np.exp(exp_arg) * erfc(z_arg)
+        else: 
+            # Stable erfcx form for the main peak and tail
+            gaus_arg = (val_x - mu) / sigma
+            gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
+            erfcx_part = erfcx(z_arg)
+            peak_val = norm * gaus_part * erfcx_part
+            
+        return bg_const + peak_val
 
-    # 2. Setup Parameters and Initial Guesses
-    # Calculate a good starting sigma using your empirical formula
+    # Setup Parameters and Initial Guesses
     sigma_guess = get_sigma(data_source, e_guess)
     tau_guess = 3
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
-
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
-    A_guess = (spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess)*sigma_guess/bin_width#35413.4#
+    A_guess = (spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess) * sigma_guess / bin_width
+    
     if data_source == 'gamma_adc':
         tau_bounds = (0.01, 10)
-        sigma_bounds = (1,20)
-        A_bounds = (1,np.inf)#((spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess), np.inf)
+        sigma_bounds = (1, 20)
+        A_bounds = (1, np.inf)
     else:
         tau_bounds = (0.01, 100)
         sigma_bounds = (0.1, 100)
@@ -313,53 +312,44 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
 
     spectrum.GetXaxis().UnZoom()
 
-    initial_values = [
-        bg_guess,          # p0: bg_const
-        A_guess,        # p1: amplitude
-        e_guess,      # p2: mu
-        sigma_guess,  # p3: sigma
-        tau_guess     # p4: tau (tail length)
-    ]
-    #print('initial values: ',initial_values)
-
-    bg_bounds = param_bounds.get('bg_const', (0, np.inf))
-    A_bounds = param_bounds.get('amplitude', A_bounds)
-    mu_bounds = param_bounds.get('mu', (e_low, e_high))
-    sigma_bounds = param_bounds.get('sigma', sigma_bounds)
-    tau_bounds = param_bounds.get('tau', tau_bounds)
+    initial_values = [bg_guess, A_guess, e_guess, sigma_guess, tau_guess]
 
     bounds = [
-        bg_bounds,       # p0: bg_const
-        A_bounds,        # p1: amplitude
-        mu_bounds,       # p2: mu bounds
-        sigma_bounds,    # p3: sigma 
-        tau_bounds       # p4: tau 
+        param_bounds.get('bg_const', (0, np.inf)),
+        param_bounds.get('amplitude', A_bounds),
+        param_bounds.get('mu', (e_low, e_high)),
+        param_bounds.get('sigma', sigma_bounds),
+        param_bounds.get('tau', tau_bounds)
     ]
-
-    #print('bounds: ',bounds)
 
     names = ["bg_const", "amplitude", "mu", "sigma", "tau"]
 
-    # 3. Call our generalized fit engine
+    # Call fit engine (passing ONLY the python function)
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
         histogram=spectrum, 
-        function_string=function_string, 
+        function_string=emg_eval, 
         initial_values=initial_values, 
         bounds=bounds, 
         fit_range=(e_low, e_high), 
         names=names
     )
 
-    # 4. Reconstruct individual TF1 components for visualization/return
     comp_id = uuid.uuid4().hex[:6]
-    fit_params = np.array(fit_res.Parameters())
+    fit_params = np.array([f_to_fit.GetParameter(i) for i in range(f_to_fit.GetNpar())])
     
-    # Background component (just parameter 0)
-    background = ROOT.TF1(f'bg_{comp_id}', bg_string, e_low, e_high)
+    # Reconstruct individual TF1 components for visualization
+    def bg_eval(x, p):
+        return p[0]
+        
+    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, 1)
+    background._pyfunc = bg_eval
     background.SetParameter(0, fit_params[0])
     
-    # EMG Peak component (parameters 1 through 4)
-    peaks = ROOT.TF1(f'emg_{comp_id}', emg_string, e_low, e_high)
+    def peak_eval(x, p):
+        return emg_eval(x, [0, p[1], p[2], p[3], p[4]])
+
+    peaks = ROOT.TF1(f'emg_{comp_id}', peak_eval, e_low, e_high, 5)
+    peaks._pyfunc = peak_eval
     for i in range(1, 5):
         peaks.SetParameter(i, fit_params[i])
         
@@ -602,6 +592,167 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     gaus_combined_string = " + ".join(gaus_strings)
     peaks = ROOT.TF1(f'gaus_{comp_id}', gaus_combined_string, e_low, e_high)
     for i in range(len(fit_params)):
+        peaks.SetParameter(i, fit_params[i])
+        
+    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+
+def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None): 
+    from scipy.special import erfcx, erfc
+    if param_bounds is None:
+        param_bounds = {}
+    e_low, e_high = fit_window
+    
+    if not isinstance(e_guess, list) and not isinstance(e_guess, tuple):
+        e_guess_list = [e_guess]
+    else:
+        e_guess_list = e_guess
+        
+    n_peaks = len(e_guess_list)
+
+    # 1. Call fit_gaussian_w_bg_shift to get initial guesses
+    gaus_res = fit_gaussian_w_bg_shift(spectrum, e_guess, fit_window, data_source, param_bounds)
+    gaus_params = np.array(gaus_res[0].Parameters())
+    gaus_res[4].Close()
+
+    bin_width = spectrum.GetBinWidth(1) 
+    
+    def emg_bg_shift_eval(x, p):
+        val_x = x[0]
+        bg_const = p[0]
+        sigma = p[3]
+        bg_shift = p[4]
+        tau = p[5]
+        
+        total = bg_const
+        for i in range(n_peaks):
+            if i == 0:
+                amp = p[1]
+                mu = p[2]
+            else:
+                amp = p[4 + 2 * i]
+                mu = p[5 + 2 * i]
+                
+            # Background Step Component
+            total += 0.5 * amp * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
+            
+            # EMG Component
+            norm = amp * bin_width / (2.0 * tau)
+            z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
+
+            if z_arg < -25:
+                exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
+                if exp_arg < 700:
+                    total += norm * np.exp(exp_arg) * erfc(z_arg)
+            else:
+                gaus_arg = (val_x - mu) / sigma
+                gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
+                erfcx_part = erfcx(z_arg)
+                total += norm * gaus_part * erfcx_part
+            
+        return total
+
+    # 3. Setup Parameters and Initial Guesses
+    if data_source is None:
+        A_bounds_default = (0, np.inf)
+        sigma_bounds = (0.1, 100)
+        tau_bounds = (0.01, 100)
+    elif data_source == 'gamma_adc':
+        A_bounds_default = (1, np.inf)
+        sigma_bounds = (1, 20)
+        tau_bounds = (0.01, 100)
+    else:
+        A_bounds_default = (0, np.inf)
+        sigma_bounds = (0.1, 100)
+        tau_bounds = (0.01, 100)
+
+    bg_shift_limit = 1
+
+    initial_values = [
+        gaus_params[0], # p0: bg_const
+        gaus_params[1], # p1: amplitude 0
+        gaus_params[2], # p2: mu 0
+        gaus_params[3], # p3: sigma
+        gaus_params[4], # p4: bg_shift
+        0.1             # p5: tau guess
+    ]
+
+    bounds = [
+        param_bounds.get('bg_const', (0, np.inf)),
+        param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default)),
+        param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high))),
+        param_bounds.get('sigma', sigma_bounds),
+        param_bounds.get('bg_shift', (0, bg_shift_limit)),
+        param_bounds.get('tau', tau_bounds)
+    ]
+
+    if n_peaks == 1:
+        names = ["bg_const", "amplitude", "mu", "sigma", "bg_shift", "tau"]
+    else:
+        names = ["bg_const", "amplitude_0", "mu_0", "sigma", "bg_shift", "tau"]
+
+    for i in range(1, n_peaks):
+        initial_values.extend([gaus_params[3 + 2 * i], gaus_params[4 + 2 * i]])
+        bounds.extend([
+            param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
+            param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
+        ])
+        names.extend([f"amplitude_{i}", f"mu_{i}"])
+
+    # 4. Call generalized fit engine
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+        histogram=spectrum, 
+        function_string=emg_bg_shift_eval, 
+        initial_values=initial_values, 
+        bounds=bounds, 
+        fit_range=(e_low, e_high), 
+        names=names
+    )
+
+    comp_id = uuid.uuid4().hex[:6]
+    fit_params = np.array([f_to_fit.GetParameter(i) for i in range(f_to_fit.GetNpar())])
+    
+    # 5. Background component
+    def bg_eval(x, p):
+        return emg_bg_shift_eval(x, [p[0], p[1], p[2], p[3], p[4], p[5]]) - peak_eval(x, p)
+        
+    # Peak component
+    def peak_eval(x, p):
+        val_x = x[0]
+        sigma = p[3]
+        tau = p[5]
+        
+        total = 0.0
+        for i in range(n_peaks):
+            if i == 0:
+                amp = p[1]
+                mu = p[2]
+            else:
+                amp = p[4 + 2 * i]
+                mu = p[5 + 2 * i]
+            
+            norm = amp * bin_width / (2.0 * tau)
+            z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
+
+            if z_arg < -25:
+                exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
+                if exp_arg < 700:
+                    total += norm * np.exp(exp_arg) * erfc(z_arg)
+            else:
+                gaus_arg = (val_x - mu) / sigma
+                gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
+                erfcx_part = erfcx(z_arg)
+                total += norm * gaus_part * erfcx_part
+                
+        return total
+        
+    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, len(initial_values))
+    background._pyfunc = bg_eval
+    
+    peaks = ROOT.TF1(f'emg_{comp_id}', peak_eval, e_low, e_high, len(initial_values))
+    peaks._pyfunc = peak_eval
+    
+    for i in range(len(fit_params)):
+        background.SetParameter(i, fit_params[i])
         peaks.SetParameter(i, fit_params[i])
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
