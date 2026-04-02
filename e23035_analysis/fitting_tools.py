@@ -85,11 +85,12 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     h_fit = sub_hist.Clone(f"h_fit_{unique_id}")
     h_fit.Reset() 
     for i in range(1, h_fit.GetNbinsX() + 1):
-        # The 'I' fit option integrates the function over the bin. To plot the fit
-        # correctly for residuals, we must do the same.
+        # The 'I' fit option integrates the function over the bin, divided by the bin width. 
+        # To plot the fit correctly for residuals, we must do the same.
         bin_low = h_fit.GetXaxis().GetBinLowEdge(i)
         bin_high = h_fit.GetXaxis().GetBinUpEdge(i)
-        h_fit.SetBinContent(i, f_to_fit.Integral(bin_low, bin_high))
+        bin_width = h_fit.GetXaxis().GetBinWidth(i)
+        h_fit.SetBinContent(i, f_to_fit.Integral(bin_low, bin_high) / bin_width)
         h_fit.SetBinError(i, 0)
         
     h_fit.SetLineColor(ROOT.kRed)
@@ -498,7 +499,7 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
             amp_idx = 3 + 2 * i
             mu_idx = 4 + 2 * i
             
-        bg_string += f" + 0.5*[{amp_idx}]*[4]*(1 + TMath::Erfc((x-[{mu_idx}])/(1.41421356*[3])))"
+        bg_string += f" + 0.5*[{amp_idx}]*[4]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[3]))"
         
         # 2.50662827 is sqrt(2*pi)
         gaus_string = f"([{amp_idx}] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[3]) * ((x-[{mu_idx}])/[3]))"

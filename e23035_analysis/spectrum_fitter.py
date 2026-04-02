@@ -266,14 +266,57 @@ class spectrum_fitter:
         if 0 <= peak_index < len(self.fit_results):
             orig_canvas = self.fit_results[peak_index]['canvas']
             
-            # The original canvas was created in ROOT Batch mode, so it lacks a GUI window.
-            # We create a new canvas and clone the contents of the batch canvas into it.
+            # 1. Create new canvas and clone the visual state
             new_canvas = ROOT.TCanvas(f"c_show_{peak_index}_{id(self)}", orig_canvas.GetTitle(), 800, 600)
             orig_canvas.DrawClonePad()
             new_canvas.Update()
-            
-            # Keep a reference to prevent garbage collection from immediately closing the window
+
+            # Retrieve fit results and function
+            fit_res = self.fit_results[peak_index]['fit_res']
+            f_to_fit = self.fit_results[peak_index]['f_to_fit']
+
+            # 2. Find the upper pad of the cloned TRatioPlot
+            # TRatioPlot creates custom TPads. The upper pad is the first TPad primitive.
+            new_canvas.cd()
+            for prim in new_canvas.GetListOfPrimitives():
+                if prim.InheritsFrom("TPad"):
+                    prim.cd()
+                    break
+
+            # 3. Create a custom stats box
+            # Coordinates are Normalized Device Coordinates (NDC)
+            stats_box = ROOT.TPaveText(0.65, 0.45, 0.88, 0.88, "NDC")
+            stats_box.SetFillColor(ROOT.kWhite)
+            stats_box.SetBorderSize(1)
+            stats_box.SetTextAlign(12) # Left-align the text
+
+            # Add Goodness of Fit info
+            prob = fit_res.Prob()
+            chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
+            stats_box.AddText(f"P-value: {prob:.4g}")
+            stats_box.AddText(f"#chi^{{2}}/ndf: {chi2_ndf:.2f}")
+            stats_box.AddLine(0, 0, 0, 0)
+
+            # Dynamically add all parameters
+            for i in range(fit_res.NPar()):
+                p_name = f_to_fit.GetParName(i)
+                p_val = fit_res.Parameter(i)
+                p_err = fit_res.ParError(i)
+                
+                # Format ROOT LaTeX strings
+                if p_name == "mu": p_name = "#mu"
+                elif p_name == "sigma": p_name = "#sigma"
+                elif p_name == "tau": p_name = "#tau"
+                
+                stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
+
+            # 4. Draw and Update
+            stats_box.Draw("SAME")
+            new_canvas.Update()
+
+            # 5. Keep references to prevent Python from deleting the GUI objects!
             self.fit_results[peak_index]['display_canvas'] = new_canvas
+            self.fit_results[peak_index]['stats_box'] = stats_box 
+            
         else:
             print(f"Invalid peak index: {peak_index}")
-    

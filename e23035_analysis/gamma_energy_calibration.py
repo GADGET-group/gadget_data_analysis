@@ -33,12 +33,12 @@ f = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
 # for i in range(len(f.peaks_to_fit)):
 #     f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)
 
-peaks = [('60Zn', 670.3, 0.3),
-         ('59Zn', 491.4, 0.1), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
-         ('60Ga', 1003.7, 0.2), ('60Ga', 1554.9, 0.6), ('60Ga', 2293.0, 1.0), ('60Ga', 2559.0, 0.8), ('60Ga', 3848.3, 0.7)]
+peaks = [('60Zn', 670.3, 0.3, 5),
+         ('59Zn', 491.4, 0.1, 5), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
+         ('60Ga', 1003.7, 0.2, 5), ('60Ga', 1554.9, 0.6, 7), ('60Ga', 2293.0, 1.0, 8), ('60Ga', 2559.0, 0.8, 8), ('60Ga', 3848.3, 0.7, 8)]
 #f.find_peaks()
 for i in range(len(peaks)):
-    f.peaks_to_fit.append((peaks[i][1],peaks[i][1]-10, peaks[i][1]+10))
+    f.peaks_to_fit.append((peaks[i][1],peaks[i][1]- peaks[i][3], peaks[i][1]+peaks[i][3]))
 f.param_bound_functions['sigma']=lambda E: (0.1, 10)
 f.fit_peaks()
 #f.show_peak_locations()
