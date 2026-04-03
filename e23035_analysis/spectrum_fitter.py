@@ -205,6 +205,9 @@ class spectrum_fitter:
             elif self.peak_model.lower() == 'bg_shift_emg':
                 res = fitting_tools.fit_emg_w_bg_shift(self.spectrum, loc_guess, fit_range, 
                                     param_bounds=param_bounds)
+            elif self.peak_model.lower() == 'bg_shift_double_gaus':
+                res = fitting_tools.fit_double_gaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
+                                    param_bounds=param_bounds)
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")
 

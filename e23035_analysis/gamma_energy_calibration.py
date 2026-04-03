@@ -12,9 +12,10 @@ from e23035_analysis.spectrum_fitter import spectrum_fitter
 Notes on peak finding an automatic fitting
 https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
 '''
-gamma_bin_size = 1 #keV
+gamma_bin_size = 0.25 #keV
 addback_ethresh = 150
-gamma_binning = (int((7000-0)/gamma_bin_size),addback_ethresh,7000) #was 1-12000 w/ 1 keV bins
+upper_energy = 7000
+gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 runs = e23035_runs.get_ddas_60_Ga_runs()
 
@@ -22,13 +23,13 @@ event_build_window = 500 #ns
 
 # from e23035_analysis.gamma_energy_calibration import *
 
-adj_dict = degai.crystal_adj_dict #degai.clover_adj_dict#use sum spectrum
+adj_dict =  degai.clover_adj_dict#degai.crystal_adj_dict
 cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
 gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
 
-f = spectrum_fitter(gamma_hist, 'bg_shift_emg')
+f = spectrum_fitter(gamma_hist, 'bg_shift_double_gaus')
 # f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
 # for i in range(len(f.peaks_to_fit)):
 #     f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)
@@ -43,7 +44,7 @@ f.param_bound_functions['sigma']=lambda E: (0.1, 10)
 f.fit_peaks()
 #f.show_peak_locations()
 mu, mu_err = f.get_fit_param('mu')
-sigma, sigma_err = f.get_fit_param('sigma')
+sigma, sigma_err = f.get_fit_param('sigma1')
 A, A_err = f.get_fit_param('amplitude')
 #tau, tau_err = f.get_fit_param('tau')
 probs = f.get_fit_probs()
@@ -73,6 +74,6 @@ sigma_func = lambda E: 0.028389590048833593*(E + 781.8486169568944)**0.5 #clover
 # f_seak.param_bound_functions['sigma'] = lambda E: (sigma_func(E), sigma_func(E))
 # f_seak.find_peaks(fit_sig=3)
 
-gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), cal_name, gamma_binning, event_build_window, addback_ethresh, event_build_window, True, 
-                                                 nonlinearity_correction_name=nlc_name)
-h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
+# gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), cal_name, gamma_binning, event_build_window, addback_ethresh, event_build_window, True, 
+#                                                  nonlinearity_correction_name=nlc_name)
+# h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
