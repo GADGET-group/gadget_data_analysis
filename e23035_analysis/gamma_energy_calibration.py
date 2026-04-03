@@ -29,22 +29,26 @@ nlc_name = 'c1'
 gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
 
-f = spectrum_fitter(gamma_hist, 'bg_shift_double_gaus')
-# f.peaks_to_fit = [511, 1003.5, 1555, 2293,2559,3848.3]
-# for i in range(len(f.peaks_to_fit)):
-#     f.peaks_to_fit[i] = (f.peaks_to_fit[i],f.peaks_to_fit[i]*0.99, f.peaks_to_fit[i]*1.01)
+# To use the new N-Gaussian model, you would add a new elif block in spectrum_fitter.py
+# For example:
+# elif self.peak_model.lower() == 'bg_shift_ngauss':
+#     res = fitting_tools.fit_ngaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
+#                                     num_gaussians=self.num_gaussians_for_fit, # A new attribute on the class
+#                                     param_bounds=param_bounds)
 
+f = spectrum_fitter(gamma_hist, 'bg_shift_emg') # This will now use N=2 by default
+#f.ngaus = 3
 peaks = [('60Zn', 670.3, 0.3, 5),
          ('59Zn', 491.4, 0.1, 5), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
          ('60Ga', 1003.7, 0.2, 5), ('60Ga', 1554.9, 0.6, 7), ('60Ga', 2293.0, 1.0, 8), ('60Ga', 2559.0, 0.8, 8), ('60Ga', 3848.3, 0.7, 8)]
-#f.find_peaks()
+
 for i in range(len(peaks)):
     f.peaks_to_fit.append((peaks[i][1],peaks[i][1]- peaks[i][3], peaks[i][1]+peaks[i][3]))
 f.param_bound_functions['sigma']=lambda E: (0.1, 10)
 f.fit_peaks()
 #f.show_peak_locations()
 mu, mu_err = f.get_fit_param('mu')
-sigma, sigma_err = f.get_fit_param('sigma1')
+sigma, sigma_err = f.get_fit_param('sigma')
 A, A_err = f.get_fit_param('amplitude')
 #tau, tau_err = f.get_fit_param('tau')
 probs = f.get_fit_probs()
