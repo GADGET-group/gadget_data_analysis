@@ -211,6 +211,9 @@ class spectrum_fitter:
             elif self.peak_model.lower() == 'bg_shift_voigt':
                 res = fitting_tools.fit_voigt_w_bg_shift(self.spectrum, loc_guess, fit_range,
                                     param_bounds=param_bounds)
+            elif self.peak_model.lower() == 'bg_shift_nemg':
+                res = fitting_tools.fit_nemg_w_bg_shift(self.spectrum, loc_guess, fit_range, self.nemg,
+                                    param_bounds=param_bounds)
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")
 

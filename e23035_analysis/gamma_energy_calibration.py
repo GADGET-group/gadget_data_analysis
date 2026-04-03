@@ -36,11 +36,11 @@ gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma
 #                                     num_gaussians=self.num_gaussians_for_fit, # A new attribute on the class
 #                                     param_bounds=param_bounds)
 
-f = spectrum_fitter(gamma_hist, 'bg_shift_emg') # This will now use N=2 by default
-#f.ngaus = 3
+f = spectrum_fitter(gamma_hist, 'bg_shift_nemg') # This will now use N=2 by default
+f.nemg = 2
 peaks = [('60Zn', 670.3, 0.3, 5),
          ('59Zn', 491.4, 0.1, 5), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
-         ('60Ga', 1003.7, 0.2, 5), ('60Ga', 1554.9, 0.6, 7), ('60Ga', 2293.0, 1.0, 8), ('60Ga', 2559.0, 0.8, 8), ('60Ga', 3848.3, 0.7, 8)]
+         ('60Ga', 1003.7, 0.2, 5), ('60Ga', 1554.9, 0.6, 7), ('60Ga', 2293.0, 1.0, 4), ('60Ga', 2559.0, 0.8, 8), ('60Ga', 3848.3, 0.7, 8)]
 
 for i in range(len(peaks)):
     f.peaks_to_fit.append((peaks[i][1],peaks[i][1]- peaks[i][3], peaks[i][1]+peaks[i][3]))
@@ -48,7 +48,7 @@ f.param_bound_functions['sigma']=lambda E: (0.1, 10)
 f.fit_peaks()
 #f.show_peak_locations()
 mu, mu_err = f.get_fit_param('mu')
-sigma, sigma_err = f.get_fit_param('sigma')
+sigma, sigma_err = f.get_fit_param('sigma1')
 A, A_err = f.get_fit_param('amplitude')
 #tau, tau_err = f.get_fit_param('tau')
 probs = f.get_fit_probs()

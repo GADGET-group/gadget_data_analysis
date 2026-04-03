@@ -1076,3 +1076,237 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         peaks.SetParameter(i, fit_params[i])
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+
+def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None): 
+    """
+    Fits N Exponentially Modified Gaussians (EMGs) + a sum of N step-like background shifts.
+    Designed for summed spectra: each of the N components gets its own Erfc step 
+    matched to its specific sigma and weighted by its specific fraction.
+    """
+    from scipy.special import erfcx, erfc
+    import uuid
+    import numpy as np
+    
+    if num_emgs < 1:
+        raise ValueError("num_emgs must be at least 1.")
+    if param_bounds is None:
+        param_bounds = {}
+    e_low, e_high = fit_window
+    
+    if not isinstance(e_guess, list) and not isinstance(e_guess, tuple):
+        e_guess_list = [e_guess]
+    else:
+        e_guess_list = e_guess
+        
+    n_peaks = len(e_guess_list)
+
+    # 1. Get initial guesses from a single EMG fit
+    temp_spectrum = spectrum.Clone(f"{spectrum.GetName()}_temp_for_guess_{uuid.uuid4().hex[:6]}")
+    temp_spectrum.SetDirectory(0) 
+    
+    emg_res = fit_emg_w_bg_shift(temp_spectrum, e_guess, fit_window, data_source, param_bounds)
+    if not emg_res[0].IsValid():
+        print(f"Warning: Initial single EMG fit failed. Guesses may be poor.")
+        base_params = np.ones(6 + 2*(n_peaks-1)) * 0.1 
+    else:
+        base_params = np.array(emg_res[0].Parameters())
+        
+    emg_res[4].Close() 
+
+    # 2. Construct the Mathematical Indexing
+    bg_const_idx = 0
+    bg_shift_idx = 1
+    sigma_start_idx = 2
+    tau_start_idx = sigma_start_idx + num_emgs
+    frac_start_idx = tau_start_idx + num_emgs
+    peak_params_start_idx = frac_start_idx + (num_emgs - 1 if num_emgs > 1 else 0)
+    
+    bin_width = spectrum.GetBinWidth(1) 
+    
+    # 3. Define the Python Evaluation Function
+    def nemg_bg_shift_eval(x, p):
+        val_x = x[0]
+        bg_const = p[bg_const_idx]
+        bg_shift = p[bg_shift_idx]
+        
+        # Calculate recursive fraction weights
+        weights = []
+        if num_emgs == 1:
+            weights.append(1.0)
+        else:
+            for j in range(num_emgs):
+                if j == 0:
+                    weights.append(p[frac_start_idx])
+                elif j < num_emgs - 1:
+                    w = p[frac_start_idx + j]
+                    for k in range(j):
+                        w *= (1.0 - p[frac_start_idx + k])
+                    weights.append(w)
+                else: 
+                    w = 1.0
+                    for k in range(num_emgs - 1):
+                        w *= (1.0 - p[frac_start_idx + k])
+                    weights.append(w)
+
+        total = bg_const
+        for i in range(n_peaks):
+            amp = p[peak_params_start_idx + 2 * i]
+            mu = p[peak_params_start_idx + 2 * i + 1]
+            
+            # Sum the N EMGs and their respective Background Steps
+            for j in range(num_emgs):
+                sigma = p[sigma_start_idx + j]
+                tau = p[tau_start_idx + j]
+                weight = weights[j]
+                
+                # --- UPDATED: Background step integrated into the loop ---
+                total += 0.5 * (amp * weight) * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
+                
+                # EMG Component
+                norm = amp * weight * bin_width / (2.0 * tau)
+                z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
+
+                if z_arg < -25:
+                    exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
+                    if exp_arg < 700:
+                        total += norm * np.exp(exp_arg) * erfc(z_arg)
+                else:
+                    gaus_arg = (val_x - mu) / sigma
+                    gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
+                    erfcx_part = erfcx(z_arg)
+                    total += norm * gaus_part * erfcx_part
+                    
+        return total
+
+    # 4. Setup Parameters and Initial Guesses
+    bg_const_guess = base_params[0]
+    base_sigma = base_params[3]
+    bg_shift_guess = base_params[4] if base_params.size > 4 else 0.0
+    base_tau = base_params[5]
+    
+    if data_source is None:
+        sigma_bounds_default = (0.1, 100)
+        tau_bounds_default = (0.01, 100)
+        A_bounds_default = (0, np.inf)
+    elif data_source == 'gamma_adc':
+        sigma_bounds_default = (1, 20)
+        tau_bounds_default = (0.01, 100)
+        A_bounds_default = (1, np.inf)
+    else:
+        sigma_bounds_default = (0.1, 100)
+        tau_bounds_default = (0.01, 100)
+        A_bounds_default = (0, np.inf)
+
+    bg_shift_limit = 1.0
+
+    initial_values = [bg_const_guess, bg_shift_guess]
+    bounds = [
+        param_bounds.get('bg_const', (0, np.inf)),
+        param_bounds.get('bg_shift', (0, bg_shift_limit))
+    ]
+    names = ["bg_const", "bg_shift"]
+
+    # Sigmas
+    for j in range(num_emgs):
+        sigma_guess = base_sigma * (0.8 + 0.4 * j / max(1, num_emgs - 1)) if num_emgs > 1 else base_sigma
+        initial_values.append(sigma_guess)
+        bounds.append(param_bounds.get(f'sigma{j+1}', sigma_bounds_default))
+        names.append(f"sigma{j+1}")
+
+    # Taus
+    for j in range(num_emgs):
+        tau_guess = base_tau * (0.5 + 1.0 * j / max(1, num_emgs - 1)) if num_emgs > 1 else base_tau
+        initial_values.append(tau_guess)
+        bounds.append(param_bounds.get(f'tau{j+1}', tau_bounds_default))
+        names.append(f"tau{j+1}")
+
+    # Fractions
+    if num_emgs > 1:
+        for j in range(num_emgs - 1):
+            initial_values.append(1.0 / num_emgs)
+            bounds.append(param_bounds.get(f'frac{j+1}', (0.0, 1.0)))
+            names.append(f"frac{j+1}")
+
+    # Peaks
+    for i in range(n_peaks):
+        if i == 0:
+            amp_guess = base_params[1]
+            mu_guess = base_params[2]
+            amp_name = "amplitude" if n_peaks == 1 else "amplitude_0"
+            mu_name = "mu" if n_peaks == 1 else "mu_0"
+        else:
+            amp_guess = base_params[4 + 2 * i]
+            mu_guess = base_params[5 + 2 * i]
+            amp_name = f"amplitude_{i}"
+            mu_name = f"mu_{i}"
+        
+        initial_values.extend([amp_guess, mu_guess])
+        bounds.extend([
+            param_bounds.get(amp_name, param_bounds.get('amplitude', A_bounds_default)),
+            param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+        ])
+        names.extend([amp_name, mu_name])
+
+    # 5. Call our generalized fit engine
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+        histogram=spectrum, 
+        function_string=nemg_bg_shift_eval, 
+        initial_values=initial_values, 
+        bounds=bounds, 
+        fit_range=(e_low, e_high), 
+        names=names
+    )
+
+    comp_id = uuid.uuid4().hex[:6]
+    fit_params = np.array([f_to_fit.GetParameter(i) for i in range(f_to_fit.GetNpar())])
+    
+    # 6. Reconstruct individual TF1 components for visualization
+    def bg_eval(x, p):
+        val_x = x[0]
+        bg_const = p[bg_const_idx]
+        bg_shift = p[bg_shift_idx]
+        
+        # Reconstruct weights for background plot
+        weights = []
+        if num_emgs == 1:
+            weights.append(1.0)
+        else:
+            for j in range(num_emgs):
+                if j == 0:
+                    weights.append(p[frac_start_idx])
+                elif j < num_emgs - 1:
+                    w = p[frac_start_idx + j]
+                    for k in range(j):
+                        w *= (1.0 - p[frac_start_idx + k])
+                    weights.append(w)
+                else: 
+                    w = 1.0
+                    for k in range(num_emgs - 1):
+                        w *= (1.0 - p[frac_start_idx + k])
+                    weights.append(w)
+                    
+        total = bg_const
+        for i in range(n_peaks):
+            amp = p[peak_params_start_idx + 2 * i]
+            mu = p[peak_params_start_idx + 2 * i + 1]
+            
+            for j in range(num_emgs):
+                sigma = p[sigma_start_idx + j]
+                weight = weights[j]
+                total += 0.5 * (amp * weight) * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
+        return total
+        
+    def peak_eval(x, p):
+        return nemg_bg_shift_eval(x, p) - bg_eval(x, p)
+        
+    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, len(initial_values))
+    background._pyfunc = bg_eval
+    
+    peaks = ROOT.TF1(f'nemg_{comp_id}', peak_eval, e_low, e_high, len(initial_values))
+    peaks._pyfunc = peak_eval
+    
+    for i in range(len(fit_params)):
+        background.SetParameter(i, fit_params[i])
+        peaks.SetParameter(i, fit_params[i])
+        
+    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
