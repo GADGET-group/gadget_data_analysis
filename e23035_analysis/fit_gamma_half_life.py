@@ -25,14 +25,14 @@ func_str = '[0] + [1]*exp(-log(2)*x/[2]) + [3]*exp(-log(2)*x/[4]) + [5]*exp(-log
 init_vals = [0, 160, 0.06, 160, 0.180, 160, 3]
 lims = [(0, np.inf), (0,np.inf), (0.02, 0.1), (0,np.inf), (0.1821,0.1821), (0, np.inf), (0.2, np.inf)]# (0.1821, 0.1821)]
 fit_window = (0,0.45)#(0.02,0.08)
-res, rp, c1, h_sub, f_fit, h_resid = fitting_tools.fit_func(tsbo, func_str, init_vals, lims, fit_window)
+res, rp, c1, h_sub, f_fit, h_resid = fitting_tools.fit_hist(tsbo, func_str, init_vals, lims, fit_window)
 
 if False:
     func_str = '[0] + [1]*exp(-log(2)*x/[2])'
     init_vals = [0, 160, 0.06]
     lims = [(0, np.inf), (-np.inf,np.inf), (0, np.inf)]
     fit_window = (0.1,0.2)
-    res2, rp2, c12, h_sub2, f_fit2, h_resid2 = fitting_tools.fit_func(tsbo, func_str, init_vals, lims, fit_window)
+    res2, rp2, c12, h_sub2, f_fit2, h_resid2 = fitting_tools.fit_hist(tsbo, func_str, init_vals, lims, fit_window)
 
 #try fitting protons
 

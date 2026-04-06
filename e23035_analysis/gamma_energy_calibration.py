@@ -40,7 +40,7 @@ f = spectrum_fitter(gamma_hist, 'bg_shift_nemg') # This will now use N=2 by defa
 f.nemg = 2
 peaks = [('60Zn', 670.3, 0.3, 5),
          ('59Zn', 491.4, 0.1, 5), # ('59Zn', 914.2, 0.1), #exclude 914 peak since it overlaps with a 228Ac peak
-         ('60Ga', 1003.7, 0.2, 5), ('60Ga', 1554.9, 0.6, 7), ('60Ga', 2293.0, 1.0, 4), ('60Ga', 2559.0, 0.8, 8), ('60Ga', 3848.3, 0.7, 8)]
+         ('60Ga', 1003.7, 0.2, 5), ('60Ga', 1554.9, 0.6, 7), ('60Ga', 2293.0, 1.0, 4), ('60Ga', 2559.0, 0.8, 6), ('60Ga', 3848.3, 0.7, 7)]
 
 for i in range(len(peaks)):
     f.peaks_to_fit.append((peaks[i][1],peaks[i][1]- peaks[i][3], peaks[i][1]+peaks[i][3]))
@@ -48,36 +48,75 @@ f.param_bound_functions['sigma']=lambda E: (0.1, 10)
 f.fit_peaks()
 #f.show_peak_locations()
 mu, mu_err = f.get_fit_param('mu')
-sigma, sigma_err = f.get_fit_param('sigma1')
+sigma1, sigma1_err = f.get_fit_param('sigma1')
+sigma2, sigma2_err = f.get_fit_param('sigma2')
+tau1, tau1_err = f.get_fit_param('tau1')
+tau2, tau2_err = f.get_fit_param('tau2')
+bg_shift, bg_shift_err = f.get_fit_param('bg_shift')
+
+sigma_a, sigma_a_err, sigma_b, sigma_b_err, tau_a, tau_a_err, tau_b, tau_b_err = [], [], [], [], [], [], [], []
+for i in range(len(mu)):
+    if sigma1[i] < sigma2[i]:
+        sigma_a.append(sigma1[i])
+        sigma_a_err.append(sigma1_err[i])
+        sigma_b.append(sigma2[i])
+        sigma_b_err.append(sigma2_err[i])
+        tau_a.append(tau1[i])
+        tau_a_err.append(tau1_err[i])
+        tau_b.append(tau2[i])
+        tau_b_err.append(tau2_err[i])
+    else:
+        sigma_a.append(sigma2[i])
+        sigma_a_err.append(sigma2_err[i])
+        sigma_b.append(sigma1[i])
+        sigma_b_err.append(sigma1_err[i])
+        tau_a.append(tau2[i])
+        tau_a_err.append(tau2_err[i])
+        tau_b.append(tau1[i])
+        tau_b_err.append(tau1_err[i])
+
 A, A_err = f.get_fit_param('amplitude')
 #tau, tau_err = f.get_fit_param('tau')
 probs = f.get_fit_probs()
 
-#fit function for peak width
-f_to_fit = ROOT.TF1("f_to_fit", "[0]*sqrt(x + [1])", 0, max(mu) * 1.2)
-f_to_fit.SetParameters(0.05, 0.0) # initial guesses
-
-graph = ROOT.TGraphErrors(
+fit_results = []
+sigma_a_vs_mu = ROOT.TGraphErrors(
     len(mu), 
     np.array(mu, dtype=np.float64), 
-    np.array(sigma, dtype=np.float64), 
+    np.array(sigma_a, dtype=np.float64), 
     np.array(mu_err, dtype=np.float64), 
-    np.array(sigma_err, dtype=np.float64)
+    np.array(sigma_a_err, dtype=np.float64)
 )
+fit_results.append(fitting_tools.fit_graph(sigma_a_vs_mu, "[0]*sqrt(x + [1])", [1, 500], [(0, np.inf), (0, np.inf)]))
 
-c1 = ROOT.TCanvas("c_sigma", "Sigma vs Energy", 800, 600)
-graph.SetTitle("Peak Width vs Energy;Energy (keV);Sigma (keV)")
-graph.SetMarkerStyle(20)
-graph.Draw("AP")
-graph.Fit(f_to_fit)
-c1.Update()
+sigma_b_vs_mu = ROOT.TGraphErrors(
+    len(mu), 
+    np.array(mu, dtype=np.float64), 
+    np.array(sigma_b, dtype=np.float64), 
+    np.array(mu_err, dtype=np.float64), 
+    np.array(sigma_b_err, dtype=np.float64)
+)
+fit_results.append(fitting_tools.fit_graph(sigma_b_vs_mu, "[0]*sqrt(x + [1])", [1, 500], [(0, np.inf), (0, np.inf)]))
+
+tau_a_vs_mu = ROOT.TGraphErrors(
+    len(mu), 
+    np.array(mu, dtype=np.float64), 
+    np.array(tau_a, dtype=np.float64), 
+    np.array(mu_err, dtype=np.float64), 
+    np.array(tau_a_err, dtype=np.float64)
+)
+fit_results.append(fitting_tools.fit_graph(tau_a_vs_mu, "[0]*x + [1]", [1, 500], [(0, np.inf), (0, np.inf)]))
+
+
+
 
 sigma_func = lambda E: 0.02456749968462633*(E + 905.0664550369642)**0.5 #sum spectrum
 sigma_func = lambda E: 0.028389590048833593*(E + 781.8486169568944)**0.5 #clover add back spectrum
-# f_seak = spectrum_fitter(gamma_hist, 'bg_shift_gaus')
-# f_seak.param_bound_functions['sigma'] = lambda E: (sigma_func(E), sigma_func(E))
-# f_seak.find_peaks(fit_sig=3)
 
-# gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), cal_name, gamma_binning, event_build_window, addback_ethresh, event_build_window, True, 
-#                                                  nonlinearity_correction_name=nlc_name)
+
+# Use a coarser binning for the 2D coincidence matrix to prevent ROOT's 1GB serialization limit
+coincidence_bin_size = 1.0 # keV
+coincidence_binning = (int((upper_energy-addback_ethresh)/coincidence_bin_size), addback_ethresh, upper_energy)
+coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+                                                 nonlinearity_correction_name=nlc_name)
 # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)

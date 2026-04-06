@@ -10,7 +10,7 @@ import ROOT
 import numpy as np
 import uuid
 
-def fit_func(histogram, function_string, initial_values, bounds, fit_range, names=None): 
+def fit_hist(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options = 'LS0QEI'): 
     # 1. Unique ID & Setup
     unique_id = uuid.uuid4().hex[:8]
     canvas_name = f"c_fit_{unique_id}"
@@ -67,7 +67,6 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     f_to_fit.SetNpx(1000)
 
     # 4. Perform Fit ("L" for Log-Likelihood / Poisson statistics)
-    fit_options = 'LS0QEI'
     fit_res = sub_hist.Fit(f_to_fit, fit_options)
     attempts = 0
     
@@ -107,6 +106,160 @@ def fit_func(histogram, function_string, initial_values, bounds, fit_range, name
     canvas.Update()
 
     return fit_res, rp, canvas, sub_hist, f_to_fit, h_fit
+
+def fit_graph(graph, function_string, initial_values, bounds, fit_range=None, names=None, fit_options='S0QE'): 
+    """
+    Fits a user-defined function to a TGraph/TGraphErrors using Least Squares 
+    and manually plots the residuals in a split canvas.
+    """
+    # 1. Unique ID & Setup
+    unique_id = uuid.uuid4().hex[:8]
+    canvas_name = f"c_fit_{unique_id}"
+    canvas = ROOT.TCanvas(canvas_name, f"Fit Result: {unique_id}", 800, 600)
+
+    n_points = graph.GetN()
+    if n_points == 0:
+        raise ValueError("Cannot fit an empty TGraph.")
+
+    # Extract unbounded limits if none are provided
+    if fit_range is None:
+        x_buf = graph.GetX()
+        x_vals = [x_buf[i] for i in range(n_points)]
+        e_low = min(x_vals)
+        e_high = max(x_vals)
+    else:
+        e_low, e_high = fit_range
+
+    # 2. Create Subset TGraphErrors (The "Cut" for a clean fit)
+    sub_graph = ROOT.TGraphErrors()
+    sub_graph.SetName(f"sub_{unique_id}")
+    sub_graph.SetTitle("Data vs Fit")
+
+    x_buf = graph.GetX()
+    y_buf = graph.GetY()
+    
+    pt_idx = 0
+    for i in range(n_points):
+        x_val = x_buf[i]
+        y_val = y_buf[i]
+        
+        if e_low <= x_val <= e_high:
+            sub_graph.SetPoint(pt_idx, x_val, y_val)
+            # Safely get errors (returns 0 if graph has no errors)
+            sub_graph.SetPointError(pt_idx, graph.GetErrorX(i), graph.GetErrorY(i))
+            pt_idx += 1
+
+    # 3. Fit Function Setup
+    func_name = f'to_fit_{unique_id}'
+    n_params = len(initial_values)
+    
+    if callable(function_string):
+        f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high, n_params)
+        f_to_fit._pyfunc = function_string 
+    else:
+        f_to_fit = ROOT.TF1(func_name, function_string, e_low, e_high)
+        
+    if len(bounds) != n_params:
+        raise ValueError("Length of initial_values must match length of bounds.")
+    if names is not None and len(names) != n_params:
+        raise ValueError("Length of names must match length of initial_values.")
+    
+    for i in range(n_params):
+        if bounds[i][0] == bounds[i][1]:
+            f_to_fit.FixParameter(i, bounds[i][0])
+        else:
+            f_to_fit.SetParameter(i, initial_values[i])
+            f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
+        
+        if names:
+            f_to_fit.SetParName(i, names[i])
+        else:
+            f_to_fit.SetParName(i, f'p{i}')
+
+    f_to_fit.SetNpx(1000)
+
+    # 4. Perform Fit
+    fit_res = sub_graph.Fit(f_to_fit, fit_options)
+    attempts = 0
+    while (not fit_res.Get() or not fit_res.IsValid()) and attempts < 20:
+        fit_res = sub_graph.Fit(f_to_fit, fit_options)
+        attempts += 1
+
+    # 5. Manual Canvas Split (Replaces TRatioPlot)
+    canvas.cd()
+    
+    # Upper Pad (70% of height)
+    pad1 = ROOT.TPad(f"pad1_{unique_id}", "pad1", 0, 0.3, 1, 1.0)
+    pad1.SetBottomMargin(0.02) # Hide bottom gap
+    pad1.Draw()
+    
+    # Lower Pad (30% of height)
+    canvas.cd()
+    pad2 = ROOT.TPad(f"pad2_{unique_id}", "pad2", 0, 0.0, 1, 0.3)
+    pad2.SetTopMargin(0.02)
+    pad2.SetBottomMargin(0.3)
+    pad2.Draw()
+
+    # --- Draw Upper Pad ---
+    pad1.cd()
+    sub_graph.SetMarkerStyle(20)
+    sub_graph.SetMarkerSize(0.8)
+    sub_graph.SetLineColor(ROOT.kBlack)
+    
+    f_to_fit.SetLineColor(ROOT.kRed)
+    f_to_fit.SetLineWidth(2)
+    
+    sub_graph.Draw("AP")
+    f_to_fit.Draw("SAME")
+    
+    # Hide X-axis labels on top plot to mimic TRatioPlot
+    sub_graph.GetXaxis().SetLabelSize(0)
+    sub_graph.GetXaxis().SetTitleSize(0)
+
+    # --- Compute and Draw Lower Pad (Residuals) ---
+    pad2.cd()
+    pad2.SetGridy()
+    
+    n_sub_points = sub_graph.GetN()
+    resid_graph = ROOT.TGraphErrors(n_sub_points)
+    resid_graph.SetName(f"resid_{unique_id}")
+    resid_graph.SetTitle("")
+    
+    sx = sub_graph.GetX()
+    sy = sub_graph.GetY()
+    sex = sub_graph.GetEX()
+    sey = sub_graph.GetEY()
+    
+    for i in range(n_sub_points):
+        x = sx[i]
+        y = sy[i]
+        ex = sex[i]
+        ey = sey[i]
+        
+        fit_y = f_to_fit.Eval(x)
+        resid = y - fit_y
+        
+        resid_graph.SetPoint(i, x, resid)
+        resid_graph.SetPointError(i, ex, ey)
+
+    resid_graph.SetMarkerStyle(20)
+    resid_graph.SetMarkerSize(0.6)
+    resid_graph.Draw("AP")
+    
+    # Scale text sizes up because the lower pad is smaller
+    resid_graph.GetXaxis().SetLabelSize(0.1)
+    resid_graph.GetXaxis().SetTitleSize(0.12)
+    resid_graph.GetYaxis().SetLabelSize(0.1)
+    resid_graph.GetYaxis().SetTitleSize(0.1)
+    resid_graph.GetYaxis().SetTitleOffset(0.4)
+    resid_graph.GetYaxis().SetTitle("Data - Fit")
+    resid_graph.GetYaxis().SetNdivisions(505)
+
+    canvas.Update()
+
+    # Returns 5 arguments to match the unpacking in your script
+    # rp is replaced by the resid_graph
+    return fit_res, resid_graph, canvas, sub_graph, f_to_fit
 
 def extract_fit_params(fit_res):
     """
@@ -232,7 +385,7 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     function_string = f'{background_string} + {peaks_string}'
 
     # 3. Call our generalized fit engine
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
         initial_values=initial_values, 
@@ -325,7 +478,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     names = ["bg_const", "amplitude", "mu", "sigma", "tau"]
 
     # Call fit engine (passing ONLY the python function)
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=emg_eval, 
         initial_values=initial_values, 
@@ -355,7 +508,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
+def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI'): 
     """
     Fits a standard Gaussian + constant background using the fit_func engine.
     """
@@ -423,13 +576,14 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     names = ["bg_const", "amplitude", "mu", "sigma"]
 
     # 3. Call our generalized fit engine
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
         initial_values=initial_values, 
         bounds=bounds, 
         fit_range=(e_low, e_high), 
-        names=names
+        names=names,
+        fit_options = fit_options
     )
 
     # 4. Reconstruct individual TF1 components for visualization/return
@@ -447,7 +601,7 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None): 
+def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI'): 
     """
     Fits a standard Gaussian + a step-like background shift using the fit_func engine.
     data_source can be specified to get default guesses and values for sigma and A
@@ -570,13 +724,14 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         names.extend([f"amplitude_{i}", f"mu_{i}"])
 
     # 3. Call our generalized fit engine
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
         initial_values=initial_values, 
         bounds=bounds, 
         fit_range=(e_low, e_high), 
-        names=names
+        names=names,
+        fit_options = fit_options
     )
 
     # 4. Reconstruct individual TF1 components for visualization/return
@@ -596,7 +751,7 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None): 
+def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None, fit_options = 'LS0QEI'): 
     from scipy.special import erfcx, erfc
     if param_bounds is None:
         param_bounds = {}
@@ -699,13 +854,14 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         names.extend([f"amplitude_{i}", f"mu_{i}"])
 
     # 4. Call generalized fit engine
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=emg_bg_shift_eval, 
         initial_values=initial_values, 
         bounds=bounds, 
         fit_range=(e_low, e_high), 
-        names=names
+        names=names,
+        fit_options = fit_options
     )
 
     comp_id = uuid.uuid4().hex[:6]
@@ -757,13 +913,7 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_double_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None):
-    """
-    Wrapper for fit_ngaussian_w_bg_shift to fit two Gaussians per peak.
-    """
-    return fit_ngaussian_w_bg_shift(spectrum, e_guess, fit_window, num_gaussians=2, data_source=data_source, param_bounds=param_bounds)
-
-def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_gaussians:int, data_source=None, param_bounds=None): 
+def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_gaussians:int, data_source=None, param_bounds=None, fit_options = 'LS0QEI'): 
     """
     Fits N Gaussians + a step-like background shift to each peak location.
     All peaks share the same set of N sigmas and N-1 fractions.
@@ -785,7 +935,7 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
     temp_spectrum = spectrum.Clone(f"{spectrum.GetName()}_temp_for_guess_{uuid.uuid4().hex[:6]}")
     temp_spectrum.SetDirectory(0) 
     
-    gaus_res = fit_gaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, data_source, param_bounds)
+    gaus_res = fit_gaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, data_source, param_bounds, fit_options=fit_options)
     if not gaus_res[0].IsValid():
         print(f"Warning: Initial single Gaussian fit failed. Guesses may be poor.")
         gaus_params = np.ones(5 + 2*(n_peaks-1)) * 0.1 
@@ -894,13 +1044,14 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
         names.extend([amp_name, mu_name])
 
     # 3. Call our generalized fit engine
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
         initial_values=initial_values, 
         bounds=bounds, 
         fit_range=(e_low, e_high), 
-        names=names
+        names=names,
+        fit_options = fit_options
     )
     
     # --- FIX 2: Fixed loop bounds so the first peak isn't excluded ---
@@ -1051,7 +1202,7 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         names.extend([f"amplitude_{i}", f"mu_{i}"])
 
     # 3. Call our generalized fit engine
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
         initial_values=initial_values, 
@@ -1077,11 +1228,11 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None): 
+def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI'): 
     """
     Fits N Exponentially Modified Gaussians (EMGs) + a sum of N step-like background shifts.
-    Designed for summed spectra: each of the N components gets its own Erfc step 
-    matched to its specific sigma and weighted by its specific fraction.
+    Uses fit_ngaussian_w_bg_shift to acquire highly optimized initial guesses for fractions, 
+    sigmas, and amplitudes before fitting the complex tails.
     """
     from scipy.special import erfcx, erfc
     import uuid
@@ -1100,20 +1251,25 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         
     n_peaks = len(e_guess_list)
 
-    # 1. Get initial guesses from a single EMG fit
+    # 1. Get initial guesses from an N-Gaussian fit
     temp_spectrum = spectrum.Clone(f"{spectrum.GetName()}_temp_for_guess_{uuid.uuid4().hex[:6]}")
     temp_spectrum.SetDirectory(0) 
     
-    emg_res = fit_emg_w_bg_shift(temp_spectrum, e_guess, fit_window, data_source, param_bounds)
-    if not emg_res[0].IsValid():
-        print(f"Warning: Initial single EMG fit failed. Guesses may be poor.")
-        base_params = np.ones(6 + 2*(n_peaks-1)) * 0.1 
+    # Call the N-Gaussian fitter
+    gaus_res = fit_ngaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, num_emgs, data_source, param_bounds, fit_options=fit_options)
+    
+    if not gaus_res[0].IsValid():
+        print(f"Warning: Initial N-Gaussian fit failed. Guesses may be poor.")
+        # Create a dummy array of the correct size if the fit totally fails
+        n_gaus_params = 2 + num_emgs + (num_emgs - 1 if num_emgs > 1 else 0) + 2 * n_peaks
+        base_params = np.ones(n_gaus_params) * 0.1 
     else:
-        base_params = np.array(emg_res[0].Parameters())
+        base_params = np.array(gaus_res[0].Parameters())
         
-    emg_res[4].Close() 
+    gaus_res[4].Close() 
 
     # 2. Construct the Mathematical Indexing
+    # N-EMG Expected Layout:
     bg_const_idx = 0
     bg_shift_idx = 1
     sigma_start_idx = 2
@@ -1121,6 +1277,11 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     frac_start_idx = tau_start_idx + num_emgs
     peak_params_start_idx = frac_start_idx + (num_emgs - 1 if num_emgs > 1 else 0)
     
+    # N-Gaussian Source Layout (For mapping):
+    gaus_sigma_start = 2
+    gaus_frac_start = 2 + num_emgs
+    gaus_peak_start = gaus_frac_start + (num_emgs - 1 if num_emgs > 1 else 0)
+
     bin_width = spectrum.GetBinWidth(1) 
     
     # 3. Define the Python Evaluation Function
@@ -1129,7 +1290,6 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         bg_const = p[bg_const_idx]
         bg_shift = p[bg_shift_idx]
         
-        # Calculate recursive fraction weights
         weights = []
         if num_emgs == 1:
             weights.append(1.0)
@@ -1153,13 +1313,12 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
             amp = p[peak_params_start_idx + 2 * i]
             mu = p[peak_params_start_idx + 2 * i + 1]
             
-            # Sum the N EMGs and their respective Background Steps
             for j in range(num_emgs):
                 sigma = p[sigma_start_idx + j]
                 tau = p[tau_start_idx + j]
                 weight = weights[j]
                 
-                # --- UPDATED: Background step integrated into the loop ---
+                # Background step 
                 total += 0.5 * (amp * weight) * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
                 
                 # EMG Component
@@ -1178,12 +1337,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
                     
         return total
 
-    # 4. Setup Parameters and Initial Guesses
-    bg_const_guess = base_params[0]
-    base_sigma = base_params[3]
-    bg_shift_guess = base_params[4] if base_params.size > 4 else 0.0
-    base_tau = base_params[5]
-    
+    # 4. Setup Parameters and Initial Guesses (Mapping from Gaus -> EMG)
     if data_source is None:
         sigma_bounds_default = (0.1, 100)
         tau_bounds_default = (0.01, 100)
@@ -1199,46 +1353,50 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     bg_shift_limit = 1.0
 
-    initial_values = [bg_const_guess, bg_shift_guess]
+    # Start with Backgrounds
+    initial_values = [base_params[0], base_params[1]]
     bounds = [
         param_bounds.get('bg_const', (0, np.inf)),
         param_bounds.get('bg_shift', (0, bg_shift_limit))
     ]
     names = ["bg_const", "bg_shift"]
 
-    # Sigmas
+    # Map Sigmas directly from N-Gaussian fit
     for j in range(num_emgs):
-        sigma_guess = base_sigma * (0.8 + 0.4 * j / max(1, num_emgs - 1)) if num_emgs > 1 else base_sigma
+        sigma_guess = base_params[gaus_sigma_start + j]
         initial_values.append(sigma_guess)
         bounds.append(param_bounds.get(f'sigma{j+1}', sigma_bounds_default))
         names.append(f"sigma{j+1}")
 
-    # Taus
+    # Generate Tau guesses based on the pre-optimized Sigmas
     for j in range(num_emgs):
-        tau_guess = base_tau * (0.5 + 1.0 * j / max(1, num_emgs - 1)) if num_emgs > 1 else base_tau
+        sigma_val = base_params[gaus_sigma_start + j]
+        # A good starting point: the decay parameter is typically roughly equal to or 
+        # slightly larger than the Gaussian spread of that component.
+        tau_guess = tau_bounds_default[0]
         initial_values.append(tau_guess)
         bounds.append(param_bounds.get(f'tau{j+1}', tau_bounds_default))
         names.append(f"tau{j+1}")
 
-    # Fractions
+    # Map Fractions directly from N-Gaussian fit
     if num_emgs > 1:
         for j in range(num_emgs - 1):
-            initial_values.append(1.0 / num_emgs)
+            frac_guess = base_params[gaus_frac_start + j]
+            initial_values.append(frac_guess)
             bounds.append(param_bounds.get(f'frac{j+1}', (0.0, 1.0)))
             names.append(f"frac{j+1}")
 
-    # Peaks
+    # Map Peaks (Amplitudes and Means) directly from N-Gaussian fit
     for i in range(n_peaks):
         if i == 0:
-            amp_guess = base_params[1]
-            mu_guess = base_params[2]
             amp_name = "amplitude" if n_peaks == 1 else "amplitude_0"
             mu_name = "mu" if n_peaks == 1 else "mu_0"
         else:
-            amp_guess = base_params[4 + 2 * i]
-            mu_guess = base_params[5 + 2 * i]
             amp_name = f"amplitude_{i}"
             mu_name = f"mu_{i}"
+            
+        amp_guess = base_params[gaus_peak_start + 2*i]
+        mu_guess = base_params[gaus_peak_start + 2*i + 1]
         
         initial_values.extend([amp_guess, mu_guess])
         bounds.extend([
@@ -1248,13 +1406,14 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         names.extend([amp_name, mu_name])
 
     # 5. Call our generalized fit engine
-    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_func(
+    fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=nemg_bg_shift_eval, 
         initial_values=initial_values, 
         bounds=bounds, 
         fit_range=(e_low, e_high), 
-        names=names
+        names=names,
+        fit_options=fit_options
     )
 
     comp_id = uuid.uuid4().hex[:6]
@@ -1266,7 +1425,6 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         bg_const = p[bg_const_idx]
         bg_shift = p[bg_shift_idx]
         
-        # Reconstruct weights for background plot
         weights = []
         if num_emgs == 1:
             weights.append(1.0)
