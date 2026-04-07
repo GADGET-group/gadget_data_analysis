@@ -107,10 +107,11 @@ def fit_hist(histogram, function_string, initial_values, bounds, fit_range, name
 
     return fit_res, rp, canvas, sub_hist, f_to_fit, h_fit
 
+
 def fit_graph(graph, function_string, initial_values, bounds, fit_range=None, names=None, fit_options='S0QE'): 
     """
     Fits a user-defined function to a TGraph/TGraphErrors using Least Squares 
-    and manually plots the residuals in a split canvas.
+    and manually plots the residuals in a split canvas, with fit statistics.
     """
     # 1. Unique ID & Setup
     unique_id = uuid.uuid4().hex[:8]
@@ -145,7 +146,6 @@ def fit_graph(graph, function_string, initial_values, bounds, fit_range=None, na
         
         if e_low <= x_val <= e_high:
             sub_graph.SetPoint(pt_idx, x_val, y_val)
-            # Safely get errors (returns 0 if graph has no errors)
             sub_graph.SetPointError(pt_idx, graph.GetErrorX(i), graph.GetErrorY(i))
             pt_idx += 1
 
@@ -216,6 +216,36 @@ def fit_graph(graph, function_string, initial_values, bounds, fit_range=None, na
     sub_graph.GetXaxis().SetLabelSize(0)
     sub_graph.GetXaxis().SetTitleSize(0)
 
+    # --- NEW: Construct and Draw the Stats Box ---
+    # Dynamically scale the bottom of the box based on parameter count
+    y_bottom = max(0.4, 0.9 - 0.05 * (n_params + 3)) 
+    stats_box = ROOT.TPaveText(0.65, y_bottom, 0.95, 0.92, "NDC")
+    
+    stats_box.SetFillColor(ROOT.kWhite)
+    stats_box.SetBorderSize(1)
+    stats_box.SetTextAlign(12) # Left-align text
+
+    if fit_res.Get():
+        prob = fit_res.Prob()
+        chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
+        stats_box.AddText(f"P-value: {prob:.4g}")
+        stats_box.AddText(f"#chi^{{2}}/ndf: {chi2_ndf:.2f}")
+        stats_box.AddLine(0, 0, 0, 0)
+
+        # Dynamically add all parameters
+        for i in range(fit_res.NPar()):
+            p_name = f_to_fit.GetParName(i)
+            p_val = fit_res.Parameter(i)
+            p_err = fit_res.ParError(i)
+            
+            if p_name == "mu": p_name = "#mu"
+            elif p_name == "sigma": p_name = "#sigma"
+            elif p_name == "tau": p_name = "#tau"
+            
+            stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
+
+    stats_box.Draw("SAME")
+
     # --- Compute and Draw Lower Pad (Residuals) ---
     pad2.cd()
     pad2.SetGridy()
@@ -257,8 +287,11 @@ def fit_graph(graph, function_string, initial_values, bounds, fit_range=None, na
 
     canvas.Update()
 
-    # Returns 5 arguments to match the unpacking in your script
-    # rp is replaced by the resid_graph
+    # Prevent the GUI objects from being deleted when the function returns
+    canvas._stats_box = stats_box 
+    canvas._pad1 = pad1
+    canvas._pad2 = pad2
+
     return fit_res, resid_graph, canvas, sub_graph, f_to_fit
 
 def extract_fit_params(fit_res):
@@ -1231,10 +1264,9 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
 def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI'): 
     """
     Fits N Exponentially Modified Gaussians (EMGs) + a sum of N step-like background shifts.
-    Uses fit_ngaussian_w_bg_shift to acquire highly optimized initial guesses for fractions, 
-    sigmas, and amplitudes before fitting the complex tails.
+    Uses ROOT's JIT C++ compiler to evaluate the complex tails, bypassing the Python GIL 
+    and allowing for full Implicit Multi-Threading (IMT).
     """
-    from scipy.special import erfcx, erfc
     import uuid
     import numpy as np
     
@@ -1255,12 +1287,10 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     temp_spectrum = spectrum.Clone(f"{spectrum.GetName()}_temp_for_guess_{uuid.uuid4().hex[:6]}")
     temp_spectrum.SetDirectory(0) 
     
-    # Call the N-Gaussian fitter
     gaus_res = fit_ngaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, num_emgs, data_source, param_bounds, fit_options=fit_options)
     
     if not gaus_res[0].IsValid():
         print(f"Warning: Initial N-Gaussian fit failed. Guesses may be poor.")
-        # Create a dummy array of the correct size if the fit totally fails
         n_gaus_params = 2 + num_emgs + (num_emgs - 1 if num_emgs > 1 else 0) + 2 * n_peaks
         base_params = np.ones(n_gaus_params) * 0.1 
     else:
@@ -1269,7 +1299,6 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     gaus_res[4].Close() 
 
     # 2. Construct the Mathematical Indexing
-    # N-EMG Expected Layout:
     bg_const_idx = 0
     bg_shift_idx = 1
     sigma_start_idx = 2
@@ -1277,67 +1306,141 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     frac_start_idx = tau_start_idx + num_emgs
     peak_params_start_idx = frac_start_idx + (num_emgs - 1 if num_emgs > 1 else 0)
     
-    # N-Gaussian Source Layout (For mapping):
     gaus_sigma_start = 2
     gaus_frac_start = 2 + num_emgs
     gaus_peak_start = gaus_frac_start + (num_emgs - 1 if num_emgs > 1 else 0)
 
     bin_width = spectrum.GetBinWidth(1) 
     
-    # 3. Define the Python Evaluation Function
-    def nemg_bg_shift_eval(x, p):
-        val_x = x[0]
-        bg_const = p[bg_const_idx]
-        bg_shift = p[bg_shift_idx]
+    # 3. Generate JIT C++ Code
+    comp_id = "f" + uuid.uuid4().hex[:7] 
+    
+    cpp_code = f"""
+    #include <TMath.h>
+    #include <cmath>
+    #include <vector>
+
+    // Custom inline erfcx to bypass missing ROOT MathMore headers and handle double overflow
+    inline double cxx_erfcx_{comp_id}(double x) {{
+        if (x < 25.0) {{
+            return std::exp(x * x) * TMath::Erfc(x);
+        }} else {{
+            double x2 = x * x;
+            // 5-term asymptotic expansion of erfcx(x) for large x
+            return (0.56418958354775628 / x) * (1.0 - 0.5/x2 + 0.75/(x2*x2) - 1.875/(x2*x2*x2) + 6.5625/(x2*x2*x2*x2));
+        }}
+    }}
+
+    double nemg_eval_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        double bg_const = p[{bg_const_idx}];
+        double bg_shift = p[{bg_shift_idx}];
+        double bin_width = {bin_width};
         
-        weights = []
-        if num_emgs == 1:
-            weights.append(1.0)
-        else:
-            for j in range(num_emgs):
-                if j == 0:
-                    weights.append(p[frac_start_idx])
-                elif j < num_emgs - 1:
-                    w = p[frac_start_idx + j]
-                    for k in range(j):
-                        w *= (1.0 - p[frac_start_idx + k])
-                    weights.append(w)
-                else: 
-                    w = 1.0
-                    for k in range(num_emgs - 1):
-                        w *= (1.0 - p[frac_start_idx + k])
-                    weights.append(w)
+        std::vector<double> weights({num_emgs});
+        if ({num_emgs} == 1) {{
+            weights[0] = 1.0;
+        }} else {{
+            for (int j = 0; j < {num_emgs}; ++j) {{
+                if (j == 0) {{
+                    weights[j] = p[{frac_start_idx}];
+                }} else if (j < {num_emgs} - 1) {{
+                    double w = p[{frac_start_idx} + j];
+                    for (int k = 0; k < j; ++k) w *= (1.0 - p[{frac_start_idx} + k]);
+                    weights[j] = w;
+                }} else {{
+                    double w = 1.0;
+                    for (int k = 0; k < {num_emgs} - 1; ++k) w *= (1.0 - p[{frac_start_idx} + k]);
+                    weights[j] = w;
+                }}
+            }}
+        }}
 
-        total = bg_const
-        for i in range(n_peaks):
-            amp = p[peak_params_start_idx + 2 * i]
-            mu = p[peak_params_start_idx + 2 * i + 1]
+        double total = bg_const;
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double amp = p[{peak_params_start_idx} + 2 * i];
+            double mu = p[{peak_params_start_idx} + 2 * i + 1];
             
-            for j in range(num_emgs):
-                sigma = p[sigma_start_idx + j]
-                tau = p[tau_start_idx + j]
-                weight = weights[j]
+            for (int j = 0; j < {num_emgs}; ++j) {{
+                double sigma = p[{sigma_start_idx} + j];
+                double tau = p[{tau_start_idx} + j];
+                double weight = weights[j];
                 
-                # Background step 
-                total += 0.5 * (amp * weight) * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
+                total += 0.5 * (amp * weight) * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
                 
-                # EMG Component
-                norm = amp * weight * bin_width / (2.0 * tau)
-                z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
+                double norm = amp * weight * bin_width / (2.0 * tau);
+                double z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356;
 
-                if z_arg < -25:
-                    exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
-                    if exp_arg < 700:
-                        total += norm * np.exp(exp_arg) * erfc(z_arg)
-                else:
-                    gaus_arg = (val_x - mu) / sigma
-                    gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
-                    erfcx_part = erfcx(z_arg)
-                    total += norm * gaus_part * erfcx_part
-                    
-        return total
+                if (z_arg < -25.0) {{
+                    double exp_arg = (sigma*sigma)/(2.0*tau*tau) + (val_x - mu)/tau;
+                    if (exp_arg < 700.0) {{
+                        total += norm * std::exp(exp_arg) * TMath::Erfc(z_arg);
+                    }}
+                }} else {{
+                    double gaus_arg = (val_x - mu) / sigma;
+                    double gaus_part = std::exp(-0.5 * gaus_arg * gaus_arg);
+                    double erfcx_part = cxx_erfcx_{comp_id}(z_arg);
+                    total += norm * gaus_part * erfcx_part;
+                }}
+            }}
+        }}
+        return total;
+    }}
 
-    # 4. Setup Parameters and Initial Guesses (Mapping from Gaus -> EMG)
+    double nemg_bg_only_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        double bg_const = p[{bg_const_idx}];
+        double bg_shift = p[{bg_shift_idx}];
+
+        std::vector<double> weights({num_emgs});
+        if ({num_emgs} == 1) {{
+            weights[0] = 1.0;
+        }} else {{
+            for (int j = 0; j < {num_emgs}; ++j) {{
+                if (j == 0) {{
+                    weights[j] = p[{frac_start_idx}];
+                }} else if (j < {num_emgs} - 1) {{
+                    double w = p[{frac_start_idx} + j];
+                    for (int k = 0; k < j; ++k) w *= (1.0 - p[{frac_start_idx} + k]);
+                    weights[j] = w;
+                }} else {{
+                    double w = 1.0;
+                    for (int k = 0; k < {num_emgs} - 1; ++k) w *= (1.0 - p[{frac_start_idx} + k]);
+                    weights[j] = w;
+                }}
+            }}
+        }}
+
+        double total = bg_const;
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double amp = p[{peak_params_start_idx} + 2 * i];
+            double mu = p[{peak_params_start_idx} + 2 * i + 1];
+            
+            for (int j = 0; j < {num_emgs}; ++j) {{
+                double sigma = p[{sigma_start_idx} + j];
+                double weight = weights[j];
+                total += 0.5 * (amp * weight) * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            }}
+        }}
+        return total;
+    }}
+
+    double nemg_peaks_only_{comp_id}(double *x, double *p) {{
+        return nemg_eval_{comp_id}(x, p) - nemg_bg_only_{comp_id}(x, p);
+    }}
+    """
+    
+    # Inject the C++ code directly into the ROOT interpreter
+    success = ROOT.gInterpreter.Declare(cpp_code)
+    if not success:
+        raise RuntimeError("Failed to JIT-compile C++ N-EMG evaluation function.")
+    
+    # Extract the JIT-compiled C++ functions as Python callables
+    eval_func = getattr(ROOT, f"nemg_eval_{comp_id}")
+    bg_eval_func = getattr(ROOT, f"nemg_bg_only_{comp_id}")
+    peak_eval_func = getattr(ROOT, f"nemg_peaks_only_{comp_id}")
+
+    # 4. Setup Parameters and Initial Guesses
     if data_source is None:
         sigma_bounds_default = (0.1, 100)
         tau_bounds_default = (0.01, 100)
@@ -1353,7 +1456,6 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     bg_shift_limit = 1.0
 
-    # Start with Backgrounds
     initial_values = [base_params[0], base_params[1]]
     bounds = [
         param_bounds.get('bg_const', (0, np.inf)),
@@ -1361,24 +1463,19 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     ]
     names = ["bg_const", "bg_shift"]
 
-    # Map Sigmas directly from N-Gaussian fit
     for j in range(num_emgs):
         sigma_guess = base_params[gaus_sigma_start + j]
         initial_values.append(sigma_guess)
         bounds.append(param_bounds.get(f'sigma{j+1}', sigma_bounds_default))
         names.append(f"sigma{j+1}")
 
-    # Generate Tau guesses based on the pre-optimized Sigmas
     for j in range(num_emgs):
         sigma_val = base_params[gaus_sigma_start + j]
-        # A good starting point: the decay parameter is typically roughly equal to or 
-        # slightly larger than the Gaussian spread of that component.
-        tau_guess = tau_bounds_default[0]
+        tau_guess = sigma_val * 1.5 
         initial_values.append(tau_guess)
         bounds.append(param_bounds.get(f'tau{j+1}', tau_bounds_default))
         names.append(f"tau{j+1}")
 
-    # Map Fractions directly from N-Gaussian fit
     if num_emgs > 1:
         for j in range(num_emgs - 1):
             frac_guess = base_params[gaus_frac_start + j]
@@ -1386,7 +1483,6 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
             bounds.append(param_bounds.get(f'frac{j+1}', (0.0, 1.0)))
             names.append(f"frac{j+1}")
 
-    # Map Peaks (Amplitudes and Means) directly from N-Gaussian fit
     for i in range(n_peaks):
         if i == 0:
             amp_name = "amplitude" if n_peaks == 1 else "amplitude_0"
@@ -1408,7 +1504,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     # 5. Call our generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
-        function_string=nemg_bg_shift_eval, 
+        function_string=eval_func, 
         initial_values=initial_values, 
         bounds=bounds, 
         fit_range=(e_low, e_high), 
@@ -1416,52 +1512,14 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         fit_options=fit_options
     )
 
-    comp_id = uuid.uuid4().hex[:6]
     fit_params = np.array([f_to_fit.GetParameter(i) for i in range(f_to_fit.GetNpar())])
     
-    # 6. Reconstruct individual TF1 components for visualization
-    def bg_eval(x, p):
-        val_x = x[0]
-        bg_const = p[bg_const_idx]
-        bg_shift = p[bg_shift_idx]
-        
-        weights = []
-        if num_emgs == 1:
-            weights.append(1.0)
-        else:
-            for j in range(num_emgs):
-                if j == 0:
-                    weights.append(p[frac_start_idx])
-                elif j < num_emgs - 1:
-                    w = p[frac_start_idx + j]
-                    for k in range(j):
-                        w *= (1.0 - p[frac_start_idx + k])
-                    weights.append(w)
-                else: 
-                    w = 1.0
-                    for k in range(num_emgs - 1):
-                        w *= (1.0 - p[frac_start_idx + k])
-                    weights.append(w)
-                    
-        total = bg_const
-        for i in range(n_peaks):
-            amp = p[peak_params_start_idx + 2 * i]
-            mu = p[peak_params_start_idx + 2 * i + 1]
-            
-            for j in range(num_emgs):
-                sigma = p[sigma_start_idx + j]
-                weight = weights[j]
-                total += 0.5 * (amp * weight) * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
-        return total
-        
-    def peak_eval(x, p):
-        return nemg_bg_shift_eval(x, p) - bg_eval(x, p)
-        
-    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, len(initial_values))
-    background._pyfunc = bg_eval
+    # 6. Reconstruct individual TF1 components for visualization using our JIT C++ equivalents
+    background = ROOT.TF1(f'bg_{comp_id}', bg_eval_func, e_low, e_high, len(initial_values))
+    background._pyfunc = bg_eval_func 
     
-    peaks = ROOT.TF1(f'nemg_{comp_id}', peak_eval, e_low, e_high, len(initial_values))
-    peaks._pyfunc = peak_eval
+    peaks = ROOT.TF1(f'nemg_peaks_{comp_id}', peak_eval_func, e_low, e_high, len(initial_values))
+    peaks._pyfunc = peak_eval_func
     
     for i in range(len(fit_params)):
         background.SetParameter(i, fit_params[i])

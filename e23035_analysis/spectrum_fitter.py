@@ -22,6 +22,7 @@ class spectrum_fitter:
         self.fit_results = []
 
         self.param_bound_functions = {} #parameter bounds as a function of energy. May be used to fix sigma, etc
+        self.fit_options = 'LS0QEI'
 
     def get_peak_index(self, peak_energy, etol=1):
         '''
