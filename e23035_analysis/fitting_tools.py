@@ -243,7 +243,7 @@ def fit_graph(graph, function_string, initial_values, bounds, fit_range=None, na
             elif p_name == "tau": p_name = "#tau"
             
             stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
-
+    stats_box.AddText(f'max E: {f_to_fit.GetMaximumX()}')
     stats_box.Draw("SAME")
 
     # --- Compute and Draw Lower Pad (Residuals) ---

@@ -24,6 +24,64 @@ class spectrum_fitter:
         self.param_bound_functions = {} #parameter bounds as a function of energy. May be used to fix sigma, etc
         self.fit_options = 'LS0QEI'
 
+    def save(self, filepath):
+        '''
+        Save fit results, canvases, histograms, and python state to a single .root file.
+        '''
+        import pickle
+        import os
+        
+        if not filepath.endswith('.root'):
+            filepath += '.root'
+
+        print(f"Saving spectrum fitter state to {filepath}...")
+        f = ROOT.TFile(filepath, "RECREATE")
+
+        # 1. Write the main spectrum
+        self.spectrum.Write("main_spectrum")
+
+        # 2. Package standard Python types into a state dictionary
+        python_state = {
+            'peak_model': self.peak_model,
+            'peaks_to_fit': self.peaks_to_fit,
+            'fit_options': self.fit_options,
+            'num_fit_results': len(self.fit_results)
+        }
+
+        # param_bound_functions might contain un-picklable lambda functions.
+        # We try to pickle them, but gracefully skip them if they are too complex.
+        try:
+            python_state['param_bound_functions'] = pickle.dumps(self.param_bound_functions)
+        except Exception as e:
+            print(f"  -> Warning: Could not serialize param_bound_functions ({e}). They will be omitted.")
+            python_state['param_bound_functions'] = None
+
+        # 3. Iterate through fit results and save ROOT objects
+        for i, res in enumerate(self.fit_results):
+            if res is None: continue # Skip if parallel fitting failed for an index
+            
+            # TFitResultPtr cannot be written directly. 
+            # We must call .Get() to extract the underlying C++ TFitResult object.
+            if res.get('fit_res') and res['fit_res'].Get():
+                res['fit_res'].Get().Write(f"peak_{i}_fit_res")
+                
+            if res.get('background_func'): res['background_func'].Write(f"peak_{i}_background_func")
+            if res.get('peak_func'): res['peak_func'].Write(f"peak_{i}_peak_func")
+            if res.get('ratio_plot'): res['ratio_plot'].Write(f"peak_{i}_ratio_plot")
+            if res.get('canvas'): res['canvas'].Write(f"peak_{i}_canvas")
+            if res.get('spectrum_to_plot'): res['spectrum_to_plot'].Write(f"peak_{i}_spectrum_to_plot")
+            if res.get('f_to_fit'): res['f_to_fit'].Write(f"peak_{i}_f_to_fit")
+            if res.get('h_fit'): res['h_fit'].Write(f"peak_{i}_h_fit")
+
+        # 4. Serialize the Python state into a Hex String and save as TObjString
+        # Hex encoding prevents ROOT from mangling null bytes during string conversion
+        pickled_hex_string = pickle.dumps(python_state).hex()
+        obj_string = ROOT.TObjString(pickled_hex_string)
+        obj_string.Write("python_state")
+
+        f.Close()
+        print("Save complete.")
+
     def get_peak_index(self, peak_energy, etol=1):
         '''
         Gets index of peak with specified peak energy, if a peak exists within etol of this value
@@ -334,3 +392,76 @@ class spectrum_fitter:
             
         else:
             print(f"Invalid peak index: {peak_index}")
+
+def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
+    """
+    Load a previously saved spectrum fitter from a .root file.
+    """
+    import pickle
+    import ROOT
+
+    print(f"Loading spectrum fitter state from {file_path}...")
+    f = ROOT.TFile(file_path, "READ")
+    if f.IsZombie():
+        raise FileNotFoundError(f"ROOT could not open {file_path}")
+
+    # 1. Extract and decode the Python State
+    state_obj = f.Get("python_state")
+    if not state_obj:
+        raise ValueError(f"Invalid file format: 'python_state' missing in {file_path}")
+    
+    python_state = pickle.loads(bytes.fromhex(state_obj.GetString().Data()))
+
+    # 2. Extract Main Spectrum and detach it from the file
+    main_spectrum = f.Get("main_spectrum")
+    if not main_spectrum:
+        raise ValueError("Main spectrum missing from file.")
+    main_spectrum.SetDirectory(0) 
+
+    # 3. Instantiate a new Fitter
+    fitter = spectrum_fitter(main_spectrum, python_state['peak_model'])
+    fitter.peaks_to_fit = python_state['peaks_to_fit']
+    fitter.fit_options = python_state.get('fit_options', 'LS0QEI')
+    
+    if python_state.get('param_bound_functions'):
+        fitter.param_bound_functions = pickle.loads(python_state['param_bound_functions'])
+
+    # 4. Reconstruct Fit Results
+    num_fits = python_state.get('num_fit_results', 0)
+    
+    for i in range(num_fits):
+        res_dict = {}
+        
+        # When we read the fit result back, ROOT returns a raw TFitResult. 
+        # We wrap it back into a TFitResultPtr to maintain your API.
+        fit_res_obj = f.Get(f"peak_{i}_fit_res")
+        if fit_res_obj:
+            res_dict['fit_res'] = ROOT.TFitResultPtr(fit_res_obj)
+        else:
+            res_dict['fit_res'] = ROOT.TFitResultPtr() # Empty pointer fallback
+
+        # Load GUI / Function Objects
+        res_dict['background_func'] = f.Get(f"peak_{i}_background_func")
+        res_dict['peak_func'] = f.Get(f"peak_{i}_peak_func")
+        res_dict['ratio_plot'] = f.Get(f"peak_{i}_ratio_plot")
+        res_dict['canvas'] = f.Get(f"peak_{i}_canvas")
+        res_dict['f_to_fit'] = f.Get(f"peak_{i}_f_to_fit")
+        
+        # Load Histograms (Must detach from the file so they aren't deleted)
+        spec_plot = f.Get(f"peak_{i}_spectrum_to_plot")
+        if spec_plot: spec_plot.SetDirectory(0)
+        res_dict['spectrum_to_plot'] = spec_plot
+        
+        h_fit = f.Get(f"peak_{i}_h_fit")
+        if h_fit: h_fit.SetDirectory(0)
+        res_dict['h_fit'] = h_fit
+
+        fitter.fit_results.append(res_dict)
+
+    # CRITICAL: Do not close 'f'! 
+    # Canvases and TRatioPlots depend on the open file. We attach it to the fitter
+    # so it stays alive exactly as long as the fitter object exists.
+    fitter._saved_file_reference = f 
+    
+    print("Load complete.")
+    return fitter
