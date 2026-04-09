@@ -29,8 +29,6 @@ tau1_func = lambda E: 0.0001117*E + 0.157
 sigma2_func = lambda E: 0.03037*np.sqrt(E + 498.5)
 tau2_func = lambda E: max(0.01, 0.0003378*E - 0.2317)
 
-
-
 #def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI'): 
 fitters = []
 def fit_peak(spectrum, location, window_start, window_stop):
@@ -53,3 +51,39 @@ coincidence_binning = (int((upper_energy-addback_ethresh)/coincidence_bin_size),
 coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                 nonlinearity_correction_name=nlc_name)
 # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
+
+#make 2D histogram of time vs energy
+t_v_E = degai.get_histogram(runs, adj_dict, cal_name, (*coincidence_binning, 200, 0, 0.200), "t_vs_E", "time vs energy", "time_since_beam_off:addback_energy", 
+                    dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
+
+chists = degai.get_crystal_histograms(runs, coincidence_binning, 'cal', 'gm_511and2614_1', nonlinearity_correction_name='c1')
+hupstream = ROOT.TH1D('upsteam', 'upsteam', *coincidence_binning)
+hcenter = ROOT.TH1D('center', 'center', *coincidence_binning)
+hdownstream = ROOT.TH1D('downstream', 'downstream', *coincidence_binning)
+upsteam_crystals = 0
+downstream_crystals = 0
+center_crystals = 0
+for clover, crystal in degai.clover_list:
+    crystal = {1:'a', 2:'b', 3:'c', 4:'d'}[crystal]
+    crystal_hist = chists[f'clover_{clover}{crystal}_keV']
+    if clover in [1,2,3]:
+        hupstream.Add(crystal_hist)
+        upsteam_crystals += 1
+    elif clover in [5,6,7]:
+        hcenter.Add(crystal_hist)
+        center_crystals += 1
+    elif clover in [11,12,13]:
+        hdownstream.Add(crystal_hist)
+        downstream_crystals += 1
+hupstream *= (1/upsteam_crystals)
+hcenter *= (1/center_crystals)
+hdownstream *= (1/downstream_crystals)
+root_vis_tools.draw_overlaid_histograms({'upstream':hupstream, 'center':hcenter, 'downstream':hdownstream})
+
+# cfitters = {}
+# for c in chists:
+#     f = spectrum_fitter(chists[c], 'bg_shift_gaus')
+#     f.peaks_to_fit.append((198.3, 192, 204))
+#     f.peaks_to_fit.append((846, 838, 852))
+#     f.fit_peaks()
+#     cfitters[c] = f

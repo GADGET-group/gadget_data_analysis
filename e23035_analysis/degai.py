@@ -358,7 +358,7 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     out_tree._keepalive_file = read_file
     return out_tree
 
-def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=False, max_workers=None, force_recreate=False, nonlinearity_correction_name=None):
+def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=True, max_workers=None, force_recreate=False, nonlinearity_correction_name=None):
     """
     Generates a 1D or 2D histogram using the add_back tree and merged_data tree. Behaves just like the get_histogram function in ddas_interface, but allows refernces to 
     a "addback_energy" branch.
@@ -487,7 +487,7 @@ if not hasattr(ROOT, "get_symmetric_pairs_dt"):
     }
     """)
 
-def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale=False, max_workers=None, nonlinearity_correction_name=None):
+def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale=True, max_workers=None, nonlinearity_correction_name=None):
     if isinstance(dt_window_ns, (list, tuple)):
         min_dt, max_dt = dt_window_ns
     else:
@@ -662,24 +662,31 @@ def get_gated_projection(h2_matrix, gate_energy, gate_width):
 def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, bg_width):
     """
     Slices a 2D matrix at a peak, slices it again at a background region, 
-    scales the background, and subtracts it to return a clean 1D spectrum.
+    scales the background, and subtracts it to return a clean 1D spectrum 
+    with perfectly propagated errors.
     """
     h2_matrix.GetXaxis().UnZoom()
     h2_matrix.GetYaxis().UnZoom()
 
     y_axis = h2_matrix.GetYaxis()
     
-    # 1. Project the Peak + Background
+    # 1. Project the Peak + Background (Added "e" option)
     p_min = y_axis.FindBin(peak_energy - peak_width)
     p_max = y_axis.FindBin(peak_energy + peak_width)
     name_peak = f"proj_{peak_energy}keV_{uuid.uuid4().hex[:8]}"
-    h1_peak = h2_matrix.ProjectionX(name_peak, p_min, p_max)
+    h1_peak = h2_matrix.ProjectionX(name_peak, p_min, p_max, "e")
     
-    # 2. Project the pure Background
+    # Force Sumw2 to guarantee arithmetic propagates errors in quadrature
+    h1_peak.Sumw2() 
+    
+    # 2. Project the pure Background (Added "e" option)
     b_min = y_axis.FindBin(bg_energy - bg_width)
     b_max = y_axis.FindBin(bg_energy + bg_width)
     name_bg = f"bg_{bg_energy}keV_{uuid.uuid4().hex[:8]}"
-    h1_bg = h2_matrix.ProjectionX(name_bg, b_min, b_max)
+    h1_bg = h2_matrix.ProjectionX(name_bg, b_min, b_max, "e")
+    
+    # Force Sumw2
+    h1_bg.Sumw2()
     
     # 3. Calculate the scaling factor
     # We use the number of bins spanned by the gates to be perfectly exact
@@ -687,14 +694,15 @@ def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, 
     n_bins_bg = (b_max - b_min) + 1
     scale_factor = n_bins_peak / n_bins_bg
     
-    # Scale the background projection
+    # Scale the background projection (Errors will now scale correctly)
     h1_bg.Scale(scale_factor)
     
     # 4. Perform the subtraction: h1_peak = h1_peak + (-1 * h1_bg)
+    # Errors will now correctly add in quadrature: sqrt(error_peak^2 + error_bg^2)
     h1_peak.Add(h1_bg, -1)
     
     # 5. Clean up the styling
-    h1_peak.SetTitle(f"Clean Coincidence (Gated {peak_energy} keV, BG Subtracted);Energy (keV);Counts / Bin")
+    h1_peak.SetTitle(f"Coincidence gate {peak_energy} keV, BG Subtracted;Energy (keV);Counts / Bin")
     h1_peak.SetLineColor(ROOT.kRed + 1)
     h1_peak.SetLineWidth(2)
     
@@ -702,11 +710,6 @@ def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, 
     h1_peak.SetDirectory(0)
     
     return h1_peak
-
-import os
-import hashlib
-import numpy as np
-import ROOT
 
 def get_adjacent_timing_spectrum(ddas_run, adj_dict, binning):
     """
