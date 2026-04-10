@@ -42,13 +42,12 @@ class spectrum_fitter:
         peak_locations = np.sort(peak_locations)
         i = 0
         while i < len(peak_locations):
-            first_index = i
             group_locations = [peak_locations[i]]
             while i < len(peak_locations) - 1:
-                i += 1
-                dE = peak_location[i] - peak_locations[i-1]
-                if dE < max(min_sep(peak_locations[i]), min_sep(peak_locations[i-1])):
-                    group_locations.append(peak_locations[i])
+                dE = peak_locations[i+1] - peak_locations[i]
+                if dE < max(min_sep(peak_locations[i+1]), min_sep(peak_locations[i])):
+                    group_locations.append(peak_locations[i+1])
+                    i += 1
                 else:
                     break
             self.peaks_to_fit.append((group_locations, group_locations[0] - min_sep(group_locations[0]),
