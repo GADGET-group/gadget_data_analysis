@@ -1,3 +1,6 @@
+import os
+
+import dill
 import ROOT
 import numpy as np
 from tqdm import tqdm
@@ -15,22 +18,48 @@ class spectrum_fitter:
         '''
         self.spectrum = spectrum
         #peak location guesses should contain a list of (peak location guess, lower window, upper window)
+        #The location guess may contain an list location guesses if more than one peak should be fit
         self.peaks_to_fit = []
         self.peak_model = peak_model
 
          #list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
-
-        self.param_bound_functions = {} #parameter bounds as a function of energy. May be used to fix sigma, etc
+        
+        #parameter bounds as a function of energy. May be used to fix sigma, etc
+        #These functions will be evaluated at loc_guess[0] if loc guess is a list of locations
+        self.param_bound_functions = {}
         self.fit_options = 'LS0QEI'
+
+    def add_peaks(self, peak_locations, min_sep):
+        '''
+        peak_locations: list of peak locations
+        min_sep: function of energy, used to determine fit window and which peaks overlap with each other
+
+        Add peaks located a peaks_to_fit. Peaks less than min_sep(peak_location) apart  will be
+        fit in a combined window. The fit window will run from first_peak_location-min_sep to
+        last_peak_location+min_sep.
+        '''
+        peak_locations = np.sort(peak_locations)
+        i = 0
+        while i < len(peak_locations):
+            first_index = i
+            group_locations = [peak_locations[i]]
+            while i < len(peak_locations) - 1:
+                i += 1
+                dE = peak_location[i] - peak_locations[i-1]
+                if dE < max(min_sep(peak_locations[i]), min_sep(peak_locations[i-1])):
+                    group_locations.append(peak_locations[i])
+                else:
+                    break
+            self.peaks_to_fit.append((group_locations, group_locations[0] - min_sep(group_locations[0]),
+                                      group_locations[-1] + min_sep(group_locations[-1])))
+            i += 1
+
 
     def save(self, filepath):
         '''
         Save fit results, canvases, histograms, and python state to a single .root file.
-        '''
-        import pickle
-        import os
-        
+        '''        
         if not filepath.endswith('.root'):
             filepath += '.root'
 
@@ -51,7 +80,7 @@ class spectrum_fitter:
         # param_bound_functions might contain un-picklable lambda functions.
         # We try to pickle them, but gracefully skip them if they are too complex.
         try:
-            python_state['param_bound_functions'] = pickle.dumps(self.param_bound_functions)
+            python_state['param_bound_functions'] = dill.dumps(self.param_bound_functions)
         except Exception as e:
             print(f"  -> Warning: Could not serialize param_bound_functions ({e}). They will be omitted.")
             python_state['param_bound_functions'] = None
@@ -75,7 +104,7 @@ class spectrum_fitter:
 
         # 4. Serialize the Python state into a Hex String and save as TObjString
         # Hex encoding prevents ROOT from mangling null bytes during string conversion
-        pickled_hex_string = pickle.dumps(python_state).hex()
+        pickled_hex_string = dill.dumps(python_state).hex()
         obj_string = ROOT.TObjString(pickled_hex_string)
         obj_string.Write("python_state")
 
@@ -240,15 +269,27 @@ class spectrum_fitter:
         ROOT.gROOT.SetBatch(True)
         
         for loc_guess, window_start, window_end in tqdm(self.peaks_to_fit):
+            try:
+                _ = iter(loc_guess)
+            except TypeError as te:
+                loc_guess = [loc_guess]
+
             # Define a fit window around the guess (e.g., +/- 2% of energy)
             fit_range = (window_start, window_end)
             location_wiggle = (window_end - window_start) / 2.0
 
             param_bounds = {}
-            if 'mu' not in self.param_bound_functions:
-                param_bounds['mu'] = (loc_guess - location_wiggle, loc_guess + location_wiggle)
+            
+            if len(loc_guess) == 1:
+                if 'mu' not in self.param_bound_functions:
+                    param_bounds['mu'] = (loc_guess[0] - location_wiggle, loc_guess[0] + location_wiggle)
+            else:
+                for i, loc in enumerate(loc_guess):
+                    if f'mu_{i}' not in self.param_bound_functions:
+                        param_bounds[f'mu_{i}'] = (loc - location_wiggle, loc + location_wiggle)
+                        
             for p in self.param_bound_functions:
-                param_bounds[p] = self.param_bound_functions[p](loc_guess)
+                param_bounds[p] = self.param_bound_functions[p](loc_guess[0])
 
             if self.peak_model.lower() == 'gaus':
                 res = fitting_tools.fit_gaussian_peak(
@@ -310,23 +351,6 @@ class spectrum_fitter:
             if not found:
                 raise ValueError('invalid parameter: %s'%param_name)
         return np.array(vals), np.array(errs)
-
-    def get_fit_param_for_peak(self, peak_index, param_name):
-        '''
-        Returns (param value, param error) for a specific peak.
-        '''
-        if not (0 <= peak_index < len(self.fit_results)):
-            raise IndexError(f"Peak index {peak_index} is out of bounds.")
-
-        res = self.fit_results[peak_index]
-        fit_res = res['fit_res']
-        f_to_fit = res['f_to_fit']
-
-        for i in range(f_to_fit.GetNpar()):
-            if f_to_fit.GetParName(i) == param_name:
-                return fit_res.Parameter(i), fit_res.ParError(i)
-        
-        raise ValueError(f"Invalid parameter: {param_name} for peak {peak_index}")
 
     def get_fit_probs(self):
         to_return = []
@@ -397,9 +421,6 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
     """
     Load a previously saved spectrum fitter from a .root file.
     """
-    import pickle
-    import ROOT
-
     print(f"Loading spectrum fitter state from {file_path}...")
     f = ROOT.TFile(file_path, "READ")
     if f.IsZombie():
@@ -410,7 +431,7 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
     if not state_obj:
         raise ValueError(f"Invalid file format: 'python_state' missing in {file_path}")
     
-    python_state = pickle.loads(bytes.fromhex(state_obj.GetString().Data()))
+    python_state = dill.loads(bytes.fromhex(state_obj.GetString().Data()))
 
     # 2. Extract Main Spectrum and detach it from the file
     main_spectrum = f.Get("main_spectrum")
@@ -424,7 +445,7 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
     fitter.fit_options = python_state.get('fit_options', 'LS0QEI')
     
     if python_state.get('param_bound_functions'):
-        fitter.param_bound_functions = pickle.loads(python_state['param_bound_functions'])
+        fitter.param_bound_functions = dill.loads(python_state['param_bound_functions'])
 
     # 4. Reconstruct Fit Results
     num_fits = python_state.get('num_fit_results', 0)
