@@ -257,6 +257,9 @@ def make_merged_root_file(ddas_run):
         
         tsbo = np.array([np.nan], dtype=np.float64)
         out_tree.Branch('time_since_beam_off', tsbo, 'time_since_beam_off/D')
+        tsco = np.array([np.nan], dtype=np.float64)
+        out_tree.Branch('time_since_chopper_off', tsco, 'time_since_chopper_off/D')
+
 
         log_file.write('Starting merge \n')
         ddas_index = 0
@@ -266,6 +269,7 @@ def make_merged_root_file(ddas_run):
         GET_DDAS_TIME_MATCH_TRHESHOLD = 10e-6
 
         last_beam_off_time = np.nan
+        last_chopper_off_time = np.nan
 
         for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
             #copy over ddas values with calibration factors applied
@@ -290,8 +294,11 @@ def make_merged_root_file(ddas_run):
                 #diagnostic reasons
                 if ch_names[i] == 'beam_off' and multiplicities[ch_indexes[i]] == 1:
                     last_beam_off_time = times[ch_indexes[i]]/1e9
+                if ch_names[i] == 'chopper_off' and multiplicities[ch_indexes[i]] == 1:
+                    last_chopper_off_time = times[ch_indexes[i]]/1e9
             
             tsbo[0] = np.max(times)/1e9 - last_beam_off_time
+            tsco[0] = np.max(times)/1e9 - last_chopper_off_time
 
             record_get_event = False
             if multiplicities[get_trig_accepted_index] == 1:

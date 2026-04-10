@@ -664,6 +664,8 @@ def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, 
     Slices a 2D matrix at a peak, slices it again at a background region, 
     scales the background, and subtracts it to return a clean 1D spectrum 
     with perfectly propagated errors.
+    
+    This method makes a gate on the y axis, and then projects to the x axis
     """
     h2_matrix.GetXaxis().UnZoom()
     h2_matrix.GetYaxis().UnZoom()

@@ -22,6 +22,14 @@ cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
 gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
+gamma_beam_off_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
+                                          "time_since_beam_off<0.094", event_build_window, addback_ethresh, True,
+                                        nonlinearity_correction_name=nlc_name)
+gamma_beam_on_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
+                                          "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
+                                        nonlinearity_correction_name=nlc_name)
+root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist})
+
 
 fit_model = 'bg_shift_nemg'#'bg_shift_ngaus'#
 sigma1_func = lambda E: 0.02078*np.sqrt(E + 742.9)
@@ -53,32 +61,42 @@ coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_na
 # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
 
 #make 2D histogram of time vs energy
-t_v_E = degai.get_histogram(runs, adj_dict, cal_name, (*coincidence_binning, 200, 0, 0.200), "t_vs_E", "time vs energy", "time_since_beam_off:addback_energy", 
+E_v_t = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.200, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time_since_beam_off", 
                     dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
 
-chists = degai.get_crystal_histograms(runs, coincidence_binning, 'cal', 'gm_511and2614_1', nonlinearity_correction_name='c1')
-hupstream = ROOT.TH1D('upsteam', 'upsteam', *coincidence_binning)
-hcenter = ROOT.TH1D('center', 'center', *coincidence_binning)
-hdownstream = ROOT.TH1D('downstream', 'downstream', *coincidence_binning)
-upsteam_crystals = 0
-downstream_crystals = 0
-center_crystals = 0
-for clover, crystal in degai.clover_list:
-    crystal = {1:'a', 2:'b', 3:'c', 4:'d'}[crystal]
-    crystal_hist = chists[f'clover_{clover}{crystal}_keV']
-    if clover in [1,2,3]:
-        hupstream.Add(crystal_hist)
-        upsteam_crystals += 1
-    elif clover in [5,6,7]:
-        hcenter.Add(crystal_hist)
-        center_crystals += 1
-    elif clover in [11,12,13]:
-        hdownstream.Add(crystal_hist)
-        downstream_crystals += 1
-hupstream *= (1/upsteam_crystals)
-hcenter *= (1/center_crystals)
-hdownstream *= (1/downstream_crystals)
-root_vis_tools.draw_overlaid_histograms({'upstream':hupstream, 'center':hcenter, 'downstream':hdownstream})
+fit_results = []
+def fit_decay_curve(Egate, tgate, Egate_bg=None):
+    if Egate_bg is None:
+        h_to_fit = degai.get_gated_projection(E_v_t, np.average(Egate), Egate[1]-Egate[0])
+    else:
+        h_to_fit = degai.get_bg_subtracted_projection(E_v_t, np.average(Egate), Egate[1]-Egate[0], np.average(Egate_bg), Egate_bg[1]-Egate_bg[0])
+    fit_string = '[0]*exp(-0.693147*x/[1]) + [2]'
+    fit_results.append(fitting_tools.fit_hist(h_to_fit, fit_string, [1,1, 0], ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,fit_options='S0QEI', names=['A', 'half life (s)', 'bg']))
+
+if False:
+    chists = degai.get_crystal_histograms(runs, coincidence_binning, 'cal', 'gm_511and2614_1', nonlinearity_correction_name='c1')
+    hupstream = ROOT.TH1D('upsteam', 'upsteam', *coincidence_binning)
+    hcenter = ROOT.TH1D('center', 'center', *coincidence_binning)
+    hdownstream = ROOT.TH1D('downstream', 'downstream', *coincidence_binning)
+    upsteam_crystals = 0
+    downstream_crystals = 0
+    center_crystals = 0
+    for clover, crystal in degai.clover_list:
+        crystal = {1:'a', 2:'b', 3:'c', 4:'d'}[crystal]
+        crystal_hist = chists[f'clover_{clover}{crystal}_keV']
+        if clover in [1,2,3]:
+            hupstream.Add(crystal_hist)
+            upsteam_crystals += 1
+        elif clover in [5,6,7]:
+            hcenter.Add(crystal_hist)
+            center_crystals += 1
+        elif clover in [11,12,13]:
+            hdownstream.Add(crystal_hist)
+            downstream_crystals += 1
+    hupstream *= (1/upsteam_crystals)
+    hcenter *= (1/center_crystals)
+    hdownstream *= (1/downstream_crystals)
+    root_vis_tools.draw_overlaid_histograms({'upstream':hupstream, 'center':hcenter, 'downstream':hdownstream})
 
 # cfitters = {}
 # for c in chists:
