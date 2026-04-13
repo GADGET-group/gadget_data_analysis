@@ -1,5 +1,6 @@
 import os
 import csv
+import re
 
 import dill
 import ROOT
@@ -71,31 +72,89 @@ class spectrum_fitter:
         with open(csv_filepath, 'w', newline='') as csvfile:
             csvwriter = csv.writer(csvfile)
             
-            max_pars = 0
-            best_f_to_fit = None
+            # 1. Identify all unique free parameter base names across all fits
+            free_base_params = set()
             for res in self.fit_results:
-                if res and res.get('f_to_fit'):
-                    if res['f_to_fit'].GetNpar() > max_pars:
-                        max_pars = res['f_to_fit'].GetNpar()
-                        best_f_to_fit = res['f_to_fit']
+                if res is None: continue
+                fit_res = res.get('fit_res')
+                f_to_fit = res.get('f_to_fit')
+                if not fit_res or not f_to_fit: continue
+                
+                for j in range(f_to_fit.GetNpar()):
+                    # Check if the parameter is actively free in the fit
+                    param_free = True
+                    try:
+                        if hasattr(fit_res, "Get") and fit_res.Get():
+                            param_free = not fit_res.Get().IsParameterFixed(j)
+                        elif hasattr(fit_res, "IsParameterFixed"):
+                            param_free = not fit_res.IsParameterFixed(j)
+                        else:
+                            param_free = (fit_res.ParError(j) != 0.0)
+                    except Exception:
+                        param_free = (fit_res.ParError(j) != 0.0)
+                    
+                    if param_free:
+                        name = f_to_fit.GetParName(j)
+                        match = re.match(r'^(.*)_(\d+)$', name)
+                        if match:
+                            free_base_params.add(match.group(1))
+                        else:
+                            free_base_params.add(name)
             
-            header = ['loc_guess', 'p_value']
-            if best_f_to_fit:
-                for j in range(max_pars):
-                    par_name = best_f_to_fit.GetParName(j)
-                    header.extend([f'{par_name}_val', f'{par_name}_err'])
-                csvwriter.writerow(header)
+            sorted_params = sorted(list(free_base_params))
+            priorities = {'mu': 1, 'amplitude': 2, 'sigma': 3, 'bg_const': 4}
+            sorted_params.sort(key=lambda x: (priorities.get(x, 100), x))
+            
+            header = ['fit_index', 'loc_guess', 'p_value']
+            for p in sorted_params:
+                header.extend([f'{p}_val', f'{p}_err'])
+            csvwriter.writerow(header)
 
             for i, res in enumerate(self.fit_results):
                 if res is None: continue
-                loc_guess = self.peaks_to_fit[i][0]
+                
+                loc_guesses = self.peaks_to_fit[i][0]
+                if not isinstance(loc_guesses, (list, tuple, np.ndarray)):
+                    loc_guesses = [loc_guesses]
                 
                 fit_res = res.get('fit_res')
                 f_to_fit = res.get('f_to_fit')
-                if fit_res and f_to_fit:
-                    row = [loc_guess, fit_res.Prob()]
+                if not fit_res or not f_to_fit: continue
+                
+                p_value = fit_res.Prob()
+                
+                for k, loc in enumerate(loc_guesses):
+                    row_dict = {}
                     for j in range(f_to_fit.GetNpar()):
-                        row.extend([fit_res.Parameter(j), fit_res.ParError(j)])
+                        param_free = True
+                        try:
+                            if hasattr(fit_res, "Get") and fit_res.Get():
+                                param_free = not fit_res.Get().IsParameterFixed(j)
+                            elif hasattr(fit_res, "IsParameterFixed"):
+                                param_free = not fit_res.IsParameterFixed(j)
+                            else:
+                                param_free = (fit_res.ParError(j) != 0.0)
+                        except Exception:
+                            param_free = (fit_res.ParError(j) != 0.0)
+                            
+                        if param_free:
+                            name = f_to_fit.GetParName(j)
+                            match = re.match(r'^(.*)_(\d+)$', name)
+                            if match:
+                                base_name = match.group(1)
+                                param_k = int(match.group(2))
+                                if param_k == k:
+                                    row_dict[base_name + '_val'] = fit_res.Parameter(j)
+                                    row_dict[base_name + '_err'] = fit_res.ParError(j)
+                            else:
+                                base_name = name
+                                row_dict[base_name + '_val'] = fit_res.Parameter(j)
+                                row_dict[base_name + '_err'] = fit_res.ParError(j)
+                                
+                    row = [i, loc, p_value]
+                    for p in sorted_params:
+                        row.append(row_dict.get(p + '_val', ''))
+                        row.append(row_dict.get(p + '_err', ''))
                     csvwriter.writerow(row)
 
         f = ROOT.TFile(filepath, "RECREATE")
