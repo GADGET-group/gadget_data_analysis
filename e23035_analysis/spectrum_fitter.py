@@ -1,4 +1,5 @@
 import os
+import csv
 
 import dill
 import ROOT
@@ -57,12 +58,46 @@ class spectrum_fitter:
 
     def save(self, filepath):
         '''
-        Save fit results, canvases, histograms, and python state to a single .root file.
+        Save fit results, canvases, histograms, and python state to a single {file_path}.root file.
+        Save fit peak locations and parameters with uncertainties to {filepath}.csv
         '''        
         if not filepath.endswith('.root'):
             filepath += '.root'
 
-        print(f"Saving spectrum fitter state to {filepath}...")
+        csv_filepath = filepath[:-5] + '.csv'
+
+        print(f"Saving spectrum fitter state to {filepath} and {csv_filepath}...")
+        
+        with open(csv_filepath, 'w', newline='') as csvfile:
+            csvwriter = csv.writer(csvfile)
+            
+            max_pars = 0
+            best_f_to_fit = None
+            for res in self.fit_results:
+                if res and res.get('f_to_fit'):
+                    if res['f_to_fit'].GetNpar() > max_pars:
+                        max_pars = res['f_to_fit'].GetNpar()
+                        best_f_to_fit = res['f_to_fit']
+            
+            header = ['loc_guess', 'p_value']
+            if best_f_to_fit:
+                for j in range(max_pars):
+                    par_name = best_f_to_fit.GetParName(j)
+                    header.extend([f'{par_name}_val', f'{par_name}_err'])
+                csvwriter.writerow(header)
+
+            for i, res in enumerate(self.fit_results):
+                if res is None: continue
+                loc_guess = self.peaks_to_fit[i][0]
+                
+                fit_res = res.get('fit_res')
+                f_to_fit = res.get('f_to_fit')
+                if fit_res and f_to_fit:
+                    row = [loc_guess, fit_res.Prob()]
+                    for j in range(f_to_fit.GetNpar()):
+                        row.extend([fit_res.Parameter(j), fit_res.ParError(j)])
+                    csvwriter.writerow(row)
+
         f = ROOT.TFile(filepath, "RECREATE")
 
         # 1. Write the main spectrum
@@ -292,27 +327,27 @@ class spectrum_fitter:
 
             if self.peak_model.lower() == 'gaus':
                 res = fitting_tools.fit_gaussian_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options
                 )
             elif self.peak_model.lower() == 'emg':
                 res = fitting_tools.fit_emg_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options
                 )
             elif self.peak_model.lower() == 'bg_shift_gaus':
                 res = fitting_tools.fit_gaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
-                                    param_bounds=param_bounds)
+                                    param_bounds=param_bounds, fit_options=self.fit_options)
             elif self.peak_model.lower() == 'bg_shift_emg':
                 res = fitting_tools.fit_emg_w_bg_shift(self.spectrum, loc_guess, fit_range, 
-                                    param_bounds=param_bounds)
+                                    param_bounds=param_bounds, fit_options=self.fit_options)
             elif self.peak_model.lower() == 'bg_shift_ngaus':
                 res = fitting_tools.fit_ngaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, self.ngaus,
-                                    param_bounds=param_bounds)
+                                    param_bounds=param_bounds, fit_options=self.fit_options)
             elif self.peak_model.lower() == 'bg_shift_voigt':
                 res = fitting_tools.fit_voigt_w_bg_shift(self.spectrum, loc_guess, fit_range,
-                                    param_bounds=param_bounds)
+                                    param_bounds=param_bounds, fit_options=self.fit_options)
             elif self.peak_model.lower() == 'bg_shift_nemg':
                 res = fitting_tools.fit_nemg_w_bg_shift(self.spectrum, loc_guess, fit_range, self.nemg,
-                                    param_bounds=param_bounds)
+                                    param_bounds=param_bounds, fit_options=self.fit_options)
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")
 

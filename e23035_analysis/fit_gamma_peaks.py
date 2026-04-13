@@ -64,8 +64,9 @@ coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_na
 E_v_tsbo = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.200, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time_since_beam_off", 
                     dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
 
-E_v_tsco = degai.get_histogram(runs, adj_dict, cal_name, (2000, 0, 0.200, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time_since_chopper_off", 
-                    dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
+# E_v_tsco = degai.get_histogram(runs, adj_dict, cal_name, (2000, 0, 0.200, *coincidence_binning), 
+#                     "E_vs_t_c", "energy (keV) vs time since chopper off (s)", "addback_energy:time_since_chopper_off", 
+#                     dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
 
 fit_results = []
 def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
@@ -74,7 +75,26 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
     else:
         h_to_fit = degai.get_bg_subtracted_projection(E_v_tsbo, np.average(Egate), Egate[1]-Egate[0], np.average(Egate_bg), Egate_bg[1]-Egate_bg[0])
     fit_string = '[0]*exp(-0.693147*x/[1]) + [2]'
-    fit_results.append(fitting_tools.fit_hist(h_to_fit, fit_string, [1,1, 0], ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,fit_options='S0QEI', names=['A', 'half life (s)', 'bg']))
+    fit_results.append(fitting_tools.fit_hist(h_to_fit, fit_string, [1,1, 0],
+                        ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,
+                        fit_options='S0QEI', names=['A', 'half life (s)', 'bg']))
+
+peak_list = [1003,1333,2007,3848]
+h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003, 3, 1010,1)
+h1028 = degai.get_bg_subtracted_projection(coincidence_hist, 1028, 1, 1040, 2)
+f = spectrum_fitter(h1028, fit_model) # This will now use N=2 by default
+f.fit_options = f.fit_options.replace('L','')
+f.nemg = f.ngaus = 2
+f.add_peaks(peak_list, lambda E: max(sigma2_func(E)*3, 10))
+f.param_bound_functions['sigma1'] = lambda E: (sigma1_func(E), sigma1_func(E))
+f.param_bound_functions['tau1'] = lambda E: (tau1_func(E), tau1_func(E))
+f.param_bound_functions['sigma2'] = lambda E: (sigma2_func(E), sigma2_func(E))
+f.param_bound_functions['tau2'] = lambda E: (tau2_func(E), tau2_func(E))
+f.spectrum.GetXaxis().UnZoom()
+bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
+f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
+f.param_bound_functions['bg_shift'] = lambda E: (0, 0) #coincidence peaks should be really weak
+f.fit_peaks()
 
 if False:
     chists = degai.get_crystal_histograms(runs, coincidence_binning, 'cal', 'gm_511and2614_1', nonlinearity_correction_name='c1')
