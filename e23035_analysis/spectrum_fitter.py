@@ -31,14 +31,14 @@ class spectrum_fitter:
         self.param_bound_functions = {}
         self.fit_options = 'LS0QEI'
 
-    def add_peaks(self, peak_locations, min_sep):
+    def add_peaks(self, peak_locations, window_size, sep_factor=1.5):
         '''
         peak_locations: list of peak locations
-        min_sep: function of energy, used to determine fit window and which peaks overlap with each other
+        window_size: function of energy, used to determine fit window and which peaks overlap with each other
 
-        Add peaks located a peaks_to_fit. Peaks less than min_sep(peak_location) apart  will be
-        fit in a combined window. The fit window will run from first_peak_location-min_sep to
-        last_peak_location+min_sep.
+        Add peaks located a peaks_to_fit. Peaks less than sep_factor*window_size(peak_location) apart  will be
+        fit in a combined window. The fit window will run from first_peak_location-window_size to
+        last_peak_location+window_size.
         '''
         peak_locations = np.sort(peak_locations)
         i = 0
@@ -46,13 +46,13 @@ class spectrum_fitter:
             group_locations = [peak_locations[i]]
             while i < len(peak_locations) - 1:
                 dE = peak_locations[i+1] - peak_locations[i]
-                if dE < max(min_sep(peak_locations[i+1]), min_sep(peak_locations[i])):
+                if dE < sep_factor*max(window_size(peak_locations[i+1]), window_size(peak_locations[i])):
                     group_locations.append(peak_locations[i+1])
                     i += 1
                 else:
                     break
-            self.peaks_to_fit.append((group_locations, group_locations[0] - min_sep(group_locations[0]),
-                                      group_locations[-1] + min_sep(group_locations[-1])))
+            self.peaks_to_fit.append((group_locations, group_locations[0] - window_size(group_locations[0]),
+                                      group_locations[-1] + window_size(group_locations[-1])))
             i += 1
 
 
@@ -111,13 +111,16 @@ class spectrum_fitter:
             'num_fit_results': len(self.fit_results)
         }
 
-        # param_bound_functions might contain un-picklable lambda functions.
-        # We try to pickle them, but gracefully skip them if they are too complex.
-        try:
-            python_state['param_bound_functions'] = dill.dumps(self.param_bound_functions)
-        except Exception as e:
-            print(f"  -> Warning: Could not serialize param_bound_functions ({e}). They will be omitted.")
-            python_state['param_bound_functions'] = None
+        # We extract and store just the source code of the lambda functions 
+        # to avoid serializing the global namespace (which causes crashes).
+        import inspect
+        source_dict = {}
+        for k, v in self.param_bound_functions.items():
+            try:
+                source_dict[k] = inspect.getsource(v).strip()
+            except Exception:
+                source_dict[k] = str(v)
+        python_state['param_bound_functions'] = source_dict
 
         # 3. Iterate through fit results and save ROOT objects
         for i, res in enumerate(self.fit_results):
@@ -479,7 +482,7 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
     fitter.fit_options = python_state.get('fit_options', 'LS0QEI')
     
     if python_state.get('param_bound_functions'):
-        fitter.param_bound_functions = dill.loads(python_state['param_bound_functions'])
+        fitter.param_bound_functions = python_state['param_bound_functions']
 
     # 4. Reconstruct Fit Results
     num_fits = python_state.get('num_fit_results', 0)

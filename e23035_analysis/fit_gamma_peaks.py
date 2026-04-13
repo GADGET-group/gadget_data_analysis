@@ -5,7 +5,7 @@ import ROOT
 
 from raw_viewer import ddas_interface
 from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, degai
-from e23035_analysis.spectrum_fitter import spectrum_fitter
+from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
 
 gamma_bin_size = 0.25 #keV
 addback_ethresh = 150
@@ -51,6 +51,24 @@ def fit_peak(spectrum, location, window_start, window_stop):
     f.show_fit_results(0)
     fitters.append(f)
 
+def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood):
+    f = spectrum_fitter(spectrum, fit_model) # This will now use N=2 by default
+    f.nemg = f.ngaus = 2
+    f.param_bound_functions['sigma1'] = lambda E: (sigma1_func(E), sigma1_func(E))
+    f.param_bound_functions['tau1'] = lambda E: (tau1_func(E), tau1_func(E))
+    f.param_bound_functions['sigma2'] = lambda E: (sigma2_func(E), sigma2_func(E))
+    f.param_bound_functions['tau2'] = lambda E: (tau2_func(E), tau2_func(E))
+    f.spectrum.GetXaxis().UnZoom()
+    bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
+    f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
+    f.add_peaks(peaks, lambda E: sigma2_func(E)*10)
+    if zero_bg_shift:
+        f.param_bound_functions['bg_shift'] = lambda E: (0, 0) #coincidence peaks should be really weak
+    if not likelihood:
+        f.fit_options = f.fit_options.replace('L','')
+    f.fit_peaks()
+    f.save(os.path.join('e23035_analysis/peak_fitting/',save_name))
+    return f
 
 
 # Use a coarser binning for the 2D coincidence matrix to prevent ROOT's 1GB serialization limit
@@ -79,22 +97,24 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
                         ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,
                         fit_options='S0QEI', names=['A', 'half life (s)', 'bg']))
 
-peak_list = [1003,1333,2007,3848]
-h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003, 3, 1010,1)
+# peak_list = [1003,1333,2007,3848]
+h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003.5, 1.5, 1010,1)
 h1028 = degai.get_bg_subtracted_projection(coincidence_hist, 1028, 1, 1040, 2)
-f = spectrum_fitter(h1028, fit_model) # This will now use N=2 by default
-f.fit_options = f.fit_options.replace('L','')
-f.nemg = f.ngaus = 2
-f.add_peaks(peak_list, lambda E: max(sigma2_func(E)*3, 10))
-f.param_bound_functions['sigma1'] = lambda E: (sigma1_func(E), sigma1_func(E))
-f.param_bound_functions['tau1'] = lambda E: (tau1_func(E), tau1_func(E))
-f.param_bound_functions['sigma2'] = lambda E: (sigma2_func(E), sigma2_func(E))
-f.param_bound_functions['tau2'] = lambda E: (tau2_func(E), tau2_func(E))
-f.spectrum.GetXaxis().UnZoom()
-bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
-f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
-f.param_bound_functions['bg_shift'] = lambda E: (0, 0) #coincidence peaks should be really weak
-f.fit_peaks()
+f=fit_peaks(h1003, [511, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007, 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
+            '1003keV_coincidence', True, False)
+# f = spectrum_fitter(h1028, fit_model) # This will now use N=2 by default
+# f.fit_options = f.fit_options.replace('L','')
+# f.nemg = f.ngaus = 2
+# f.add_peaks(peak_list, lambda E: max(sigma2_func(E)*3, 10))
+# f.param_bound_functions['sigma1'] = lambda E: (sigma1_func(E), sigma1_func(E))
+# f.param_bound_functions['tau1'] = lambda E: (tau1_func(E), tau1_func(E))
+# f.param_bound_functions['sigma2'] = lambda E: (sigma2_func(E), sigma2_func(E))
+# f.param_bound_functions['tau2'] = lambda E: (tau2_func(E), tau2_func(E))
+# f.spectrum.GetXaxis().UnZoom()
+# bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
+# f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
+# f.param_bound_functions['bg_shift'] = lambda E: (0, 0) #coincidence peaks should be really weak
+# f.fit_peaks()
 
 if False:
     chists = degai.get_crystal_histograms(runs, coincidence_binning, 'cal', 'gm_511and2614_1', nonlinearity_correction_name='c1')
