@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+import csv
 
 import numpy as np
 import ROOT
@@ -51,7 +53,17 @@ def fit_peak(spectrum, location, window_start, window_stop):
     f.show_fit_results(0)
     fitters.append(f)
 
-def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood):
+def fit_exists(save_name):
+    save_path = os.path.join('e23035_analysis/peak_fitting/',save_name)
+    return Path(save_path).exists()
+
+def get_fitter(save_name):
+    save_path = os.path.join('e23035_analysis/peak_fitting/',save_name)
+    return load_spectrum_fitter_from_file(save_path+'.root')
+
+def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, force_refit=False):
+    if not force_refit and fit_exists(save_name):
+        return get_fitter(save_name)
     f = spectrum_fitter(spectrum, fit_model) # This will now use N=2 by default
     f.nemg = f.ngaus = 2
     f.param_bound_functions['sigma1'] = lambda E: (sigma1_func(E), sigma1_func(E))
@@ -67,7 +79,7 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood):
     if not likelihood:
         f.fit_options = f.fit_options.replace('L','')
     f.fit_peaks()
-    f.save(os.path.join('e23035_analysis/peak_fitting/',save_name))
+    f.save(save_path)
     return f
 
 
@@ -97,54 +109,26 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
                         ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,
                         fit_options='S0QEI', names=['A', 'half life (s)', 'bg']))
 
-# peak_list = [1003,1333,2007,3848]
+
+all_peaks = []
+with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
+    reader = csv.reader(f)
+    for row in reader:
+        if row:
+                try:
+                    all_peaks.append(float(row[0]))
+                except:
+                    print('failed to load peak', row[0])
+f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True)
+
 h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003.5, 1.5, 1010,1)
+f1003=fit_peaks(h1003, 
+        [511, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
+            2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
+        3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
+        '1003keV_coincidence', True, False)
+
 h1028 = degai.get_bg_subtracted_projection(coincidence_hist, 1028, 1, 1040, 2)
-f=fit_peaks(h1003, [511, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007, 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
-            '1003keV_coincidence', True, False)
-# f = spectrum_fitter(h1028, fit_model) # This will now use N=2 by default
-# f.fit_options = f.fit_options.replace('L','')
-# f.nemg = f.ngaus = 2
-# f.add_peaks(peak_list, lambda E: max(sigma2_func(E)*3, 10))
-# f.param_bound_functions['sigma1'] = lambda E: (sigma1_func(E), sigma1_func(E))
-# f.param_bound_functions['tau1'] = lambda E: (tau1_func(E), tau1_func(E))
-# f.param_bound_functions['sigma2'] = lambda E: (sigma2_func(E), sigma2_func(E))
-# f.param_bound_functions['tau2'] = lambda E: (tau2_func(E), tau2_func(E))
-# f.spectrum.GetXaxis().UnZoom()
-# bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
-# f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
-# f.param_bound_functions['bg_shift'] = lambda E: (0, 0) #coincidence peaks should be really weak
-# f.fit_peaks()
-
-if False:
-    chists = degai.get_crystal_histograms(runs, coincidence_binning, 'cal', 'gm_511and2614_1', nonlinearity_correction_name='c1')
-    hupstream = ROOT.TH1D('upsteam', 'upsteam', *coincidence_binning)
-    hcenter = ROOT.TH1D('center', 'center', *coincidence_binning)
-    hdownstream = ROOT.TH1D('downstream', 'downstream', *coincidence_binning)
-    upsteam_crystals = 0
-    downstream_crystals = 0
-    center_crystals = 0
-    for clover, crystal in degai.clover_list:
-        crystal = {1:'a', 2:'b', 3:'c', 4:'d'}[crystal]
-        crystal_hist = chists[f'clover_{clover}{crystal}_keV']
-        if clover in [1,2,3]:
-            hupstream.Add(crystal_hist)
-            upsteam_crystals += 1
-        elif clover in [5,6,7]:
-            hcenter.Add(crystal_hist)
-            center_crystals += 1
-        elif clover in [11,12,13]:
-            hdownstream.Add(crystal_hist)
-            downstream_crystals += 1
-    hupstream *= (1/upsteam_crystals)
-    hcenter *= (1/center_crystals)
-    hdownstream *= (1/downstream_crystals)
-    root_vis_tools.draw_overlaid_histograms({'upstream':hupstream, 'center':hcenter, 'downstream':hdownstream})
-
-# cfitters = {}
-# for c in chists:
-#     f = spectrum_fitter(chists[c], 'bg_shift_gaus')
-#     f.peaks_to_fit.append((198.3, 192, 204))
-#     f.peaks_to_fit.append((846, 838, 852))
-#     f.fit_peaks()
-#     cfitters[c] = f
+f1028=fit_peaks(h1028, 
+        [1003, 1333, 2007, 3848],
+        '1028keV_coincidence', True, False)
