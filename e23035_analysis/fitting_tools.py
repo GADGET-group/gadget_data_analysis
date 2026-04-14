@@ -55,6 +55,9 @@ def fit_hist(histogram, function_string, initial_values, bounds, fit_range, name
     for i in range(n_params):
         if bounds[i][0] == bounds[i][1]:
             f_to_fit.FixParameter(i, bounds[i][0])
+        elif bounds[i][0] == -np.inf and bounds[i][1] == np.inf:
+            f_to_fit.SetParameter(i, initial_values[i])
+            f_to_fit.SetParLimits(i, 0, 0)
         else:
             f_to_fit.SetParameter(i, initial_values[i])
             f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
@@ -167,6 +170,9 @@ def fit_graph(graph, function_string, initial_values, bounds, fit_range=None, na
     for i in range(n_params):
         if bounds[i][0] == bounds[i][1]:
             f_to_fit.FixParameter(i, bounds[i][0])
+        elif bounds[i][0] == -np.inf and bounds[i][1] == np.inf:
+            f_to_fit.SetParameter(i, initial_values[i])
+            f_to_fit.SetParLimits(i, 0, 0)
         else:
             f_to_fit.SetParameter(i, initial_values[i])
             f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
@@ -1300,8 +1306,9 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     # 2. Construct the Mathematical Indexing
     bg_const_idx = 0
-    bg_shift_idx = 1
-    sigma_start_idx = 2
+    bg_slope_idx = 1
+    bg_shift_idx = 2
+    sigma_start_idx = 3
     tau_start_idx = sigma_start_idx + num_emgs
     frac_start_idx = tau_start_idx + num_emgs
     peak_params_start_idx = frac_start_idx + (num_emgs - 1 if num_emgs > 1 else 0)
@@ -1334,6 +1341,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     double nemg_eval_{comp_id}(double *x, double *p) {{
         double val_x = x[0];
         double bg_const = p[{bg_const_idx}];
+        double bg_slope = p[{bg_slope_idx}];
         double bg_shift = p[{bg_shift_idx}];
         double bin_width = {bin_width};
         
@@ -1356,7 +1364,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
             }}
         }}
 
-        double total = bg_const;
+        double total = bg_const + bg_slope * val_x;
         for (int i = 0; i < {n_peaks}; ++i) {{
             double amp = p[{peak_params_start_idx} + 2 * i];
             double mu = p[{peak_params_start_idx} + 2 * i + 1];
@@ -1390,6 +1398,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     double nemg_bg_only_{comp_id}(double *x, double *p) {{
         double val_x = x[0];
         double bg_const = p[{bg_const_idx}];
+        double bg_slope = p[{bg_slope_idx}];
         double bg_shift = p[{bg_shift_idx}];
 
         std::vector<double> weights({num_emgs});
@@ -1411,7 +1420,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
             }}
         }}
 
-        double total = bg_const;
+        double total = bg_const + bg_slope * val_x;
         for (int i = 0; i < {n_peaks}; ++i) {{
             double amp = p[{peak_params_start_idx} + 2 * i];
             double mu = p[{peak_params_start_idx} + 2 * i + 1];
@@ -1456,12 +1465,13 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     bg_shift_limit = 1.0
 
-    initial_values = [base_params[0], base_params[1]]
+    initial_values = [base_params[0], 0.0, base_params[1]]
     bounds = [
-        param_bounds.get('bg_const', (0, np.inf)),
+        param_bounds.get('bg_const', (-np.inf, np.inf)),
+        param_bounds.get('bg_slope', (-np.inf, np.inf)),
         param_bounds.get('bg_shift', (0, bg_shift_limit))
     ]
-    names = ["bg_const", "bg_shift"]
+    names = ["bg_const", "bg_slope", "bg_shift"]
 
     for j in range(num_emgs):
         sigma_guess = base_params[gaus_sigma_start + j]

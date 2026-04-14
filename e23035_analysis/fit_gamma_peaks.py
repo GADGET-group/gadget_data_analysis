@@ -42,7 +42,7 @@ tau2_func = lambda E: max(0.01, 0.0003378*E - 0.2317)
 #def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI'): 
 fitters = []
 def fit_peak(spectrum, location, window_start, window_stop):
-    f = spectrum_fitter(gamma_hist, fit_model) # This will now use N=2 by default
+    f = spectrum_fitter(spectrum, fit_model) # This will now use N=2 by default
     f.nemg = f.ngaus = 2
     f.peaks_to_fit = [(location, window_start, window_stop)]
     f.param_bound_functions['sigma1'] = lambda E: (sigma1_func(E), sigma1_func(E))
@@ -54,7 +54,7 @@ def fit_peak(spectrum, location, window_start, window_stop):
     fitters.append(f)
 
 def fit_exists(save_name):
-    save_path = os.path.join('e23035_analysis/peak_fitting/',save_name)
+    save_path = os.path.join('e23035_analysis/peak_fitting/',save_name + '.root')
     return Path(save_path).exists()
 
 def get_fitter(save_name):
@@ -73,15 +73,17 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, force_refit
     f.spectrum.GetXaxis().UnZoom()
     bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
     f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
-    f.add_peaks(peaks, lambda E: sigma2_func(E)*10)
+    f.add_peaks(peaks, lambda E: sigma2_func(E)*10, sep_factor=1.5)
     if zero_bg_shift:
         f.param_bound_functions['bg_shift'] = lambda E: (0, 0) #coincidence peaks should be really weak
     if not likelihood:
         f.fit_options = f.fit_options.replace('L','')
     f.fit_peaks()
-    f.save(save_path)
+    f.save(os.path.join('e23035_analysis/peak_fitting/',save_name))
     return f
 
+def compton_edge(E):
+     return E - E/(1 + 2*E/511)
 
 # Use a coarser binning for the 2D coincidence matrix to prevent ROOT's 1GB serialization limit
 coincidence_bin_size = 1.0 # keV
@@ -119,16 +121,16 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
                     all_peaks.append(float(row[0]))
                 except:
                     print('failed to load peak', row[0])
-f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True)
+f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, force_refit=False)
 
 h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003.5, 1.5, 1010,1)
 f1003=fit_peaks(h1003, 
         [511, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
             2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
         3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
-        '1003keV_coincidence', True, False)
+        '1003keV_coincidence', True, False, force_refit=False)
 
 h1028 = degai.get_bg_subtracted_projection(coincidence_hist, 1028, 1, 1040, 2)
 f1028=fit_peaks(h1028, 
         [1003, 1333, 2007, 3848],
-        '1028keV_coincidence', True, False)
+        '1028keV_coincidence', True, False,force_refit=False)

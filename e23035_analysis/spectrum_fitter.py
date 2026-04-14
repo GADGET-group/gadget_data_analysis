@@ -32,7 +32,7 @@ class spectrum_fitter:
         self.param_bound_functions = {}
         self.fit_options = 'LS0QEI'
 
-    def add_peaks(self, peak_locations, window_size, sep_factor=1.5):
+    def add_peaks(self, peak_locations, window_size, sep_factor=1.25):
         '''
         peak_locations: list of peak locations
         window_size: function of energy, used to determine fit window and which peaks overlap with each other
@@ -360,6 +360,7 @@ class spectrum_fitter:
         '''
         Fit each peak from peak_loc_guesses, and store the results
         '''
+        ROOT.EnableImplicitMT()
         self.fit_results = []
         original_batch_state = ROOT.gROOT.IsBatch()
         ROOT.gROOT.SetBatch(True)
@@ -369,10 +370,11 @@ class spectrum_fitter:
                 _ = iter(loc_guess)
             except TypeError as te:
                 loc_guess = [loc_guess]
+            print(f'fitting peak/s at:{loc_guess}')
 
             # Define a fit window around the guess (e.g., +/- 2% of energy)
             fit_range = (window_start, window_end)
-            location_wiggle = (window_end - window_start) / 2.0
+            location_wiggle = 5#(window_end - window_start) / 2.0
 
             param_bounds = {}
             
@@ -427,6 +429,7 @@ class spectrum_fitter:
             self.fit_results.append(res_dict)
             
         ROOT.gROOT.SetBatch(original_batch_state)
+        ROOT.DisableImplicitMT()
 
     def get_fit_param(self, param_name):
         '''
