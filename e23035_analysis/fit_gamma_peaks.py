@@ -30,7 +30,7 @@ gamma_beam_off_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binnin
 gamma_beam_on_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
                                           "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
-root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist})
+_overlay= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist})
 
 
 fit_model = 'bg_shift_nemg'#'bg_shift_ngaus'#
@@ -61,7 +61,10 @@ def get_fitter(save_name):
     save_path = os.path.join('e23035_analysis/peak_fitting/',save_name)
     return load_spectrum_fitter_from_file(save_path+'.root')
 
-def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, force_refit=False):
+def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, manual_bounds=False,force_refit=False):
+    '''
+    manual_bounds: if False, use add peaks function to cluster peaks and set fitting bounds.
+    '''
     if not force_refit and fit_exists(save_name):
         return get_fitter(save_name)
     f = spectrum_fitter(spectrum, fit_model) # This will now use N=2 by default
@@ -73,7 +76,10 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, force_refit
     f.spectrum.GetXaxis().UnZoom()
     bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
     f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
-    f.add_peaks(peaks, lambda E: sigma2_func(E)*10, sep_factor=1.5)
+    if manual_bounds:
+        f.peaks_to_fit = peaks
+    else:
+        f.add_peaks(peaks, lambda E: sigma2_func(E)*10, sep_factor=1.5)
     if zero_bg_shift:
         f.param_bound_functions['bg_shift'] = lambda E: (0, 0) #coincidence peaks should be really weak
     if not likelihood:
@@ -115,13 +121,26 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
 all_peaks = []
 with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
     reader = csv.reader(f)
+    current_group = []
+    fit_window=(0,0)
     for row in reader:
         if row:
-                try:
-                    all_peaks.append(float(row[0]))
-                except:
-                    print('failed to load peak', row[0])
-f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, force_refit=False)
+            try:
+                if len(row[0]) > 0:
+                    if len(current_group) > 0:
+                        all_peaks.append((current_group, *fit_window))
+                        current_group = []
+                    start, stop = row[0].split('-')
+                    fit_window = (float(start), float(stop))
+                current_group.append(float(row[1]))
+            except Exception as e:
+                print(f'failed to load peak from row {row}: {e}')
+    
+    if len(current_group) > 0:
+        all_peaks.append((current_group, *fit_window))
+
+# print(all_peaks)
+f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=False)
 
 h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003.5, 1.5, 1010,1)
 f1003=fit_peaks(h1003, 
