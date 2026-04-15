@@ -125,6 +125,8 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
     fit_window=(0,0)
     for row in reader:
         if row:
+            if row[0]=='STOP':
+                break
             try:
                 if len(row[0]) > 0:
                     if len(current_group) > 0:
@@ -141,6 +143,10 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
 
 # print(all_peaks)
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=False)
+f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=False)
+f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=False)
+
+
 
 h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003.5, 1.5, 1010,1)
 f1003=fit_peaks(h1003, 
