@@ -13,6 +13,9 @@ from e23035_analysis import e23035_runs, fitting_tools
 Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
+ddas_runs = e23035_runs.get_ddas_60_Ga_runs()
+mesh_spectrum = ddas_interface.get_histogram(ddas_runs, (1000,0,10000), "mesh_spectrum", "mesh_spectrum", 'mesh_pre_amp_cr',"tpc_particle_id==1", num_workers=200)
+
 print('loading 59Zn data')
 get_runs_Zn = np.array(e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')])
 get_runs_Zn = get_runs_Zn[(get_runs_Zn != 298) & (get_runs_Zn != 297)] #TODO: need to merge these runs!!!
