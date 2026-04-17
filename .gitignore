@@ -11,3 +11,4 @@ old_track_fitting/
 run124_mcmc/
 run124_palpha_mcmc
 *.pkl
+*.root

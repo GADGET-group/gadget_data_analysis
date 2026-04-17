@@ -374,7 +374,7 @@ class spectrum_fitter:
 
             # Define a fit window around the guess (e.g., +/- 2% of energy)
             fit_range = (window_start, window_end)
-            location_wiggle = 5#(window_end - window_start) / 2.0
+            location_wiggle = 3#(window_end - window_start) / 2.0
 
             param_bounds = {}
             

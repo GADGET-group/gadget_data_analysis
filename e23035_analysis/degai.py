@@ -620,22 +620,20 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
 
     return hist
 
-def get_gated_projection(h2_matrix, gate_energy, gate_width):
+def get_gated_projection(h2_matrix, gate_window):
     """
-    Slices a 2D gamma-gamma matrix along the Y-axis at a specific energy
+    Slices a 2D gamma-gamma matrix along the Y-axis at a specific energy window
     and projects it onto the X-axis to create a 1D coincidence spectrum.
     
     Parameters:
     - h2_matrix: The TH2D ROOT object to slice.
-    - gate_energy: The center of the peak to gate on (in keV).
-    - gate_width: The +/- range around the peak to include (in keV).
+    - gate_window: A tuple of (window_start, window_stop) defining the gate range (in keV).
     """
     h2_matrix.GetXaxis().UnZoom()
     h2_matrix.GetYaxis().UnZoom()
 
     # 1. Define the physical energy boundaries of the gate
-    energy_min = gate_energy - gate_width
-    energy_max = gate_energy + gate_width
+    energy_min, energy_max = gate_window
     
     # 2. Convert physical energies to ROOT bin numbers
     y_axis = h2_matrix.GetYaxis()
@@ -644,13 +642,13 @@ def get_gated_projection(h2_matrix, gate_energy, gate_width):
     
     # 3. Create a strictly unique name for ROOT's internal memory registry
     # uuid.uuid4().hex[:8] generates a random 8-character string 
-    unique_name = f"proj_{gate_energy}keV_{uuid.uuid4().hex[:8]}"
+    unique_name = f"proj_{energy_min}_to_{energy_max}keV_{uuid.uuid4().hex[:8]}"
     
     # 4. Project the slice onto the X-axis
     h1_proj = h2_matrix.ProjectionX(unique_name, bin_min, bin_max)
     
     # 5. Make it look nice
-    h1_proj.SetTitle(f"Coincidence Spectrum gated on {gate_energy} #pm {gate_width} keV;Energy (keV);Counts / Bin")
+    h1_proj.SetTitle(f"Coincidence Spectrum gated on {energy_min}-{energy_max} keV;Energy (keV);Counts / Bin")
     h1_proj.SetLineColor(ROOT.kBlue + 1)
     h1_proj.SetLineWidth(2)
     
@@ -659,7 +657,7 @@ def get_gated_projection(h2_matrix, gate_energy, gate_width):
     
     return h1_proj
 
-def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, bg_width):
+def get_bg_subtracted_projection(h2_matrix, peak_window, bg_window):
     """
     Slices a 2D matrix at a peak, slices it again at a background region, 
     scales the background, and subtracts it to return a clean 1D spectrum 
@@ -673,18 +671,18 @@ def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, 
     y_axis = h2_matrix.GetYaxis()
     
     # 1. Project the Peak + Background (Added "e" option)
-    p_min = y_axis.FindBin(peak_energy - peak_width)
-    p_max = y_axis.FindBin(peak_energy + peak_width)
-    name_peak = f"proj_{peak_energy}keV_{uuid.uuid4().hex[:8]}"
+    p_min = y_axis.FindBin(peak_window[0])
+    p_max = y_axis.FindBin(peak_window[1])
+    name_peak = f"proj_{peak_window[0]}_to_{peak_window[1]}keV_{uuid.uuid4().hex[:8]}"
     h1_peak = h2_matrix.ProjectionX(name_peak, p_min, p_max, "e")
     
     # Force Sumw2 to guarantee arithmetic propagates errors in quadrature
     h1_peak.Sumw2() 
     
     # 2. Project the pure Background (Added "e" option)
-    b_min = y_axis.FindBin(bg_energy - bg_width)
-    b_max = y_axis.FindBin(bg_energy + bg_width)
-    name_bg = f"bg_{bg_energy}keV_{uuid.uuid4().hex[:8]}"
+    b_min = y_axis.FindBin(bg_window[0])
+    b_max = y_axis.FindBin(bg_window[1])
+    name_bg = f"bg_{bg_window[0]}_to_{bg_window[1]}keV_{uuid.uuid4().hex[:8]}"
     h1_bg = h2_matrix.ProjectionX(name_bg, b_min, b_max, "e")
     
     # Force Sumw2
@@ -704,7 +702,7 @@ def get_bg_subtracted_projection(h2_matrix, peak_energy, peak_width, bg_energy, 
     h1_peak.Add(h1_bg, -1)
     
     # 5. Clean up the styling
-    h1_peak.SetTitle(f"Coincidence gate {peak_energy} keV, BG Subtracted;Energy (keV);Counts / Bin")
+    h1_peak.SetTitle(f"Coincidence gate {peak_window[0]}-{peak_window[1]} keV, BG Subtracted;Energy (keV);Counts / Bin")
     h1_peak.SetLineColor(ROOT.kRed + 1)
     h1_peak.SetLineWidth(2)
     

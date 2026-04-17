@@ -38,6 +38,7 @@ sigma1_func = lambda E: 0.02078*np.sqrt(E + 742.9)
 tau1_func = lambda E: 0.0001117*E + 0.157
 sigma2_func = lambda E: 0.03037*np.sqrt(E + 498.5)
 tau2_func = lambda E: max(0.01, 0.0003378*E - 0.2317)
+bg_shift_func = lambda E:(0, 0.004 if E >500 else 0.01)
 
 #def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI'): 
 fitters = []
@@ -49,6 +50,7 @@ def fit_peak(spectrum, location, window_start, window_stop):
     f.param_bound_functions['tau1'] = lambda E: (tau1_func(E), tau1_func(E))
     f.param_bound_functions['sigma2'] = lambda E: (sigma2_func(E), sigma2_func(E))
     f.param_bound_functions['tau2'] = lambda E: (tau2_func(E), tau2_func(E))
+    f.param_bound_functions['bg_shift'] = bg_shift_func
     f.fit_peaks()
     f.show_fit_results(0)
     fitters.append(f)
@@ -73,6 +75,7 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, manual_boun
     f.param_bound_functions['tau1'] = lambda E: (tau1_func(E), tau1_func(E))
     f.param_bound_functions['sigma2'] = lambda E: (sigma2_func(E), sigma2_func(E))
     f.param_bound_functions['tau2'] = lambda E: (tau2_func(E), tau2_func(E))
+    f.param_bound_functions['bg_shift'] = bg_shift_func
     f.spectrum.GetXaxis().UnZoom()
     bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
     f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
@@ -109,9 +112,9 @@ E_v_tsbo = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.200, *coinci
 fit_results = []
 def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
     if Egate_bg is None:
-        h_to_fit = degai.get_gated_projection(E_v_tsbo, np.average(Egate), Egate[1]-Egate[0])
+        h_to_fit = degai.get_gated_projection(E_v_tsbo, Egate)
     else:
-        h_to_fit = degai.get_bg_subtracted_projection(E_v_tsbo, np.average(Egate), Egate[1]-Egate[0], np.average(Egate_bg), Egate_bg[1]-Egate_bg[0])
+        h_to_fit = degai.get_bg_subtracted_projection(E_v_tsbo, Egate, Egate_bg)
     fit_string = '[0]*exp(-0.693147*x/[1]) + [2]'
     fit_results.append(fitting_tools.fit_hist(h_to_fit, fit_string, [1,1, 0],
                         ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,
@@ -148,14 +151,14 @@ f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, Tru
 
 
 
-h1003 = degai.get_bg_subtracted_projection(coincidence_hist, 1003.5, 1.5, 1010,1)
+h1003 = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1009, 1011))
 f1003=fit_peaks(h1003, 
         [511, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
             2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
         3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
         '1003keV_coincidence', True, False, force_refit=False)
 
-h1028 = degai.get_bg_subtracted_projection(coincidence_hist, 1028, 1, 1040, 2)
+h1028 = degai.get_bg_subtracted_projection(coincidence_hist, (1027, 1029), (1038, 1042))
 f1028=fit_peaks(h1028, 
         [1003, 1333, 2007, 3848],
         '1028keV_coincidence', True, False,force_refit=False)

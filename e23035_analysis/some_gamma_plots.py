@@ -63,16 +63,16 @@ sum_ss_hist = degai.get_histogram(runs, degai.get_adjacency_dict(1), 'gm', gamma
 # if True:
 gg_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adjacency_dict(1), 'gm', gamma_binning, event_build_window, addback_ethresh, event_build_window, True)#adj_dict
 cspec = ROOT.TCanvas()
-# gspec = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1024, 2)
+# gspec = degai.get_bg_subtracted_projection(gg_hist, (1001.7, 1005.7), (1022, 1026))
 # gspec.SetLineColor(ROOT.kRed)
 # gspec.Draw()
-# gspec2 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1141, 2)
+# gspec2 = degai.get_bg_subtracted_projection(gg_hist, (1001.7, 1005.7), (1139, 1143))
 # gspec2.SetLineColor(ROOT.kBlue)
 # gspec2.Draw('SAME')
-no_bg_sub_spec = degai.get_gated_projection(gg_hist, 1003.6, 2)
+no_bg_sub_spec = degai.get_gated_projection(gg_hist, (1001.6, 1005.6))
 no_bg_sub_spec.SetLineColor(ROOT.kBlue)
 no_bg_sub_spec.Draw()
-gspec3 = degai.get_bg_subtracted_projection(gg_hist, 1003.7, 2, 1265, 2)
+gspec3 = degai.get_bg_subtracted_projection(gg_hist, (1001.7, 1005.7), (1263, 1267))
 gspec3.SetLineColor(ROOT.kGreen)
 gspec3.Draw('SAME')
 
@@ -88,4 +88,4 @@ canvas.SetLogy(1)
 if False:
     indiv_adj_dict = degai.get_adjacency_dict(1)
     gg_hist = degai.get_addback_coincidence_spectrum(runs, indiv_adj_dict, 'gm', gamma_binning, event_build_window, 0, event_build_window)
-    gspec = degai.get_bg_subtracted_projection(gg_hist, 2614, 1, 2700, 2)
+    gspec = degai.get_bg_subtracted_projection(gg_hist, (2613, 2615), (2698, 2702))
