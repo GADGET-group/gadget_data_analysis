@@ -354,8 +354,25 @@ def show_pid(ddas_run):
         current_data = current_file.Get('merged_data')
     current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)>>(1000,-0.63e-6,-0.6e-6,1000,4000,8000)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1', 'colz')
 
+def _worker_get_cross_scint_counts(ddas_run):
+    df = ROOT.RDataFrame('merged_data', get_merged_root_file_path(ddas_run))
+    return df.Sum('cross_scint_b2_m').GetValue()
+
 rdataframes = {}
-def get_cross_scint_counts(ddas_run):
+def get_cross_scint_counts(ddas_run, num_workers=None):
+    if is_iterable_runs(ddas_run):
+        run_list = list(ddas_run)
+        total_counts = 0
+        if num_workers is None or num_workers > 1:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = [executor.submit(_worker_get_cross_scint_counts, run) for run in run_list]
+                for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc="Counting cross scintillator"):
+                    total_counts += future.result()
+        else:
+            for run in tqdm.tqdm(run_list, desc="Counting cross scintillator"):
+                total_counts += get_cross_scint_counts(run, num_workers=1)
+        return total_counts
+
     global rdataframes
     if ddas_run not in rdataframes:
         rdataframes[ddas_run] = ROOT.RDataFrame('merged_data', get_merged_root_file_path(ddas_run))
