@@ -16,7 +16,7 @@ https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
 '''
 gamma_bin_size = 1 #keV
 gamma_binning = (int((7000-0)/gamma_bin_size),0,7000) #was 1-12000 w/ 1 keV bins
-run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
+run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='59Zn')]
 runs = []
 for run in run_candidates:
     t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
@@ -28,7 +28,7 @@ for run in run_candidates:
         #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
-runs = e23035_runs.get_ddas_60_Ga_runs()
+#runs = e23035_runs.get_ddas_60_Ga_runs()
 print(runs)
 n_workers=min(200, len(runs))
 

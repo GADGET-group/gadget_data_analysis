@@ -14,7 +14,10 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-runs = e23035_runs.get_ddas_60_Ga_runs()
+if True:
+    runs = e23035_runs.get_ddas_60_Ga_runs()
+    fit_prefix = '60Ga'
+
 
 event_build_window = 500 #ns
 
@@ -56,11 +59,11 @@ def fit_peak(spectrum, location, window_start, window_stop):
     fitters.append(f)
 
 def fit_exists(save_name):
-    save_path = os.path.join('e23035_analysis/peak_fitting/',save_name + '.root')
+    save_path = os.path.join('e23035_analysis/peak_fitting/',fit_prefix+'_'+save_name + '.root')
     return Path(save_path).exists()
 
 def get_fitter(save_name):
-    save_path = os.path.join('e23035_analysis/peak_fitting/',save_name)
+    save_path = os.path.join('e23035_analysis/peak_fitting/',fit_prefix+'_'+save_name)
     return load_spectrum_fitter_from_file(save_path+'.root')
 
 def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, manual_bounds=False,force_refit=False):
@@ -88,7 +91,7 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, manual_boun
     if not likelihood:
         f.fit_options = f.fit_options.replace('L','')
     f.fit_peaks()
-    f.save(os.path.join('e23035_analysis/peak_fitting/',save_name))
+    f.save(os.path.join('e23035_analysis/peak_fitting/',fit_prefix+'_'+save_name))
     return f
 
 def compton_edge(E):
