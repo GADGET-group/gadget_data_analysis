@@ -16,11 +16,15 @@ https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
 '''
 gamma_bin_size = 1 #keV
 gamma_binning = (int((7000-0)/gamma_bin_size),0,7000) #was 1-12000 w/ 1 keV bins
-run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='59Zn')]
+run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='59Zn')]#[(e23035_runs.run_df['Run Type'].str.lower()=='background')]#
 runs = []
 for run in run_candidates:
-    t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
-    if True: #not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[159, 169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
+    if np.isnan(run):
+        print(f'run {run} is nan, skipping')
+        continue
+   # t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
+    if run not in [275, 276, 279]: #not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[159, 169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
+        #275, 576, 279 need h5 to be transfered
         #only looking at runs later than 150 since these definitely use final beam settings
         #169-173: beam disruptions, and following short runs
         #174: attenuated beam
@@ -29,6 +33,7 @@ for run in run_candidates:
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
 #runs = e23035_runs.get_ddas_60_Ga_runs()
+#runs = 
 print(runs)
 n_workers=min(200, len(runs))
 
@@ -226,7 +231,7 @@ def process_all():
             
     make_summary_pdf()
 
-    make_nonlinearity_correction()
+    #make_nonlinearity_correction()
     
 def make_summary_pdf():
     energy_calibration_tools.create_calibration_summary(gm_name, pvalue_threshold_dict, runs)

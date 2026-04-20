@@ -14,9 +14,15 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-if True:
+if False:
     runs = e23035_runs.get_ddas_60_Ga_runs()
     fit_prefix = '60Ga'
+if False:
+    runs = [286]
+    fit_prefix = 'bg_run_286'
+if True:
+    runs = [280, 278, 277, 277, 274, 271, 270, 269, 268]
+    fit_prefix = '59Zn'
 
 
 event_build_window = 500 #ns
@@ -147,21 +153,33 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
     if len(current_group) > 0:
         all_peaks.append((current_group, *fit_window))
 
-force_refit=True
+force_refit=False
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
+if False:
+    f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
+    f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 
 
 
-h1003 = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1009, 1011))
-f1003=fit_peaks(h1003, 
-        [511, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
-            2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
-        3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
-        '1003keV_coincidence', True, False, force_refit=False)
+    h1003 = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1009, 1011))
+    f1003=fit_peaks(h1003, 
+            [511, 1003, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
+                2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
+            3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
+            '1003keV_coincidence', True, False, force_refit=False)
 
-h1028 = degai.get_bg_subtracted_projection(coincidence_hist, (1027, 1029), (1038, 1042))
-f1028=fit_peaks(h1028, 
-        [1003, 1333, 2007, 3848],
-        '1028keV_coincidence', True, False,force_refit=False)
+    h1028 = degai.get_bg_subtracted_projection(coincidence_hist, (1027, 1029), (1038, 1042))
+    f1028=fit_peaks(h1028, 
+            [511, 1003, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
+                2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
+            3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
+            '1028keV_coincidence', True, False,force_refit=False)
+
+
+    #fit_decay_curve((2006,2009), (0,0.095), (2018, 2038))
+    h2007 = degai.get_bg_subtracted_projection(coincidence_hist, (2006, 2009), (2018, 2038))
+    f2007=fit_peaks(h2007, 
+            [511, 1003, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
+                2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
+            3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
+            '2007keV_coincidence', True, False,force_refit=False)

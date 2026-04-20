@@ -357,7 +357,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     # --- NEW: Filter out any fits that returned NaN or <= 0 uncertainties ---
     valid_indices = [
         i for i, err in enumerate(peak_location_uncertainties) 
-        if not np.isnan(err) and not np.isnan(peak_locations[i]) and err > 0.01 and amplitudes[i]/amplitude_uncertainties[i]>3# and probs[i]>0.01
+        if not np.isnan(err) and not np.isnan(peak_locations[i])# and err > 0.01 and amplitudes[i]/amplitude_uncertainties[i]>3# and probs[i]>0.01
     ]
 
     valid_peak_locs = [peak_locations[i] for i in valid_indices]
