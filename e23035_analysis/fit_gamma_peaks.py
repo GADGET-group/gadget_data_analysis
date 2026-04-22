@@ -17,10 +17,11 @@ gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethr
 if False:
     runs = e23035_runs.get_ddas_60_Ga_runs()
     fit_prefix = '60Ga'
-if False:
-    runs = [286]
-    fit_prefix = 'bg_run_286'
 if True:
+    bg_run = 281
+    runs = [bg_run]
+    fit_prefix = 'bg_run_%d'%bg_run
+if False:
     runs = [280, 278, 277, 277, 274, 271, 270, 269, 268]
     fit_prefix = '59Zn'
 
@@ -111,7 +112,10 @@ coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_na
 # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
 
 #make 2D histogram of time vs energy
-E_v_tsbo = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.200, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time_since_beam_off", 
+E_v_tsbo = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.200, *coincidence_binning), "E_vs_tsbo", "energy (keV) vs time (s)", "addback_energy:time_since_beam_off", 
+                    dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
+run_start_time, run_stop_time = ddas_interface.get_first_and_last_ddas_time(runs[0]) #currently only works for a single run
+E_v_t = degai.get_histogram(runs, adj_dict, cal_name, (2000, run_start_time, run_stop_time, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time", 
                     dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
 
 # E_v_tsco = degai.get_histogram(runs, adj_dict, cal_name, (2000, 0, 0.200, *coincidence_binning), 
@@ -123,7 +127,7 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
     if Egate_bg is None:
         h_to_fit = degai.get_gated_projection(E_v_tsbo, Egate)
     else:
-        h_to_fit = degai.get_bg_subtracted_projection(E_v_tsbo, Egate, Egate_bg)
+        h_to_fit = degai.get_bg_subtracted_projection(source, Egate, Egate_bg)
     fit_string = '[0]*exp(-0.693147*x/[1]) + [2]'
     fit_results.append(fitting_tools.fit_hist(h_to_fit, fit_string, [1,1, 0],
                         ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,
@@ -160,20 +164,20 @@ if False:
     f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 
 
-
+    force_refit=False
     h1003 = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1009, 1011))
     f1003=fit_peaks(h1003, 
             [511, 1003, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
                 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
             3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
-            '1003keV_coincidence', True, False, force_refit=False)
+            '1003keV_coincidence', True, False, force_refit=force_refit)
 
     h1028 = degai.get_bg_subtracted_projection(coincidence_hist, (1027, 1029), (1038, 1042))
     f1028=fit_peaks(h1028, 
             [511, 1003, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
                 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
             3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
-            '1028keV_coincidence', True, False,force_refit=False)
+            '1028keV_coincidence', True, False,force_refit=force_refit)
 
 
     #fit_decay_curve((2006,2009), (0,0.095), (2018, 2038))
@@ -182,4 +186,4 @@ if False:
             [511, 1003, 1028, 1188, 1202,  1341, 1413, 1482, 1554, 2007,
                 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
             3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806],
-            '2007keV_coincidence', True, False,force_refit=False)
+            '2007keV_coincidence', True, False,force_refit=force_refit)

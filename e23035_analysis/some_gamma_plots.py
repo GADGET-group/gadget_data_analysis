@@ -19,10 +19,10 @@ upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-if False:
+if True:
     runs = e23035_runs.get_ddas_60_Ga_runs()
     nlc_name ='c1'
-if True:
+if False:
     runs = [280, 278, 277, 274, 271, 270, 269, 268] #missing several runs due to untransfered data
     nlc_name ='c1'
 
@@ -33,10 +33,12 @@ if True:
     chists_cal = degai.get_crystal_histograms(runs, (7000, 0, 7000), 'cal', cal_name=cal_name, nonlinearity_correction_name=nlc_name, sliding_scale=True)
     canvas2, th22=root_vis_tools.create_2d_hist_from_dict(chists_cal)
     canvas2.SetLogz(1)
-if False:
+if True:
     gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
     gamma_sum_hist = degai.get_histogram(runs, degai.crystal_adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+                                    nonlinearity_correction_name=nlc_name)
+    gamma_150ns_build_window = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', 150, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
 
 if False:

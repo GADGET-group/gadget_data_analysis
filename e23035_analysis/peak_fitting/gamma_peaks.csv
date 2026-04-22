@@ -11,7 +11,8 @@ fit_window,peak energy,from decay of,notes,gate,bg_gate,coincidence_hist,coincid
 ,299,,,,,,,,,,
 318-336,327,,,,,,,,,,
 ,334,60Zn,"1969Ho01, poor fit because of nearby compton edge",,,,,,,,
-336-343,338.6,228Ac? 59Cu?,Room background line and overlapping 59Cu line possibly,,,,,,,,
+336-343,338.6,59Cu,"Room background line and overlapping 59Cu line possibly. In bg run 281, measured half life to be  56.9376 -23.1428/+18.428 seconds using fit_decay_curve((337,340), (0,100), (310,330), E_v_t)
+ ",,,,,,,,
 348-356,351.9,214Pb?,,,,,,,,,
 360-368,364.4,60Zn,1969Ho01,,,,,,,,
 404-414,409,?,,,,,,,,,
