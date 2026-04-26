@@ -26,22 +26,24 @@ if False:
     runs = [280, 278, 277, 274, 271, 270, 269, 268] #missing several runs due to untransfered data
     nlc_name ='c1'
 
-    chists = degai.get_crystal_histograms(runs, (7000, 0, 7000), 'e', sliding_scale=True)
+    chists = degai.get_crystal_histograms(runs, gamma_binning, 'e', sliding_scale=True)
     canvas, th2=root_vis_tools.create_2d_hist_from_dict(chists)
     canvas.SetLogz(1)
 
-    chists_cal = degai.get_crystal_histograms(runs, (7000, 0, 7000), 'cal', cal_name=cal_name, nonlinearity_correction_name=nlc_name, sliding_scale=True)
+    chists_cal = degai.get_crystal_histograms(runs, gamma_binning, 'cal', cal_name=cal_name, nonlinearity_correction_name=nlc_name, sliding_scale=True)
     canvas2, th22=root_vis_tools.create_2d_hist_from_dict(chists_cal)
     canvas2.SetLogz(1)
 if True:
-    gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+    gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'addback_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
-    gamma_sum_hist = degai.get_histogram(runs, degai.crystal_adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+    gamma_sum_hist = degai.get_histogram(runs, degai.crystal_adj_dict, cal_name, gamma_binning, 'sum_gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
-    gamma_150ns_build_window = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', 150, addback_ethresh, True,
+if True:
+    gamma_150ns_build_window = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, '150ns_gamma_hist', 'gamma spectrum', 'addback_energy', '', 150, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
+root_vis_tools.draw_overlaid_histograms({'sum':gamma_sum_hist, '500 ns build window':gamma_hist, '150 ns build window':gamma_150ns_build_window})
 
-if False:
+if True:
     gamma_beam_off_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
                                             "time_since_beam_off<0.094", event_build_window, addback_ethresh, True,
                                             nonlinearity_correction_name=nlc_name)
@@ -82,6 +84,8 @@ if False:
     coincidence_binning = (int((upper_energy-addback_ethresh)/coincidence_bin_size), addback_ethresh, upper_energy)
     coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                     nonlinearity_correction_name=nlc_name)
+    coincidence_hist_150ns = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_name, coincidence_binning, 150, addback_ethresh, 150, True, 
+                                                    nonlinearity_correction_name=nlc_name)
     # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
 
     #make 2D histogram of time vs energy
@@ -107,5 +111,10 @@ if False:
 
 
     h1003 = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1009, 1011))
+    h1003_150ns = degai.get_bg_subtracted_projection(coincidence_hist_150ns, (1002.0, 1005.0), (1009, 1011))
+    _=root_vis_tools.draw_overlaid_histograms({'500ns':h1003, '150ns':h1003_150ns})
     h1028 = degai.get_bg_subtracted_projection(coincidence_hist, (1027, 1029), (1038, 1042))
 
+h5809 = degai.get_bg_subtracted_projection(coincidence_hist, (5804, 5813), (5830, 5850))
+h5809_150ns = degai.get_bg_subtracted_projection(coincidence_hist_150ns, 5809, 4, 5840, 10)
+_=root_vis_tools.draw_overlaid_histograms({'500ns':h5809, '150ns':h5809_150ns})
