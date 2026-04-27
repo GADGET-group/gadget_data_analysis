@@ -22,7 +22,7 @@ if False:
     runs = [bg_run]
     fit_prefix = 'bg_run_%d'%bg_run
 if False:
-    runs = [280, 278, 277, 277, 274, 271, 270, 269, 268]
+    runs = [280, 278, 277, 274, 271, 270, 269, 268]
     fit_prefix = '59Zn'
 
 

@@ -37,7 +37,7 @@ def process_run(run):
 def merge_ddas(ddas_run, remerge=True):
     try:
         if os.path.exists(ddas_interface.get_merged_root_file_path(ddas_run)) and not remerge:
-            print('ddas run %d already merged\n')
+            print('ddas run %d already merged\n'%ddas_run)
         else:
             print('merging ddas run %d'%ddas_run)
             ddas_interface.make_merged_root_file(ddas_run)
@@ -50,7 +50,7 @@ if __name__ == '__main__':
     from e23035_analysis.e23035_runs import run_df
     import numpy as np
     if True:
-        ddas_runs = range(0, 287)
+        ddas_runs = [285,279,275,276,238,218,217,213,203,204]
         with multiprocessing.Pool(200) as pool:
             pool.map(merge_ddas, ddas_runs)
     if False:
