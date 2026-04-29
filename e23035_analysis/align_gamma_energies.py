@@ -23,7 +23,7 @@ for run in run_candidates:
         print(f'run {run} is nan, skipping')
         continue
    # t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
-    if run not in [275, 276, 279]: #not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[159, 169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
+    if True: #not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[159, 169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
         #275, 576, 279 need h5 to be transfered
         #only looking at runs later than 150 since these definitely use final beam settings
         #169-173: beam disruptions, and following short runs
@@ -32,8 +32,8 @@ for run in run_candidates:
         #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
-#runs = e23035_runs.get_ddas_60_Ga_runs()
-#runs = 
+runs = e23035_runs.get_ddas_60_Ga_runs()
+#runs = [209]#[203, 204, 275,276, 279]
 print(runs)
 n_workers=min(200, len(runs))
 
@@ -229,7 +229,7 @@ def process_all():
                 
             pbar.close()
             
-    make_summary_pdf()
+    #make_summary_pdf()
 
     #make_nonlinearity_correction()
     
