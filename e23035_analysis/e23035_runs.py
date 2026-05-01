@@ -20,11 +20,22 @@ run_df['GET'] = pd.to_numeric(run_df['GET'], errors='coerce', downcast='integer'
 run_df['DDAS'] = pd.to_numeric(run_df['DDAS'], errors='coerce', downcast='integer')
 run_df['degrader angle'] = pd.to_numeric(run_df['degrader angle'], errors='coerce', downcast='float')
 
-def get_ddas_60_Ga_runs():
+def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_beam_settings):
+    '''
+    good_gamma: runs for which I beleive the gamma array was performing well
+    good_low_energy_tpc: Runs during which the SCA threshold was behaving correctly
+    good_long_tracks_tpc: Runs with get settings which properly captured long tracks
+    final_beam_settings: only include runs with final beam settings (38 degree degrader and reduced momentum acceptance)
+    '''
     _ddas_60Ga_run_candidates = run_df['DDAS'][(run_df['Run Type']=='60Ga')]
     runs = []
     for run in _ddas_60Ga_run_candidates:
-        if not np.isnan(run) and  run>=150 and run not in[174, 205, 237] and not (run>=182 and run<=191): #169, 170,171, 172,173
+        if np.isnan(run):
+            continue
+        if final_beam_settings and run <149:
+            continue
+        if good_gamma and (run <150 or run in [174, 205, 237] or (run>=182 and run<=191) or run in [218, 238]):
+            continue
             #only looking at runs later than 150 since these definitely use final beam settings
             #169-173: beam disruptions, and following short runs. Include
             #174: attenuated beam
@@ -32,9 +43,10 @@ def get_ddas_60_Ga_runs():
             #205 doesn't have matching GET run
             #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
             #237 has some odds, remove
+            #218, 238 are too short to gain match
             #run not in [162,163,203,204,209, 213,217, 218, 238] and #runs which previously were missing h5 files
-            if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
-                runs.append(run)
+        if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
+            runs.append(run)
     return runs
 
 def is_iterable(obj):

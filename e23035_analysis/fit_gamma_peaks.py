@@ -15,7 +15,7 @@ upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 if True:
-    runs = e23035_runs.get_ddas_60_Ga_runs()
+    runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
     fit_prefix = '60Ga'
 if False:
     bg_run = 281
@@ -25,6 +25,12 @@ if False:
     runs = [280, 278, 277, 274, 271, 270, 269, 268]
     fit_prefix = '59Zn'
 
+
+run_duration = 0
+for run in runs:
+    t1, t2 = ddas_interface.get_first_and_last_ddas_time(run)
+    run_duration += (t2 - t1)
+print('duration: %s hr'%(run_duration/3600))
 
 event_build_window = 500 #ns
 

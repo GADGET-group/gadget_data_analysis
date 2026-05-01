@@ -32,8 +32,8 @@ for run in run_candidates:
         #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
             runs.append(run)
-runs = e23035_runs.get_ddas_60_Ga_runs()
-#runs = [209]#[203, 204, 275,276, 279]
+runs = e23035_runs.get_ddas_60_Ga_runs(False, False, False, False)
+#runs = [218]#[203, 204, 275,276, 279]
 print(runs)
 n_workers=min(200, len(runs))
 
