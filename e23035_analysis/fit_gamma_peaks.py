@@ -172,7 +172,7 @@ if True:
     possible_coincidence_peaks = [511, 546, 1003, 1028, 1188, 1202,  1333, 1341, 1413, 1482, 1554, 2007,
                 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
             3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806]
-    force_refit=True
+    #force_refit=True
     h1003 = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1009, 1011))
     f1003=fit_peaks(h1003, possible_coincidence_peaks,
             '1003keV_coincidence', True, False, force_refit=force_refit)
@@ -199,6 +199,16 @@ if True:
     h5299=degai.get_bg_subtracted_projection(coincidence_hist,(5294,5303),(5331,5400))
     f5299=fit_peaks(h5299, possible_coincidence_peaks,
             '5299keV_coincidence', True, False,force_refit=force_refit)
+    
+    h5266 = degai.get_bg_subtracted_projection(coincidence_hist, (5260,5275),(5340,5380))
+    f5266 = fit_peaks(h5266, possible_coincidence_peaks,
+            '5266keV_coincidence', True, False,force_refit=force_refit)
+    
+
+    h5809 = degai.get_bg_subtracted_projection(coincidence_hist, (5803,5812), (5820,5825))
+    f5809 = fit_peaks(h5809, possible_coincidence_peaks,
+            '5809keV_coincidence', True, False,force_refit=force_refit)
+
     
     
     

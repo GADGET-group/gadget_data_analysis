@@ -295,13 +295,13 @@ fit_window,peak energy,from decay of,notes,gate,bg_gate,coincidence_hist,coincid
 4876-4925,4892,60Ga?,2021Or01,,,,,,,,
 5015-5095,5050,?,,,,,,,,,
 5085-5228,5107,?,weak or not present when beam off,,,,,,,,
-5230-5363,5266,?,could this be the Oshea gammaat 5256±13?,,,,,,,,
+5230-5363,5266,?,could this be the Oshea gammaat 5256±13?,5260-5275,5340-5380,,,,,,
 ,5299,60Ga?,half life (s) =  0.0572131  -0.0298075/+0.0116908,5294-5303,5331-5400,,511,,,,
-5363-5500,5450,?,may be stat fluctuation,,,,,,,,
+5363-5500,5450,?,very small peak. ,,,,,,,,
 5500-5661,5560,60Ga,"half life (s) = 0.0687843±0.0288298 from fit_decay_curve((5557,5565),(0,0.095),(5568, 5604))",,,"h5560 = degai.get_bg_subtracted_projection(coincidence_hist, 5561, 4, 5586, 18)",511,,,,
 ,5621,?,not present when beam off,,,,,,,,
 5677-5766,5725,,,,,,,,,,
-5766-5850,5809,61Ge?,"OShea2025 has 5837±12 keV gamma originating from 6842 state, which would show up in coincidence w/ 1003 if that's what this is. 46.6±8 ms half life fit w/ fit_decay_curve((5803,5812),(0,0.095),(5820, 5925))
+5766-5850,5809,60Ga?,"OShea2025 has 5837±12 keV gamma originating from 6842 state, which would show up in coincidence w/ 1003 if that's what this is. 39-64.6 ms half life fit w/ fit_decay_curve((5803,5812),(0,0.095),(5820, 5925)). Maybe goes with ~720 keV proton peak.
 
 ",5805-5813,5830-5850,"h5809 = degai.get_bg_subtracted_projection(coincidence_hist, 5809, 4, 5840, 10)",511,,,,
 6041-6215,6132,?,not present when beam off?,,,,,,,,
