@@ -24,8 +24,11 @@ f_all_proton = spectrum_fitter.spectrum_fitter(pspec, 'bg_shift_gaus')
 f_all_proton.param_bound_functions['sigma'] = lambda E: (sigma_tpc(E), sigma_tpc(E))
 #f_all_proton.param_bound_functions['bg_slope'] = lambda E: (0,0)
 f_all_proton.peaks_to_fit = [([725],600,850),
-                             ([1060, 1109,1212, 1260, 1330, 1380, 1780, 1820, 1860, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1000,2800)]
-f_all_proton.location_wiggle = 20
+                             ([1060, 1109,1160, 1212, 1260],1000,1288),
+                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
+                             ]
+f_all_proton.location_wiggle = 10
+f_all_proton.shared_sigma = False
 
 f_all_proton.fit_peaks()
 

@@ -640,7 +640,7 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
         
     return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI'): 
+def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI', shared_sigma=True): 
     """
     Fits a standard Gaussian + a step-like background shift using the fit_func engine.
     data_source can be specified to get default guesses and values for sigma and A
@@ -661,12 +661,18 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     # [1]: Slope Background
     # [2]: Amplitude (Area) for peak 0
     # [3]: Mean (mu) for peak 0
-    # [4]: Sigma (shared across all peaks)
+    # [4]: Sigma for peak 0 (or shared across all peaks if shared_sigma=True)
     # [5]: shift in background (left - right) as fraction of peak area, shared for all peaks
     # If n_peaks > 1:
-    # [6]: Amplitude of peak 1
-    # [7]: Mean of peak 1
+    #   If shared_sigma=True:
+    #     [6]: Amplitude of peak 1
+    #     [7]: Mean of peak 1
     # ...
+    #   If shared_sigma=False:
+    #     [6]: Amplitude of peak 1
+    #     [7]: Mean of peak 1
+    #     [8]: Sigma of peak 1
+    #     ...
     
     # Gaussian normalized to area [1]
     # Using GetBinWidth(1) instead of 0, as 0 is technically the underflow bin in ROOT
@@ -676,17 +682,28 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     gaus_strings = []
     
     for i in range(n_peaks):
-        if i == 0:
-            amp_idx = 2
-            mu_idx = 3
+        if shared_sigma:
+            if i == 0:
+                amp_idx = 2
+                mu_idx = 3
+            else:
+                amp_idx = 4 + 2 * i
+                mu_idx = 5 + 2 * i
+            sigma_idx = 4
         else:
-            amp_idx = 4 + 2 * i
-            mu_idx = 5 + 2 * i
+            if i == 0:
+                amp_idx = 2
+                mu_idx = 3
+                sigma_idx = 4
+            else:
+                amp_idx = 3 + 3 * i
+                mu_idx = 4 + 3 * i
+                sigma_idx = 5 + 3 * i
             
-        bg_string += f" + 0.5*[{amp_idx}]*[5]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[4]))"
+        bg_string += f" + 0.5*[{amp_idx}]*[5]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{sigma_idx}]))"
         
         # 2.50662827 is sqrt(2*pi)
-        gaus_string = f"([{amp_idx}] * {bin_width} / ([4] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[4]) * ((x-[{mu_idx}])/[4]))"
+        gaus_string = f"([{amp_idx}] * {bin_width} / ([{sigma_idx}] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[{sigma_idx}]) * ((x-[{mu_idx}])/[{sigma_idx}]))"
         gaus_strings.append(gaus_string)
 
     function_string = f"{bg_string} + {' + '.join(gaus_strings)}"
@@ -741,7 +758,8 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     bg_slope_bounds = param_bounds.get('bg_slope', (-np.inf, np.inf))
     A_bounds = param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default))
     mu_bounds = param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high)))
-    sigma_bounds = param_bounds.get('sigma', sigma_bounds)
+    sigma_name_0 = 'sigma' if shared_sigma else 'sigma_0'
+    sigma_bounds_current = param_bounds.get(sigma_name_0, param_bounds.get('sigma', sigma_bounds))
     bg_shift_bounds = param_bounds.get('bg_shift', (0, bg_shift_limit))
 
     bounds = [
@@ -749,22 +767,32 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         bg_slope_bounds, # p1: bg_slope
         A_bounds,        # p2: amplitude 0
         mu_bounds,       # p3: mu 0
-        sigma_bounds,    # p4: sigma 
+        sigma_bounds_current, # p4: sigma 
         bg_shift_bounds  # p5: bg_shift
     ]
 
     if n_peaks == 1:
         names = ["bg_const", "bg_slope", "amplitude", "mu", "sigma", "bg_shift"]
     else:
-        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", "sigma", "bg_shift"]
+        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", sigma_name_0, "bg_shift"]
 
     for i in range(1, n_peaks):
-        initial_values.extend([A_guess, e_guess_list[i]])
-        bounds.extend([
-            param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
-            param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
-        ])
-        names.extend([f"amplitude_{i}", f"mu_{i}"])
+        if shared_sigma:
+            initial_values.extend([A_guess, e_guess_list[i]])
+            bounds.extend([
+                param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
+                param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
+            ])
+            names.extend([f"amplitude_{i}", f"mu_{i}"])
+        else:
+            i_sigma_guess = 1 if data_source is None else get_sigma(data_source, e_guess_list[i])
+            initial_values.extend([A_guess, e_guess_list[i], i_sigma_guess])
+            bounds.extend([
+                param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
+                param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high))),
+                param_bounds.get(f'sigma_{i}', param_bounds.get('sigma', sigma_bounds))
+            ])
+            names.extend([f"amplitude_{i}", f"mu_{i}", f"sigma_{i}"])
 
     # 3. Call our generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(

@@ -31,7 +31,8 @@ class spectrum_fitter:
         #These functions will be evaluated at loc_guess[0] if loc guess is a list of locations
         self.param_bound_functions = {}
         self.fit_options = 'LS0QEI'
-        self.location_wiggle=3
+        self.location_wiggle=3 #bounds +/- to apply to location guesses
+        self.shared_sigma=True #currently only implemented for bg_shift_guass. Will fill out param bounds for each peak based on guess.
 
     def add_peaks(self, peak_locations, window_size, sep_factor=1.25):
         '''
@@ -399,8 +400,13 @@ class spectrum_fitter:
                     self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options
                 )
             elif self.peak_model.lower() == 'bg_shift_gaus':
+                if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
+                    del param_bounds['sigma']
+                    for i, loc in enumerate(loc_guess):
+                        param_bounds[f'sigma_{i}'] = self.param_bound_functions['sigma'](loc)
+                
                 res = fitting_tools.fit_gaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
-                                    param_bounds=param_bounds, fit_options=self.fit_options)
+                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma)
             elif self.peak_model.lower() == 'bg_shift_emg':
                 res = fitting_tools.fit_emg_w_bg_shift(self.spectrum, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options)
