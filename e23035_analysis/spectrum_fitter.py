@@ -31,6 +31,7 @@ class spectrum_fitter:
         #These functions will be evaluated at loc_guess[0] if loc guess is a list of locations
         self.param_bound_functions = {}
         self.fit_options = 'LS0QEI'
+        self.location_wiggle=3
 
     def add_peaks(self, peak_locations, window_size, sep_factor=1.25):
         '''
@@ -374,7 +375,7 @@ class spectrum_fitter:
 
             # Define a fit window around the guess (e.g., +/- 2% of energy)
             fit_range = (window_start, window_end)
-            location_wiggle = 3#(window_end - window_start) / 2.0
+            location_wiggle = self.location_wiggle#(window_end - window_start) / 2.0
 
             param_bounds = {}
             

@@ -18,8 +18,16 @@ pspec = ddas_interface.get_histogram(ddas_runs_protons_all_energies, (4000, 0, 4
 ddas_runs_alphas = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
 aspec = ddas_interface.get_histogram(ddas_runs_alphas, (700, 2000, 9000), 'alpha spectrum', 'alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=256)
 
+sigma_tpc = lambda E: (0.011107*E/1e3 + 0.008813049)*1e3
+
 f_all_proton = spectrum_fitter.spectrum_fitter(pspec, 'bg_shift_gaus')
-f_all_proton.peaks_to_fit = [([725,],600,1000)]
+f_all_proton.param_bound_functions['sigma'] = lambda E: (sigma_tpc(E), sigma_tpc(E))
+#f_all_proton.param_bound_functions['bg_slope'] = lambda E: (0,0)
+f_all_proton.peaks_to_fit = [([725],600,850),
+                             ([1060, 1109,1212, 1260, 1330, 1380, 1780, 1820, 1860, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1000,2800)]
+f_all_proton.location_wiggle = 20
+
+f_all_proton.fit_peaks()
 
 #mesh_spectrum = ddas_interface.get_histogram(ddas_runs, (1000,0,10000), "mesh_spectrum", "mesh_spectrum", 'mesh_pre_amp_cr',"tpc_particle_id==1", num_workers=200)
 

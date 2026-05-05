@@ -658,34 +658,35 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
 
     # 1. Construct the Mathematical Model
     # [0]: Constant Background
-    # [1]: Amplitude (Area) for peak 0
-    # [2]: Mean (mu) for peak 0
-    # [3]: Sigma (shared across all peaks)
-    # [4]: shift in background (left - right) as fraction of peak area, shared for all peaks
+    # [1]: Slope Background
+    # [2]: Amplitude (Area) for peak 0
+    # [3]: Mean (mu) for peak 0
+    # [4]: Sigma (shared across all peaks)
+    # [5]: shift in background (left - right) as fraction of peak area, shared for all peaks
     # If n_peaks > 1:
-    # [5]: Amplitude of peak 1
-    # [6]: Mean of peak 1
+    # [6]: Amplitude of peak 1
+    # [7]: Mean of peak 1
     # ...
     
     # Gaussian normalized to area [1]
     # Using GetBinWidth(1) instead of 0, as 0 is technically the underflow bin in ROOT
     bin_width = spectrum.GetBinWidth(1) 
     
-    bg_string = "[0]"
+    bg_string = "[0] + [1]*x"
     gaus_strings = []
     
     for i in range(n_peaks):
         if i == 0:
-            amp_idx = 1
-            mu_idx = 2
+            amp_idx = 2
+            mu_idx = 3
         else:
-            amp_idx = 3 + 2 * i
-            mu_idx = 4 + 2 * i
+            amp_idx = 4 + 2 * i
+            mu_idx = 5 + 2 * i
             
-        bg_string += f" + 0.5*[{amp_idx}]*[4]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[3]))"
+        bg_string += f" + 0.5*[{amp_idx}]*[5]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[4]))"
         
         # 2.50662827 is sqrt(2*pi)
-        gaus_string = f"([{amp_idx}] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[3]) * ((x-[{mu_idx}])/[3]))"
+        gaus_string = f"([{amp_idx}] * {bin_width} / ([4] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[4]) * ((x-[{mu_idx}])/[4]))"
         gaus_strings.append(gaus_string)
 
     function_string = f"{bg_string} + {' + '.join(gaus_strings)}"
@@ -729,13 +730,15 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
 
     initial_values = [
         bg_guess,      # p0: bg_const
-        A_guess,       # p1: amplitude 0
-        e_guess_list[0], # p2: mu 0
-        sigma_guess,   # p3: sigma
-        0.002            # p4: bg_shift
+        0.0,           # p1: bg_slope
+        A_guess,       # p2: amplitude 0
+        e_guess_list[0], # p3: mu 0
+        sigma_guess,   # p4: sigma
+        0.002          # p5: bg_shift
     ]
 
-    bg_bounds = param_bounds.get('bg_const', (0, np.inf))
+    bg_bounds = param_bounds.get('bg_const', (-np.inf, np.inf))
+    bg_slope_bounds = param_bounds.get('bg_slope', (-np.inf, np.inf))
     A_bounds = param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default))
     mu_bounds = param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high)))
     sigma_bounds = param_bounds.get('sigma', sigma_bounds)
@@ -743,16 +746,17 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
 
     bounds = [
         bg_bounds,       # p0: bg_const
-        A_bounds,        # p1: amplitude 0
-        mu_bounds,       # p2: mu 0
-        sigma_bounds,    # p3: sigma 
-        bg_shift_bounds  # p4: bg_shift
+        bg_slope_bounds, # p1: bg_slope
+        A_bounds,        # p2: amplitude 0
+        mu_bounds,       # p3: mu 0
+        sigma_bounds,    # p4: sigma 
+        bg_shift_bounds  # p5: bg_shift
     ]
 
     if n_peaks == 1:
-        names = ["bg_const", "amplitude", "mu", "sigma", "bg_shift"]
+        names = ["bg_const", "bg_slope", "amplitude", "mu", "sigma", "bg_shift"]
     else:
-        names = ["bg_const", "amplitude_0", "mu_0", "sigma", "bg_shift"]
+        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", "sigma", "bg_shift"]
 
     for i in range(1, n_peaks):
         initial_values.extend([A_guess, e_guess_list[i]])
@@ -813,18 +817,19 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
     def emg_bg_shift_eval(x, p):
         val_x = x[0]
         bg_const = p[0]
-        sigma = p[3]
-        bg_shift = p[4]
-        tau = p[5]
+        bg_slope = p[1]
+        sigma = p[4]
+        bg_shift = p[5]
+        tau = p[6]
         
-        total = bg_const
+        total = bg_const + bg_slope * val_x
         for i in range(n_peaks):
             if i == 0:
-                amp = p[1]
-                mu = p[2]
+                amp = p[2]
+                mu = p[3]
             else:
-                amp = p[4 + 2 * i]
-                mu = p[5 + 2 * i]
+                amp = p[5 + 2 * i]
+                mu = p[6 + 2 * i]
                 
             # Background Step Component
             total += 0.5 * amp * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
@@ -863,15 +868,17 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
 
     initial_values = [
         gaus_params[0], # p0: bg_const
-        gaus_params[1], # p1: amplitude 0
-        gaus_params[2], # p2: mu 0
-        gaus_params[3], # p3: sigma
-        gaus_params[4], # p4: bg_shift
-        0.1             # p5: tau guess
+        gaus_params[1], # p1: bg_slope
+        gaus_params[2], # p2: amplitude 0
+        gaus_params[3], # p3: mu 0
+        gaus_params[4], # p4: sigma
+        gaus_params[5], # p5: bg_shift
+        0.1             # p6: tau guess
     ]
 
     bounds = [
-        param_bounds.get('bg_const', (0, np.inf)),
+        param_bounds.get('bg_const', (-np.inf, np.inf)),
+        param_bounds.get('bg_slope', (-np.inf, np.inf)),
         param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default)),
         param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high))),
         param_bounds.get('sigma', sigma_bounds),
@@ -880,12 +887,12 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
     ]
 
     if n_peaks == 1:
-        names = ["bg_const", "amplitude", "mu", "sigma", "bg_shift", "tau"]
+        names = ["bg_const", "bg_slope", "amplitude", "mu", "sigma", "bg_shift", "tau"]
     else:
-        names = ["bg_const", "amplitude_0", "mu_0", "sigma", "bg_shift", "tau"]
+        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", "sigma", "bg_shift", "tau"]
 
     for i in range(1, n_peaks):
-        initial_values.extend([gaus_params[3 + 2 * i], gaus_params[4 + 2 * i]])
+        initial_values.extend([gaus_params[4 + 2 * i], gaus_params[5 + 2 * i]])
         bounds.extend([
             param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
             param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
@@ -908,22 +915,22 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
     
     # 5. Background component
     def bg_eval(x, p):
-        return emg_bg_shift_eval(x, [p[0], p[1], p[2], p[3], p[4], p[5]]) - peak_eval(x, p)
+        return emg_bg_shift_eval(x, p) - peak_eval(x, p)
         
     # Peak component
     def peak_eval(x, p):
         val_x = x[0]
-        sigma = p[3]
-        tau = p[5]
+        sigma = p[4]
+        tau = p[6]
         
         total = 0.0
         for i in range(n_peaks):
             if i == 0:
-                amp = p[1]
-                mu = p[2]
+                amp = p[2]
+                mu = p[3]
             else:
-                amp = p[4 + 2 * i]
-                mu = p[5 + 2 * i]
+                amp = p[5 + 2 * i]
+                mu = p[6 + 2 * i]
             
             norm = amp * bin_width / (2.0 * tau)
             z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
@@ -977,7 +984,7 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
     gaus_res = fit_gaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, data_source, param_bounds, fit_options=fit_options)
     if not gaus_res[0].IsValid():
         print(f"Warning: Initial single Gaussian fit failed. Guesses may be poor.")
-        gaus_params = np.ones(5 + 2*(n_peaks-1)) * 0.1 
+        gaus_params = np.ones(6 + 2*(n_peaks-1)) * 0.1 
     else:
         gaus_params = np.array(gaus_res[0].Parameters())
         
@@ -985,14 +992,15 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
 
     # 2. Construct the Mathematical Model
     bg_const_idx = 0
-    bg_shift_idx = 1
-    sigma_start_idx = 2
-    frac_start_idx = 2 + num_gaussians
+    bg_slope_idx = 1
+    bg_shift_idx = 2
+    sigma_start_idx = 3
+    frac_start_idx = 3 + num_gaussians
     peak_params_start_idx = frac_start_idx + (num_gaussians - 1) if num_gaussians > 1 else frac_start_idx
     
     bin_width = spectrum.GetBinWidth(1) 
     
-    bg_string = f"[{bg_const_idx}]"
+    bg_string = f"[{bg_const_idx}] + [{bg_slope_idx}]*x"
     all_gaus_strings = []
     
     # --- FIX 1: Generate stable recursive fraction weights ---
@@ -1028,9 +1036,10 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
 
     # 2. Setup Parameters and Initial Guesses
     bg_const_guess = gaus_params[0]
-    sigma_from_gaus = gaus_params[3] 
-    bg_shift_guess = gaus_params[4] if gaus_params.size > 4 else 0.0
-    
+    bg_slope_guess = gaus_params[1]
+    sigma_from_gaus = gaus_params[4] 
+    bg_shift_guess = gaus_params[5] if gaus_params.size > 5 else 0.0
+
     if data_source is None:
         sigma_bounds_default = (0.1, 100)
         A_bounds_default = (0, np.inf)
@@ -1041,12 +1050,13 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
         sigma_bounds_default = (0.1, 100)
         A_bounds_default = (0, np.inf)
 
-    initial_values = [bg_const_guess, bg_shift_guess]
+    initial_values = [bg_const_guess, bg_slope_guess, bg_shift_guess]
     bounds = [
-        param_bounds.get('bg_const', (0, np.inf)),
+        param_bounds.get('bg_const', (-np.inf, np.inf)),
+        param_bounds.get('bg_slope', (-np.inf, np.inf)),
         param_bounds.get('bg_shift', (0, 1.0))
     ]
-    names = ["bg_const", "bg_shift"]
+    names = ["bg_const", "bg_slope", "bg_shift"]
 
     # Sigmas
     for j in range(num_gaussians):
@@ -1065,13 +1075,13 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
     # Peaks
     for i in range(n_peaks):
         if i == 0:
-            amp_guess = gaus_params[1]
-            mu_guess = gaus_params[2]
+            amp_guess = gaus_params[2]
+            mu_guess = gaus_params[3]
             amp_name = "amplitude" if n_peaks == 1 else "amplitude_0"
             mu_name = "mu" if n_peaks == 1 else "mu_0"
         else:
-            amp_guess = gaus_params[3 + 2 * i]
-            mu_guess = gaus_params[4 + 2 * i]
+            amp_guess = gaus_params[4 + 2 * i]
+            mu_guess = gaus_params[5 + 2 * i]
             amp_name = f"amplitude_{i}"
             mu_name = f"mu_{i}"
         
@@ -1133,35 +1143,36 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
 
     # 1. Construct the Mathematical Model
     # [0]: Constant Background
-    # [1]: Amplitude (Area) for peak 0
-    # [2]: Mean (mu) for peak 0
-    # [3]: Sigma (Gaussian width, shared across all peaks)
-    # [4]: shift in background (left - right) as fraction of peak area, shared for all peaks
-    # [5]: Gamma (Lorentzian width, shared across all peaks)
+    # [1]: Slope Background
+    # [2]: Amplitude (Area) for peak 0
+    # [3]: Mean (mu) for peak 0
+    # [4]: Sigma (Gaussian width, shared across all peaks)
+    # [5]: shift in background (left - right) as fraction of peak area, shared for all peaks
+    # [6]: Gamma (Lorentzian width, shared across all peaks)
     # If n_peaks > 1:
-    # [6]: Amplitude of peak 1
-    # [7]: Mean of peak 1
+    # [7]: Amplitude of peak 1
+    # [8]: Mean of peak 1
     # ...
     
     bin_width = spectrum.GetBinWidth(1) 
     
-    bg_string = "[0]"
+    bg_string = "[0] + [1]*x"
     voigt_strings = []
     
     for i in range(n_peaks):
         if i == 0:
-            amp_idx = 1
-            mu_idx = 2
+            amp_idx = 2
+            mu_idx = 3
         else:
             # Shifted by +1 compared to the Gaussian function because of the new Gamma parameter
-            amp_idx = 4 + 2 * i 
-            mu_idx = 5 + 2 * i
+            amp_idx = 5 + 2 * i 
+            mu_idx = 6 + 2 * i
             
-        # Background step function uses the Gaussian sigma [3] for the resolution smearing
-        bg_string += f" + 0.5*[{amp_idx}]*[4]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[3]))"
+        # Background step function uses the Gaussian sigma [4] for the resolution smearing
+        bg_string += f" + 0.5*[{amp_idx}]*[5]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[4]))"
         
         # TMath::Voigt is normalized to 1. Multiply by Amplitude and bin_width.
-        voigt_string = f"[{amp_idx}] * {bin_width} * TMath::Voigt(x-[{mu_idx}], [3], [5])"
+        voigt_string = f"[{amp_idx}] * {bin_width} * TMath::Voigt(x-[{mu_idx}], [4], [6])"
         voigt_strings.append(voigt_string)
 
     function_string = f"{bg_string} + {' + '.join(voigt_strings)}"
@@ -1204,14 +1215,16 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
 
     initial_values = [
         bg_guess,        # p0: bg_const
-        A_guess,         # p1: amplitude 0
-        e_guess_list[0], # p2: mu 0
-        sigma_guess,     # p3: sigma
-        0.002,           # p4: bg_shift
-        gamma_guess      # p5: gamma (Lorentzian width)
+        0.0,             # p1: bg_slope
+        A_guess,         # p2: amplitude 0
+        e_guess_list[0], # p3: mu 0
+        sigma_guess,     # p4: sigma
+        0.002,           # p5: bg_shift
+        gamma_guess      # p6: gamma (Lorentzian width)
     ]
 
-    bg_bounds = param_bounds.get('bg_const', (0, np.inf))
+    bg_bounds = param_bounds.get('bg_const', (-np.inf, np.inf))
+    bg_slope_bounds = param_bounds.get('bg_slope', (-np.inf, np.inf))
     A_bounds = param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default))
     mu_bounds = param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high)))
     sigma_bounds = param_bounds.get('sigma', sigma_bounds)
@@ -1220,17 +1233,18 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
 
     bounds = [
         bg_bounds,       # p0: bg_const
-        A_bounds,        # p1: amplitude 0
-        mu_bounds,       # p2: mu 0
-        sigma_bounds,    # p3: sigma 
-        bg_shift_bounds, # p4: bg_shift
-        gamma_bounds     # p5: gamma
+        bg_slope_bounds, # p1: bg_slope
+        A_bounds,        # p2: amplitude 0
+        mu_bounds,       # p3: mu 0
+        sigma_bounds,    # p4: sigma 
+        bg_shift_bounds, # p5: bg_shift
+        gamma_bounds     # p6: gamma
     ]
 
     if n_peaks == 1:
-        names = ["bg_const", "amplitude", "mu", "sigma", "bg_shift", "gamma"]
+        names = ["bg_const", "bg_slope", "amplitude", "mu", "sigma", "bg_shift", "gamma"]
     else:
-        names = ["bg_const", "amplitude_0", "mu_0", "sigma", "bg_shift", "gamma"]
+        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", "sigma", "bg_shift", "gamma"]
 
     for i in range(1, n_peaks):
         initial_values.extend([A_guess, e_guess_list[i]])
@@ -1297,7 +1311,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     
     if not gaus_res[0].IsValid():
         print(f"Warning: Initial N-Gaussian fit failed. Guesses may be poor.")
-        n_gaus_params = 2 + num_emgs + (num_emgs - 1 if num_emgs > 1 else 0) + 2 * n_peaks
+        n_gaus_params = 3 + num_emgs + (num_emgs - 1 if num_emgs > 1 else 0) + 2 * n_peaks
         base_params = np.ones(n_gaus_params) * 0.1 
     else:
         base_params = np.array(gaus_res[0].Parameters())
@@ -1313,8 +1327,8 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     frac_start_idx = tau_start_idx + num_emgs
     peak_params_start_idx = frac_start_idx + (num_emgs - 1 if num_emgs > 1 else 0)
     
-    gaus_sigma_start = 2
-    gaus_frac_start = 2 + num_emgs
+    gaus_sigma_start = 3
+    gaus_frac_start = 3 + num_emgs
     gaus_peak_start = gaus_frac_start + (num_emgs - 1 if num_emgs > 1 else 0)
 
     bin_width = spectrum.GetBinWidth(1) 
@@ -1465,7 +1479,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     bg_shift_limit = 1.0
 
-    initial_values = [base_params[0], 0.0, base_params[1]]
+    initial_values = [base_params[0], base_params[1], base_params[2]]
     bounds = [
         param_bounds.get('bg_const', (-np.inf, np.inf)),
         param_bounds.get('bg_slope', (-np.inf, np.inf)),
