@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import ROOT
 import numpy as np
@@ -20,17 +21,52 @@ aspec = ddas_interface.get_histogram(ddas_runs_alphas, (700, 2000, 9000), 'alpha
 
 sigma_tpc = lambda E: (0.011107*E/1e3 + 0.008813049)*1e3
 
-f_all_proton = spectrum_fitter.spectrum_fitter(pspec, 'bg_shift_gaus')
-f_all_proton.param_bound_functions['sigma'] = lambda E: (sigma_tpc(E), sigma_tpc(E))
-#f_all_proton.param_bound_functions['bg_slope'] = lambda E: (0,0)
-f_all_proton.peaks_to_fit = [([725],600,850),
+fit_path = 'e23035_analysis/tpc_spectrum_fitting/'
+def get_save_path(save_name):
+    return os.path.join(fit_path,save_name)
+def fit_exists(save_name):
+    return Path(get_save_path(save_name)+'.root').exists()
+def get_fitter(save_name):
+    return spectrum_fitter.load_spectrum_fitter_from_file(get_save_path(save_name)+'.root')
+
+def fit_peaks(spectrum, peaks, save_name, zero_bg_shift=False, likelihood=True, force_refit=False, additional_param_bounds={}):
+    '''
+    manual_bounds: if False, use add peaks function to cluster peaks and set fitting bounds.
+    '''
+    if not force_refit and fit_exists(save_name):
+        return get_fitter(save_name)
+    f = spectrum_fitter.spectrum_fitter(spectrum, 'bg_shift_gaus') # This will now use N=2 by default
+    f.param_bound_functions['sigma'] = lambda E: (sigma_tpc(E), sigma_tpc(E))
+    f.spectrum.GetXaxis().UnZoom()
+    f.peaks_to_fit = peaks
+    f.location_wiggle = 10
+    f.shared_sigma = False
+    if zero_bg_shift:
+        f.param_bound_functions['bg_shift'] = lambda E: (0, 0)
+    for p in additional_param_bounds:
+        f.param_bound_functions[p] = additional_param_bounds[p]
+    if not likelihood:
+        f.fit_options = f.fit_options.replace('L','')
+    f.fit_peaks()
+    f.save(get_save_path(save_name))
+    return f
+
+force_refit=True
+f_all_proton = fit_peaks(pspec, 
+                         [([725, 814, 913, 950, 1060],500,1000),
                              ([1060, 1109,1160, 1212, 1260],1000,1288),
                              #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
-                             ]
-f_all_proton.location_wiggle = 10
-f_all_proton.shared_sigma = False
+                             ],
+                         'all_proton_energies', force_refit=force_refit
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
+                        
 
-f_all_proton.fit_peaks()
+f_alpha = fit_peaks(aspec, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
+                    'alpha', force_refit=force_refit,
+                    additional_param_bounds={'bg_slope':lambda E: (0,0)})#3356
+
+# Ensure batch mode is off so any interactive plots will display
+ROOT.gROOT.SetBatch(False)
 
 #mesh_spectrum = ddas_interface.get_histogram(ddas_runs, (1000,0,10000), "mesh_spectrum", "mesh_spectrum", 'mesh_pre_amp_cr',"tpc_particle_id==1", num_workers=200)
 

@@ -464,7 +464,7 @@ class spectrum_fitter:
             to_return.append(res['fit_res'].Prob())
         return to_return
 
-    def show_fit_results(self, peak_index):
+    def show_fit_results(self, peak_index, show_fit_params=True):
         if 0 <= peak_index < len(self.fit_results):
             orig_canvas = self.fit_results[peak_index]['canvas']
             
@@ -484,41 +484,42 @@ class spectrum_fitter:
                 if prim.InheritsFrom("TPad"):
                     prim.cd()
                     break
+            if show_fit_params:
+                # 3. Create a custom stats box
+                # Coordinates are Normalized Device Coordinates (NDC)
+                stats_box = ROOT.TPaveText(0.65, 0.45, 0.88, 0.88, "NDC")
+                stats_box.SetFillColor(ROOT.kWhite)
+                stats_box.SetBorderSize(1)
+                stats_box.SetTextAlign(12) # Left-align the text
 
-            # 3. Create a custom stats box
-            # Coordinates are Normalized Device Coordinates (NDC)
-            stats_box = ROOT.TPaveText(0.65, 0.45, 0.88, 0.88, "NDC")
-            stats_box.SetFillColor(ROOT.kWhite)
-            stats_box.SetBorderSize(1)
-            stats_box.SetTextAlign(12) # Left-align the text
+                # Add Goodness of Fit info
+                prob = fit_res.Prob()
+                chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
+                stats_box.AddText(f"P-value: {prob:.4g}")
+                stats_box.AddText(f"#chi^{{2}}/ndf: {chi2_ndf:.2f}")
+                stats_box.AddLine(0, 0, 0, 0)
 
-            # Add Goodness of Fit info
-            prob = fit_res.Prob()
-            chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
-            stats_box.AddText(f"P-value: {prob:.4g}")
-            stats_box.AddText(f"#chi^{{2}}/ndf: {chi2_ndf:.2f}")
-            stats_box.AddLine(0, 0, 0, 0)
+                # Dynamically add all parameters
+                for i in range(fit_res.NPar()):
+                    p_name = f_to_fit.GetParName(i)
+                    p_val = fit_res.Parameter(i)
+                    p_err = fit_res.ParError(i)
+                    
+                    # Format ROOT LaTeX strings
+                    if p_name == "mu": p_name = "#mu"
+                    elif p_name == "sigma": p_name = "#sigma"
+                    elif p_name == "tau": p_name = "#tau"
+                    
+                    stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
 
-            # Dynamically add all parameters
-            for i in range(fit_res.NPar()):
-                p_name = f_to_fit.GetParName(i)
-                p_val = fit_res.Parameter(i)
-                p_err = fit_res.ParError(i)
-                
-                # Format ROOT LaTeX strings
-                if p_name == "mu": p_name = "#mu"
-                elif p_name == "sigma": p_name = "#sigma"
-                elif p_name == "tau": p_name = "#tau"
-                
-                stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
-
-            # 4. Draw and Update
-            stats_box.Draw("SAME")
-            new_canvas.Update()
+                # 4. Draw and Update
+                stats_box.Draw("SAME")
+                new_canvas.Update()
 
             # 5. Keep references to prevent Python from deleting the GUI objects!
             self.fit_results[peak_index]['display_canvas'] = new_canvas
-            self.fit_results[peak_index]['stats_box'] = stats_box 
+            if show_fit_params:
+                self.fit_results[peak_index]['stats_box'] = stats_box 
             
         else:
             print(f"Invalid peak index: {peak_index}")

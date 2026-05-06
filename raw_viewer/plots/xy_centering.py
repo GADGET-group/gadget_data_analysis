@@ -6,7 +6,7 @@ import matplotlib.pylab as plt
 
 from raw_viewer import process_runs
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'
 run_range = [73,73]#(148,150)#(101, 143)
 
 exclude_runs = []# [1,9, 73, 113,210,216, 225, 226, 227, 228, 229] #210 needs to be transfered by Tyler
@@ -14,6 +14,7 @@ runs = []
 for run in range(run_range[0], run_range[1]+1):
     if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
         runs.append(run)
+runs = [250, 253]
 
 #runs=[148,149,150]
 print(runs)
@@ -32,6 +33,7 @@ xy_len = np.abs(np.sin(angles)*lengths)
 
 
 veto_mask = (veto_max<350)&(energy>7)&(energy<8.4)&(lengths>93)&(np.degrees(angles)<20)#&(xy_len < 20)#&(energy<1.5)&(lengths>5)&(lengths<30)#
+veto_mask = (veto_max<200) &(xy_len < 10)
 
 centers = process_runs.get_quantity('track_center', experiment, runs)[veto_mask]
 endpoints = process_runs.get_quantity('endpoints', experiment, runs)

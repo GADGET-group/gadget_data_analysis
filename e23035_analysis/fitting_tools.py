@@ -1492,18 +1492,17 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     peak_eval_func = getattr(ROOT, f"nemg_peaks_only_{comp_id}")
 
     # 4. Setup Parameters and Initial Guesses
+    total_counts = spectrum.Integral(spectrum.FindBin(e_low), spectrum.FindBin(e_high))
     if data_source is None:
         sigma_bounds_default = (0.1, 100)
         tau_bounds_default = (0.01, 100)
-        A_bounds_default = (0, np.inf)
     elif data_source == 'gamma_adc':
         sigma_bounds_default = (1, 20)
         tau_bounds_default = (0.01, 100)
-        A_bounds_default = (1, np.inf)
     else:
         sigma_bounds_default = (0.1, 100)
         tau_bounds_default = (0.01, 100)
-        A_bounds_default = (0, np.inf)
+    A_bounds_default = (0, total_counts)
 
     bg_shift_limit = 1.0
 

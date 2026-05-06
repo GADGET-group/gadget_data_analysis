@@ -19,7 +19,7 @@ from track_fitting import srim_interface, build_sim
 experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
-    if False:
+    if True:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
         #run_range = range(275, 279)
     else:
