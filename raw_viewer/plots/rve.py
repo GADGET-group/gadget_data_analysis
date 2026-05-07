@@ -101,16 +101,17 @@ angles = process_runs.get_angle(experiment, get_runs)
 
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
-pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
-num_pads_railed = np.array([len(prl) for prl in pads_railed])
+
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(get_runs)
     endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
+    pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
+    num_pads_railed = np.array([len(prl) for prl in pads_railed])
     veto_mask = (veto_max < veto_thresh)
-veto_mask = veto_mask & (num_pads_railed==0)# & (angles>np.radians(8)) 
+    veto_mask = veto_mask & (num_pads_railed==0)# & (angles>np.radians(8)) 
 
     
 if load_ddas:

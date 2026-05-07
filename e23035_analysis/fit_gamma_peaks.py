@@ -46,7 +46,7 @@ gamma_beam_off_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binnin
 gamma_beam_on_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
                                           "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
-_overlay= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist})
+beam_on_off_drawing= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist})
 
 
 fit_model = 'bg_shift_nemg'#'bg_shift_ngaus'#
@@ -195,6 +195,34 @@ if True:
     h2007 = degai.get_bg_subtracted_projection(coincidence_hist, (2006, 2009), (2018, 2038))
     f2007=fit_peaks(h2007, possible_coincidence_peaks,
             '2007keV_coincidence', True, False,force_refit=force_refit)
+    
+    h4719 = degai.get_bg_subtracted_projection(coincidence_hist, (4716, 4722), (4727, 4777))
+    f4719 = fit_peaks(h4719, possible_coincidence_peaks,
+            '4719keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((4716, 4722),(0,0.095), (4727, 4777))
+
+
+    h4786 = degai.get_bg_subtracted_projection(coincidence_hist, (4785, 4791), (4727, 4751))
+    f4786 = fit_peaks(h4786, possible_coincidence_peaks,
+            '4786keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((4785, 4791),(0,0.095), (4727, 4751))
+
+    h4852 = degai.get_bg_subtracted_projection(coincidence_hist, (4847, 4855), (4858, 4884))
+    f4852 = fit_peaks(h4852, possible_coincidence_peaks,
+            '4858keV_coincidence', True, False,force_refit=force_refit)
+    
+    h4804 = degai.get_bg_subtracted_projection(coincidence_hist, (4800, 4808), (4816, 4844))
+    f4804 = fit_peaks(h4804, possible_coincidence_peaks,
+            '4804keV_coincidence', True, False,force_refit=force_refit)
+    
+
+    h4892 = degai.get_bg_subtracted_projection(coincidence_hist, (4888, 4896), (4902, 4996))
+    f4892 = fit_peaks(h4892, possible_coincidence_peaks,
+            '4892keV_coincidence', True, False,force_refit=force_refit)
+    
+    h5050 = degai.get_bg_subtracted_projection(coincidence_hist, (5045, 5054), (5060, 5094))
+    f5050 = fit_peaks(h5050, possible_coincidence_peaks,
+            '5050keV_coincidence', True, False,force_refit=force_refit)
     
     h5299=degai.get_bg_subtracted_projection(coincidence_hist,(5294,5303),(5331,5400))
     f5299=fit_peaks(h5299, possible_coincidence_peaks,
