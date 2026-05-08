@@ -135,9 +135,16 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo):
     else:
         h_to_fit = degai.get_bg_subtracted_projection(source, Egate, Egate_bg)
     fit_string = '[0]*exp(-0.693147*x/[1]) + [2]'
-    fit_results.append(fitting_tools.fit_hist(h_to_fit, fit_string, [1,1, 0],
-                        ((0, np.inf), (0, np.inf), (0, np.inf)), tgate,
-                        fit_options='S0QEI', names=['A', 'half life (s)', 'bg']))
+    res = fitting_tools.fit_hist(h_to_fit, fit_string, [1,1, 0],
+                        ((0, 1e9), (0., 3600), (0, h_to_fit.GetMaximum())), tgate,
+                        fit_options='S0QEI', names=['A', 'half life (s)', 'bg'])
+    fit_results.append(res)
+    
+    fit_ptr = res[0]
+    hl = fit_ptr.Parameter(1)
+    lower_err = fit_ptr.LowerError(1)
+    upper_err = fit_ptr.UpperError(1)
+    print(f"Half-life for Egate {Egate}: {hl:.4g} ({lower_err:.4g}/+{upper_err:.4g}) s. Bounds: [{hl + lower_err:.4g}, {hl + upper_err:.4g}] s")
 
 
 all_peaks = []
@@ -196,16 +203,60 @@ if True:
     f2007=fit_peaks(h2007, possible_coincidence_peaks,
             '2007keV_coincidence', True, False,force_refit=force_refit)
     
+    h4179 = degai.get_bg_subtracted_projection(coincidence_hist, (4175, 4180), (4213, 4255))
+    f4179 = fit_peaks(h4179, possible_coincidence_peaks,
+            '4179keV_coincidence', True, False,force_refit=force_refit)
+    fit_decay_curve((4175, 4180), (0.005,0.095), (4213, 4255))
+
+    h4189 = degai.get_bg_subtracted_projection(coincidence_hist, (4187, 4193),(4213, 4255))
+    f4189 = fit_peaks(h4189, possible_coincidence_peaks,
+            '4189keV_coincidence', True, False,force_refit=force_refit)
+    fit_decay_curve((4187, 4193),(0.005,0.095), (4213, 4255))
+
+    h4208 = degai.get_bg_subtracted_projection(coincidence_hist, (4205, 4211), (4213, 4255))
+    f4208 = fit_peaks(h4208, possible_coincidence_peaks,
+            '4208keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((4205, 4211), (0.005,0.095), (4213, 4255))
+
+    h4259 = degai.get_bg_subtracted_projection(coincidence_hist, (4257, 4265), (4213, 4255))
+    f4259 = fit_peaks(h4259, possible_coincidence_peaks,
+            '4259keV_coincidence', True, False,force_refit=force_refit)
+    fit_decay_curve((4257, 4265), (0.005,0.095), (4213, 4255))
+
+
+    h4341 = degai.get_bg_subtracted_projection(coincidence_hist, (4338,4344), (4347, 4376))
+    f4341 = fit_peaks(h4341, possible_coincidence_peaks,
+            '4341keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((4338,4344),(0.005,0.095), (4347, 4376))
+
+    h4293 = degai.get_bg_subtracted_projection(coincidence_hist, (4291, 4296), (4269, 4285))
+    f4293 = fit_peaks(h4293, possible_coincidence_peaks,
+            '4293keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((4291, 4296),(0.005,0.095), (4269, 4285))
+
+
+    h4382 = degai.get_bg_subtracted_projection(coincidence_hist, (4379, 4384), (4387, 4440))
+    f4382 = fit_peaks(h4382, possible_coincidence_peaks,
+            '4382keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((4379, 4384),(0,0.095), (4387, 4440))
+
+    h4538 = degai.get_bg_subtracted_projection(coincidence_hist, (4535,4542), (4544,4727))
+    f4538 = fit_peaks(h4538, possible_coincidence_peaks,
+            '4538keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((4535,4542),(0.005,0.095), (4544,4727))
+
+
     h4719 = degai.get_bg_subtracted_projection(coincidence_hist, (4716, 4722), (4727, 4777))
     f4719 = fit_peaks(h4719, possible_coincidence_peaks,
             '4719keV_coincidence', True, False,force_refit=force_refit)
-    #fit_decay_curve((4716, 4722),(0,0.095), (4727, 4777))
+    #fit_decay_curve((4716, 4722),(0.005,0.095), (4727, 4777))
 
 
     h4786 = degai.get_bg_subtracted_projection(coincidence_hist, (4785, 4791), (4727, 4751))
     f4786 = fit_peaks(h4786, possible_coincidence_peaks,
             '4786keV_coincidence', True, False,force_refit=force_refit)
     #fit_decay_curve((4785, 4791),(0,0.095), (4727, 4751))
+
 
     h4852 = degai.get_bg_subtracted_projection(coincidence_hist, (4847, 4855), (4858, 4884))
     f4852 = fit_peaks(h4852, possible_coincidence_peaks,
