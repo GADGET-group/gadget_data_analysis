@@ -40,13 +40,19 @@ cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
 gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
+adj_ab_hist = degai.get_histogram(runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'ab_hist', 'addback spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+                                  nonlinearity_correction_name=nlc_name)
+ab_to_crystal_comparison = root_vis_tools.draw_overlaid_histograms({'addback':adj_ab_hist, 'sum':gamma_hist}, title='addback to sum comparison',
+                                                                    x_label='energy (keV)', y_label='counts/0.25 keV')
+
 gamma_beam_off_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
                                           "time_since_beam_off<0.094", event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
 gamma_beam_on_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
                                           "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
-beam_on_off_drawing= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist})
+beam_on_off_drawing= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist},
+                                                             x_label='energy (keV)', y_label='counts/0.25 keV')
 
 
 fit_model = 'bg_shift_nemg'#'bg_shift_ngaus'#
@@ -79,7 +85,9 @@ def get_fitter(save_name):
     save_path = os.path.join('e23035_analysis/peak_fitting/',fit_prefix+'_'+save_name)
     return load_spectrum_fitter_from_file(save_path+'.root')
 
-def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, manual_bounds=False,force_refit=False):
+def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, manual_bounds=False, force_refit=False, constrain_mu=None):
+    if constrain_mu is None:
+        constrain_mu = 'coincidence' in save_name
     '''
     manual_bounds: if False, use add peaks function to cluster peaks and set fitting bounds.
     '''
@@ -95,6 +103,21 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift, likelihood, manual_boun
     f.spectrum.GetXaxis().UnZoom()
     bg_const_bounds = (f.spectrum.GetMinimum(), f.spectrum.GetMaximum())
     f.param_bound_functions['bg_const'] = lambda E: bg_const_bounds
+
+    f_all_obj = globals().get('f_all')
+    if constrain_mu and f_all_obj is not None:
+        def get_singles_mu_bound(E):
+            # Use the new method to find the exact mu for this guess
+            fitted_mu, _ = f_all_obj.get_param_for_guess('mu', E)
+            
+            if fitted_mu is not None:
+                # Found a match, constrain it tightly
+                return (fitted_mu, fitted_mu)
+            else:
+                # No exact match found, use a wider window as a fallback.
+                return (E - f.location_wiggle, E + f.location_wiggle)
+        f.param_bound_functions['mu'] = get_singles_mu_bound
+
     if manual_bounds:
         f.peaks_to_fit = peaks
     else:
@@ -170,7 +193,7 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
     if len(current_group) > 0:
         all_peaks.append((current_group, *fit_window))
 
-force_refit=True
+force_refit=False
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if True:
     f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
@@ -180,7 +203,7 @@ if True:
 #                 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
 #             3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806]
     possible_coincidence_peaks = [
-        669, 913, 1004, 1028, 1188, 1202, 1340, 1398, 1413, 1441,
+        669, 913, 1004, 1021, 1028, 1188, 1202, 1340, 1398, 1413, 1441,
         1481, 1554, 1780, 2007, 2047, 2092, 2293, 2333, 2390, 2433,
         2507, 2557, 2623, 2633, 2825, 2882, 2996, 3335, 3393, 3781,
         3847, 3888, 4000, 4179, 4208, 4293, 4538, 4719, 4786, 4804,
@@ -190,10 +213,18 @@ if True:
     h1003 = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1009, 1011))
     f1003=fit_peaks(h1003, possible_coincidence_peaks,
             '1003keV_coincidence', True, False, force_refit=force_refit)
+        
+    h1003_diff_bg = degai.get_bg_subtracted_projection(coincidence_hist, (1002.0, 1005.0), (1056,1068))
+    f1003_diff_bg=fit_peaks(h1003_diff_bg, possible_coincidence_peaks,
+                '1003keV_coincidence_diff_bg', True, False, force_refit=force_refit)
 
     h1028 = degai.get_bg_subtracted_projection(coincidence_hist, (1027, 1029), (1038, 1042))
     f1028=fit_peaks(h1028, possible_coincidence_peaks,
             '1028keV_coincidence', True, False,force_refit=force_refit)
+    
+    h1028_diff_bg = degai.get_bg_subtracted_projection(coincidence_hist, (1027, 1029), (1056,1068))
+    f1028_diff_bg=fit_peaks(h1028_diff_bg, possible_coincidence_peaks,
+            '1028keV_coincidence_diff_bg', True, False,force_refit=force_refit)
 
     h1189 = degai.get_bg_subtracted_projection(coincidence_hist, (1188, 1190),(1194,1198))
     f1189=fit_peaks(h1189, possible_coincidence_peaks,
@@ -209,6 +240,16 @@ if True:
     h2007 = degai.get_bg_subtracted_projection(coincidence_hist, (2006, 2009), (2018, 2038))
     f2007=fit_peaks(h2007, possible_coincidence_peaks,
             '2007keV_coincidence', True, False,force_refit=force_refit)
+
+    h2825 = degai.get_bg_subtracted_projection(coincidence_hist, (2822,2829), (2831,2860))
+    f2825 = fit_peaks(h2825, possible_coincidence_peaks,
+            '2825keV_coincidence', True, False,force_refit=force_refit)
+    #fit_decay_curve((2822,2829),(0.005,0.095), (2831,2860))
+
+    h3337 = degai.get_bg_subtracted_projection(coincidence_hist, (3334, 3339), (3346, 3370))
+    f3337 = fit_peaks(h3337, possible_coincidence_peaks,
+            '3337keV_coincidence', True, False,force_refit=force_refit)
+
 
     h3781 = degai.get_bg_subtracted_projection(coincidence_hist, (3776, 3785), (3788, 3818))
     f3781 = fit_peaks(h3781, possible_coincidence_peaks,
