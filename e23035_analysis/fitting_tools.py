@@ -445,7 +445,24 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     peaks = ROOT.TF1(f'peaks_{comp_id}', peaks_string, e_low, e_high)
     peaks.SetParameters(fit_params[:-2])
     
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = []
+    for i in range(n_peaks):
+        amp_idx = params_per_peak * i
+        mean_idx = params_per_peak * i + 1
+        if free_sigma:
+            sigma_idx = params_per_peak * i + 2
+            sigma_string = f'[{sigma_idx}]'
+        else:
+            if data_source == 'tpc':
+                sigma_string = f'(0.011107*[{mean_idx}] + 0.008813049)'
+            
+        peak_str = f'[{amp_idx}]*exp(-0.5*((x-[{mean_idx}])/{sigma_string})^2)/({sigma_string} *sqrt(2*pi))*{bin_width}'
+        p = ROOT.TF1(f'comp_{i}_{comp_id}', peak_str, e_low, e_high)
+        for j in range(len(fit_params)):
+            p.SetParameter(j, fit_params[j])
+        component_peak_funcs.append(p)
+
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
     from scipy.special import erfcx, erfc
@@ -545,7 +562,8 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     for i in range(1, 5):
         peaks.SetParameter(i, fit_params[i])
         
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = [peaks]
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI'): 
     """
@@ -638,7 +656,8 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     for i in range(1, 4):
         peaks.SetParameter(i, fit_params[i])
         
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = [peaks]
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI', shared_sigma=True): 
     """
@@ -820,7 +839,14 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     for i in range(len(fit_params)):
         peaks.SetParameter(i, fit_params[i])
         
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = []
+    for i, gstr in enumerate(gaus_strings):
+        p = ROOT.TF1(f'gaus_comp_{i}_{comp_id}', gstr, e_low, e_high)
+        for j in range(len(fit_params)):
+            p.SetParameter(j, fit_params[j])
+        component_peak_funcs.append(p)
+        
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None, fit_options = 'LS0QEI'): 
     from scipy.special import erfcx, erfc
@@ -838,7 +864,7 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
     # 1. Call fit_gaussian_w_bg_shift to get initial guesses
     gaus_res = fit_gaussian_w_bg_shift(spectrum, e_guess, fit_window, data_source, param_bounds)
     gaus_params = np.array(gaus_res[0].Parameters())
-    gaus_res[4].Close()
+    gaus_res[5].Close()
 
     bin_width = spectrum.GetBinWidth(1) 
     
@@ -985,7 +1011,35 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         background.SetParameter(i, fit_params[i])
         peaks.SetParameter(i, fit_params[i])
         
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = []
+    for i in range(n_peaks):
+        def make_eval(peak_idx):
+            def eval_func(x, p):
+                val_x = x[0]
+                sigma = p[4]
+                tau = p[6]
+                if peak_idx == 0:
+                    amp = p[2]
+                    mu = p[3]
+                else:
+                    amp = p[5 + 2 * peak_idx]
+                    mu = p[6 + 2 * peak_idx]
+                norm = amp * bin_width / (2.0 * tau)
+                z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
+                if z_arg < -25:
+                    exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
+                    return norm * np.exp(exp_arg) * erfc(z_arg) if exp_arg < 700 else 0.0
+                else:
+                    gaus_arg = (val_x - mu) / sigma
+                    return norm * np.exp(-0.5 * gaus_arg * gaus_arg) * erfcx(z_arg)
+            return eval_func
+        peak_eval_i = make_eval(i)
+        p = ROOT.TF1(f'emg_peak_{i}_{comp_id}', peak_eval_i, e_low, e_high, len(initial_values))
+        p._pyfunc = peak_eval_i
+        for j in range(len(fit_params)):
+            p.SetParameter(j, fit_params[j])
+        component_peak_funcs.append(p)
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_gaussians:int, data_source=None, param_bounds=None, fit_options = 'LS0QEI'): 
     """
@@ -1016,7 +1070,7 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
     else:
         gaus_params = np.array(gaus_res[0].Parameters())
         
-    gaus_res[4].Close() 
+    gaus_res[5].Close() 
 
     # 2. Construct the Mathematical Model
     bg_const_idx = 0
@@ -1151,7 +1205,15 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
     for i in range(len(fit_params)): 
         peaks.SetParameter(i, fit_params[i])
         
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = []
+    for i in range(n_peaks):
+        peak_gaus_strings = all_gaus_strings[i*num_gaussians : (i+1)*num_gaussians]
+        peak_string = " + ".join(peak_gaus_strings)
+        p = ROOT.TF1(f'ngauss_peak_{i}_{comp_id}', peak_string, e_low, e_high)
+        for j in range(len(fit_params)):
+            p.SetParameter(j, fit_params[j])
+        component_peak_funcs.append(p)
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None): 
     """
@@ -1307,7 +1369,14 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
     for i in range(len(fit_params)):
         peaks.SetParameter(i, fit_params[i])
         
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = []
+    for i, vstr in enumerate(voigt_strings):
+        p = ROOT.TF1(f'voigt_comp_{i}_{comp_id}', vstr, e_low, e_high)
+        for j in range(len(fit_params)):
+            p.SetParameter(j, fit_params[j])
+        component_peak_funcs.append(p)
+
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI'): 
     """
@@ -1344,7 +1413,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     else:
         base_params = np.array(gaus_res[0].Parameters())
         
-    gaus_res[4].Close() 
+    gaus_res[5].Close() 
 
     # 2. Construct the Mathematical Indexing
     bg_const_idx = 0
@@ -1576,4 +1645,46 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         background.SetParameter(i, fit_params[i])
         peaks.SetParameter(i, fit_params[i])
         
-    return fit_res, background, peaks, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+    component_peak_funcs = []
+    for i in range(n_peaks):
+        peak_func_cpp = f"""
+        double nemg_peak_{i}_{comp_id}(double *x, double *p) {{
+            double val_x = x[0];
+            double bin_width = {bin_width};
+            std::vector<double> weights({num_emgs});
+            if ({num_emgs} == 1) {{ weights[0] = 1.0; }} else {{
+                for (int j = 0; j < {num_emgs}; ++j) {{
+                    if (j == 0) {{ weights[j] = p[{frac_start_idx}]; }} 
+                    else if (j < {num_emgs} - 1) {{ double w = p[{frac_start_idx} + j]; for (int k = 0; k < j; ++k) w *= (1.0 - p[{frac_start_idx} + k]); weights[j] = w; }} 
+                    else {{ double w = 1.0; for (int k = 0; k < {num_emgs} - 1; ++k) w *= (1.0 - p[{frac_start_idx} + k]); weights[j] = w; }}
+                }}
+            }}
+            double total = 0.0;
+            double amp = p[{peak_params_start_idx} + 2 * {i}];
+            double mu = p[{peak_params_start_idx} + 2 * {i} + 1];
+            for (int j = 0; j < {num_emgs}; ++j) {{
+                double sigma = p[{sigma_start_idx} + j];
+                double tau = p[{tau_start_idx} + j];
+                double weight = weights[j];
+                double norm = amp * weight * bin_width / (2.0 * tau);
+                double z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356;
+                if (z_arg < -25.0) {{
+                    double exp_arg = (sigma*sigma)/(2.0*tau*tau) + (val_x - mu)/tau;
+                    if (exp_arg < 700.0) {{ total += norm * std::exp(exp_arg) * TMath::Erfc(z_arg); }}
+                }} else {{
+                    double gaus_arg = (val_x - mu) / sigma;
+                    double gaus_part = std::exp(-0.5 * gaus_arg * gaus_arg);
+                    double erfcx_part = cxx_erfcx_{comp_id}(z_arg);
+                    total += norm * gaus_part * erfcx_part;
+                }}
+            }}
+            return total;
+        }}
+        """
+        ROOT.gInterpreter.Declare(peak_func_cpp)
+        peak_eval_func_i = getattr(ROOT, f"nemg_peak_{i}_{comp_id}")
+        p = ROOT.TF1(f'nemg_peak_{i}_{comp_id}', peak_eval_func_i, e_low, e_high, len(initial_values))
+        p._pyfunc = peak_eval_func_i
+        for j in range(len(fit_params)): p.SetParameter(j, fit_params[j])
+        component_peak_funcs.append(p)
+    return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit

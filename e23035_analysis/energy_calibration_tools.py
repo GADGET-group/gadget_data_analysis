@@ -182,15 +182,15 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
         # --- NEW: Route to the correct fitting engine ---
         if peak_model.lower() == 'gaus':
-            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_peak(
+            fit_res, background, peak_func, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_peak(
                 hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
             )
         elif peak_model.lower() == 'emg':
-            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
+            fit_res, background, peak_func, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_emg_peak(
                 hist_for_this_peak, data_source, location_guess, fit_range, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)}
             )
         elif peak_model.lower() == 'bg_shift_gaus':
-            fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_w_bg_shift(
+            fit_res, background, peak_func, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fitting_tools.fit_gaussian_w_bg_shift(
                 hist_for_this_peak, location_guess, fit_range,data_source, param_bounds={'mu': (location_guess - location_wiggle, location_guess + location_wiggle)})
         else:
             raise ValueError(f'unknown peak model {peak_model}')
@@ -1160,7 +1160,7 @@ def create_nonlinearity_correction(runs:int|list, calibration_name:str, correcti
             ROOT.gROOT.SetBatch(original_batch_state)
             raise ValueError(f"Unknown peak model: {peak_model}")
 
-        fit_res, _, _, _, canvas, _, f_to_fit, _ = res_tuple
+        fit_res, _, _, _, _, canvas, _, f_to_fit, _ = res_tuple
 
         if fit_res.IsValid():
             mu_val = fit_res.Parameter(2)

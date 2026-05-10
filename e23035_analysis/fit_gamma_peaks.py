@@ -193,7 +193,7 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
     if len(current_group) > 0:
         all_peaks.append((current_group, *fit_window))
 
-force_refit=False
+force_refit=True
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if True:
     f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)

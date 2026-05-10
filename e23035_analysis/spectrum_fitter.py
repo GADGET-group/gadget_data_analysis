@@ -192,6 +192,10 @@ class spectrum_fitter:
             if res.get('fit_res') and res['fit_res'].Get():
                 res['fit_res'].Get().Write(f"peak_{i}_fit_res")
                 
+            if res.get('component_peak_funcs'):
+                for j, comp_func in enumerate(res['component_peak_funcs']):
+                    comp_func.Write(f"peak_{i}_component_{j}")
+
             if res.get('background_func'): res['background_func'].Write(f"peak_{i}_background_func")
             if res.get('peak_func'): res['peak_func'].Write(f"peak_{i}_peak_func")
             if res.get('ratio_plot'): res['ratio_plot'].Write(f"peak_{i}_ratio_plot")
@@ -450,16 +454,17 @@ class spectrum_fitter:
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")
 
-            # fitting_tools returns (fit_res, background, peak_func, rp, canvas, spectrum_to_plot, f_to_fit, h_fit)
+            # fitting_tools returns (fit_res, background, peak_func, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit)
             res_dict = {
                 'fit_res': res[0],
                 'background_func': res[1],
                 'peak_func': res[2],
-                'ratio_plot': res[3],
-                'canvas': res[4],
-                'spectrum_to_plot': res[5],
-                'f_to_fit': res[6],
-                'h_fit': res[7]
+                'component_peak_funcs': res[3],
+                'ratio_plot': res[4],
+                'canvas': res[5],
+                'spectrum_to_plot': res[6],
+                'f_to_fit': res[7],
+                'h_fit': res[8]
             }
             self.fit_results.append(res_dict)
             
@@ -534,7 +539,7 @@ class spectrum_fitter:
             to_return.append(res['fit_res'].Prob())
         return to_return
 
-    def show_fit_results(self, peak_index, show_fit_params=True):
+    def show_fit_results(self, peak_index, show_fit_params=True, show_components=False):
         if 0 <= peak_index < len(self.fit_results):
             orig_canvas = self.fit_results[peak_index]['canvas']
             
@@ -550,11 +555,38 @@ class spectrum_fitter:
             # 2. Find the upper pad of the cloned TRatioPlot
             # TRatioPlot creates custom TPads. The upper pad is the first TPad primitive.
             new_canvas.cd()
+            upper_pad = None
             for prim in new_canvas.GetListOfPrimitives():
                 if prim.InheritsFrom("TPad"):
                     prim.cd()
+                    upper_pad = prim
                     break
+            
+            if upper_pad:
+                upper_pad.cd()
+                if show_components:
+                    bg_func = self.fit_results[peak_index].get('background_func')
+                    if bg_func:
+                        bg_func.SetLineColor(ROOT.kGray+2)
+                        bg_func.SetLineStyle(2)
+                        bg_func.Draw("SAME")
+                        
+                    component_funcs = self.fit_results[peak_index].get('component_peak_funcs')
+                    if component_funcs:
+                        for i, func in enumerate(component_funcs):
+                            func.SetLineStyle(3)
+                            func.SetLineColor(ROOT.kBlue + (i % 4))
+                            func.Draw("SAME")
+                    else:
+                        peak_func = self.fit_results[peak_index].get('peak_func')
+                        if peak_func:
+                            peak_func.SetLineColor(ROOT.kBlue)
+                            peak_func.SetLineStyle(3)
+                            peak_func.Draw("SAME")
+
             if show_fit_params:
+                if upper_pad:
+                    upper_pad.cd()
                 # 3. Create a custom stats box
                 # Coordinates are Normalized Device Coordinates (NDC)
                 stats_box = ROOT.TPaveText(0.65, 0.45, 0.88, 0.88, "NDC")
@@ -637,6 +669,16 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
             res_dict['fit_res'] = ROOT.TFitResultPtr(fit_res_obj)
         else:
             res_dict['fit_res'] = ROOT.TFitResultPtr() # Empty pointer fallback
+
+        res_dict['component_peak_funcs'] = []
+        j = 0
+        while True:
+            comp_func = f.Get(f"peak_{i}_component_{j}")
+            if comp_func:
+                res_dict['component_peak_funcs'].append(comp_func)
+                j += 1
+            else:
+                break
 
         # Load GUI / Function Objects
         res_dict['background_func'] = f.Get(f"peak_{i}_background_func")
