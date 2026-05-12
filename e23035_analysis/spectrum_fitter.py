@@ -543,6 +543,25 @@ class spectrum_fitter:
         if 0 <= peak_index < len(self.fit_results):
             orig_canvas = self.fit_results[peak_index]['canvas']
             
+            # Ensure data is black and fit is red for previously saved fits
+            spec = self.fit_results[peak_index].get('spectrum_to_plot')
+            if spec:
+                spec.SetLineColor(ROOT.kBlack)
+                spec.SetMarkerColor(ROOT.kBlack)
+            h_fit = self.fit_results[peak_index].get('h_fit')
+            if h_fit:
+                h_fit.SetLineColor(ROOT.kRed)
+            f_to_fit = self.fit_results[peak_index].get('f_to_fit')
+            if f_to_fit:
+                f_to_fit.SetLineColor(ROOT.kRed)
+            rp = self.fit_results[peak_index].get('ratio_plot')
+            if rp and hasattr(rp, "GetLowerRefGraph") and rp.GetLowerRefGraph():
+                rp.GetLowerRefGraph().SetLineColor(ROOT.kBlack)
+                rp.GetLowerRefGraph().SetMarkerColor(ROOT.kBlack)
+                
+            orig_canvas.Modified()
+            orig_canvas.Update()
+
             # 1. Create new canvas and clone the visual state
             new_canvas = ROOT.TCanvas(f"c_show_{peak_index}_{id(self)}", orig_canvas.GetTitle(), 800, 600)
             orig_canvas.DrawClonePad()
@@ -567,7 +586,7 @@ class spectrum_fitter:
                 if show_components:
                     bg_func = self.fit_results[peak_index].get('background_func')
                     if bg_func:
-                        bg_func.SetLineColor(ROOT.kGray+2)
+                        bg_func.SetLineColor(ROOT.kRed)
                         bg_func.SetLineStyle(2)
                         bg_func.Draw("SAME")
                         
@@ -575,12 +594,12 @@ class spectrum_fitter:
                     if component_funcs:
                         for i, func in enumerate(component_funcs):
                             func.SetLineStyle(3)
-                            func.SetLineColor(ROOT.kBlue + (i % 4))
+                            func.SetLineColor(ROOT.kRed)
                             func.Draw("SAME")
                     else:
                         peak_func = self.fit_results[peak_index].get('peak_func')
                         if peak_func:
-                            peak_func.SetLineColor(ROOT.kBlue)
+                            peak_func.SetLineColor(ROOT.kRed)
                             peak_func.SetLineStyle(3)
                             peak_func.Draw("SAME")
 

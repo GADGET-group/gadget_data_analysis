@@ -6,17 +6,17 @@ import numpy as np
 from raw_viewer import ddas_interface, process_runs
 from e23035_analysis import e23035_runs, fitting_tools, degai, root_vis_tools
 
-run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-runs = []
-for run in run_candidates:
-    if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
-        if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
-            runs.append(run)
-runs = e23035_runs.get_ddas_60_Ga_runs()
-print(runs)
+# run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
+# runs = []
+# for run in run_candidates:
+#     if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
+#         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
+#             runs.append(run)
+# runs = e23035_runs.get_ddas_60_Ga_runs()
+# print(runs)
 
-
-n_workers = min(len(runs), 150) #cap at 150 so as not to murder the TPCGPU
+runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_long_tracks_tpc=False, good_low_energy_tpc=False, final_beam_settings=True)
+n_workers = min(len(runs), 255) #cap at 150 so as not to murder the TPCGPU
 
 
 
@@ -101,4 +101,4 @@ h491 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted,(488, 4
 h914 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (911, 917), (918,927))
 h1398 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (1395, 1401), (1420,1430))
 h511 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (508, 513), (518,529))
-root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h914,'1398 keV':h1398, '511 keV':h511})
+overlay3 = root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h914,'1398 keV':h1398, '511 keV':h511})

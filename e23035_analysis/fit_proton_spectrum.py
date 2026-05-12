@@ -16,6 +16,8 @@ Ga60_cycle_efficiency =  0.37410064021102757
 
 ddas_runs_protons_all_energies = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec = ddas_interface.get_histogram(ddas_runs_protons_all_energies, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
+ddas_runs_low_energy_protons = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
+pspec_low_enegy = ddas_interface.get_histogram(ddas_runs_low_energy_protons, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
 ddas_runs_alphas = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
 aspec = ddas_interface.get_histogram(ddas_runs_alphas, (700, 2000, 9000), 'alpha spectrum', 'alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=256)
 
@@ -52,12 +54,18 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift=False, likelihood=True, 
     return f
 
 force_refit=True
-f_all_proton = fit_peaks(pspec, 
-                         [([725, 814, 913, 950, 1060],500,1000),
+ROOT.Math.MinimizerOptions.SetDefaultErrorDef(1)
+proton_peak_guesses = [([725, 814, 913, 950, 1060],500,1000),
                              ([1060, 1109,1160, 1212, 1260],1000,1288),
                              #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
-                             ],
+                             ]
+f_all_proton = fit_peaks(pspec, 
+                         proton_peak_guesses,
                          'all_proton_energies', force_refit=force_refit
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
+f_proton_low_enegy = fit_peaks(pspec_low_enegy, 
+                         proton_peak_guesses,
+                         'low_energy_proton_energies', force_refit=force_refit
                         ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
                         
 
@@ -65,6 +73,30 @@ f_alpha = fit_peaks(aspec, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 440
                     'alpha', force_refit=force_refit,
                     additional_param_bounds={'bg_slope':lambda E: (0,0)})#3356
 
+f_alpha2 = fit_peaks(aspec, [([3529, 3662,3810,3890,4000, 4125], 2800, 4400)],
+                    '_a', force_refit=force_refit,
+                    additional_param_bounds={'bg_slope':lambda E: (0,0)})#3356
+
+f_proton2 = fit_peaks(pspec, 
+                         [([1060, 1109,1160, 1212],1000,1288),
+                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
+                             ],
+                         '_p', force_refit=force_refit
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
+#do 3 sigma
+ROOT.Math.MinimizerOptions.SetDefaultErrorDef(9)
+f_all_proton_3sigma = fit_peaks(pspec, 
+                         [([725, 814, 913, 950, 1060],500,1000),
+                             ([1060, 1109,1160, 1212, 1260],1000,1288),
+                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
+                             ],
+                         'all_proton_energies_3_sigma', force_refit=force_refit
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
+
+f_alpha_3sigma  = fit_peaks(aspec, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
+                    'alpha_3sigma', force_refit=force_refit,
+                    additional_param_bounds={'bg_slope':lambda E: (0,0)})
+ROOT.Math.MinimizerOptions.SetDefaultErrorDef(1)
 # Ensure batch mode is off so any interactive plots will display
 ROOT.gROOT.SetBatch(False)
 
