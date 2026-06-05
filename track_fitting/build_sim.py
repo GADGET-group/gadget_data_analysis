@@ -26,7 +26,7 @@ read_data_mode = 'unchanged'
 calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
                         {124:((90625 , 192102 ),(0.7856, 1.633)),
                          212:((158082,330108),(0.7856, 1.633))},
-                      'e25058' :{71:((0, 1), (0, 5.429682253391736e-06))}#TODO: update this to have better energy calibration, or better yet use gain matched data
+                      'e25058' :{71:((0, 1),(0, 5.429682253391736e-06))}#TODO: update this to have better energy calibration, or better yet use gain matched data
                      }
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
@@ -143,7 +143,7 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         sim.zscale = get_zscale(experiment, run)
         pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0, 100#7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
         sim.pad_threshold = 54.8#TODO: also need to figure this one out
         sim.counts_per_MeV =get_adc_counts_per_MeV(experiment, run)
 
@@ -212,7 +212,7 @@ def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
     trace_sim.sims[1].phi = phi_a
     trace_sim = ProtonAlphaEvent(*trace_sim.sims)
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
-    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
+    trace_sim.set_real_data(pads, traces, trim_threshold=20, trim_pad=10, pads_to_sim_select=read_data_mode)
     trace_sim.pad_gain_match_uncertainty, trace_sim.other_systematics = trace_sim.proton.pad_gain_match_uncertainty, trace_sim.proton.other_systematics
     trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
     #trace_sim.pad_gain_match_uncertainty = m
@@ -250,7 +250,7 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='1H', mcmc_nam
     trace_sim.products[0].phi = phi
     #trace_sim.other_systematics = c
     pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
-    trace_sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
+    trace_sim.set_real_data(pads, traces, trim_threshold=20, trim_pad=10, pads_to_sim_select=read_data_mode)#TODO: make trim threshold match for all experiments
     #trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
     #trace_sim.pad_gain_match_uncertainty = m
     #trace_sim.other_systematics = c
