@@ -25,7 +25,8 @@ read_data_mode = 'unchanged'
 #contents of the dictionairy should be a tuple of adc counts, followed by energies in MeV, followed by width of the peaks in adc counts
 calibration_points = {'e21072': #calibration points are for proton + recoiling 19Ne. Energies only include that which is deposited as ionization
                         {124:((90625 , 192102 ),(0.7856, 1.633)),
-                         212:((158082,330108),(0.7856, 1.633))}
+                         212:((158082,330108),(0.7856, 1.633))},
+                      'e25058' :{71:((0, 1), (0, 5.429682253391736e-06))}#TODO: update this to have better energy calibration, or better yet use gain matched data
                      }
 
 def get_adc_counts_per_MeV(experiment:str, run:int)->float:
@@ -43,18 +44,18 @@ def get_detector_E_sigma(experiment:str, run:int, MeV):
             return (5631/86431)*0.779*(MeV/0.779)**0.5
 
 def get_stopping_material(experiment:str, run:int):
-    if experiment == 'e21072':
-        return 'P10'
+    return 'P10'
+    
 
 def get_gas_density(experiment:str, run:int)->float:
-    if experiment == 'e21072':
+    if experiment == 'e21072' or experiment == 'e25058':
         rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
         T = 20+273.15 #K
         P = 860.3 #torr
         return rho0*(P/760)*(300./T)
     
 def get_zscale(experiment:str, run:int):
-    if experiment == 'e21072':
+    if experiment == 'e21072' or experiment == 'e25058':
         clock_freq = 50e6 #Hz, from e21062 config file on mac minis
         drift_speed = 54.4*1e6 #mm/s, from ruchi's paper
     return drift_speed/clock_freq
@@ -64,6 +65,8 @@ def get_raw_h5_path(experiment:str, run:int):
     if experiment == 'e21072':
         if socket.gethostname() == 'tpcgpu':
             return "/egr/research-tpc/shared/Run_Data/" + ('run_%04d.h5'%run)
+    elif experiment == 'e25058':
+        return '/egr/research-tpc/shared/experiments/e25058/h5/run_%04d.h5'%run
 
 def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
     '''
@@ -85,7 +88,15 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.num_background_bins=(160, 250) #not used for "smart" background subtraction
         h5file.zscale = get_zscale(experiment, run)
         return h5file
-    assert False
+    elif experiment == 'e25058':
+        h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run), zscale=get_zscale(experiment, run), flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        h5file.length_counts_threshold = 100
+        h5file.ic_counts_threshold = 100
+        h5file.background_subtract_mode = 'smart'
+        h5file.smart_bins_away_to_check = 25
+        h5file.num_smart_background_ave_bins = 10
+        h5file.cache_enable = False
+        return h5file
     
 def apply_config_to_object(config_file, object):
     pass #TODO
@@ -128,6 +139,15 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
             if pad != 1:
                 sim.timing_offsets[pad] -= sim.timing_offsets[1] #give pad 1 an offset of 0
         sim.timing_offsets[1] = 0
+    if experiment == 'e25058':
+        sim.zscale = get_zscale(experiment, run)
+        pads, traces = get_pads_and_traces(experiment, run, event)
+        sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
+        sim.pad_threshold = 54.8#TODO: also need to figure this one out
+        sim.counts_per_MeV =get_adc_counts_per_MeV(experiment, run)
+
+        #TODO: might need timing offsets! Don't forget!
 
 
 def create_single_particle_sim(experiment:str, run:int, event:int, particle_type:str, load_data=True)->SingleParticleEvent:
