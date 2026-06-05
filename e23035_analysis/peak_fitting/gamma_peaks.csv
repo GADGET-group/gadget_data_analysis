@@ -1,6 +1,6 @@
 fit_window,peak energy,from decay of,notes,gate,bg_gate,coincidence_hist,coincidences,,,,
 180-190,185,?,,,,,,,,considered:,"60Cu, 59Cu, 60Zn, 60Ga, 58Cu, common backgrounds"
-195-206,198,71mGe,"20.22 ms isomer, half life is correct",,,,,,,,
+195-206,198,71mGe,"20.22 ms isomer, half life is correct. No coincidences with other gammas, but this makes sense because of lifetime.",,,,,,,,
 ,203,,excess visible in 198 keV fit,,,,,,,,
 230-250,238.5,212Pb?,,,,,,,,,
 ,241,?,shoulder on 238 peak,,,,,,,,
@@ -56,7 +56,7 @@ fit_window,peak energy,from decay of,notes,gate,bg_gate,coincidence_hist,coincid
 ,836,228Ac? or 59Cu,"59Cu 1973Va03+1977Se02, seems pretty time independent",,,,,,,,
 ,839,60Cu,"1972Va19, shoulder on 836 keV peak",,,,,,,,
 842-872,844,?,,,,,,,,,
-,846,56*Fe?,Only present when implanting,,,"h847 = degai.get_bg_subtracted_projection(coincidence_hist, 847, 1.5, 853,1)","834,846, 1238, 1810?",,,,
+,846,56*Fe?,Only present when implanting,,," h848 = degai.get_bg_subtracted_projection(ab_coincidence_hist, (845,849), (841,844))","846, 1238, 1810?",,,,
 ,850,?,"peak seen in 2021Or, but I don't see it in sum spectrum. Should be weak peak here from 59Cu as well",,,,,,,,
 ,854,58Cu,1972Jo01,,,,,,,,
 ,860,208Tl?,,,,,,,,,
@@ -305,4 +305,4 @@ fit_window,peak energy,from decay of,notes,gate,bg_gate,coincidence_hist,coincid
 5766-5850,5809,60Ga?,"OShea2025 has 5837±12 keV gamma originating from 6842 state, which would show up in coincidence w/ 1003 if that's what this is. 39-64.6 ms half life fit w/ fit_decay_curve((5803,5812),(0,0.095),(5820, 5925)). Maybe goes with ~720 keV proton peak.
 
 ",5805-5813,5830-5850,"h5809 = degai.get_bg_subtracted_projection(coincidence_hist, 5809, 4, 5840, 10)",511,,,,
-6041-6215,6132,?,not present when beam off?,,,,,,,,
+6041-6215,6132,16O*?,not present when beam off?,,,,,,,,

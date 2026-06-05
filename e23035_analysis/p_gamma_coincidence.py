@@ -66,6 +66,9 @@ protons_gated_on_491 = degai.get_histogram(runs,  adj_dict, cal_name, (3000, 0, 
 protons_gated_on_914 = degai.get_histogram(runs,  adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_914', 'proton energy (keV) gated on 914 keV gamma rays',
                                             'tpc_energy', 'tpc_particle_id==1 && (addback_energy>912) && (addback_energy<917)&&'+time_gate_str, event_build_window, addback_ethresh, True,
                                             nonlinearity_correction_name=nlc_name)
+protons_gated_on_511 = degai.get_histogram(runs, adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_511', 'proton energy (keV) gated on 511 keV gamma rays',
+                                            'tpc_energy', 'tpc_particle_id==1 && (addback_energy>509) && (addback_energy<513)&&'+time_gate_str, event_build_window, addback_ethresh, True,
+                                            nonlinearity_correction_name=nlc_name)
 
 
 canvas, legend, stack = root_vis_tools.draw_overlaid_histograms({'protons':protons, 'proton gated on gammas':protons_gated_on_gammas, 
@@ -73,8 +76,11 @@ canvas, legend, stack = root_vis_tools.draw_overlaid_histograms({'protons':proto
 
 protons_gated_on_491.Rebin(10)
 protons_gated_on_914.Rebin(10)
+protons_gated_on_511.Rebin(10)
 canvas2, legend2, stack2 = root_vis_tools.draw_overlaid_histograms({'proton gated on 491 keV gammas':protons_gated_on_491, 'proton gated on 914 keV gammas':protons_gated_on_914})
-
+canvas3, legend3, stack3 = root_vis_tools.draw_overlaid_histograms({'proton gated on 491 keV gammas':protons_gated_on_491, 
+                                                                    'proton gated on 914 keV gammas':protons_gated_on_914, 
+                                                                     'proton gated on 511 keV gammas':protons_gated_on_511})
 particle_gamma_dt = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.1), "particle_gamma_dt", "mesh_time - gamma time (s)", 
                                              "mesh_pre_amp_t - time", "tpc_particle_id==1 || tpc_particle_id==2", event_build_window, addback_ethresh, True,
                                              nonlinearity_correction_name=nlc_name)
@@ -102,3 +108,7 @@ h914 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (911, 
 h1398 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (1395, 1401), (1420,1430))
 h511 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (508, 513), (518,529))
 overlay3 = root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h914,'1398 keV':h1398, '511 keV':h511})
+
+pscaled = protons.Clone('pscaled')
+pscaled.Scale(0.01)
+overlay4 = root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h914,'1398 keV':h1398, 'all protons (scaled)':pscaled})

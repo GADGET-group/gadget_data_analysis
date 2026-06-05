@@ -53,7 +53,7 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift=False, likelihood=True, 
     f.save(get_save_path(save_name))
     return f
 
-force_refit=True
+force_refit=False
 ROOT.Math.MinimizerOptions.SetDefaultErrorDef(1)
 proton_peak_guesses = [([725, 814, 913, 950, 1060],500,1000),
                              ([1060, 1109,1160, 1212, 1260],1000,1288),

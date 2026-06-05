@@ -54,6 +54,15 @@ gamma_beam_on_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning
 beam_on_off_drawing= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist},
                                                              x_label='energy (keV)', y_label='counts/0.25 keV')
 
+gamma_beam_off_hist_ab = degai.get_histogram(runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_off_gammas_ab', 'beam off gamma spectrum_ab', 'addback_energy', 
+                                          "time_since_beam_off<0.094", event_build_window, addback_ethresh, True,
+                                        nonlinearity_correction_name=nlc_name)
+gamma_beam_on_hist_ab = degai.get_histogram(runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_on_gammas_ab', 'beam on gamma spectrum_ab', 'addback_energy', 
+                                          "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
+                                        nonlinearity_correction_name=nlc_name)
+beam_on_off_drawing_ab= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist_ab, 'beam on':gamma_beam_on_hist_ab, 'all':gamma_hist},
+                                                             x_label='addback energy (keV)', y_label='counts/0.25 keV')
+
 
 fit_model = 'bg_shift_nemg'#'bg_shift_ngaus'#
 sigma1_func = lambda E: 0.02078*np.sqrt(E + 742.9)

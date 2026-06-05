@@ -125,7 +125,10 @@ if __name__ == "__main__":
         4892: '',
         5183: '',
         5723: '',
-        5809: ''
+        5809: '',
+        5050:'',
+        5266:'',
+        5299:'', 5450:'', 5560:''
     }
 
     # Define gamma transitions
@@ -152,6 +155,11 @@ if __name__ == "__main__":
         {'Ei':4852, 'Ef':0 },
         {'Ei':5809, 'Ef':1004 },
         {'Ei':5809, 'Ef': 0},
+        {'Ei':5050, 'Ef':0}, 
+        {'Ei':5299, 'Ef':0}, 
+        {'Ei':5266, 'Ef':0}, 
+        {'Ei':5450, 'Ef':0}, 
+        {'Ei':5560, 'Ef':0}
     ]
 
     draw_level_scheme(my_levels, my_transitions, title="$^{60}$Zn Level Scheme")
