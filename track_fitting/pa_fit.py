@@ -11,8 +11,6 @@ import multiprocessing
 
 from track_fitting import build_sim
 
-particle_type = 'proton'
-
 class GaussianVar:
     def __init__(self, mu, sigma):
         self.mu, self.sigma  = mu, sigma
@@ -23,7 +21,7 @@ class GaussianVar:
 def get_sims_and_param_bounds(experiment, run_number, events, flip_angle=False):
     sims, bounds, epriors, guesses = [],[], [], []
     for event_num in events:
-        new_sim = build_sim.create_pa_sim(experiment, run_number, event_num)
+        new_sim = build_sim.create_multi_particle_decay(experiment, run_number, run_number,['1H', '4He'],[1,4],'16O',16)
         E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
         xmin, xmax, ymin, ymax, biggest_peak = np.inf, -np.inf, np.inf, -np.inf, -np.inf
         brightest_pad = None
@@ -52,8 +50,8 @@ def get_sims_and_param_bounds(experiment, run_number, events, flip_angle=False):
                        (xmin - new_sim.pad_width, xmax+new_sim.pad_width), 
                        (ymin - new_sim.pad_width, ymax+new_sim.pad_width),
                        (zmin, zmax),
-                       (0, np.pi), (0, 2*np.pi), (0, np.pi), (0, 2*np.pi),
-                       (2.2, 20), (2.2, 20), (0.1,100)))
+                       (-np.inf, np.inf), (-np.inf, np.inf), (-np.inf, np.inf), (-np.inf, np.inf)
+                       (1, 20), (1, 20), (0.1,100)))
         epriors.append(GaussianVar(E_from_ic, Esigma))
         
         #guess decay location is at peak with largest
@@ -67,7 +65,7 @@ def get_sims_and_param_bounds(experiment, run_number, events, flip_angle=False):
 
 
 def apply_params(sim, params):
-    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z, c = params
+    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z = params
     sim.sims[0].initial_energy = E*(1-Ea_frac)
     sim.sims[1].initial_energy = E*Ea_frac
     sim.sims[0].initial_point = sim.sims[1].initial_point = (x,y,z)
@@ -75,19 +73,23 @@ def apply_params(sim, params):
     sim.sims[1].theta, sim.sims[1].phi= theta_a, phi_a
     sim.sims[0].sigma_xy = sim.sims[1].sigma_xy =sigma_xy
     sim.sims[0].sigma_z = sim.sims[1].sigma_z = sigma_z
-    sim.other_systematics = c
     sim.simulate_event()
 
 def fit_event(sim, guess, bounds, Eprior, fit_results_dict=None, results_key=None, workers=1):
     #tries to maximize posterior of each of the sims passed in subject to the given parameter bounds
     def to_minimize(params):
         apply_params(sim, params)
-        return -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
+        to_return = -(sim.log_likelihood() + Eprior.log_likelihood(params[0]))
+        #print(params, to_return)
+        return to_return
+
     #res =  opt.shgo(to_minimize, bounds, sampling_method='halton', options={'ftol':0.1}, workers=workers)
     #res =  opt.shgo(to_minimize, bounds, options={'ftol':0.1}, workers=workers)
     #res =  opt.direct(to_minimize, bounds)
     #res =  opt.differential_evolution(to_minimize, bounds)
-    res = opt.minimize(to_minimize, guess, bounds=bounds)
+    def callback(intermediate_result):
+        print(intermediate_result)
+    res = opt.minimize(to_minimize, guess, bounds=bounds, callback=callback)
     if fit_results_dict != None:
         fit_results_dict[results_key]=res
         print(results_key, res)
@@ -118,6 +120,7 @@ def fit_events(experiment, run_num, events, timeout=3600):
             p.terminate()
             p.join()
     fit_results_dict = {k:fit_results_dict[k] for k in fit_results_dict}
+    print('fitting ended after', time.time()-start, ' seconds')
     return fit_results_dict
 
 def get_cnn_events(run_num):
@@ -139,11 +142,12 @@ def get_cnn_events(run_num):
 #from track_fitting.pa_fit import *
 
 #res_dict = fit_events(124, [87480,19699,51777,68192,68087, 21640, 96369, 21662, 26303, 50543])
-run_num = 124
-if False:
+run_num = 71
+experiment = 'e25058'
+if True:
     #events_to_fit = get_cnn_events(run_num)
-    events_to_fit = [87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067, 74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220]
-    res_dict = fit_events('e21072', run_num, events_to_fit, timeout=12*3600)
+    events_to_fit = [4007,]#9174
+    res_dict = fit_events(experiment, run_num, events_to_fit, timeout=60*3600)
     with open('run_%d_hand_picked_events_local_minimizer.dat'%run_num,'wb') as f:
         pickle.dump(res_dict, f)
 else:
@@ -169,7 +173,7 @@ plt.colorbar()
 plt.show()
 
 def show_fit(event_num):
-    sim, bounds, eprior = get_sims_and_param_bounds('e21072', run_num, [event_num])
+    sim, bounds, eprior = get_sims_and_param_bounds(experiment, run_num, [event_num])
     sim = sim[0]
     params = res_dict[event_num].x
     apply_params(sim, params)

@@ -42,6 +42,8 @@ def get_detector_E_sigma(experiment:str, run:int, MeV):
         #assume energy calibraiton goes as sqrt energy, and use 770 keV protons
         if run == 124:
             return (5631/86431)*0.779*(MeV/0.779)**0.5
+    if experiment == 'e25058': #TODO: check if this is event close to correct for 25058. It came from e23035
+        return (0.011107*MeV + 0.008813049)
 
 def get_stopping_material(experiment:str, run:int):
     return 'P10'
@@ -96,6 +98,7 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = False
+        h5file.ic_counts_threshold=0
         return h5file
     
 def apply_config_to_object(config_file, object):
@@ -143,7 +146,7 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         sim.zscale = get_zscale(experiment, run)
         pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0, 100#7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.04, 100#7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
         sim.pad_threshold = 54.8#TODO: also need to figure this one out
         sim.counts_per_MeV =get_adc_counts_per_MeV(experiment, run)
 

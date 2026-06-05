@@ -20,10 +20,8 @@ if __name__ == '__main__':
     particle_type = 'proton'
     run_number = int(run_number)
     event_num = int(event_num)
-    #folder = '/mnt/analysis/e21072/gastest_h5_files/'
-    folder = '../../shared/Run_Data/'
 
-    experiment = 'e21072'
+    experiment = 'e25058'
 
     #MCMC priors
     class GaussianVar:
@@ -36,8 +34,8 @@ if __name__ == '__main__':
     E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
     E_from_ic_simga = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
     E_prior = GaussianVar(E_from_ic, E_from_ic_simga)
-    rho0 = build_sim.get_gas_density('e21072', run_number)
-    density_scale_prior = GaussianVar(1, 0.5)#TODO: decid on density range
+    rho0 = build_sim.get_gas_density(experiment, run_number)
+    density_scale_prior = GaussianVar(1, 0.05)#TODO: decid on density range
 
     h5file = build_sim.get_rawh5_object(experiment, run_number)
     #set zmax to length of trimmed traces
@@ -95,9 +93,9 @@ if __name__ == '__main__':
             return -np.inf
         if theta_a < 0 or theta_a >= np.pi or phi_a < 0 or phi_a>2*np.pi:
             return -np.inf 
-        if sigma_p_xy < 0 or sigma_p_xy >10:
+        if sigma_p_xy < 0 or sigma_p_xy >30:
             return -np.inf
-        if sigma_p_z < 0 or sigma_p_z > 10:
+        if sigma_p_z < 0 or sigma_p_z > 30:
             return -np.inf
         #gaussian prior for energy, and assume uniform over solid angle
         return E_prior.log_likelihood(E)  + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p))) + density_scale_prior.log_likelihood(rho_scale)
@@ -177,7 +175,7 @@ if __name__ == '__main__':
 
 
     # We'll track how the average autocorrelation time estimate changes
-    directory = 'run%d_palpha_mcmc/event%d'%(run_number, event_num)
+    directory = '%s_mcmc/run%d_palpha_mcmc/event%d'%(experiment, run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
 
