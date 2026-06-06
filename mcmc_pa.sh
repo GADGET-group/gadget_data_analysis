@@ -1,7 +1,20 @@
-#for i in  87480 19699 51777 68192 68087 10356 21640 96369 21662 26303 50543 27067 74443 25304 38909 104723 43833 52010 95644 98220
-#for i in  13 30 67 83 98 101 115 116 121
-for i in   19699 51777 68192 10356 21640 21662 26303 50543 27067 25304 104723 43833 52010 #only those in cut region
+# suspected pa events
+printf "%s\n" 4007 7074 9174 11379 15302 21224 22222 28950 33414 | xargs -P 2 -I {} python pa_mcmc.py 71 {}
+
+for i in 4434 5866 #4.33 MeV alphas
 do
-    python pa_mcmc.py 124 $i &
+    python pa_mcmc.py 71 $i &
+done
+wait
+
+for i in 314  993 1723  #1.3 MeV protons
+do
+    python pa_mcmc.py 71 $i &
+done
+wait
+
+for i in 166 563   #2 MeV alphas
+do
+    python pa_mcmc.py 71 $i &
 done
 wait
