@@ -213,23 +213,49 @@ if __name__ == '__main__':
 
         # --- NEW CALLBACK FUNCTION ---
         iteration_counter = [0]
-        def print_callback(xk):
+        # --- NEW CALLBACK FUNCTION WITH StopIteration ---
+        iteration_counter = [0]
+        last_lp = [-np.inf]  # Store previous log-posterior
+
+        # Using the modern signature from your screenshot
+        def print_callback(intermediate_result):
             iteration_counter[0] += 1
-            current_lp = log_posterior(xk, direction)
+            
+            # Grab the pre-calculated function value and parameters!
+            # (Remember nll returns -log_posterior, so we negate it back)
+            current_lp = -intermediate_result.fun 
+            xk = intermediate_result.x
+            
+            # Calculate how much the NLL changed since the last step
+            delta_lp = current_lp - last_lp[0]
+            last_lp[0] = current_lp
+            
             params_str = np.array2string(xk, precision=3, suppress_small=True, max_line_width=120)
-            print(f"  Step {iteration_counter[0]:02d} | Log-Posterior: {current_lp:+.4e} | Params: {params_str}")
-        # -----------------------------
+            print(f"  Step {iteration_counter[0]:02d} | Log-Posterior: {current_lp:+.5e} | Delta: {delta_lp:+.4e} | Params: {params_str}")
+            
+            # close enough if step size is less than 0.1
+            if iteration_counter[0] > 1 and abs(delta_lp) < 0.1:
+                print("  -> Stopping early: Log-posterior change is below 1e-3 tolerance.")
+                raise StopIteration
+        # ------------------------------------------------
 
         # Run BFGS optimization
         # NOTE: We added args=(direction,) so Scipy knows how to call our top-level nll function
         opt_start = time.time()
-        res = opt.minimize(nll, p0, args=(direction,), method='BFGS', jac=parallel_jac, callback=print_callback)
+        res = opt.minimize(nll, p0, args=(direction,), method='BFGS', jac=parallel_jac, callback=print_callback,
+                           options={
+                'disp': True      # Prints a summary when finished
+            })
         
-        print(f"Optimization finished in {time.time() - opt_start:.1f}s.")
-        print(f"Success: {res.success} | Message: {res.message}")
-
-        # Fallback to heuristic guess if the optimizer fails entirely
-        best_p = res.x if res.success else p0
+        # Determine if it stopped for a good reason
+        stopped_by_us = getattr(res, 'status', None) == 99
+        
+        if res.success or stopped_by_us:
+            print(f"  -> Optimization successful. (Reason: {res.message})")
+            best_p = res.x
+        else:
+            print(f"  -> Optimization failed. (Reason: {res.message}). Falling back to heuristic.")
+            best_p = p0
 
         initial_positions = []
         
