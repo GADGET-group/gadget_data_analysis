@@ -51,9 +51,21 @@ if __name__ == '__main__':
     track_direction_vec = track_direction_vec[0]
 
     def get_sim(params):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_xy, sigma_z, rho_scale = params
+        # Unpack 14 parameters (swapped 4 angles for 6 Cartesian coords)
+        E, Ea_frac, x, y, z, p_x, p_y, p_z, a_x, a_y, a_z, sigma_xy, sigma_z, rho_scale = params
+        
         Ep = E*(1-Ea_frac)
         Ea = E*Ea_frac
+        
+        # Convert Cartesian to Spherical for the simulation
+        r_p = np.sqrt(p_x**2 + p_y**2 + p_z**2)
+        theta_p = np.arccos(p_z / r_p)
+        phi_p = np.arctan2(p_y, p_x)
+        
+        r_a = np.sqrt(a_x**2 + a_y**2 + a_z**2)
+        theta_a = np.arccos(a_z / r_a)
+        phi_a = np.arctan2(a_y, a_x)
+
         trace_sim = build_sim.create_multi_particle_decay(experiment, run_number, event_num, ['1H', '4He'], [1.,4.], '16O', 16. )
         trace_sim.sims[0].initial_energy = Ep
         trace_sim.sims[1].initial_energy = Ea
@@ -64,6 +76,7 @@ if __name__ == '__main__':
         trace_sim.sims[0].phi = phi_p
         trace_sim.sims[1].theta = theta_a
         trace_sim.sims[1].phi = phi_a
+        
         for sim in trace_sim.sims:
             sim.load_srim_table(sim.particle, 'P10', rho0*rho_scale)
         trace_sim.simulate_event()
@@ -74,31 +87,36 @@ if __name__ == '__main__':
         to_return = trace_sim.log_likelihood()
         if print_out:
             print(params, to_return)
-        #print('E=%f MeV, (x,y,z)=(%f, %f, %f) mm, theta = %f deg, phi=%f deg, sigma_xy, sigma_z, LL=%e'%(E, x,y,z,np.degrees(theta), np.degrees(phi), sigma_xy, sigma_z, to_return))
-        return to_return#/len(trace_sim.pads_to_sim)#(2.355*shaping_time*clock_freq)
+        return to_return
 
     def log_priors(params, direction):
-        E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, rho_scale = params
+        E, Ea_frac, x, y, z, p_x, p_y, p_z, a_x, a_y, a_z, sigma_p_xy, sigma_p_z, rho_scale = params
+        
         if E > 1.5*E_prior.mu:
             return -np.inf
-        #uniform priors
         if Ea_frac < 0 or Ea_frac > 1:
             return -np.inf
         if x**2 + y**2 > 40**2:
             return -np.inf
-        if z < zmin or z >zmax:
+        if z < zmin or z > zmax:
             return -np.inf
-        vhat = np.array([np.sin(theta_p)*np.cos(phi_p), np.sin(theta_p)*np.sin(phi_p), np.cos(theta_p)])
-        if np.dot(vhat, direction*track_direction_vec) < 0 or theta_p > np.pi or theta_p < 0 or np.abs(phi_p)>np.pi:
-            return -np.inf
-        if theta_a < 0 or theta_a >= np.pi or phi_a < 0 or phi_a>2*np.pi:
-            return -np.inf 
-        if sigma_p_xy < 0 or sigma_p_xy >30:
+        if sigma_p_xy < 0 or sigma_p_xy > 30:
             return -np.inf
         if sigma_p_z < 0 or sigma_p_z > 30:
             return -np.inf
-        #gaussian prior for energy, and assume uniform over solid angle
-        return E_prior.log_likelihood(E)  + np.log(np.abs(np.sin(theta_a))) + np.log(np.abs(np.sin(theta_p))) + density_scale_prior.log_likelihood(rho_scale)
+
+        # Normalize proton direction to evaluate bimodal constraint
+        r_p = np.sqrt(p_x**2 + p_y**2 + p_z**2)
+        vhat_p = np.array([p_x, p_y, p_z]) / r_p
+        
+        # Keep bimodal sampling restricted to the correct hemisphere
+        if np.dot(vhat_p, direction*track_direction_vec) < 0:
+            return -np.inf
+            
+        # Standard normal prior for 3D Cartesian vectors ensures uniform spherical sampling
+        cartesian_prior = -0.5 * (p_x**2 + p_y**2 + p_z**2 + a_x**2 + a_y**2 + a_z**2)
+
+        return E_prior.log_likelihood(E) + density_scale_prior.log_likelihood(rho_scale) + cartesian_prior
 
     def log_posterior(params, direction, print_out=False):
         to_return = log_priors(params, direction)
@@ -113,74 +131,54 @@ if __name__ == '__main__':
     fit_start_time = time.time()
     nwalkers = 400
     steps = 400
-    ndim = 12
+    ndim = 14 # Increased from 12 to 14
 
     def get_init_walker_pos(direction):
-        #initialize E per priors
-        #start walkers in a small ball at far end of the track from where the particle will stop, given selected direction
-        d_best, best_point = np.inf, None #distance along track in direction of particle motion. Make as negative as possible
+        d_best, best_point = np.inf, None 
         for x, y, z in zip(x_real, y_real, z_real):
             delta = np.array([x,y,z]) - track_center
             dist = np.dot(delta, track_direction_vec*direction)
             if  dist < d_best:
                 d_best= dist
                 best_point = np.array([x,y,z])
-        #start theta, phi in a small ball around track direction from svd
-        vhat = track_direction_vec*direction
-        theta = np.arctan2( np.sqrt(vhat[0]**2 + vhat[1]**2), vhat[2])
-        phi = np.arctan2(vhat[1], vhat[0])
+                
+        # Direction vector for proton initialization
+        vhat = track_direction_vec * direction
 
-        #start sigma_xy, sigma_z, and c in a small ball around an initial guess
         sigma_guess = 2.5
         sigma_ball_size = 0.5
         pos_ball_size = 6
-        angle_ball_size = 1*np.pi/180
+        vec_ball_size = 0.1 # Noise for Cartesian vectors
 
         max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
         track_length = np.sqrt(dxy**2 + dz**2)
         Ep_guess = temp_sim.sims[0].srim_table.get_energy_w_stopping_distance(track_length - sigma_guess) 
         Ea_frac_guess = 1-Ep_guess/E_prior.mu
-        #assert Ea_frac_guess >0
         if Ea_frac_guess < 0:
             Ea_frac_guess = 0.001
 
+        print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, vhat, sigma_guess, sigma_guess))
 
-        print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess, sigma_guess))
+        # Yield initial positions with 14 parameters
+        return [ (E_prior.sigma*np.random.randn() + E_prior.mu, 
+                  Ea_frac_guess + np.random.randn()*0.01,
+                  best_point[0] + np.random.randn()*pos_ball_size,
+                  best_point[1] + np.random.randn()*pos_ball_size,
+                  best_point[2] + np.random.randn()*pos_ball_size,
+                  vhat[0] + np.random.randn()*vec_ball_size, # p_x
+                  vhat[1] + np.random.randn()*vec_ball_size, # p_y
+                  vhat[2] + np.random.randn()*vec_ball_size, # p_z
+                  np.random.randn(), # a_x (standard normal)
+                  np.random.randn(), # a_y
+                  np.random.randn(), # a_z
+                  sigma_guess + np.random.randn()*sigma_ball_size, 
+                  sigma_guess + np.random.randn()*sigma_ball_size,
+                  np.random.uniform(0.9, 2)
+                  ) for w in range(nwalkers)]
 
-        
-    
-        # while True:
-        #     workable_point = (E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
-        #                     best_point[0] + np.random.randn()*pos_ball_size,
-        #                     best_point[1] + np.random.randn()*pos_ball_size,
-        #                     best_point[2] + np.random.randn()*pos_ball_size,
-        #                     min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
-        #                     min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
-        #                     np.random.uniform(0, np.pi), np.random.uniform(-np.pi, np.pi),
-        #                     sigma_guess + np.random.randn()*sigma_ball_size, sigma_guess + np.random.randn()*sigma_ball_size,
-        #                     np.random.uniform(0.9, 2)
-        #                     )
-        #     if np.isfinite(log_posterior(workable_point, direction)):
-        #         break
-        # workable_point = np.array(workable_point)
-        # return [workable_point + np.random.randn(ndim)*1e-6 for w in range(nwalkers)]
-        return [ (E_prior.sigma*np.random.randn() + E_prior.mu, Ea_frac_guess + np.random.randn()*0.01,
-                            best_point[0] + np.random.randn()*pos_ball_size,
-                            best_point[1] + np.random.randn()*pos_ball_size,
-                            best_point[2] + np.random.randn()*pos_ball_size,
-                            min(np.pi, max(0,theta + np.random.randn()*angle_ball_size)),
-                            min(np.pi, max(-np.pi,phi + np.random.randn()*angle_ball_size)),
-                            np.random.uniform(0, np.pi), np.random.uniform(-np.pi, np.pi),
-                            sigma_guess + np.random.randn()*sigma_ball_size, sigma_guess + np.random.randn()*sigma_ball_size,
-                            np.random.uniform(0.9, 2)
-                            ) for w in range(nwalkers)]
-
-
-    # We'll track how the average autocorrelation time estimate changes
     directory = '%s_mcmc/run%d_palpha_mcmc/event%d'%(experiment, run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
-
 
     with multiprocessing.Pool() as pool:
         for direction in [1, -1]:
@@ -197,7 +195,7 @@ if __name__ == '__main__':
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
             sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=[direction],backend=backend, 
-                                            moves=[(emcee.moves.KDEMove(), 1)],
+                                            #moves=[(emcee.moves.KDEMove(), 1)],
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=steps, progress=True):
@@ -212,4 +210,3 @@ if __name__ == '__main__':
                 
                 print(np.percentile(xs, [50], axis=0))
                 print('log prob:',np.percentile(lls, [0,16, 50, 84,100]))
-        
