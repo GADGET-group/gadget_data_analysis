@@ -260,7 +260,7 @@ if __name__ == '__main__':
         initial_positions = []
         
         # --- NEW: Hessian-based Initialization ---
-        if res.success and hasattr(res, 'hess_inv'):
+        if (res.success or stopped_by_us) and hasattr(res, 'hess_inv'):
             try:
                 # Extract the inverse Hessian (Covariance Matrix)
                 cov_matrix = res.hess_inv
