@@ -128,53 +128,154 @@ if __name__ == '__main__':
             print('log posterior: %e'%to_return, params)
         return to_return
 
+    # --- NEW: Top-level NLL and Wrapper for Pickling ---
+    def nll(params, direction):
+        lp = log_posterior(params, direction)
+        if not np.isfinite(lp):
+            return 1e15  # Massive penalty for stepping out of bounds
+        return -lp
+
+    def nll_pool_wrapper(args_tuple):
+        # pool.map only passes one argument, so we unpack the tuple here
+        params, dir_arg = args_tuple
+        return nll(params, dir_arg)
+    # ---------------------------------------------------
+
     fit_start_time = time.time()
-    nwalkers = 400
+
+    fit_start_time = time.time()
+    nwalkers = 256
     steps = 400
     ndim = 14 # Increased from 12 to 14
 
     def get_init_walker_pos(direction):
-        d_best, best_point = np.inf, None 
-        for x, y, z in zip(x_real, y_real, z_real):
-            delta = np.array([x,y,z]) - track_center
-            dist = np.dot(delta, track_direction_vec*direction)
-            if  dist < d_best:
-                d_best= dist
-                best_point = np.array([x,y,z])
-                
         # Direction vector for proton initialization
         vhat = track_direction_vec * direction
 
-        sigma_guess = 2.5
-        sigma_ball_size = 0.5
-        pos_ball_size = 6
-        vec_ball_size = 0.1 # Noise for Cartesian vectors
+        # --- HEURISTIC INITIAL GUESS ---
+        coords = np.column_stack((x_real, y_real, z_real))
+        dists_along_track = np.dot(coords - track_center, vhat)
+        extreme_end_point = coords[np.argmin(dists_along_track)]
+        vertex_guess = extreme_end_point + vhat * 2.0 
 
+        sigma_guess = 2.5
         max_veto_pad_counts, dxy, dz, measured_counts, angle, pads_railed = h5file.process_event(event_num)
         track_length = np.sqrt(dxy**2 + dz**2)
         Ep_guess = temp_sim.sims[0].srim_table.get_energy_w_stopping_distance(track_length - sigma_guess) 
-        Ea_frac_guess = 1-Ep_guess/E_prior.mu
+        Ea_frac_guess = 1 - Ep_guess / E_prior.mu
         if Ea_frac_guess < 0:
             Ea_frac_guess = 0.001
 
-        print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, vhat, sigma_guess, sigma_guess))
+        # Package the heuristic guess into a single 1D array (p0) for the optimizer
+        # Alpha vector is guessed as a random unit vector to avoid div-by-zero
+        a_guess = np.random.randn(3)
+        a_guess /= np.linalg.norm(a_guess)
 
-        # Yield initial positions with 14 parameters
-        return [ (E_prior.sigma*np.random.randn() + E_prior.mu, 
-                  Ea_frac_guess + np.random.randn()*0.01,
-                  best_point[0] + np.random.randn()*pos_ball_size,
-                  best_point[1] + np.random.randn()*pos_ball_size,
-                  best_point[2] + np.random.randn()*pos_ball_size,
-                  vhat[0] + np.random.randn()*vec_ball_size, # p_x
-                  vhat[1] + np.random.randn()*vec_ball_size, # p_y
-                  vhat[2] + np.random.randn()*vec_ball_size, # p_z
-                  np.random.randn(), # a_x (standard normal)
-                  np.random.randn(), # a_y
-                  np.random.randn(), # a_z
-                  sigma_guess + np.random.randn()*sigma_ball_size, 
-                  sigma_guess + np.random.randn()*sigma_ball_size,
-                  np.random.uniform(0.9, 2)
-                  ) for w in range(nwalkers)]
+        p0 = np.array([
+            E_prior.mu,                 # E
+            Ea_frac_guess,              # Ea_frac
+            vertex_guess[0],            # x
+            vertex_guess[1],            # y
+            vertex_guess[2],            # z
+            vhat[0],                    # p_x
+            vhat[1],                    # p_y
+            vhat[2],                    # p_z
+            a_guess[0],                 # a_x
+            a_guess[1],                 # a_y
+            a_guess[2],                 # a_z
+            sigma_guess,                # sigma_p_xy
+            15.0,                       # sigma_p_z (midpoint of uniform prior 0-30)
+            1.0                         # rho_scale
+        ])
+
+        print(f"\n--- Optimizing Initial Position for Direction {direction} ---")
+
+        # --- PARALLEL NUMERICAL GRADIENT ---
+        def parallel_jac(params, direction_arg):
+            epsilon = 1e-8
+            perturbed_params = []
+            
+            # Create 14 perturbed arrays and pack them into tuples with the direction
+            for i in range(ndim):
+                p_copy = np.copy(params)
+                p_copy[i] += epsilon
+                perturbed_params.append((p_copy, direction_arg))
+                
+            # Evaluate all 14 perturbed states simultaneously across your 256 cores
+            f_x_plus_h = np.array(pool.map(nll_pool_wrapper, perturbed_params))
+            
+            # Evaluate the base state
+            f_x = nll(params, direction_arg)
+            
+            # Calculate the gradient vector: (f(x+h) - f(x)) / h
+            return (f_x_plus_h - f_x) / epsilon
+        # -----------------------------------
+
+        # --- NEW CALLBACK FUNCTION ---
+        iteration_counter = [0]
+        def print_callback(xk):
+            iteration_counter[0] += 1
+            current_lp = log_posterior(xk, direction)
+            params_str = np.array2string(xk, precision=3, suppress_small=True, max_line_width=120)
+            print(f"  Step {iteration_counter[0]:02d} | Log-Posterior: {current_lp:+.4e} | Params: {params_str}")
+        # -----------------------------
+
+        # Run BFGS optimization
+        # NOTE: We added args=(direction,) so Scipy knows how to call our top-level nll function
+        opt_start = time.time()
+        res = opt.minimize(nll, p0, args=(direction,), method='BFGS', jac=parallel_jac, callback=print_callback)
+        
+        print(f"Optimization finished in {time.time() - opt_start:.1f}s.")
+        print(f"Success: {res.success} | Message: {res.message}")
+
+        # Fallback to heuristic guess if the optimizer fails entirely
+        best_p = res.x if res.success else p0
+
+        initial_positions = []
+        
+        # --- NEW: Hessian-based Initialization ---
+        if res.success and hasattr(res, 'hess_inv'):
+            try:
+                # Extract the inverse Hessian (Covariance Matrix)
+                cov_matrix = res.hess_inv
+                
+                # Safety check: Ensure the diagonal (variances) are strictly positive
+                if np.all(np.diag(cov_matrix) > 0):
+                    print("  -> Using BFGS inverse Hessian to shape the initial walker ball.")
+                    
+                    # We scale the covariance by a small factor (e.g., 0.01) 
+                    # to start the walkers in a *tight* ball around the MAP rather 
+                    # than spanning the full width of the posterior immediately.
+                    tight_cov = cov_matrix * 0.01 
+                    
+                    # Draw walkers from the multivariate Gaussian
+                    initial_positions = np.random.multivariate_normal(best_p, tight_cov, size=nwalkers)
+                    
+                    # Force to a list of arrays for emcee compatibility
+                    initial_positions = list(initial_positions) 
+                else:
+                    print("  -> Warning: Hessian diagonal has negative values. Falling back to heuristic.")
+            except Exception as e:
+                print(f"  -> Warning: Hessian initialization failed ({e}). Falling back to heuristic.")
+        # -----------------------------------------
+
+        # --- FALLBACK: Heuristic Scales ---
+        if len(initial_positions) == 0:
+            print("  -> Using heuristic scales for walker initialization.")
+            scales = np.array([
+                E_prior.sigma * 0.5,  # E
+                0.01,                 # Ea_frac
+                1.0, 1.0, 1.0,        # x, y, z
+                0.05, 0.05, 0.05,     # p_x, p_y, p_z
+                0.5, 0.5, 0.5,        # a_x, a_y, a_z
+                0.5,                  # sigma_p_xy
+                1.0,                  # sigma_p_z
+                0.02                  # rho_scale
+            ])
+            initial_positions = [best_p + np.random.randn(ndim) * scales for w in range(nwalkers)]
+        # ----------------------------------
+
+        return initial_positions
 
     directory = '%s_mcmc/run%d_palpha_mcmc/event%d'%(experiment, run_number, event_num)
     if not os.path.exists(directory):
@@ -194,8 +295,26 @@ if __name__ == '__main__':
             backend_file = os.path.join(directory, backend_fname)
             backend = emcee.backends.HDFBackend(backend_file)
             backend.reset(nwalkers, ndim)
+
+            de_moves =[
+                (emcee.moves.DEMove(), 0.8),
+                (emcee.moves.DESnookerMove(), 0.2)
+            ]
+            stretch_kde = [
+                (emcee.moves.StretchMove(), 0.75),
+                (emcee.moves.KDEMove(), 0.25)
+            ]
+
+            kde_only = [
+                (emcee.moves.KDEMove(), 1)
+            ]
+
+            stretch_move_only = [
+                (emcee.moves.StretchMove(), 1)
+            ]
+
             sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=[direction],backend=backend, 
-                                            #moves=[(emcee.moves.KDEMove(), 1)],
+                                            moves=stretch_move_only,
                                             pool=pool)
 
             for sample in sampler.sample(init_walker_pos, iterations=steps, progress=True):
