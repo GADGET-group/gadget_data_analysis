@@ -90,7 +90,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
         else:
             tau = [2]
         burnin = int(5 * np.max(tau))
-        thin = int(0.5 * np.min(tau))
+        thin = int(np.max(tau))
         output_text_file.write('burnin: %f\n'%burnin)
         output_text_file.write('thin: %f\n'%thin)
 
@@ -158,7 +158,7 @@ else:
     steps = ['forward', 'backward']
     filenames = []
     #events = [74443, 25304, 38909, 104723, 43833, 52010, 95644, 98220,87480, 19699, 51777, 68192, 68087, 10356, 21640, 96369, 21662, 26303, 50543, 27067]
-    events = [ 4007 ]
+    events = [4007, 7074, 9174, 11379, 15302, 21224, 22222, 28950, 33414, 4434, 5866, 314,  993, 1723, 166, 563 ]
     labels = ['E', 'Ea_frac', 'x','y','z','theta_p', 'phi_p', 'theta_a', 'phi_a', 'sigma_p_xy', 'sigma_p_z', 'k']
     theta_index, phi_index = 5,6
     tau = [2]

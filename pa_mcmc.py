@@ -140,7 +140,9 @@ if __name__ == '__main__':
         track_length = np.sqrt(dxy**2 + dz**2)
         Ep_guess = temp_sim.sims[0].srim_table.get_energy_w_stopping_distance(track_length - sigma_guess) 
         Ea_frac_guess = 1-Ep_guess/E_prior.mu
-        assert Ea_frac_guess >0
+        #assert Ea_frac_guess >0
+        if Ea_frac_guess < 0:
+            Ea_frac_guess = 0.001
 
 
         print('initial_guess:', (E_prior.mu, Ea_frac_guess, best_point, theta, phi, sigma_guess, sigma_guess))
