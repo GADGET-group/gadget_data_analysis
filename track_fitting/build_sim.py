@@ -276,14 +276,6 @@ def load_single_particle_mcmc_result(run:int, event:int, particle='1H', mcmc_nam
     trace_sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
     return trace_sim
 
-def show_results(event:int):
-    sim = load_pa_mcmc_results(124,event, 'clustering_run2')
-    sim.plot_residuals_3d(threshold=20)
-    sim.plot_simulated_3d_data(threshold=20)
-
-    h5 = get_rawh5_object('e21072', 124)
-    h5.plot_3d_traces(event,threshold=20)
-    #plt.show()
 
 def open_gui(sim:SingleParticleEvent):
     import tkinter as tk

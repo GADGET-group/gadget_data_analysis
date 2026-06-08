@@ -240,7 +240,6 @@ if __name__ == '__main__':
             options={
                 'disp': True,
                 'fatol': 0.1,        # Exit criteria: Function (NLL) absolute tolerance is ~0.1
-                'xatol': 1e-6        # Exit criteria: Parameter step size is small
             }
         )
         
