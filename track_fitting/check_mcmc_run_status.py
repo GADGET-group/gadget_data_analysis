@@ -67,25 +67,34 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
                 # Fixed: Use 'in' so it catches 'theta_p' and 'theta_a'
                 if 'theta' in labels[i] or 'phi' in labels[i]:
                     to_plot = np.degrees(to_plot)
+                
+                # Plot the individual walker paths
                 ax.plot(to_plot, "k", alpha=0.3)
+                
+                # Calculate and plot the 16th, 50th, and 84th percentiles across walkers
+                q16, q50, q84 = np.percentile(to_plot, [16, 50, 84], axis=1)
+                ax.plot(q16, color="r", alpha=0.8, linestyle="--", linewidth=1.5)
+                ax.plot(q50, color="r", alpha=1.0, linestyle="-", linewidth=2)
+                ax.plot(q84, color="r", alpha=0.8, linestyle="--", linewidth=1.5)
+
                 ax.set_xlim(0, len(samples))
                 ax.set_ylabel(labels[i])
                 ax.yaxis.set_label_coords(-0.1, 0.5)
             axes[-1].set_xlabel("step number")
             plt.savefig(base_fname+'_chain.png')
-
-            #show plot of ll vs phi in last step
-            thetas = samples[-1][:, theta_index]
-            phis = samples[-1][:, phi_index]
-            plt.figure()
-            plt.title("before clustering")
-            plt.scatter(np.degrees(thetas), np.degrees(phis), c=log_prob[-1])
-            plt.colorbar(label="log prob")
-            plt.xlabel('theta (deg)')
-            plt.ylabel('phi (deg)')
-            plt.savefig(base_fname+'_theta_phi_ll.png')
             
+        #show plot of ll vs phi in last step
+        thetas = samples[-1][:, theta_index]
+        phis = samples[-1][:, phi_index]
+        plt.figure()
+        plt.title("before clustering")
+        plt.scatter(np.degrees(thetas), np.degrees(phis), c=log_prob[-1])
+        plt.colorbar(label="log prob")
+        plt.xlabel('theta (deg)')
+        plt.ylabel('phi (deg)')
+        plt.savefig(base_fname+'_theta_phi_ll.png')
 
+        #make plot with proton and alpha energies, instead of total and Ea_frac
         #make plot with proton and alpha energies, instead of total and Ea_frac
         if show_time_series_plots and Ea_Ep_labels != None:
             Ea_Ep_samples = np.copy(samples)
@@ -98,21 +107,30 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
                 # Fixed: Use 'in' so it catches 'theta_p' and 'theta_a'
                 if 'theta' in labels[i] or 'phi' in labels[i]:
                     to_plot = np.degrees(to_plot)
+                
+                # Plot the individual walker paths
                 ax.plot(to_plot, "k", alpha=0.3)
+                
+                # Calculate and plot the 16th, 50th, and 84th percentiles across walkers
+                q16, q50, q84 = np.percentile(to_plot, [16, 50, 84], axis=1)
+                ax.plot(q16, color="r", alpha=0.8, linestyle="--", linewidth=1.5)
+                ax.plot(q50, color="r", alpha=1.0, linestyle="-", linewidth=2)
+                ax.plot(q84, color="r", alpha=0.8, linestyle="--", linewidth=1.5)
+
                 ax.set_xlim(0, len(Ea_Ep_samples))
                 ax.set_ylabel(Ea_Ep_labels[i])
                 ax.yaxis.set_label_coords(-0.1, 0.5)
             axes[-1].set_xlabel("step number")
 
-            #scatter plot of Ea and Ep color coded by posterior
-            Ea = Ea_Ep_samples[-1][:, 0]
-            Ep = Ea_Ep_samples[-1][:, 1]
-            plt.figure()
-            plt.scatter(Ea, Ep, c=log_prob[-1])
-            plt.colorbar(label="log prob")
-            plt.xlabel('Ea')
-            plt.ylabel('Ep')
-            plt.savefig(base_fname+'Ea_Ep_ll.png')
+        #scatter plot of Ea and Ep color coded by posterior
+        Ea = Ea_Ep_samples[-1][:, 0]
+        Ep = Ea_Ep_samples[-1][:, 1]
+        plt.figure()
+        plt.scatter(Ea, Ep, c=log_prob[-1])
+        plt.colorbar(label="log prob")
+        plt.xlabel('Ea')
+        plt.ylabel('Ep')
+        plt.savefig(base_fname+'Ea_Ep_ll.png')
 
         plt.close('all') 
 
@@ -191,7 +209,7 @@ else:
     run_number= 71
     steps = ['forward', 'backward']
     filenames = []
-    events = [4007]#[4007, 7074, 9174, 11379, 15302, 21224, 22222, 28950, 33414, 4434, 5866, 314,  993, 1723, 166, 563 ]
+    events = [4007, 7074, 9174]#[4007, 7074, 9174, 11379, 15302, 21224, 22222, 28950, 33414, 4434, 5866, 314,  993, 1723, 166, 563 ]
     
     # Note: Keep the labels exactly as they were (12 dimensions). The transform_to_spherical function 
     # handles the conversion from 14 back to 12 behind the scenes.

@@ -145,7 +145,7 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 256
-    steps = 400
+    steps = 200
     ndim = 14 # Increased from 12 to 14
 
     def get_init_walker_pos(direction):
@@ -235,7 +235,7 @@ if __name__ == '__main__':
             
             # close enough if step size is less than 0.1
             if iteration_counter[0] > 1 and abs(delta_lp) < 0.1:
-                print("  -> Stopping early: Log-posterior change is below 1e-3 tolerance.")
+                print("  -> Stopping early: Log-posterior change is below 0.1 tolerance.")
                 raise StopIteration
         # ------------------------------------------------
 
@@ -254,8 +254,8 @@ if __name__ == '__main__':
             print(f"  -> Optimization successful. (Reason: {res.message})")
             best_p = res.x
         else:
-            print(f"  -> Optimization failed. (Reason: {res.message}). Falling back to heuristic.")
-            best_p = p0
+            print(f"  -> Optimization failed. (Reason: {res.message}). Still using optimization result.")
+            best_p = res.x#p0
 
         initial_positions = []
         
@@ -306,6 +306,13 @@ if __name__ == '__main__':
     directory = '%s_mcmc/run%d_palpha_mcmc/event%d'%(experiment, run_number, event_num)
     if not os.path.exists(directory):
         os.makedirs(directory)
+    
+    # --- NEW: Redirect all print statements to a log file ---
+    log_file = os.path.join(directory, 'mcmc_output.log')
+    # buffering=1 ensures the file writes line-by-line so you can view it live
+    log_file_obj = open(log_file, 'w', buffering=1) 
+    sys.stdout = log_file_obj
+    sys.stderr = log_file_obj
 
     with multiprocessing.Pool() as pool:
         for direction in [1, -1]:
@@ -343,7 +350,8 @@ if __name__ == '__main__':
                                             moves=stretch_move_only,
                                             pool=pool)
 
-            for sample in sampler.sample(init_walker_pos, iterations=steps, progress=True):
+            for step_idx, sample in enumerate(sampler.sample(init_walker_pos, iterations=steps, progress=False)):
+                print('step: ', step_idx)
                 tau = sampler.get_autocorr_time(tol=0)
                 xs = sampler.get_chain()[-1]
                 Ea = xs[:, 0]*xs[:, 1]
