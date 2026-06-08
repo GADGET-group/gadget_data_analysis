@@ -32,8 +32,8 @@ if __name__ == '__main__':
             return -np.log(np.sqrt(2*np.pi*self.sigma**2)) - (val - self.mu)**2/2/self.sigma**2
 
     E_from_ic = build_sim.get_energy_from_ic(experiment, run_number, event_num)
-    E_from_ic_simga = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
-    E_prior = GaussianVar(E_from_ic, E_from_ic_simga)
+    E_from_ic_sigma = build_sim.get_detector_E_sigma(experiment, run_number, E_from_ic)
+    E_prior = GaussianVar(E_from_ic, E_from_ic_sigma)
     rho0 = build_sim.get_gas_density(experiment, run_number)
     density_scale_prior = GaussianVar(1, 0.05)#TODO: decid on density range
 
@@ -225,61 +225,32 @@ if __name__ == '__main__':
             physical_params = scaled_params * param_scales
             return nll(physical_params, direction_arg)
 
-        # --- PARALLEL NUMERICAL GRADIENT (SCALED, CENTRAL DIFF, ADAPTIVE EPSILON) ---
+        # --- PARALLEL NUMERICAL GRADIENT (SCALED, CENTRAL DIFFERENCE) ---
         def parallel_jac_scaled(scaled_params, direction_arg):
-            base_epsilon = 1e-5
-            max_epsilon = 1e-1  # Stop increasing if epsilon gets dangerously large (10% of scaled space)
+            epsilon = 1e-5  # Increased epsilon to prevent floating-point truncation
+            perturbed_params = []
             
-            # Arrays to store the final results
-            epsilons = np.full(ndim, base_epsilon)
-            gradients = np.zeros(ndim)
+            # Create (x + h) and (x - h) for all 14 parameters
+            for i in range(ndim):
+                # Forward step
+                p_plus = np.copy(scaled_params)
+                p_plus[i] += epsilon
+                perturbed_params.append((p_plus, direction_arg, param_scales))
+                
+                # Backward step
+                p_minus = np.copy(scaled_params)
+                p_minus[i] -= epsilon
+                perturbed_params.append((p_minus, direction_arg, param_scales))
+                
+            # Evaluate all 28 perturbed states simultaneously (28 < 256 cores)
+            results = np.array(pool.map(nll_pool_wrapper_scaled, perturbed_params))
             
-            # Start with all parameters needing a gradient calculation
-            active_indices = list(range(ndim))
+            # Split the results back into plus and minus arrays
+            f_x_plus_h = results[0::2]   # Evens: 0, 2, 4...
+            f_x_minus_h = results[1::2]  # Odds:  1, 3, 5...
             
-            while active_indices:
-                perturbed_params = []
-                
-                # Create (x + h) and (x - h) ONLY for parameters that still need it
-                for i in active_indices:
-                    eps = epsilons[i]
-                    
-                    p_plus = np.copy(scaled_params)
-                    p_plus[i] += eps
-                    perturbed_params.append((p_plus, direction_arg, param_scales))
-                    
-                    p_minus = np.copy(scaled_params)
-                    p_minus[i] -= eps
-                    perturbed_params.append((p_minus, direction_arg, param_scales))
-                    
-                # Evaluate the active batch simultaneously across your pool
-                results = np.array(pool.map(nll_pool_wrapper_scaled, perturbed_params))
-                
-                f_x_plus_h = results[0::2]   # Evens
-                f_x_minus_h = results[1::2]  # Odds
-                
-                next_active_indices = []
-                
-                for loop_idx, param_idx in enumerate(active_indices):
-                    f_plus = f_x_plus_h[loop_idx]
-                    f_minus = f_x_minus_h[loop_idx]
-                    eps = epsilons[param_idx]
-                    
-                    delta_f = f_plus - f_minus
-                    
-                    # If the gradient is entirely swallowed by precision loss, adapt the step
-                    if delta_f == 0.0 and eps * 10 <= max_epsilon:
-                        epsilons[param_idx] *= 10.0
-                        next_active_indices.append(param_idx)
-                    else:
-                        # Otherwise, calculate and lock in the gradient
-                        gradients[param_idx] = delta_f / (2 * eps)
-                        
-                # Update the active list for the next iteration (if any remain flat)
-                active_indices = next_active_indices
-                
-            return gradients
-        # -----------------------------------
+            # Calculate Central Difference Gradient
+            return (f_x_plus_h - f_x_minus_h) / (2 * epsilon)
 
         # --- CALLBACK FUNCTION WITH UN-SCALING ---
         iteration_counter = [0]
@@ -296,7 +267,7 @@ if __name__ == '__main__':
             last_lp[0] = current_lp
             
             params_str = np.array2string(xk_phys, precision=3, suppress_small=True, max_line_width=120)
-            print(f"  Step {iteration_counter[0]:02d} | Log-Posterior: {current_lp:+.5e} | Delta: {delta_lp:+.4e} | Params: {params_str}")
+            print(f"  Step {iteration_counter[0]:02d} | Log-Posterior: {current_lp:+.4e} | Delta: {delta_lp:+.4e} | Params: {params_str}")
             
             if iteration_counter[0] > 10 and abs(delta_lp) < 0.1:
                 print("  -> Stopping early: Log-posterior change is below 0.1 tolerance.")
@@ -306,23 +277,51 @@ if __name__ == '__main__':
         # Run BFGS optimization in the SCALED space
         opt_start = time.time()
         res = opt.minimize(nll_scaled, p0_scaled, args=(direction,), method='BFGS', 
-                           jac=parallel_jac_scaled, callback=print_callback_scaled,
-                           options={'disp': True})
-        
+                        jac=parallel_jac_scaled, callback=print_callback_scaled,
+                        options={'disp': True})
+
         stopped_by_us = getattr(res, 'status', None) == 99
-        
+            
+
         if res.success or stopped_by_us:
             print(f"  -> Optimization successful. (Reason: {res.message})")
             # Convert the result back to physical units
             best_p = res.x * param_scales
         else:
-            print(f"  -> Optimization failed. (Reason: {res.message}). Still using optimization result.")
-            best_p = res.x * param_scales
+            print(f"  -> Optimization failed. (Reason: {res.message}). Trying to continue with Nelder-Mead")
+            
+            # FIXED CALLBACK: Properly passing 'direction' to nll_scaled
+            def callback_nm(x):
+                # Calculate the current NLL using both required arguments
+                current_lp = -nll_scaled(x, direction)
+                delta_lp = current_lp - last_lp[0]
+                last_lp[0] = current_lp
+                
+                # Un-scale the parameters so the printout makes physical sense
+                xk_phys = x * param_scales
+                params_str = np.array2string(xk_phys, precision=3, suppress_small=True, max_line_width=120)
+                print(f"  NM Step | Log-Posterior: {current_lp:+.4e} | delta lp {delta} | Params: {params_str}")
+
+            res2 = opt.minimize(
+                nll_scaled, 
+                res.x,                   # Start exactly where BFGS left off
+                args=(direction,), 
+                callback=callback_nm,
+                method='Nelder-Mead', 
+                options={
+                    'disp': True,
+                    'fatol': 0.1,        # Exit criteria: Function (NLL) absolute tolerance is ~0.1
+                    'xatol': 1e-6        # Exit criteria: Parameter step size is small
+                }
+            )
+            
+            print(f"  -> Nelder-Mead finished. (Reason: {res2.message})")
+            best_p = res2.x * param_scales
 
         initial_positions = []
         
         # --- Hessian-based Initialization (WITH UN-SCALING) ---
-        if hasattr(res, 'hess_inv'): #(res.success or stopped_by_us) and 
+        if (res.success or stopped_by_us) and hasattr(res, 'hess_inv'): #(res.success or stopped_by_us) and 
             try:
                 cov_matrix_scaled = res.hess_inv
                 
@@ -347,14 +346,14 @@ if __name__ == '__main__':
             va = np.sum(best_p[8:11]**2)**0.5
             print("  -> Using heuristic scales for walker initialization.")
             scales = np.array([
-                E_prior.sigma * 0.5,  # E
+                E_prior.sigma * 0.05,  # E
                 0.01,                 # Ea_frac
-                1.0, 1.0, 1.0,        # x, y, z
+                0.1, 0.1, 0.1,        # x, y, z
                 0.01*vp, 0.01*vp, 0.01*vp,     # p_x, p_y, p_z
                 0.01*va, 0.01*va, 0.01*va,        # a_x, a_y, a_z
-                0.5,                  # sigma_p_xy
-                1.0,                  # sigma_p_z
-                0.02                  # rho_scale
+                0.1,                  # sigma_p_xy
+                0.1,                  # sigma_p_z
+                0.01                  # rho_scale
             ])
             initial_positions = [best_p + np.random.randn(ndim) * scales for w in range(nwalkers)]
         # ----------------------------------
