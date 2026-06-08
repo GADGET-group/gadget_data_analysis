@@ -225,21 +225,60 @@ if __name__ == '__main__':
             physical_params = scaled_params * param_scales
             return nll(physical_params, direction_arg)
 
-        # --- PARALLEL NUMERICAL GRADIENT (SCALED) ---
+        # --- PARALLEL NUMERICAL GRADIENT (SCALED, CENTRAL DIFF, ADAPTIVE EPSILON) ---
         def parallel_jac_scaled(scaled_params, direction_arg):
-            epsilon = 1e-8
-            perturbed_params = []
+            base_epsilon = 1e-5
+            max_epsilon = 1e-1  # Stop increasing if epsilon gets dangerously large (10% of scaled space)
             
-            for i in range(ndim):
-                p_copy = np.copy(scaled_params)
-                p_copy[i] += epsilon
-                # Pass param_scales to the tuple so worker processes have access to it
-                perturbed_params.append((p_copy, direction_arg, param_scales))
+            # Arrays to store the final results
+            epsilons = np.full(ndim, base_epsilon)
+            gradients = np.zeros(ndim)
+            
+            # Start with all parameters needing a gradient calculation
+            active_indices = list(range(ndim))
+            
+            while active_indices:
+                perturbed_params = []
                 
-            f_x_plus_h = np.array(pool.map(nll_pool_wrapper_scaled, perturbed_params))
-            f_x = nll_scaled(scaled_params, direction_arg)
-            
-            return (f_x_plus_h - f_x) / epsilon
+                # Create (x + h) and (x - h) ONLY for parameters that still need it
+                for i in active_indices:
+                    eps = epsilons[i]
+                    
+                    p_plus = np.copy(scaled_params)
+                    p_plus[i] += eps
+                    perturbed_params.append((p_plus, direction_arg, param_scales))
+                    
+                    p_minus = np.copy(scaled_params)
+                    p_minus[i] -= eps
+                    perturbed_params.append((p_minus, direction_arg, param_scales))
+                    
+                # Evaluate the active batch simultaneously across your pool
+                results = np.array(pool.map(nll_pool_wrapper_scaled, perturbed_params))
+                
+                f_x_plus_h = results[0::2]   # Evens
+                f_x_minus_h = results[1::2]  # Odds
+                
+                next_active_indices = []
+                
+                for loop_idx, param_idx in enumerate(active_indices):
+                    f_plus = f_x_plus_h[loop_idx]
+                    f_minus = f_x_minus_h[loop_idx]
+                    eps = epsilons[param_idx]
+                    
+                    delta_f = f_plus - f_minus
+                    
+                    # If the gradient is entirely swallowed by precision loss, adapt the step
+                    if delta_f == 0.0 and eps * 10 <= max_epsilon:
+                        epsilons[param_idx] *= 10.0
+                        next_active_indices.append(param_idx)
+                    else:
+                        # Otherwise, calculate and lock in the gradient
+                        gradients[param_idx] = delta_f / (2 * eps)
+                        
+                # Update the active list for the next iteration (if any remain flat)
+                active_indices = next_active_indices
+                
+            return gradients
         # -----------------------------------
 
         # --- CALLBACK FUNCTION WITH UN-SCALING ---
@@ -283,7 +322,7 @@ if __name__ == '__main__':
         initial_positions = []
         
         # --- Hessian-based Initialization (WITH UN-SCALING) ---
-        if (res.success or stopped_by_us) and hasattr(res, 'hess_inv'):
+        if hasattr(res, 'hess_inv'): #(res.success or stopped_by_us) and 
             try:
                 cov_matrix_scaled = res.hess_inv
                 
@@ -304,13 +343,15 @@ if __name__ == '__main__':
 
         # --- FALLBACK: Heuristic Scales ---
         if len(initial_positions) == 0:
+            vp = np.sum(best_p[5:8]**2)**0.5
+            va = np.sum(best_p[8:11]**2)**0.5
             print("  -> Using heuristic scales for walker initialization.")
             scales = np.array([
                 E_prior.sigma * 0.5,  # E
                 0.01,                 # Ea_frac
                 1.0, 1.0, 1.0,        # x, y, z
-                0.05, 0.05, 0.05,     # p_x, p_y, p_z
-                0.5, 0.5, 0.5,        # a_x, a_y, a_z
+                0.01*vp, 0.01*vp, 0.01*vp,     # p_x, p_y, p_z
+                0.01*va, 0.01*va, 0.01*va,        # a_x, a_y, a_z
                 0.5,                  # sigma_p_xy
                 1.0,                  # sigma_p_z
                 0.02                  # rho_scale
