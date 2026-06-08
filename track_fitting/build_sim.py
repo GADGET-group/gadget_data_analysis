@@ -124,13 +124,20 @@ def get_energy_from_ic(experiment, run, event):
 ########################################################
 # Functions to creating and manipulating sim objects
 ########################################################
+data_cache = {}
 def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:int):
     '''
     Load data from h5 file, and set sim variables
     '''
+    #use caching to avoid reading data from h5 file every time
+    if (experiment, run, event) in data_cache:
+        pads, traces = data_cache[(experiment, run, event)]
+    else:
+        pads, traces = get_pads_and_traces(experiment, run, event)
+        data_cache[(experiment, run, event)] = (pads, traces)
+    #exp specific config
     if experiment == 'e21072':
         sim.zscale = get_zscale(experiment, run)
-        pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
         sim.pad_gain_match_uncertainty, sim.other_systematics = 7*0.0706, 7*4.77 #TODO: update once Efield mapping is done
         sim.pad_threshold = 54.8
@@ -144,7 +151,6 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         sim.timing_offsets[1] = 0
     if experiment == 'e25058':
         sim.zscale = get_zscale(experiment, run)
-        pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
         sim.pad_gain_match_uncertainty, sim.other_systematics = 0.15, 5#7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
         sim.likelihood_option = 'uncorrelated'
