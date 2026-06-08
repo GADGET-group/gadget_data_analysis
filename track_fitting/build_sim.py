@@ -146,7 +146,8 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         sim.zscale = get_zscale(experiment, run)
         pads, traces = get_pads_and_traces(experiment, run, event)
         sim.set_real_data(pads, traces, trim_threshold=100, trim_pad=10, pads_to_sim_select=read_data_mode)
-        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.04, 100#7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
+        sim.pad_gain_match_uncertainty, sim.other_systematics = 0.15, 5#7*0.0706, 7*4.77 #TODO: no idea what these should be for this expereiemnt
+        sim.likelihood_option = 'uncorrelated'
         sim.pad_threshold = 54.8#TODO: also need to figure this one out
         sim.counts_per_MeV =get_adc_counts_per_MeV(experiment, run)
 
@@ -191,36 +192,45 @@ def set_params_and_simulate(sim, param_dict:dict):
         sim.__dict__[param] = param_dict[param]
     sim.simulate_event()
 
-def load_pa_mcmc_results(run:int, event:int, mcmc_name='final_run', step=-1):
-    reader = emcee.backends.HDFBackend(filename='run%d_palpha_mcmc/event%d/%s.h5'%(run, event, mcmc_name), read_only=True)
+def load_multiparticle_decay_mcmc_results(experiment:str, run:int, event:int, mcmc_name:str, product_names:list[str]=['1H', '4He'], prodcut_masses:float=[1.,4.], 
+                                recoil_name:str='16O', recoil_mass:float=16., step=-1):
+    h5name = filename='%s_mcmc/run%d_palpha_mcmc/event%d/%s.h5'%(experiment,run, event, mcmc_name)
+    print(h5name)
+    reader = emcee.backends.HDFBackend(filename=h5name, read_only=True)
     
     samples = reader.get_chain()[step]
     ll = reader.get_log_prob()[step]
     best_params = samples[np.argmax(ll)]
-    E, Ea_frac, x, y, z, theta_p, phi_p, theta_a, phi_a, sigma_p_xy, sigma_p_z, c = best_params
-    rho_scale = 1
+    E, Ea_frac, x, y, z, p_x, p_y, p_z, a_x, a_y, a_z, sigma_xy, sigma_z, rho_scale = best_params
     Ep = E*(1-Ea_frac)
     Ea = E*Ea_frac
-    trace_sim = create_pa_sim('e21072', run, event)
+    trace_sim = create_multi_particle_decay(experiment, run, event, product_names, prodcut_masses, recoil_name, recoil_mass)
     trace_sim.sims[0].initial_energy = Ep
     trace_sim.sims[1].initial_energy = Ea
     trace_sim.sims[0].initial_point = trace_sim.sims[1].initial_point = (x,y,z)
-    trace_sim.sims[0].sigma_xy = sigma_p_xy
-    trace_sim.sims[0].sigma_z = sigma_p_z
-    trace_sim.sims[1].sigma_xy = sigma_p_xy
-    trace_sim.sims[1].sigma_z = sigma_p_z
+    trace_sim.sigma_xy = sigma_xy
+    trace_sim.sigma_z = sigma_z
+
+    r_p = np.sqrt(p_x**2 + p_y**2 + p_z**2)
+    theta_p = np.arccos(p_z / r_p)
+    phi_p = np.arctan2(p_y, p_x)
+    r_a = np.sqrt(a_x**2 + a_y**2 + a_z**2)
+    theta_a = np.arccos(a_z / r_a)
+    phi_a = np.arctan2(a_y, a_x)
+    
     trace_sim.sims[0].theta = theta_p
     trace_sim.sims[0].phi = phi_p
     trace_sim.sims[1].theta = theta_a
     trace_sim.sims[1].phi = phi_a
-    trace_sim = ProtonAlphaEvent(*trace_sim.sims)
-    pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
-    trace_sim.set_real_data(pads, traces, trim_threshold=20, trim_pad=10, pads_to_sim_select=read_data_mode)
-    trace_sim.pad_gain_match_uncertainty, trace_sim.other_systematics = trace_sim.proton.pad_gain_match_uncertainty, trace_sim.proton.other_systematics
-    trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
+
+    # trace_sim = ProtonAlphaEvent(*trace_sim.sims)
+    # pads, traces = pads, traces = get_pads_and_traces('e21072', run, event)
+    #trace_sim.set_real_data(pads, traces, trim_threshold=20, trim_pad=10, pads_to_sim_select=read_data_mode)
+    #trace_sim.pad_gain_match_uncertainty, trace_sim.other_systematics = trace_sim.proton.pad_gain_match_uncertainty, trace_sim.proton.other_systematics
+    #trace_sim.gas_density = rho_scale*trace_sim.proton.gas_density
     #trace_sim.pad_gain_match_uncertainty = m
-    trace_sim.other_systematics = c
-    trace_sim.name = '%s run %d event %d %s'%('e21072', run, event, mcmc_name)
+    #trace_sim.other_systematics = c
+    trace_sim.name = '%s run %d event %d %s'%(experiment, run, event, mcmc_name)
     return trace_sim
 
 def load_single_particle_mcmc_result(run:int, event:int, particle='1H', mcmc_name='final_run', step=-1, select_model='best')->SingleParticleEvent:

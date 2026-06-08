@@ -146,6 +146,7 @@ def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_fil
         thin = int(np.max(tau))
         output_text_file.write('burnin: %f\n'%burnin)
         output_text_file.write('thin: %f\n'%thin)
+        
 
         raw_flat_samples = reader.get_chain(discard=burnin, thin=thin, flat=True)
         # Transform flat chain as well
@@ -209,7 +210,7 @@ else:
     run_number= 71
     steps = ['forward', 'backward']
     filenames = []
-    events = [4007, 7074, 9174]#[4007, 7074, 9174, 11379, 15302, 21224, 22222, 28950, 33414, 4434, 5866, 314,  993, 1723, 166, 563 ]
+    events = [4007, 7074,9174]#[4007, 7074, 9174, 11379, 15302, 21224, 22222, 28950, 33414, 4434, 5866, 314,  993, 1723, 166, 563 ]# 
     
     # Note: Keep the labels exactly as they were (12 dimensions). The transform_to_spherical function 
     # handles the conversion from 14 back to 12 behind the scenes.

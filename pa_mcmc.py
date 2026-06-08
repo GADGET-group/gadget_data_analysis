@@ -128,10 +128,10 @@ if __name__ == '__main__':
             print('log posterior: %e'%to_return, params)
         return to_return
 
-    # --- NEW: Top-level NLL and Wrapper for Pickling ---
+    # --- Top-level NLL and Wrapper for Pickling, only used for initial optimization of posterior---
     def nll(params, direction):
         lp = log_posterior(params, direction)
-        if not np.isfinite(lp):
+        if not np.isfinite(lp) or params[-1]<0.9 or params[-1]>1.1:
             return 1e15  # Massive penalty for stepping out of bounds
         return -lp
 
@@ -139,6 +139,12 @@ if __name__ == '__main__':
         # pool.map only passes one argument, so we unpack the tuple here
         params, dir_arg = args_tuple
         return nll(params, dir_arg)
+
+    def nll_pool_wrapper_scaled(args_tuple):
+        scaled_params, dir_arg, p_scales = args_tuple
+        physical_params = scaled_params * p_scales
+        return nll(physical_params, dir_arg)
+    # ---------------------------------------------------
     # ---------------------------------------------------
 
     fit_start_time = time.time()
@@ -184,100 +190,111 @@ if __name__ == '__main__':
             a_guess[1],                 # a_y
             a_guess[2],                 # a_z
             sigma_guess,                # sigma_p_xy
-            15.0,                       # sigma_p_z (midpoint of uniform prior 0-30)
+            15.0,                       # sigma_p_z
             1.0                         # rho_scale
         ])
 
         print(f"\n--- Optimizing Initial Position for Direction {direction} ---")
 
-        # --- PARALLEL NUMERICAL GRADIENT ---
-        def parallel_jac(params, direction_arg):
+        # --- PRECONDITIONING FOR BFGS ---
+        # Generate scale factors based on the initial guess. 
+        # Using np.maximum prevents division by values that are exactly zero.
+        param_scales = np.array([
+            1,                 # E
+            0.5,              # Ea_frac
+            20,            # x
+            20,            # y
+            20,            # z
+            1,                    # p_x
+            1,                    # p_y
+            1,                    # p_z
+            1,                 # a_x
+            1,                 # a_y
+            1,                 # a_z
+            3,                # sigma_p_xy
+            3,                       # sigma_p_z
+            0.1                         # rho_scale
+        ])
+        # Force the Energy scale strictly to its prior mean to handle the extreme magnitude
+        param_scales[0] = E_prior.mu 
+        
+        # Initial guess in scaled space O(1)
+        p0_scaled = p0 / param_scales
+
+        def nll_scaled(scaled_params, direction_arg):
+            physical_params = scaled_params * param_scales
+            return nll(physical_params, direction_arg)
+
+        # --- PARALLEL NUMERICAL GRADIENT (SCALED) ---
+        def parallel_jac_scaled(scaled_params, direction_arg):
             epsilon = 1e-8
             perturbed_params = []
             
-            # Create 14 perturbed arrays and pack them into tuples with the direction
             for i in range(ndim):
-                p_copy = np.copy(params)
+                p_copy = np.copy(scaled_params)
                 p_copy[i] += epsilon
-                perturbed_params.append((p_copy, direction_arg))
+                # Pass param_scales to the tuple so worker processes have access to it
+                perturbed_params.append((p_copy, direction_arg, param_scales))
                 
-            # Evaluate all 14 perturbed states simultaneously across your 256 cores
-            f_x_plus_h = np.array(pool.map(nll_pool_wrapper, perturbed_params))
+            f_x_plus_h = np.array(pool.map(nll_pool_wrapper_scaled, perturbed_params))
+            f_x = nll_scaled(scaled_params, direction_arg)
             
-            # Evaluate the base state
-            f_x = nll(params, direction_arg)
-            
-            # Calculate the gradient vector: (f(x+h) - f(x)) / h
             return (f_x_plus_h - f_x) / epsilon
         # -----------------------------------
 
-        # --- NEW CALLBACK FUNCTION ---
+        # --- CALLBACK FUNCTION WITH UN-SCALING ---
         iteration_counter = [0]
-        # --- NEW CALLBACK FUNCTION WITH StopIteration ---
-        iteration_counter = [0]
-        last_lp = [-np.inf]  # Store previous log-posterior
+        last_lp = [-np.inf] 
 
-        # Using the modern signature from your screenshot
-        def print_callback(intermediate_result):
+        def print_callback_scaled(intermediate_result):
             iteration_counter[0] += 1
-            
-            # Grab the pre-calculated function value and parameters!
-            # (Remember nll returns -log_posterior, so we negate it back)
             current_lp = -intermediate_result.fun 
-            xk = intermediate_result.x
             
-            # Calculate how much the NLL changed since the last step
+            # Print the PHYSICAL parameters, not the scaled ones
+            xk_phys = intermediate_result.x * param_scales
+            
             delta_lp = current_lp - last_lp[0]
             last_lp[0] = current_lp
             
-            params_str = np.array2string(xk, precision=3, suppress_small=True, max_line_width=120)
+            params_str = np.array2string(xk_phys, precision=3, suppress_small=True, max_line_width=120)
             print(f"  Step {iteration_counter[0]:02d} | Log-Posterior: {current_lp:+.5e} | Delta: {delta_lp:+.4e} | Params: {params_str}")
             
-            # close enough if step size is less than 0.1
-            if iteration_counter[0] > 1 and abs(delta_lp) < 0.1:
+            if iteration_counter[0] > 10 and abs(delta_lp) < 0.1:
                 print("  -> Stopping early: Log-posterior change is below 0.1 tolerance.")
                 raise StopIteration
         # ------------------------------------------------
 
-        # Run BFGS optimization
-        # NOTE: We added args=(direction,) so Scipy knows how to call our top-level nll function
+        # Run BFGS optimization in the SCALED space
         opt_start = time.time()
-        res = opt.minimize(nll, p0, args=(direction,), method='BFGS', jac=parallel_jac, callback=print_callback,
-                           options={
-                'disp': True      # Prints a summary when finished
-            })
+        res = opt.minimize(nll_scaled, p0_scaled, args=(direction,), method='BFGS', 
+                           jac=parallel_jac_scaled, callback=print_callback_scaled,
+                           options={'disp': True})
         
-        # Determine if it stopped for a good reason
         stopped_by_us = getattr(res, 'status', None) == 99
         
         if res.success or stopped_by_us:
             print(f"  -> Optimization successful. (Reason: {res.message})")
-            best_p = res.x
+            # Convert the result back to physical units
+            best_p = res.x * param_scales
         else:
             print(f"  -> Optimization failed. (Reason: {res.message}). Still using optimization result.")
-            best_p = res.x#p0
+            best_p = res.x * param_scales
 
         initial_positions = []
         
-        # --- NEW: Hessian-based Initialization ---
+        # --- Hessian-based Initialization (WITH UN-SCALING) ---
         if (res.success or stopped_by_us) and hasattr(res, 'hess_inv'):
             try:
-                # Extract the inverse Hessian (Covariance Matrix)
-                cov_matrix = res.hess_inv
+                cov_matrix_scaled = res.hess_inv
                 
-                # Safety check: Ensure the diagonal (variances) are strictly positive
+                # Transform inverse Hessian from scaled space to physical space:
+                # Cov_phys = diag(Scales) * Cov_scaled * diag(Scales)
+                cov_matrix = cov_matrix_scaled * np.outer(param_scales, param_scales)
+                
                 if np.all(np.diag(cov_matrix) > 0):
-                    print("  -> Using BFGS inverse Hessian to shape the initial walker ball.")
-                    
-                    # We scale the covariance by a small factor (e.g., 0.01) 
-                    # to start the walkers in a *tight* ball around the MAP rather 
-                    # than spanning the full width of the posterior immediately.
+                    print("  -> Using un-scaled BFGS inverse Hessian to shape the initial walker ball.")
                     tight_cov = cov_matrix * 0.01 
-                    
-                    # Draw walkers from the multivariate Gaussian
                     initial_positions = np.random.multivariate_normal(best_p, tight_cov, size=nwalkers)
-                    
-                    # Force to a list of arrays for emcee compatibility
                     initial_positions = list(initial_positions) 
                 else:
                     print("  -> Warning: Hessian diagonal has negative values. Falling back to heuristic.")
@@ -350,7 +367,7 @@ if __name__ == '__main__':
                                             moves=stretch_move_only,
                                             pool=pool)
 
-            for step_idx, sample in enumerate(sampler.sample(init_walker_pos, iterations=steps, progress=False)):
+            for step_idx, sample in enumerate(sampler.sample(init_walker_pos, iterations=steps, progress=True)):
                 print('step: ', step_idx)
                 tau = sampler.get_autocorr_time(tol=0)
                 xs = sampler.get_chain()[-1]

@@ -34,6 +34,9 @@ class SimulatedEvent:
         self.pad_to_xy = {a: b for b, a in self.xy_to_pad.items()}
         self.pad_width = 2.2 #mm
 
+        #trace_correlated: x_i = m y_i + c_i
+        #uncorrelated: x_y = m_i y_i + c_i
+        self.likelihood_option = 'trace_correlated'
         
         #dictionary containing energy deposition on each pad as a function of z coordinate
         self.traces_to_fit = {} #trace data to try to fit. Populated by calling self.set_real_data
@@ -273,50 +276,86 @@ class SimulatedEvent:
         self.pad_ll = {}
         start_time = time.time()
         to_return = 0
-        for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
-            pad_ll = 0
-            if pad in self.sim_traces: #if the pad trace was simulated
-                cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
-                for i in range(self.num_trace_bins):
-                    for j in range(self.num_trace_bins):
-                        cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
-                        if i ==j:
-                            cov_matrix[i,j] += self.other_systematics**2
-                if pad in self.traces_to_fit: #pad fired and was simulated
-                    residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
-                    pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
-                    #use cholesky decomposition to get log(det(cov_matrix)) and avoid overlow issues when trace is long
-                    #https://math.stackexchange.com/questions/2001041/logarithm-of-the-determinant-of-a-positive-definite-matrix
-                    #used to do: pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
-                    L = np.linalg.cholesky(cov_matrix)
-                    diag_elements = np.diagonal(L)
-                    pad_ll -= np.sum(np.log(diag_elements))
+        if self.likelihood_option == 'trace_correlated':
+            for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
+                pad_ll = 0
+                if pad in self.sim_traces: #if the pad trace was simulated
+                    cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
+                    for i in range(self.num_trace_bins):
+                        for j in range(self.num_trace_bins):
+                            cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
+                            if i ==j:
+                                cov_matrix[i,j] += self.other_systematics**2
+                    if pad in self.traces_to_fit: #pad fired and was simulated
+                        residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
+                        pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
+                        #use cholesky decomposition to get log(det(cov_matrix)) and avoid overlow issues when trace is long
+                        #https://math.stackexchange.com/questions/2001041/logarithm-of-the-determinant-of-a-positive-definite-matrix
+                        #used to do: pad_ll -= 0.5*np.log(np.linalg.det(cov_matrix))
+                        L = np.linalg.cholesky(cov_matrix)
+                        diag_elements = np.diagonal(L)
+                        pad_ll -= 0.5*np.sum(np.log(diag_elements))
 
-                    residuals = np.matrix(residuals)
-                    pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0,0]
-                else: #pad was simulated firing, but did not
-                    #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
-                    #than this value
-                    #TODO: is there a not to expensive way to account for corralations between time bins?
-                    sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
-                    x = (self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma
-                    #make function which 
-                    #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
-                    #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
-                    #continuous everywhere.
-                    pad_ll = np.sum(np.log(0.5*scipy.special.erfc(-x)))
-                    # if not np.isfinite(pad_ll):
-                    #     print(x, pad_ll)
+                        residuals = np.matrix(residuals)
+                        pad_ll -= 0.5*(residuals*(cov_matrix**-1)*residuals.T)[0,0]
+                    else: #pad was simulated firing, but did not
+                        #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
+                        #than this value
+                        #TODO: is there a not to expensive way to account for corralations between time bins?
+                        sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
+                        x = (self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma
+                        #make function which 
+                        #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
+                        #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
+                        #continuous everywhere.
+                        pad_ll = np.sum(np.log(0.5*scipy.special.erfc(-x)))
+                        # if not np.isfinite(pad_ll):
+                        #     print(x, pad_ll)
 
-            elif pad in self.traces_to_fit: #pad was not simulated but did fire
-                assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading
-                pad_ll -= 0.5*self.num_trace_bins*np.log(np.sqrt(2*np.pi*self.other_systematics**2))
-                if pad in self.traces_to_fit: #pad fired, but was not simulated
-                    residuals = np.matrix(-self.traces_to_fit[pad])
-                    pad_ll -= 0.5*(residuals*residuals.T)[0]/self.other_systematics**2
+                elif pad in self.traces_to_fit: #pad was not simulated but did fire
+                    assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading
+            
             to_return += pad_ll
             self.pad_ll[pad] = pad_ll
+        
+        elif self.likelihood_option == 'uncorrelated':
+            for pad in  self.pad_to_xy: #iterate over all pads, regardless of if they fired
+                pad_ll = 0
+                if pad in self.sim_traces: #if the pad trace was simulated
+                    cov_matrix = np.matrix(np.zeros((self.num_trace_bins, self.num_trace_bins)))
+                    # for i in range(self.num_trace_bins):
+                    #     for j in range(self.num_trace_bins):
+                    #         cov_matrix[i,j] = self.pad_gain_match_uncertainty**2*self.sim_traces[pad][i]*self.sim_traces[pad][j]
+                    #         if i ==j:
+                    #             cov_matrix[i,j] += self.other_systematics**2
+                    if pad in self.traces_to_fit: #pad fired and was simulated
+                        residuals = self.sim_traces[pad] - self.traces_to_fit[pad]
+                        pad_ll -= self.num_trace_bins*0.5*np.log(2*np.pi)
+                        uncertainties_squared_per_bin = self.pad_gain_match_uncertainty**2*self.sim_traces[pad]**2 + self.other_systematics**2
+                        pad_ll -= 0.5*np.sum(np.log(uncertainties_squared_per_bin))
+                        pad_ll -= 0.5*np.sum(residuals**2/uncertainties_squared_per_bin)
 
+                        residuals = np.matrix(residuals)
+                    else: #pad was simulated firing, but did not
+                        #if trace < self.pad_threshold, pad would not have fired. Calculate probability that all time bins were less
+                        #than this value
+                        #TODO: is there a not to expensive way to account for corralations between time bins?
+                        sigma = np.sqrt(self.other_systematics**2 + (self.pad_gain_match_uncertainty*self.sim_traces[pad])**2)
+                        x = (self.pad_threshold - self.sim_traces[pad])/2**0.5/sigma
+                        #make function which 
+                        #erf(x) evaluates to -1.0 always within floating point precision for x < approx -5.5. Build piecwise function
+                        #which evaluates to x for x > a, and then asymtotically approaches -5.5 as x->-inf when x <a, and is 
+                        #continuous everywhere.
+                        pad_ll = np.sum(np.log(0.5*scipy.special.erfc(-x)))
+                        # if not np.isfinite(pad_ll):
+                        #     print(x, pad_ll)
+                    to_return += pad_ll
+                    self.pad_ll[pad] = pad_ll
+
+                elif pad in self.traces_to_fit: #pad was not simulated but did fire
+                    assert False #this case should never happen anymore, but might need to add it back in if I add adaptive charge spreading
+        else:
+            raise ValueError('unknown likelihood option')
         if self.enable_print_statements:
             print('likelihood time: %f s'%(time.time() - start_time))
         return to_return
