@@ -105,7 +105,7 @@ def get_h5_file(experiment, run_number):
     elif experiment == 'e25058':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 100
+        h5file.ic_counts_threshold = 0
         h5file.background_subtract_mode = 'smart'
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
@@ -294,3 +294,18 @@ def get_run_and_event_numbers(experiment, runs):
         event_numbers.append(np.arange(first, last+1))
         run_numbers.append(np.ones(last - first + 1)*run)
     return np.concatenate(run_numbers, axis=0), np.concatenate(event_numbers, axis=0)
+ 
+def get_cobos_present(experiment, run, num_events_to_check = 1000):
+    num_asads_expected = 4 #terminate once 4 asads have been seen
+    h5 = process_runs.get_h5_file(experiment, run)
+    h5.background_subtract_mode = 'none' #disable background subtrction since only care about channels
+    cobos = []
+    evt_bounds = h5.get_event_num_bounds()
+    for i in range(evt_bounds[0], min(evt_bounds[0] + num_events_to_check, evt_bounds[1])):
+        l = np.unique(h5.get_data(i)[:,0])
+        for j in l:
+            if j not in cobos:
+                cobos.append(j)
+        if len(cobos) >= num_asads_expected:
+            return np.sort(cobos)
+    return np.sort(cobos)

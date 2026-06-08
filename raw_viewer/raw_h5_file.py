@@ -775,11 +775,27 @@ class raw_h5_file:
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
-        ax.set_xlim3d(-200, 200)
-        ax.set_ylim3d(-200, 200)
-        ax.set_zlim3d(0, 400)
+        
 
         xs, ys, zs, es = self.get_xyze(event_num, threshold=threshold)
+
+        if len(xs) > 0:
+            # Find the center of the track
+            x_c, y_c, z_c = np.mean(xs), np.mean(ys), np.mean(zs)
+            
+            # Find the max spread to keep the box cubic
+            max_spread = max(np.ptp(xs), np.ptp(ys), np.ptp(zs)) / 2.0
+            buffer = 10 
+            limit_range = max_spread + buffer
+
+            ax.set_xlim3d(x_c - limit_range, x_c + limit_range)
+            ax.set_ylim3d(y_c - limit_range, y_c + limit_range)
+            ax.set_zlim3d(z_c - limit_range, z_c + limit_range)
+        else:
+            # Fallback if the event is totally empty
+            ax.set_xlim3d(-200, 200)
+            ax.set_ylim3d(-200, 200)
+            ax.set_zlim3d(0, 400)
 
         #TODO: make generic, these are P10 values
         calib_point_1 = (0.806, 156745)
@@ -789,12 +805,16 @@ class raw_h5_file:
         energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
         energy_offset = energy_1 - energy_scale_factor * channel_1
 
+        # 1. Apply the calibration to the pad energies (for the color mapping)
+        #calibrated_es = (es * energy_scale_factor) + energy_offset
+
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
         max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(event_num)
+        #total_calibrated_energy = (raw_total_counts * energy_scale_factor) + energy_offset
         length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d \n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
+        plt.title('Event %d, Total Counts=%d \n Length=%f mm, Angle=%f deg\n # Pads Railed=%d'%(event_num, energy, 
                                                                                                length,
                                                                                                np.degrees(angle), len(pads_railed)))
         plt.show(block=block)

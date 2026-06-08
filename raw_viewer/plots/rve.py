@@ -17,22 +17,8 @@ from e23035_analysis import e23035_runs
 
 experiment = 'e25058'#_prep_vault'
  
-if experiment == 'e23035':
-    #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-    run_range=[148,149,150]
-    #run_range = [145]
-#     exclude_runs = [1,9, 19, 73, 113,
-#                     132, #run missing some CoBos
-#                     210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
-#                     289,290, 291, 292, 293, 294, 295, 296, 297, 298]#41 deg angle runs
-if experiment == 'e23035_prep_vault': # runs before experiment
-    #run_range = (17,20,21)
-    #run_range = np.arange(61, 63+1) #calibration before experiment
-    #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
-    #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [73]#[61, 62, 63]
 if experiment =='e25058':
-    run_range= [71]#[70,71,72,76,77,78,79,80,81,82,83]
+    run_range= [71] #80,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range =[228]
 # else: #during experiment
@@ -72,7 +58,7 @@ if load_ddas:
     times_since_beam_off = np.concatenate(times_since_beam_off)
 else:
     times_since_beam_off = process_runs.get_time_since_beam_off(experiment, get_runs)
-veto_thresh =  150 #np.inf
+veto_thresh =  150
 rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 1001)
 alphahist_bins = 100
@@ -107,7 +93,7 @@ if experiment == 'e23035':
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
-    veto_mask = (veto_max < veto_thresh) & (times_since_beam_off>0.1)
+    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.1)
 veto_mask = veto_mask & (num_pads_railed==0) #& (angles>np.radians(20)) 
 
     
@@ -117,12 +103,14 @@ if load_ddas:
 
 print('starting plotting')
 plt.figure()
-plt_mask = veto_mask&(lengths>1)&(lengths<400)
+plt_mask = veto_mask&(lengths>1)&(lengths<400)#
 plt.title('runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.colorbar()
-plt.xlabel('energy (MeV)')
-plt.ylabel('range (mm)')
+plt.xlabel('Energy (MeV)')
+plt.ylabel('Range (mm)')
+plt.xlim(0, 4)
+plt.ylim(0, 160)
 
 
 # self.poly_selector = matplotlib.widgets.PolygonSelector(ax,self.set_cut_polygon)
@@ -292,8 +280,49 @@ def show_selected_event(i):
     evt = evt_nums[plt_mask][rve_cut_select_mask][i]
     print('run %d evt %d energy %f MeV'%(run, evt, energy[plt_mask][rve_cut_select_mask][i]))
     show_event(run,evt)
-    
 
+def show_all_selected_tracks():
+    """
+    Loops through all events in the rve_cut_select_mask, 
+    displaying 2D and 3D tracks side-by-side.
+    """
+    # Calculate how many events are in the mask
+    num_selected = np.sum(rve_cut_select_mask)
+    print(f"Displaying {num_selected} selected events...| Total Events{num_selected}")
+
+    for i in range(num_selected):
+        show_selected_event_side_by_side(i)
+        # Wait for 5 seconds before the next iteration
+        plt.pause(5)
+        plt.close('all') # Clears the plots for the next event
+
+def show_selected_event_side_by_side(i):
+    run = evt_runs[plt_mask][rve_cut_select_mask][i]
+    evt = evt_nums[plt_mask][rve_cut_select_mask][i]
+    en = energy[plt_mask][rve_cut_select_mask][i]
+    
+    print(f'Displaying: Run {run} | Evt {evt} | Energy {en:.3f} MeV | Index {i}')
+    
+    # Create the main container window
+    #plt.figure(figsize=(14, 7))
+    
+    h5file = process_runs.get_h5_file(experiment, run)
+    
+    # Position 1: Left side for 2D
+    #plt.subplot(1, 2, 1)
+    h5file.show_2d_projection(evt, block=False)
+    #plt.show(block=False)
+    #plt.title("2D Projection")
+    #plt.figure(figsize=(14, 7))
+    # Position 2: Right side for 3D
+    # Note: If your plot_3d_traces handles its own 'projection=3d', 
+    # this call should hopefully populate the right side of the current figure.
+    #plt.subplot(1, 2, 2)
+    h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
+    h5file.plot_traces(evt, block=False)
+    
+    #plt.suptitle(f"Run {run} - Event {evt} ({en:.3f} MeV)")
+    #plt.show(block=False)
 def show_event(run, evt):
     h5file = process_runs.get_h5_file(experiment, run)
     h5file.show_2d_projection(evt, block=False)
@@ -365,7 +394,7 @@ def plot_energy_spectrum_fixed_bin_width(bin_width=0.01):
     plt.figure(figsize=(10, 6))
     plt.hist(selected_energy, bins=fixed_bins, histtype='step', color='black', lw=1.5)
    
-    plt.title(f'Energy Spectrum | Selected Protons (Run {get_runs})')
+    plt.title(f'Energy Spectrum | Selected Region from (Run {get_runs})')
     plt.xlabel('Energy (MeV)')
     plt.ylabel(f'Counts / {bin_width*1000:.0f} keV') # Updates y-axis to show bin width
    
@@ -511,3 +540,28 @@ def fit_peak_and_calibrate(true_energy_mev):
     else:
         print("No valid fit was made. Returning None.")
         return None, None
+    def range_vs_energy(time_interval):
+        print('starting plotting')
+        plt.figure()
+        plt_mask = veto_mask&(lengths>1)&(lengths<400)
+        plt.title('runs: '+str(get_runs) + 'time interval'+ str(time_interval) + "mins")
+        plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
+        plt.colorbar()
+        plt.xlabel('energy (MeV)')
+        plt.ylabel('range (mm)')
+        print(ts)
+
+def get_cobos_present(experiment, run, num_events_to_check = 1000):
+    num_asads_expected = 4 #terminate once 4 asads have been seen
+    h5 = process_runs.get_h5_file(experiment, run)
+    h5.background_subtract_mode = 'none' #disable background subtrction since only care about channels
+    cobos = []
+    evt_bounds = h5.get_event_num_bounds()
+    for i in range(evt_bounds[0], min(evt_bounds[0] + num_events_to_check, evt_bounds[1])):
+        l = np.unique(h5.get_data(i)[:,0])
+        for j in l:
+            if j not in cobos:
+                cobos.append(j)
+        if len(cobos) >= num_asads_expected:
+            return np.sort(cobos)
+    return np.sort(cobos)
