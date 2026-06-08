@@ -144,7 +144,7 @@ if __name__ == '__main__':
 
     fit_start_time = time.time()
     nwalkers = 256
-    steps = 200
+    steps = 2000
     ndim = 14
 
     def get_init_walker_pos(direction):
@@ -239,7 +239,9 @@ if __name__ == '__main__':
             method='Nelder-Mead', 
             options={
                 'disp': True,
-                'fatol': 0.1,        # Exit criteria: Function (NLL) absolute tolerance is ~0.1
+                'fatol': 1,        # Exit criteria: Function (NLL) absolute tolerance is ~0.1
+                'xatol':1, #really loose, so fatol typically is the one to trip
+                'adaptive':True
             }
         )
         
@@ -250,18 +252,19 @@ if __name__ == '__main__':
         # --- Heuristic Scales for Walker Initialization ---
         vp = np.sum(best_p[5:8]**2)**0.5
         va = np.sum(best_p[8:11]**2)**0.5
-        print("  -> Using heuristic scales for walker initialization.")
-        scales = np.array([
-            E_prior.sigma * 0.05,  # E
-            0.01,                 # Ea_frac
-            0.1, 0.1, 0.1,        # x, y, z
-            0.01*vp, 0.01*vp, 0.01*vp,     # p_x, p_y, p_z
-            0.01*va, 0.01*va, 0.01*va,        # a_x, a_y, a_z
-            0.1,                  # sigma_p_xy
-            0.1,                  # sigma_p_z
-            0.01                  # rho_scale
-        ])
-        initial_positions = [best_p + np.random.randn(ndim) * scales for w in range(nwalkers)]
+        # print("  -> Using heuristic scales for walker initialization.")
+        # scales = np.array([
+        #     E_prior.sigma * 0.05,  # E
+        #     0.01,                 # Ea_frac
+        #     0.1, 0.1, 0.1,        # x, y, z
+        #     0.01*vp, 0.01*vp, 0.01*vp,     # p_x, p_y, p_z
+        #     0.01*va, 0.01*va, 0.01*va,        # a_x, a_y, a_z
+        #     0.1,                  # sigma_p_xy
+        #     0.1,                  # sigma_p_z
+        #     0.01                  # rho_scale
+        # ])
+        
+        initial_positions = [best_p + np.random.randn(ndim) * 1e-4 for w in range(nwalkers)]
 
         return initial_positions
 

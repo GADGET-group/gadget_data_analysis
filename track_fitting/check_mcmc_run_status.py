@@ -208,9 +208,9 @@ if False: #change this to True for single particle fits
     filepath_template = './run%d_mcmc/event%d/%s.h5'
 else:
     run_number= 71
-    steps = ['forward', 'backward']
+    steps = ['forward']#, 'backward']
     filenames = []
-    events = [4007, 7074,9174]#[4007, 7074, 9174, 11379, 15302, 21224, 22222, 28950, 33414, 4434, 5866, 314,  993, 1723, 166, 563 ]# 
+    events = [4007, 7074]#[4007, 7074, 9174, 11379, 15302, 21224, 22222, 28950, 33414, 4434, 5866, 314,  993, 1723, 166, 563 ]# 
     
     # Note: Keep the labels exactly as they were (12 dimensions). The transform_to_spherical function 
     # handles the conversion from 14 back to 12 behind the scenes.
