@@ -239,8 +239,8 @@ if __name__ == '__main__':
             method='Nelder-Mead', 
             options={
                 'disp': True,
-                'fatol': 1,        # Exit criteria: Function (NLL) absolute tolerance is ~0.1
-                'xatol':1, #really loose, so fatol typically is the one to trip
+                'fatol': 0.1,        # Exit criteria: Function (NLL) absolute tolerance is ~0.1
+                'xatol':0.1, #really loose, so fatol typically is the one to trip
                 'adaptive':True
             }
         )
