@@ -186,6 +186,7 @@ def make_merged_root_file(ddas_run):
     An initial energy calibraiton will be provided for DDAS channels using the slope and offset specified in the channel map.
 
     All times will be stored in seconds, and energies will be stored in keV if a calibraiton is available. Track lengths are in mm.
+    Track angles are in degrees.
 
     '''
     root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
@@ -208,6 +209,7 @@ def make_merged_root_file(ddas_run):
             proton_mask = e23035_runs.get_proton_mask(get_runs)
             alpha_mask = e23035_runs.get_alpha_mask(get_runs)
             track_lengths = e23035_runs.get_length_mm(get_runs)
+            track_angles = np.degrees(process_runs.get_angle('e23035', get_runs))
             get_timestamps = process_runs.get_quantity('timestamps', 'e23035', get_runs)
             veto_mask = e23035_runs.get_veto_mask(get_runs)
         else:
@@ -240,6 +242,7 @@ def make_merged_root_file(ddas_run):
         branch_counts = [np.array([0], dtype=np.int32) for i in ch_names]
         branch_counts_ss = [np.array([0], dtype=np.float64) for i in ch_names] #sliding scale method counts
         tree_tpc_energy, tree_track_length = np.array([0.], dtype=np.float64), np.array([0.], dtype=np.float64)
+        tree_track_angle = np.array([0.], dtype=np.float64)
         tree_ptype = np.array([0], dtype=np.int32)
         tree_should_veto = np.array([True], dtype=bool)
         tree_get_timestamp = np.array([np.nan])
@@ -254,6 +257,7 @@ def make_merged_root_file(ddas_run):
         out_tree.Branch('tpc_track_length', tree_track_length, 'tpc_track_length/D')
         out_tree.Branch('tpc_particle_id', tree_ptype, 'tpc_particle_id/I')
         out_tree.Branch('tpc_should_veto', tree_should_veto, 'tpc_should_veto/O')
+        out_tree.Branch('tpc_track_angle', tree_track_angle, 'tpc_track_angle/D')
         
         tsbo = np.array([np.nan], dtype=np.float64)
         out_tree.Branch('time_since_beam_off', tsbo, 'time_since_beam_off/D')
@@ -328,6 +332,7 @@ def make_merged_root_file(ddas_run):
                     tree_ptype[0] = 2
                 tree_should_veto[0] = not veto_mask[get_evt_index]
                 tree_get_timestamp[0] = get_time
+                tree_track_angle[0] = track_angles[get_evt_index]
                 
                 last_get_time = get_time
                 last_ddas_time = ddas_time            

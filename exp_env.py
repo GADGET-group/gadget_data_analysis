@@ -49,12 +49,12 @@ if __name__ == '__main__':
     #runs = [49]#range(61,74)#[74,75,76,77]
     from e23035_analysis.e23035_runs import run_df
     import numpy as np
-    if True:
+    if False:
         ddas_runs = [73]#range(72,99)
         with multiprocessing.Pool(200) as pool:
             pool.map(merge_ddas, ddas_runs)
-    if False:
+    if True:
         #runs = run_df['GET'][np.isfinite(run_df['GET'])]
-        runs=[131,177,178,180,214,215,221,229,234,235,257,266,271,274]#49, 61,62,63,64,65]
+        runs=[257, 256, 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241]#49, 61,62,63,64,65]
         with multiprocessing.Pool(200) as pool:
-            pool.map(process_run, runs)
+            pool.map(merge_ddas, runs)
