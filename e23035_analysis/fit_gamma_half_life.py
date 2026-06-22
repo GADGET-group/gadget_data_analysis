@@ -6,6 +6,8 @@ import numpy as np
 from raw_viewer import ddas_interface, process_runs
 from e23035_analysis import e23035_runs, fitting_tools
 
+experiment = 'e23035'
+
 if True: #all 59Zn
     runs = np.array(e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='59Zn')])# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')])
     runs = runs[(runs != 275)&(runs!=276)&(runs!=279)]
@@ -16,9 +18,9 @@ if False: #subset of 60Ga
 
 n_workers = len(runs)
 
-gammas = ddas_interface.get_histogram(runs, (12000-1,1,12000), 'gammas', 'summed gamma spectrum', ddas_interface.get_add_back_gamma_str(), num_workers=n_workers)
+gammas = ddas_interface.get_histogram(experiment, runs, (12000-1,1,12000), 'gammas', 'summed gamma spectrum', ddas_interface.get_add_back_gamma_str(), num_workers=n_workers)
 s = ddas_interface.get_add_back_gamma_str()
-tsbo = ddas_interface.get_histogram(runs, tsbo_bins, '60Ga_decay_times', 'Time since beam off for 60Ga gamma rays (1003 keV & 3848 keV)',
+tsbo = ddas_interface.get_histogram(experiment, runs, tsbo_bins, '60Ga_decay_times', 'Time since beam off for 60Ga gamma rays (1003 keV & 3848 keV)',
                                     'time_since_beam_off', '((%s>3840 && %s < 3855) || (%s > 1002 && %s < 1006))'%(s,s,s,s), num_workers=n_workers)
 
 func_str = '[0] + [1]*exp(-log(2)*x/[2]) + [3]*exp(-log(2)*x/[4]) + [5]*exp(-log(2)*x/[6])'

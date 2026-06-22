@@ -36,11 +36,11 @@ def process_run(run):
 
 def merge_ddas(ddas_run, remerge=True):
     try:
-        if os.path.exists(ddas_interface.get_merged_root_file_path(ddas_run)) and not remerge:
+        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, ddas_run)) and not remerge:
             print('ddas run %d already merged\n'%ddas_run)
         else:
             print('merging ddas run %d'%ddas_run)
-            ddas_interface.make_merged_root_file(ddas_run)
+            ddas_interface.make_merged_root_file(experiment, ddas_run)
             print('finished merging ddas run %d'%ddas_run)
     except Exception as e:
         print('error merging ddas run ', ddas_run)

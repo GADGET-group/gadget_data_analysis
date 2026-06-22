@@ -53,7 +53,7 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
         if good_long_tracks_tpc and run < 238:
             #run 238 has max readout depth and final gate delay. Only important above ~2.2 MeV
             continue
-        if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
+        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
             runs.append(run)
     return runs
 

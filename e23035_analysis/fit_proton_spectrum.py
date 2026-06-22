@@ -7,6 +7,8 @@ import numpy as np
 from raw_viewer import ddas_interface, process_runs
 from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter
 
+experiment = 'e23035'
+
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end
 # These efficiencies are defined in terms of fractions of implanted nuclie which decay during the measurement window
@@ -15,11 +17,11 @@ Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
 ddas_runs_protons_all_energies = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec = ddas_interface.get_histogram(ddas_runs_protons_all_energies, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
+pspec = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
 ddas_runs_low_energy_protons = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
-pspec_low_enegy = ddas_interface.get_histogram(ddas_runs_low_energy_protons, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
+pspec_low_enegy = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
 ddas_runs_alphas = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
-aspec = ddas_interface.get_histogram(ddas_runs_alphas, (700, 2000, 9000), 'alpha spectrum', 'alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=256)
+aspec = ddas_interface.get_histogram(experiment, ddas_runs_alphas, (700, 2000, 9000), 'alpha spectrum', 'alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=256)
 
 sigma_tpc = lambda E: (0.011107*E/1e3 + 0.008813049)*1e3
 

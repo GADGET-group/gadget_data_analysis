@@ -166,11 +166,11 @@ def get_time_since_beam_off(experiment, run):
             pickle.dump(to_return, save_file)
         return to_return
 
-def get_merged_root_file_path(ddas_run):
-    root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
+def get_merged_root_file_path(experiment, ddas_run):
+    root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     return os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
 
-def make_merged_root_file(ddas_run):
+def make_merged_root_file(experiment, ddas_run):
     '''
     Merge GET data stream into an existing root file, adding a new TTree called "merged_data".
     The ddas root file is assumed to be in the uncalibrated raw format assumed by the above function, but the 
@@ -189,10 +189,10 @@ def make_merged_root_file(ddas_run):
     Track angles are in degrees.
 
     '''
-    root_file_path = get_root_file_path(experiment='e23035', run=ddas_run)
+    root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
 
     log_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merge.log'%ddas_run)
-    output_path = get_merged_root_file_path(ddas_run)
+    output_path = get_merged_root_file_path(experiment, ddas_run)
     with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
         git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
@@ -202,21 +202,28 @@ def make_merged_root_file(ddas_run):
         log_file.write('git status: %s\n'%git_status)
         log_file.write('git diff: %s\n'%git_diff)
 
-        get_runs = np.sort(e23035_runs.run_df['GET'][(e23035_runs.run_df['DDAS']==ddas_run) & np.isfinite(e23035_runs.run_df['GET'])] )
+        import importlib
+        try:
+            exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+            get_runs = np.sort(exp_runs.run_df['GET'][(exp_runs.run_df['DDAS']==ddas_run) & np.isfinite(exp_runs.run_df['GET'])] )
+        except (ImportError, AttributeError):
+            log_file.write(f'no runs module or compatible run_df found for {experiment}, skipping GET data merge\n')
+            get_runs = []
+
         if len(get_runs)>0:
             log_file.write('found corresponding GET runs: %s\n'%str(get_runs))
-            tpc_energy_MeV = e23035_runs.get_energy_MeV(get_runs)
-            proton_mask = e23035_runs.get_proton_mask(get_runs)
-            alpha_mask = e23035_runs.get_alpha_mask(get_runs)
-            track_lengths = e23035_runs.get_length_mm(get_runs)
-            track_angles = np.degrees(process_runs.get_angle('e23035', get_runs))
-            get_timestamps = process_runs.get_quantity('timestamps', 'e23035', get_runs)
-            veto_mask = e23035_runs.get_veto_mask(get_runs)
+            tpc_energy_MeV = exp_runs.get_energy_MeV(get_runs)
+            proton_mask = exp_runs.get_proton_mask(get_runs)
+            alpha_mask = exp_runs.get_alpha_mask(get_runs)
+            track_lengths = exp_runs.get_length_mm(get_runs)
+            track_angles = np.degrees(process_runs.get_angle(experiment, get_runs))
+            get_timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
+            veto_mask = exp_runs.get_veto_mask(get_runs)
         else:
             log_file.write('no corresponding GET runs found \n')
             get_timestamps = []
 
-        ddas_ch_map_path = 'e23035_analysis/channel_map.csv'
+        ddas_ch_map_path = f'{experiment}_analysis/channel_map.csv'
         log_file.write('loading DDAS channel map from %s\n'%ddas_ch_map_path)
         chmap = np.genfromtxt(ddas_ch_map_path,delimiter=', ', dtype=str, skip_header=1)
         ch_indexes = np.array(chmap[:,0], dtype=int)
@@ -349,44 +356,44 @@ def make_merged_root_file(ddas_run):
 
 
 current_run, current_file, current_data = np.nan, None, None
-def show_pid(ddas_run):
+def show_pid(experiment, ddas_run):
     global current_run
     global current_file
     global current_data
     if current_run != ddas_run:
         current_run = ddas_run
-        current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
+        current_file = ROOT.TFile(get_merged_root_file_path(experiment, ddas_run), 'READ')
         current_data = current_file.Get('merged_data')
     current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)>>(1000,-0.63e-6,-0.6e-6,1000,4000,8000)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1', 'colz')
 
-def _worker_get_cross_scint_counts(ddas_run):
-    df = ROOT.RDataFrame('merged_data', get_merged_root_file_path(ddas_run))
+def _worker_get_cross_scint_counts(experiment, ddas_run):
+    df = ROOT.RDataFrame('merged_data', get_merged_root_file_path(experiment, ddas_run))
     return df.Sum('cross_scint_b2_m').GetValue()
 
 rdataframes = {}
-def get_cross_scint_counts(ddas_run, num_workers=None):
+def get_cross_scint_counts(experiment, ddas_run, num_workers=None):
     if is_iterable_runs(ddas_run):
         run_list = list(ddas_run)
         total_counts = 0
         if num_workers is None or num_workers > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-                futures = [executor.submit(_worker_get_cross_scint_counts, run) for run in run_list]
+                futures = [executor.submit(_worker_get_cross_scint_counts, experiment, run) for run in run_list]
                 for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc="Counting cross scintillator"):
                     total_counts += future.result()
         else:
             for run in tqdm.tqdm(run_list, desc="Counting cross scintillator"):
-                total_counts += get_cross_scint_counts(run, num_workers=1)
+                total_counts += get_cross_scint_counts(experiment, run, num_workers=1)
         return total_counts
 
     global rdataframes
     if ddas_run not in rdataframes:
-        rdataframes[ddas_run] = ROOT.RDataFrame('merged_data', get_merged_root_file_path(ddas_run))
+        rdataframes[ddas_run] = ROOT.RDataFrame('merged_data', get_merged_root_file_path(experiment, ddas_run))
     return rdataframes[ddas_run].Sum('cross_scint_b2_m').GetValue()
 
-def get_cross_scint_counts_during_get_run(get_run):
+def get_cross_scint_counts_during_get_run(experiment, get_run):
     pass #TODO
 
-def get_ddas_run_duration(ddas_run):
+def get_ddas_run_duration(experiment, ddas_run):
     pass#TODO
 
 def is_iterable_runs(obj):
@@ -405,8 +412,8 @@ import concurrent.futures
 import tqdm
 import ROOT
 
-def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
-    cache_dir = os.path.join('e23035_analysis', 'hist_cache')
+def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate):
+    cache_dir = os.path.join(f'{experiment}_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
     
     unique_string = str((run, tuple(binning), var_exp, selection)).encode('utf-8')
@@ -437,7 +444,7 @@ def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
                 pass
 
     # --- BUILD THE HISTOGRAM ---
-    data_file_path = get_merged_root_file_path(run) 
+    data_file_path = get_merged_root_file_path(experiment, run) 
     data_file = ROOT.TFile.Open(data_file_path, 'READ')
     
     if not data_file or data_file.IsZombie():
@@ -466,7 +473,7 @@ def _worker_fill_run(run, binning, var_exp, selection, force_recreate):
     return cache_file_path, hash_name
 
 
-def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1):
+def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1):
     # --- MULTIPLE RUNS LOGIC ---
     if is_iterable_runs(ddas_run):
         sum_hist = None
@@ -475,7 +482,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
         if num_workers > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
-                    executor.submit(_worker_fill_run, run, binning, var_exp, selection, force_recreate) 
+                    executor.submit(_worker_fill_run, experiment, run, binning, var_exp, selection, force_recreate) 
                     for run in run_list
                 ]
                 
@@ -490,7 +497,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
                     if not temp_hist:
                         cf.Close()
                         print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
-                        cache_file_path, hash_name = _worker_fill_run(run, binning, var_exp, selection, force_recreate=True)
+                        cache_file_path, hash_name = _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate=True)
                         cf = ROOT.TFile.Open(cache_file_path, 'READ')
                         temp_hist = cf.Get(hash_name)
                         
@@ -508,7 +515,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
             # Forced stdout and dynamic columns
             for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
                 temp_name = f"{hist_name}_run{run}"
-                hist = get_histogram(run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1)
+                hist = get_histogram(experiment, run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1)
                 
                 if sum_hist is None:
                     sum_hist = hist.Clone(hist_name)
@@ -521,7 +528,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
     # --- SINGLE RUN LOGIC ---
     # Wrapped in a 1-step progress bar so you always see it
     with tqdm.tqdm(total=1, desc=f"Filling {hist_name} (Single)", file=sys.stdout, dynamic_ncols=True, leave=True) as pbar:
-        cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate)
+        cache_file_path, hash_name = _worker_fill_run(experiment, ddas_run, binning, var_exp, selection, force_recreate)
         pbar.update(1)
     
     # --- LAYER 2: SINGLE RUN FAILSAFE ---
@@ -531,7 +538,7 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
     if not temp_hist:
         cf.Close()
         print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
-        cache_file_path, hash_name = _worker_fill_run(ddas_run, binning, var_exp, selection, force_recreate=True)
+        cache_file_path, hash_name = _worker_fill_run(experiment, ddas_run, binning, var_exp, selection, force_recreate=True)
         cf = ROOT.TFile.Open(cache_file_path, 'READ')
         temp_hist = cf.Get(hash_name)
         
@@ -542,11 +549,11 @@ def get_histogram(ddas_run, binning, hist_name, hist_title, var_exp, selection="
     
     return final_hist
 
-def get_first_and_last_ddas_time(ddas_run):
+def get_first_and_last_ddas_time(experiment, ddas_run):
     '''
     Get first and last time stamps in the run in seconds
     '''
-    with ROOT.TFile(get_root_file_path('e23035', ddas_run), 'READ') as f:
+    with ROOT.TFile(get_root_file_path(experiment, ddas_run), 'READ') as f:
         tree = f.Get('tree')
         times = np.zeros(NUM_TOTAL_CH)
         tree.SetBranchAddress('times', times)

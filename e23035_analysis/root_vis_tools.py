@@ -4,6 +4,8 @@ import ROOT
 
 from raw_viewer import ddas_interface
 
+experiment = 'e23035'
+
 def draw_overlaid_histograms(hist_dict, title="Overlaid Histograms", x_label="X", y_label="Counts"):
     if not hist_dict:
         return None, None, None
@@ -119,7 +121,7 @@ def plot_crystal_vs_time(ddas_run, clover, seconds_per_tbin=360):
         canvas, histogram (to prevent garbage collection)
     """
     # 1. Get run times using the module
-    t_start, t_stop = ddas_interface.get_first_and_last_ddas_time(ddas_run)
+    t_start, t_stop = ddas_interface.get_first_and_last_ddas_time(experiment, ddas_run)
     
     # Calculate time bins (1 bin per 360 seconds = 6 minutes)
     t_bins = int((t_stop - t_start) / seconds_per_tbin)
@@ -139,6 +141,7 @@ def plot_crystal_vs_time(ddas_run, clover, seconds_per_tbin=360):
     binning = (300, 0, 3000, t_bins, t_start, t_stop)
     
     hist_vs_t = ddas_interface.get_histogram(
+        experiment,
         ddas_run, 
         binning,
         hist_name, 

@@ -10,6 +10,8 @@ import ROOT
 from raw_viewer import ddas_interface
 from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, energy_calibration_tools, degai
 
+experiment = 'e23035'
+
 '''
 Notes on peak finding an automatic fitting
 https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
@@ -30,7 +32,7 @@ for run in run_candidates:
         #174: attenuated beam
         #180, 181: grow in after PID
         #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
-        if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
+        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
             runs.append(run)
 runs = e23035_runs.get_ddas_60_Ga_runs(False, False, False, False)
 #runs = [218]#[203, 204, 275,276, 279]
@@ -241,7 +243,7 @@ def make_summary_pdf():
 
 t_tot = 0
 for run in runs:
-    t1, t2 =  ddas_interface.get_first_and_last_ddas_time(run)
+    t1, t2 =  ddas_interface.get_first_and_last_ddas_time(experiment, run)
     t_tot += t2 - t1
 print(f'total run time: {t_tot/3600} hours')
 

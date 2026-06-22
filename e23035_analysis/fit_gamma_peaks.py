@@ -9,6 +9,8 @@ from raw_viewer import ddas_interface
 from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, degai
 from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
 
+experiment = 'e23035'
+
 gamma_bin_size = 0.25 #keV
 addback_ethresh = 150
 upper_energy = 7000
@@ -28,7 +30,7 @@ if False:
 
 run_duration = 0
 for run in runs:
-    t1, t2 = ddas_interface.get_first_and_last_ddas_time(run)
+    t1, t2 = ddas_interface.get_first_and_last_ddas_time(experiment, run)
     run_duration += (t2 - t1)
 print('duration: %s hr'%(run_duration/3600))
 
@@ -154,7 +156,7 @@ ab_coincidence_hist = degai.get_addback_coincidence_spectrum(runs, degai.get_adj
 #make 2D histogram of time vs energy
 E_v_tsbo = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.200, *coincidence_binning), "E_vs_tsbo", "energy (keV) vs time (s)", "addback_energy:time_since_beam_off", 
                     dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
-run_start_time, run_stop_time = ddas_interface.get_first_and_last_ddas_time(runs[0]) #currently only works for a single run
+run_start_time, run_stop_time = ddas_interface.get_first_and_last_ddas_time(experiment, runs[0]) #currently only works for a single run
 E_v_t = degai.get_histogram(runs, adj_dict, cal_name, (2000, run_start_time, run_stop_time, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time", 
                     dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
 

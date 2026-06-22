@@ -6,6 +6,8 @@ import numpy as np
 from raw_viewer import ddas_interface, process_runs
 from e23035_analysis import e23035_runs, fitting_tools, degai, root_vis_tools
 
+experiment = 'e23035'
+
 # run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 # runs = []
 # for run in run_candidates:
@@ -40,7 +42,7 @@ gammas = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_his
 gamma_gated_on_proton = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_gated_on_protons', 'gamma rays gated on protons', 
                 'addback_energy', 'tpc_particle_id==1 &&'+time_gate_str, event_build_window, addback_ethresh, True, nonlinearity_correction_name=nlc_name)
 
-protons = ddas_interface.get_histogram(runs, (3000, 0, 3000), 'protons', 'proton energy (keV)', 'tpc_energy', 'tpc_particle_id==1', num_workers=n_workers)
+protons = ddas_interface.get_histogram(experiment, runs, (3000, 0, 3000), 'protons', 'proton energy (keV)', 'tpc_energy', 'tpc_particle_id==1', num_workers=n_workers)
 protons_gated_on_gammas = degai.get_histogram(runs,  adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_gammas', 'proton energy (keV) gated on gamma rays',
                                             'tpc_energy', 'tpc_particle_id==1 && (addback_energy>0)&&'+time_gate_str, event_build_window, addback_ethresh, True,
                                             nonlinearity_correction_name=nlc_name)

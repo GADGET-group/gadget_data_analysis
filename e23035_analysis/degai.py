@@ -13,6 +13,8 @@ from raw_viewer import ddas_interface
 from track_fitting import srim_interface, build_sim
 from e23035_analysis import energy_calibration_tools
 
+experiment = 'e23035'
+
 def is_iterable_runs(obj):
     if isinstance(obj, (str, bytes)):
         return False
@@ -141,7 +143,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
         
     for clover_string, name in zip(clover_strings, names):
         # We pass num_workers=1 because the parallelization is now handled by the outer loop above
-        to_return[name] = ddas_interface.get_histogram(ddas_run, binning, name, name, clover_string, selection="", force_recreate=False, num_workers=1)
+        to_return[name] = ddas_interface.get_histogram(experiment, ddas_run, binning, name, name, clover_string, selection="", force_recreate=False, num_workers=1)
         
     return to_return
 
@@ -251,7 +253,7 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
             nlc_poly_matrix[i, :len(params)] = params
 
     # Set up input file for reading
-    infile = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(ddas_run))
+    infile = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(experiment, ddas_run))
     intree = infile.Get('merged_data')
     
     invals = []
@@ -455,7 +457,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
 
     add_back_tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
     
-    merged_file = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(ddas_run), 'READ')
+    merged_file = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(experiment, ddas_run), 'READ')
     merged_tree = merged_file.Get('merged_data')
     merged_tree.AddFriend(add_back_tree)
 
@@ -775,7 +777,7 @@ def get_adjacent_timing_spectrum(ddas_run, adj_dict, binning):
     # ---------------------------------------------------------
     # 2. READ THE RAW TREE
     # ---------------------------------------------------------
-    in_filepath = ddas_interface.get_merged_root_file_path(ddas_run)
+    in_filepath = ddas_interface.get_merged_root_file_path(experiment, ddas_run)
     infile = ROOT.TFile.Open(in_filepath, 'READ')
     if not infile or infile.IsZombie():
         raise RuntimeError(f"Cannot open {in_filepath}")
