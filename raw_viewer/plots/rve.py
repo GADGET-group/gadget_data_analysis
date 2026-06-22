@@ -20,8 +20,8 @@ experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
     if True:
-        run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-        #run_range = range(275, 279)
+        #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+        run_range = range(263, 280)
     else:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
@@ -89,7 +89,15 @@ veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
 charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
 #energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 if experiment == 'e23035':
-    energy = e23035_runs.get_energy_MeV(get_runs)
+    if True: #use default gain match
+        energy = e23035_runs.get_energy_MeV(get_runs)
+    else:
+        gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+        with open(gain_match_path, 'rb') as f:
+            gain_match_result = pickle.load(f)
+        pad_gains = np.ones(1024)*np.average(gain_match_result.x)
+        energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
+        
 else:
     gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
     with open(gain_match_path, 'rb') as f:
