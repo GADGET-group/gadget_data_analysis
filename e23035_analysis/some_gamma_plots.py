@@ -6,7 +6,8 @@ import numpy as np
 import ROOT
 
 from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, degai
+from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
+from raw_viewer import degai
 from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
 
 addback_ethresh = 150
@@ -26,28 +27,28 @@ if False:
     runs = [280, 278, 277, 274, 271, 270, 269, 268] #missing several runs due to untransfered data
     nlc_name ='c1'
 
-    chists = degai.get_crystal_histograms(runs, gamma_binning, 'e', sliding_scale=True)
+    chists = degai.get_crystal_histograms(experiment, runs, gamma_binning, 'e', sliding_scale=True)
     canvas, th2=root_vis_tools.create_2d_hist_from_dict(chists)
     canvas.SetLogz(1)
 
-    chists_cal = degai.get_crystal_histograms(runs, gamma_binning, 'cal', cal_name=cal_name, nonlinearity_correction_name=nlc_name, sliding_scale=True)
+    chists_cal = degai.get_crystal_histograms(experiment, runs, gamma_binning, 'cal', cal_name=cal_name, nonlinearity_correction_name=nlc_name, sliding_scale=True)
     canvas2, th22=root_vis_tools.create_2d_hist_from_dict(chists_cal)
     canvas2.SetLogz(1)
 if True:
-    gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'addback_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+    gamma_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'addback_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
-    gamma_sum_hist = degai.get_histogram(runs, degai.crystal_adj_dict, cal_name, gamma_binning, 'sum_gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+    gamma_sum_hist = degai.get_histogram(experiment, runs, degai.crystal_adj_dict, cal_name, gamma_binning, 'sum_gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
 if True:
-    gamma_150ns_build_window = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, '150ns_gamma_hist', 'gamma spectrum', 'addback_energy', '', 150, addback_ethresh, True,
+    gamma_150ns_build_window = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, '150ns_gamma_hist', 'gamma spectrum', 'addback_energy', '', 150, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
 root_vis_tools.draw_overlaid_histograms({'sum':gamma_sum_hist, '500 ns build window':gamma_hist, '150 ns build window':gamma_150ns_build_window})
 
 if True:
-    gamma_beam_off_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
+    gamma_beam_off_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
                                             "time_since_beam_off<0.094", event_build_window, addback_ethresh, True,
                                             nonlinearity_correction_name=nlc_name)
-    gamma_beam_on_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
+    gamma_beam_on_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
                                             "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
                                             nonlinearity_correction_name=nlc_name)
     _overlay= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist})
@@ -82,17 +83,17 @@ if True:
     # Use a coarser binning for the 2D coincidence matrix to prevent ROOT's 1GB serialization limit
     coincidence_bin_size = 1.0 # keV
     coincidence_binning = (int((upper_energy-addback_ethresh)/coincidence_bin_size), addback_ethresh, upper_energy)
-    coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+    coincidence_hist = degai.get_addback_coincidence_spectrum(experiment, runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                     nonlinearity_correction_name=nlc_name)
-    coincidence_hist_150ns = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_name, coincidence_binning, 150, addback_ethresh, 150, True, 
+    coincidence_hist_150ns = degai.get_addback_coincidence_spectrum(experiment, runs, adj_dict, cal_name, coincidence_binning, 150, addback_ethresh, 150, True, 
                                                     nonlinearity_correction_name=nlc_name)
     # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
 
     #make 2D histogram of time vs energy
-    E_v_tsbo = degai.get_histogram(runs, adj_dict, cal_name, (200, 0, 0.200, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time_since_beam_off", 
+    E_v_tsbo = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, 0, 0.200, *coincidence_binning), "E_vs_t", "energy (keV) vs time (s)", "addback_energy:time_since_beam_off", 
                         dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
 
-    # E_v_tsco = degai.get_histogram(runs, adj_dict, cal_name, (2000, 0, 0.200, *coincidence_binning), 
+    # E_v_tsco = degai.get_histogram(experiment, runs, adj_dict, cal_name, (2000, 0, 0.200, *coincidence_binning), 
     #                     "E_vs_t_c", "energy (keV) vs time since chopper off (s)", "addback_energy:time_since_chopper_off", 
     #                     dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
 

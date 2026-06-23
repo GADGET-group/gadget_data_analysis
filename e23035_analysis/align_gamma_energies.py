@@ -8,7 +8,8 @@ import numpy as np
 import ROOT
 
 from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, energy_calibration_tools, degai
+from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, energy_calibration_tools
+from raw_viewer import degai
 
 experiment = 'e23035'
 

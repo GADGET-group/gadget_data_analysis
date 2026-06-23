@@ -168,7 +168,8 @@ def get_time_since_beam_off(experiment, run):
 
 def get_merged_root_file_path(experiment, ddas_run):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
-    return os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
+    to_return =  os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
+    return to_return
 
 def make_merged_root_file(experiment, ddas_run):
     '''
@@ -190,6 +191,7 @@ def make_merged_root_file(experiment, ddas_run):
 
     '''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
+    
 
     log_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merge.log'%ddas_run)
     output_path = get_merged_root_file_path(experiment, ddas_run)

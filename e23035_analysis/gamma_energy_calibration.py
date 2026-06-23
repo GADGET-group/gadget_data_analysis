@@ -5,7 +5,8 @@ import ROOT
 #ROOT.EnableImplicitMT()
 
 from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs, degai
+from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
+from raw_viewer import degai
 from e23035_analysis.spectrum_fitter import spectrum_fitter
 
 '''
@@ -26,7 +27,7 @@ event_build_window = 500 #ns
 adj_dict =  degai.crystal_adj_dict#degai.clover_adj_dict#
 cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
-gamma_hist = degai.get_histogram(runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+gamma_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
 
 
@@ -232,6 +233,6 @@ if False:
     # Use a coarser binning for the 2D coincidence matrix to prevent ROOT's 1GB serialization limit
     coincidence_bin_size = 1.0 # keV
     coincidence_binning = (int((upper_energy-addback_ethresh)/coincidence_bin_size), addback_ethresh, upper_energy)
-    coincidence_hist = degai.get_addback_coincidence_spectrum(runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+    coincidence_hist = degai.get_addback_coincidence_spectrum(experiment, runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                     nonlinearity_correction_name=nlc_name)
     # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)

@@ -13,8 +13,6 @@ from raw_viewer import ddas_interface
 from track_fitting import srim_interface, build_sim
 from e23035_analysis import energy_calibration_tools
 
-experiment = 'e23035'
-
 def is_iterable_runs(obj):
     if isinstance(obj, (str, bytes)):
         return False
@@ -74,17 +72,17 @@ for clover, crystal in clover_list:
 #no adjacency, equivalent to sum spectrum
 crystal_adj_dict = {(clover, crystal):[] for clover, crystal in clover_list}
 
-def _worker_cache_crystal_run(run, binning, hist_to_get, cal_name, nonlinearity_correction_name):
+def _worker_cache_crystal_run(experiment, run, binning, hist_to_get, cal_name, nonlinearity_correction_name):
     """
     Helper function for the parallel worker. 
     It calls get_crystal_histograms for a single run just to force the 
     underlying get_histogram to write the results to the safe .root cache files.
     It returns only the run number (an integer) to avoid PyROOT pickling segfaults.
     """
-    _ = get_crystal_histograms(run, binning, hist_to_get, cal_name, nonlinearity_correction_name=nonlinearity_correction_name, num_workers=1)
+    _ = get_crystal_histograms(experiment, run, binning, hist_to_get, cal_name, nonlinearity_correction_name=nonlinearity_correction_name, num_workers=1)
     return run
 
-def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_workers=None, nonlinearity_correction_name=None, sliding_scale=True):
+def get_crystal_histograms(experiment, ddas_run, binning, hist_to_get, cal_name='', num_workers=None, nonlinearity_correction_name=None, sliding_scale=True):
     '''
     hist_to_get: c, t, m, e, or cal.
     If cal, cal_name must be given, and corresponding cal generated with energy_calibration_tools will be applied, and the
@@ -103,7 +101,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
             # 1. PARALLEL CACHING: Spawn workers to process the TTrees and populate the disk caches.
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
-                    executor.submit(_worker_cache_crystal_run, run, binning, hist_to_get, cal_name, nonlinearity_correction_name)
+                    executor.submit(_worker_cache_crystal_run, experiment, run, binning, hist_to_get, cal_name, nonlinearity_correction_name)
                     for run in run_list
                 ]
                 
@@ -114,7 +112,7 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
         # Reading from the ROOT cache is nearly instantaneous, so we sum them safely in the main thread.
         for run in tqdm.tqdm(run_list, desc=f"Summing {hist_to_get}"):
             # Grab the dict of histograms for this specific run
-            run_hists = get_crystal_histograms(run, binning, hist_to_get, cal_name, num_workers=1, nonlinearity_correction_name=nonlinearity_correction_name)
+            run_hists = get_crystal_histograms(experiment, run, binning, hist_to_get, cal_name, num_workers=1, nonlinearity_correction_name=nonlinearity_correction_name)
             
             if not summed_hists:
                 # For the first run, clone the dictionaries to establish the baseline sum
@@ -147,15 +145,15 @@ def get_crystal_histograms(ddas_run, binning, hist_to_get, cal_name='', num_work
         
     return to_return
 
-def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init', nonlinearity_correction_name=None):
+def get_summed_gamma_spectrum(experiment, ddas_run, binning, cal_name='init', nonlinearity_correction_name=None):
     '''
     Sum histograms of individual crystals
     '''
     # 1. Let our newly parallelized function do all the heavy lifting
     if cal_name == 'init': #use calibration applied for merging process
-        crystal_hists = get_crystal_histograms(ddas_run, binning, 'e', nonlinearity_correction_name=nonlinearity_correction_name)
+        crystal_hists = get_crystal_histograms(experiment, ddas_run, binning, 'e', nonlinearity_correction_name=nonlinearity_correction_name)
     else:
-        crystal_hists = get_crystal_histograms(ddas_run, binning, 'cal', cal_name)
+        crystal_hists = get_crystal_histograms(experiment, ddas_run, binning, 'cal', cal_name)
         
     # 2. Create a ROOT-safe name for the histogram
     if is_iterable_runs(ddas_run):
@@ -174,7 +172,7 @@ def get_summed_gamma_spectrum(ddas_run, binning, cal_name='init', nonlinearity_c
         
     return to_return
 
-def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=True, nonlinearity_correction_name=None, time_alignment_ns=None):
+def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=True, nonlinearity_correction_name=None, time_alignment_ns=None):
     '''
     Make a ttree with the gamma ray add back, storing an array of energies and times per event.
     If sliding scale is true, adc counts will have a a uniform number from -0.5 to 0.5 added to them to prevent binning issues (see).
@@ -184,7 +182,7 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
         time_alignment_ns = {}
     time_align_str = str(sorted(time_alignment_ns.items())) if time_alignment_ns else ""
 
-    cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'add_back_tree')
+    cache_dir = os.path.join(f'{experiment}_analysis', 'clarion_cache', 'add_back_tree')
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
@@ -378,7 +376,7 @@ def get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, slidi
     out_tree._keepalive_file = read_file
     return out_tree
 
-def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=True, max_workers=None, force_recreate=False, nonlinearity_correction_name=None, time_alignment_ns=None):
+def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=True, max_workers=None, force_recreate=False, nonlinearity_correction_name=None, time_alignment_ns=None):
     """
     Generates a 1D or 2D histogram using the add_back tree and merged_data tree. Behaves just like the get_histogram function in ddas_interface, but allows refernces to 
     a "addback_energy" branch.
@@ -399,7 +397,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
             if max_workers is None or max_workers > 1:
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
-                        executor.submit(get_histogram, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns) 
+                        executor.submit(get_histogram, experiment, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns) 
                         for run in run_list
                     ]
                     for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)"):
@@ -412,7 +410,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
                             sum_hist.Add(h)
             else:
                 for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)"):
-                    h = get_histogram(run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns) 
+                    h = get_histogram(experiment, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns) 
                     if sum_hist is None:
                         sum_hist = h.Clone(hist_name)
                         sum_hist.SetTitle(hist_title)
@@ -429,7 +427,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()).hexdigest()
-    cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms_flex')
+    cache_dir = os.path.join(f'{experiment}_analysis', 'clarion_cache', 'histograms_flex')
     os.makedirs(cache_dir, exist_ok=True)
     
     hash_name = f"h_flex_{hash_str}"
@@ -455,7 +453,7 @@ def get_histogram(ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, 
             if os.path.exists(cache_file_path):
                 os.remove(cache_file_path)
 
-    add_back_tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
+    add_back_tree = get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
     
     merged_file = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(experiment, ddas_run), 'READ')
     merged_tree = merged_file.Get('merged_data')
@@ -511,7 +509,7 @@ if not hasattr(ROOT, "get_symmetric_pairs_dt"):
     }
     """)
 
-def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale=True, max_workers=None, nonlinearity_correction_name=None, time_alignment_ns=None):
+def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale=True, max_workers=None, nonlinearity_correction_name=None, time_alignment_ns=None):
     if time_alignment_ns is None:
         time_alignment_ns = {}
     time_align_str = str(sorted(time_alignment_ns.items())) if time_alignment_ns else ""
@@ -534,7 +532,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
                 (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()
             ).hexdigest()
             
-            cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
+            cache_dir = os.path.join(f'{experiment}_analysis', 'clarion_cache', 'histograms')
             os.makedirs(cache_dir, exist_ok=True)
             
             combined_hist_name = f"gg_combined_{combined_hash_str}"
@@ -569,7 +567,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
                         # Pass dt_window_ns down to the workers
-                        executor.submit(get_addback_coincidence_spectrum, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale, None, nonlinearity_correction_name, time_alignment_ns) 
+                        executor.submit(get_addback_coincidence_spectrum, experiment, run, adj_dict, cal_name, binning, dt_window_ns, e_thresh, addback_dt, sliding_scale, None, nonlinearity_correction_name, time_alignment_ns) 
                         for run in ddas_run
                     ]
                     
@@ -599,7 +597,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()).hexdigest()
-    cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'histograms')
+    cache_dir = os.path.join(f'{experiment}_analysis', 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"gg_{hash_str}"
@@ -626,7 +624,7 @@ def get_addback_coincidence_spectrum(ddas_run, adj_dict, cal_name, binning, dt_w
             if os.path.exists(cache_file_path): os.remove(cache_file_path)
 
     # Pass the window down to the tree builder!
-    tree = get_addback_tree(ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
+    tree = get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns=addback_dt, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
     df = ROOT.RDataFrame(tree)
     df = df.Define("pairs", f"get_symmetric_pairs_dt(addback_energy, time, {min_dt}, {max_dt})")
     df = df.Define("energy_x", "pairs.x")
@@ -739,7 +737,7 @@ def get_bg_subtracted_projection(h2_matrix, peak_window, bg_window):
     
     return h1_peak
 
-def get_adjacent_timing_spectrum(ddas_run, adj_dict, binning):
+def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     """
     Creates a histogram of time differences (in nanoseconds) between 
     adjacent crystals that fired in the same event, with custom binning.
@@ -751,7 +749,7 @@ def get_adjacent_timing_spectrum(ddas_run, adj_dict, binning):
     # CRITICAL: Add str(binning) to the hash so different binnings don't overwrite each other!
     hash_str = hashlib.md5((str(ddas_run) + str(binning) + str(adj_dict)).encode()).hexdigest()
     
-    cache_dir = os.path.join('e23035_analysis', 'clarion_cache', 'timing')
+    cache_dir = os.path.join(f'{experiment}_analysis', 'clarion_cache', 'timing')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"dt_{hash_str}"
