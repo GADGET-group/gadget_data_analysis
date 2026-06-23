@@ -169,6 +169,8 @@ def get_time_since_beam_off(experiment, run):
 def get_merged_root_file_path(experiment, ddas_run):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     to_return =  os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
+    if experiment == 'e25058':
+        to_return += '_alex'
     return to_return
 
 def make_merged_root_file(experiment, ddas_run):
@@ -192,8 +194,9 @@ def make_merged_root_file(experiment, ddas_run):
     '''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     
-
     log_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merge.log'%ddas_run)
+    if experiment == 'e25058':
+        log_path += '_alex'
     output_path = get_merged_root_file_path(experiment, ddas_run)
     with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout

@@ -52,12 +52,13 @@ def get_gas_density(experiment:str, run:int)->float:
         T = 20+273.15 #K
         P = 860.3 #torr
         return rho0*(P/760)*(300./T)
-    if experiment == 'e23035':
+    if experiment == 'e23035' or experiment == 'e25058':
         #TODO: verify pressure and temperature
         rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
         T = 20+273.15 #K
         P = 860.3 #torr
         return rho0*(P/760)*(300./T)
+    assert False
     
 def get_zscale(experiment:str, run:int):
     if experiment == 'e21072':
