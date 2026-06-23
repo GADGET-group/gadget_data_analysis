@@ -224,9 +224,14 @@ def make_merged_root_file(experiment, ddas_run):
             track_angles = np.degrees(process_runs.get_angle(experiment, get_runs))
             get_timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
             veto_mask = exp_runs.get_veto_mask(get_runs)
+            track_centroids = process_runs.get_quantity('track_center', experiment, get_runs)
+            get_run_ids, get_event_ids = process_runs.get_run_and_event_numbers(experiment, get_runs)
         else:
             log_file.write('no corresponding GET runs found \n')
             get_timestamps = []
+            track_centroids = []
+            get_event_ids = []
+            get_run_ids = []
 
         ddas_ch_map_path = f'{experiment}_analysis/channel_map.csv'
         log_file.write('loading DDAS channel map from %s\n'%ddas_ch_map_path)
@@ -271,6 +276,13 @@ def make_merged_root_file(experiment, ddas_run):
         out_tree.Branch('tpc_should_veto', tree_should_veto, 'tpc_should_veto/O')
         out_tree.Branch('tpc_track_angle', tree_track_angle, 'tpc_track_angle/D')
         
+        tree_track_centroid = np.array([0., 0., 0.], dtype=np.float64)
+        out_tree.Branch('tpc_track_centroid', tree_track_centroid, 'tpc_track_centroid[3]/D')
+        
+        tree_get_event_id = np.array([0], dtype=np.int32)
+        out_tree.Branch('get_event_id', tree_get_event_id, 'get_event_id/I')
+        tree_get_run_id = np.array([0], dtype=np.int32)
+        out_tree.Branch('get_run_id', tree_get_run_id, 'get_run_id/I')
         tsbo = np.array([np.nan], dtype=np.float64)
         out_tree.Branch('time_since_beam_off', tsbo, 'time_since_beam_off/D')
         tsco = np.array([np.nan], dtype=np.float64)
@@ -346,15 +358,25 @@ def make_merged_root_file(experiment, ddas_run):
                 tree_get_timestamp[0] = get_time
                 tree_track_angle[0] = track_angles[get_evt_index]
                 
+                tree_track_centroid[0] = track_centroids[get_evt_index][0]
+                tree_track_centroid[1] = track_centroids[get_evt_index][1]
+                tree_track_centroid[2] = track_centroids[get_evt_index][2]
+                tree_get_event_id[0] = int(get_event_ids[get_evt_index])
+                tree_get_run_id[0] = int(get_run_ids[get_evt_index])
+                
                 last_get_time = get_time
                 last_ddas_time = ddas_time            
                 tree_ptype
                 get_evt_index += 1
                 #print(tree_tpc_energy)
             else: #no corresponding TPC event; set TPC quantities to NaN
-                tree_get_timestamp[0] = tree_tpc_energy[0] = tree_track_length[0] = np.nan
+                tree_get_timestamp[0] = tree_tpc_energy[0] = tree_track_length[0] = tree_track_angle[0] = np.nan
                 tree_ptype[0] = -1
                 tree_should_veto[0] = True
+                
+                tree_track_centroid[0] = tree_track_centroid[1] = tree_track_centroid[2] = np.nan
+                tree_get_event_id[0] = -1
+                tree_get_run_id[0] = -1
             out_tree.Fill()
 
         output_file.WriteObject(out_tree, "merged_data")
@@ -582,3 +604,43 @@ def get_first_and_last_ddas_time(experiment, ddas_run):
 #         else:
 #             slope, offset = 1,0
 #         print('%d, %s, %f, %f'%(v, k.lower(), slope, offset)), 
+
+def show_selected_event(experiment, ddas_run, selection, index):
+    """
+    Given a DDAS run and a ROOT selection string, retrieves the index-th matching event
+    and displays its corresponding GET TPC data.
+    """
+    import ROOT
+    from raw_viewer import process_runs
+    import os
+    
+    root_file_path = get_merged_root_file_path(experiment, ddas_run)
+    if not os.path.exists(root_file_path):
+        print(f"Error: Merged root file not found for {experiment} run {ddas_run}")
+        return
+        
+    df = ROOT.RDataFrame("merged_data", root_file_path)
+    filtered_df = df.Filter(selection)
+    
+    count = filtered_df.Count().GetValue()
+    if index >= count:
+        print(f"Error: index {index} is out of bounds for {count} selected events.")
+        return
+        
+    data = filtered_df.Range(index, index+1).AsNumpy(["get_event_id", "get_run_id"])
+    evt = int(data["get_event_id"][0])
+    run = int(data["get_run_id"][0])
+    
+    if evt < 0 or run < 0:
+        print(f"Error: The selected event (index {index}) does not have corresponding GET TPC data.")
+        return
+        
+    print(f'experiment {experiment} ddas_run {ddas_run} GET run {run} evt {evt}')
+    
+    h5file = process_runs.get_h5_file(experiment, run)
+    h5file.show_2d_projection(evt, block=False)
+    h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
+    h5file.plot_traces(evt, block=False)
+    
+    import matplotlib.pyplot as plt
+    plt.show(block=False)
