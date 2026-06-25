@@ -59,15 +59,14 @@ def get_DDAS_run_number(get_run_number):
 
 
 def get_veto_mask(get_run):
-    if is_iterable(get_run):
-        return np.concatenate([get_veto_mask(i) for i in get_run])
-    max_pad_counts = process_runs.get_quantity('pad_max', experiment, [get_run])
     veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
     for pad in process_runs.raw_h5_file.VETO_PADS:
             veto_thresholds[pad] = 500#260
     veto_thresholds[509]=500
 
-    return np.all(max_pad_counts<veto_thresholds, axis=1)
+    if is_iterable(get_run):
+        return process_runs.get_veto_mask(experiment, get_run, veto_thresholds)
+    return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds)
 
 def get_pad_gains(get_run):
     #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e25058_prep_runs61to63_gm.pkl'

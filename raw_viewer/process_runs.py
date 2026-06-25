@@ -269,33 +269,83 @@ def get_lengths(experiment, runs):
     return np.sqrt(np.sum(dr*dr, axis=1))
 
 def get_veto_counts(experiment, runs):
-    veto_pad_mask = np.zeros(1024)
-    for i in raw_h5_file.VETO_PADS:
-        veto_pad_mask[i] = 1
-    return np.einsum('ij, j', get_quantity('pad_charge', experiment, runs), veto_pad_mask)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            veto_counts = np.load(cache_fname)
+        else:
+            veto_pad_mask = np.zeros(1024)
+            for i in raw_h5_file.VETO_PADS:
+                veto_pad_mask[i] = 1
+            veto_counts = np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), veto_pad_mask)
+            np.save(cache_fname, veto_counts)
+        to_return.append(veto_counts)
+    return np.concatenate(to_return, axis=0)
+
+def get_veto_mask(experiment, runs, veto_thresholds):
+    thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}.npy')
+        if os.path.exists(cache_fname):
+            veto_mask = np.load(cache_fname)
+        else:
+            pad_maxs = get_quantity('pad_max', experiment, [run])
+            veto_mask = np.all(pad_maxs < veto_thresholds, axis=1)
+            np.save(cache_fname, veto_mask)
+        to_return.append(veto_mask)
+    return np.concatenate(to_return, axis=0)
 
 def get_max_veto_counts(experiment, runs):
     '''
     gets array of max counts on any individual veto pad
     '''
-    max_pad_counts = get_quantity('pad_max', experiment, runs)
-    veto_pad_mask = np.zeros(1024)
-    for i in raw_h5_file.VETO_PADS:
-        veto_pad_mask[i] = 1
-    return np.max(max_pad_counts[:,veto_pad_mask==1], axis=1)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            max_pad_counts = np.load(cache_fname)
+        else:
+            pad_maxs = get_quantity('pad_max', experiment, [run])
+            veto_pad_mask = np.zeros(1024)
+            for i in raw_h5_file.VETO_PADS:
+                veto_pad_mask[i] = 1
+            max_pad_counts = np.max(pad_maxs[:,veto_pad_mask==1], axis=1)
+            np.save(cache_fname, max_pad_counts)
+        to_return.append(max_pad_counts)
+    return np.concatenate(to_return, axis=0)
 
 def get_outer_ring_counts(experiment, runs):
-    outer_ring_mask = np.zeros(1024)
-    for i in OUTER_RING_PADS:
-        outer_ring_mask[i] = 1
-    return np.einsum('ij, j', get_quantity('pad_charge', experiment, runs), outer_ring_mask)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            counts = np.load(cache_fname)
+        else:
+            outer_ring_mask = np.zeros(1024)
+            for i in OUTER_RING_PADS:
+                outer_ring_mask[i] = 1
+            counts = np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), outer_ring_mask)
+            np.save(cache_fname, counts)
+        to_return.append(counts)
+    return np.concatenate(to_return, axis=0)
 
 def get_outer_ring_max_counts(experiment, runs):
-    max_pad_counts = get_quantity('pad_max', experiment, runs)
-    outer_ring_mask = np.zeros(1024)
-    for i in OUTER_RING_PADS:
-        outer_ring_mask[i] = 1
-    return np.max(max_pad_counts[:,outer_ring_mask==1], axis=1)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            max_pad_counts = np.load(cache_fname)
+        else:
+            pad_maxs = get_quantity('pad_max', experiment, [run])
+            outer_ring_mask = np.zeros(1024)
+            for i in OUTER_RING_PADS:
+                outer_ring_mask[i] = 1
+            max_pad_counts = np.max(pad_maxs[:,outer_ring_mask==1], axis=1)
+            np.save(cache_fname, max_pad_counts)
+        to_return.append(max_pad_counts)
+    return np.concatenate(to_return, axis=0)
     
 def get_gm_ic(experiment, runs, gains):
     gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
