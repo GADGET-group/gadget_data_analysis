@@ -51,10 +51,10 @@ if __name__ == '__main__':
     import numpy as np
     if False:
         ddas_runs = [73]#range(72,99)
-        with multiprocessing.Pool(10) as pool:
+        with multiprocessing.Pool(100) as pool:
             pool.map(merge_ddas, ddas_runs)
     if True:
         runs = run_df['DDAS'][np.isfinite(run_df['DDAS'])]
         #runs=[257, 256, 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241]#49, 61,62,63,64,65]
-        with multiprocessing.Pool(10) as pool:
+        with multiprocessing.Pool(100) as pool:
             pool.map(merge_ddas, runs)
