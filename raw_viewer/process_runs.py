@@ -112,6 +112,26 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
     '''
     #save_path = os.path.dirname(os.path.abspath(__file__))
     fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}.root')
+    
+    if force_reprocess:
+        import glob
+        save_path = get_save_path(experiment)
+        cache_patterns = [
+            f'gm_ic_{experiment}_run{run_number}_*.npy',
+            f'veto_counts_{experiment}_run{run_number}.npy',
+            f'max_veto_counts_{experiment}_run{run_number}.npy',
+            f'outer_ring_counts_{experiment}_run{run_number}.npy',
+            f'max_outer_ring_counts_{experiment}_run{run_number}.npy',
+            f'veto_mask_{experiment}_run{run_number}_*.npy'
+        ]
+        for pattern in cache_patterns:
+            for cache_file in glob.glob(os.path.join(save_path, pattern)):
+                try:
+                    os.remove(cache_file)
+                    print(f"Cleared cache file: {cache_file}")
+                except OSError as e:
+                    print(f"Error removing {cache_file}: {e}")
+    
     #fname += '.no_neg'
     if os.path.exists(fname) and not force_reprocess:
         print('run %d previously processed, ROOT file exists'%run_number)
