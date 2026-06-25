@@ -177,13 +177,57 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
         #git info to save
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
         git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
-        git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True).stdout
+        def sanitize_jagged(lst):
+            def _walk(obj):
+                if isinstance(obj, tuple):
+                    return [_walk(x) for x in obj]
+                elif isinstance(obj, list):
+                    return [_walk(x) for x in obj]
+                elif isinstance(obj, np.ndarray):
+                    if obj.dtype == object:
+                        return [_walk(x) for x in obj]
+                    return obj.tolist()
+                return obj
+            cleaned = [_walk(x) for x in lst]
+            if len(cleaned) == 0:
+                return np.empty(0, dtype=np.float64)
+            try:
+                counts = [len(x) for x in cleaned]
+                if sum(counts) == 0:
+                    return ak.unflatten(np.array([], dtype=np.float64), counts)
+            except TypeError:
+                pass
+            return ak.from_iter(cleaned)
 
-
-        events_data = {'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
-                   'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
-                   'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs, 'timestamps':ts,
-                   'railed_pads':ak.from_iter(railed_pads)}
+        res_centers = []
+        for c in track_centers:
+            try:
+                if len(c) == 3:
+                    res_centers.append(list(c))
+                else:
+                    res_centers.append([0.0, 0.0, 0.0])
+            except TypeError:
+                res_centers.append([0.0, 0.0, 0.0])
+                
+        res_endpoints = []
+        for ep in track_endpoints:
+            try:
+                if len(ep) == 2 and len(ep[0]) == 3 and len(ep[1]) == 3:
+                    res_endpoints.append([list(ep[0]), list(ep[1])])
+                else:
+                    res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+            except TypeError:
+                res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+                
+        events_data = {'track_center':np.array(res_centers, dtype=np.float64), 'principle_axes':sanitize_jagged(principle_axes), 'variance_along_axes': sanitize_jagged(variances_along_axes),
+                   'pad_charge': pad_charges, 'endpoints':np.array(res_endpoints, dtype=np.float64), 'charge_width':np.array(charge_widths),
+                   'width_above_threshold':np.array(width_above_thresholds), 'pad_max':pad_maxs, 'timestamps':ts}
+                   
+        counts = [len(x) for x in railed_pads]
+        if sum(counts) == 0:
+            events_data['railed_pads'] = ak.unflatten(np.array([], dtype=np.int64), counts)
+        else:
+            events_data['railed_pads'] = ak.from_iter(railed_pads)
         metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff]}
         print('saving to ROOT file')
         with uproot.recreate(fname) as file:
