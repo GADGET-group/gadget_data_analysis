@@ -1,18 +1,19 @@
 import ROOT
 from raw_viewer import ddas_interface
 from e23035_analysis import root_vis_tools, e23035_runs
-experiment = 'e25058'
-num_workers = 100
+experiment = '23035'
+num_workers = 10
 
-#run = e23035_runs.get_ddas_60_Ga_runs(False, True, True, True)
-run=58
-mesh = ddas_interface.get_histogram(experiment, run, (1500, 0, 6000), 'mesh', 'mesh', 'mesh_pre_amp_e', 'mesh_pre_amp_e>0', num_workers=num_workers)
+run = e23035_runs.get_ddas_60_Ga_runs(False, True, True, True)
+#run=[237,239]
+#run=58
+#mesh = ddas_interface.get_histogram(experiment, run, (1500, 0, 6000), 'mesh', 'mesh', 'mesh_pre_amp_e', 'mesh_pre_amp_e>0', num_workers=num_workers)
 mesh_energy = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000), 'mesh', 'mesh', '(mesh_pre_amp_e/2.5)+52', 'mesh_pre_amp_e>0', num_workers=num_workers)
-tpc_energy = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000), 'mesh', 'mesh', 'tpc_energy', 'tpc_energy>0', num_workers=num_workers)
+tpc_energy = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000), 'tpc_energy', 'tpc_energy', 'tpc_energy', 'tpc_energy>0', num_workers=num_workers)
 _1 = root_vis_tools.draw_overlaid_histograms({'mesh':mesh_energy, 'tpc':tpc_energy})
 
-mesh_energy_protons = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000), 'mesh', 'mesh', '(mesh_pre_amp_e/2.5)+52', 'tpc_particle_id==1', num_workers=num_workers)
-tpc_energy_protons = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000), 'mesh', 'mesh', 'tpc_energy', 'tpc_particle_id==1', num_workers=num_workers)
+mesh_energy_protons = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000), 'mesh_protons', 'mesh protons', '(mesh_pre_amp_e/2.5)+52', 'tpc_particle_id==1', num_workers=num_workers)
+tpc_energy_protons = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000), 'tpc_energy_protons', 'tpc protons', 'tpc_energy', 'tpc_particle_id==1', num_workers=num_workers)
 _2 = root_vis_tools.draw_overlaid_histograms({'mesh':mesh_energy_protons, 'tpc':tpc_energy_protons})
 
 mesh_vs_tpc = ddas_interface.get_histogram(experiment, run, (4500, 0, 9000, 4500, 0, 9000), 'mesh_vs_tpc_energy', 'mesh vs tpc_energy', 'mesh_pre_amp_e:tpc_energy', 'tpc_should_veto==0', num_workers=num_workers)

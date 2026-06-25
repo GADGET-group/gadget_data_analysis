@@ -1,6 +1,7 @@
 import os
-import pickle
-import gzip
+import uproot
+import awkward as ak
+import hashlib
 import multiprocessing as mp
 import subprocess
 import socket
@@ -104,18 +105,17 @@ def get_h5_file(experiment, run_number):
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def get_processed_run(experiment, run_number, force_reprocess=False):
+def process_tpc_run(experiment, run_number, force_reprocess=False):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
-    Only redoes processing if a pickled version of this information isn't available.
+    Only redoes processing if a ROOT version of this information isn't available.
     '''
     #save_path = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(get_save_path(experiment), '%s_run%d.pkl.gz'%(experiment, run_number))
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}.root')
     #fname += '.no_neg'
     if os.path.exists(fname) and not force_reprocess:
-        print('run %d previously processed, loading previous results'%run_number)
-        with gzip.open(fname, 'rb') as file:
-            return pickle.load(file)
+        print('run %d previously processed, ROOT file exists'%run_number)
+        return
     else:
         # h5file = build_sim.get_rawh5_object(experiment, run_number)
         h5file = get_h5_file(experiment, run_number)
@@ -180,27 +180,41 @@ def get_processed_run(experiment, run_number, force_reprocess=False):
         git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True).stdout
 
 
-        to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
+        events_data = {'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
                    'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
                    'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs, 'timestamps':ts,
-                   'git_version':git_version, 'git_status':git_status, 'git_diff':git_diff, 'railed_pads':railed_pads}
-        print('pickling')
-        with gzip.open(fname, 'wb') as file:
-            pickle.dump(to_return, file)
-        return to_return
+                   'railed_pads':ak.from_iter(railed_pads)}
+        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff]}
+        print('saving to ROOT file')
+        with uproot.recreate(fname) as file:
+            file['events'] = events_data
+            file['metadata'] = metadata
 
-loaded_runs={}
 def get_quantity(qname, experiment, runs):
     to_return = []
     for run in runs:
-        if (experiment, run) not in loaded_runs:
-            loaded_runs[(experiment, run)] = get_processed_run(experiment, run)
-        to_return.append(loaded_runs[(experiment, run)][qname])
+        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}.root')
+        if not os.path.exists(fname):
+            process_tpc_run(experiment, run)
+            
+        with uproot.open(fname) as file:
+            if qname in file['events']:
+                if qname == 'railed_pads':
+                    arr = file['events'][qname].array(library='ak')
+                    to_return.extend(ak.to_list(arr))
+                else:
+                    arr = file['events'][qname].array(library='np')
+                    to_return.append(arr)
+            elif qname in file['metadata']:
+                arr = file['metadata'][qname].array(library='np')
+                to_return.append(arr[0])
+            else:
+                raise ValueError(f"Quantity {qname} not found in ROOT file")
+                
     if qname == 'railed_pads':
-        l = []
-        for sub in to_return:
-            l += sub
-        return l
+        return to_return
+    elif qname in ['git_version', 'git_status', 'git_diff']:
+        return to_return
     else:
         return np.concatenate(to_return, axis=0)
     
@@ -240,9 +254,19 @@ def get_outer_ring_max_counts(experiment, runs):
     return np.max(max_pad_counts[:,outer_ring_mask==1], axis=1)
     
 def get_gm_ic(experiment, runs, gains):
-    counts_per_pad = get_quantity('pad_charge', experiment, runs)
-    #counts per pad needs to already be on the gpu
-    return np.einsum('ij, j', counts_per_pad, gains)
+    gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}.npy')
+        if os.path.exists(cache_fname):
+            gm_ic = np.load(cache_fname)
+        else:
+            counts_per_pad = get_quantity('pad_charge', experiment, [run])
+            #counts per pad needs to already be on the gpu
+            gm_ic = np.einsum('ij, j', counts_per_pad, gains)
+            np.save(cache_fname, gm_ic)
+        to_return.append(gm_ic)
+    return np.concatenate(to_return, axis=0)
 
 def get_angle(experiment, runs):
     endpoints = np.array(get_quantity('endpoints', experiment, runs))

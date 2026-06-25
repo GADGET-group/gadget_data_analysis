@@ -28,7 +28,7 @@ experiment = 'e23035'
 
 def process_run(run):
     try:
-        process_runs.get_processed_run(experiment, run, True)
+        process_runs.process_tpc_run(experiment, run, True)
         print('processed run ', run)
     except Exception as e:
         print('error processing run ', run)
@@ -51,10 +51,10 @@ if __name__ == '__main__':
     import numpy as np
     if False:
         ddas_runs = [73]#range(72,99)
-        with multiprocessing.Pool(200) as pool:
+        with multiprocessing.Pool(10) as pool:
             pool.map(merge_ddas, ddas_runs)
     if True:
-        #runs = run_df['GET'][np.isfinite(run_df['GET'])]
-        runs=[257, 256, 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241]#49, 61,62,63,64,65]
-        with multiprocessing.Pool(200) as pool:
+        runs = run_df['DDAS'][np.isfinite(run_df['DDAS'])]
+        #runs=[257, 256, 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241]#49, 61,62,63,64,65]
+        with multiprocessing.Pool(10) as pool:
             pool.map(merge_ddas, runs)
