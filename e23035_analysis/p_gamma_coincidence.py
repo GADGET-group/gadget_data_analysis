@@ -84,10 +84,10 @@ canvas2, legend2, stack2 = root_vis_tools.draw_overlaid_histograms({'proton gate
 canvas3, legend3, stack3 = root_vis_tools.draw_overlaid_histograms({'proton gated on 491 keV gammas':protons_gated_on_491, 
                                                                     'proton gated on 914 keV gammas':protons_gated_on_914, 
                                                                      'proton gated on 511 keV gammas':protons_gated_on_511})
-particle_gamma_dt = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, 0, 0.1), "particle_gamma_dt", "mesh_time - gamma time (s)", 
+particle_gamma_dt = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, -15e-6, 15e-6), "particle_gamma_dt", "mesh_time - gamma time (s)", 
                                              "mesh_pre_amp_t - time", "tpc_particle_id==1 || tpc_particle_id==2", event_build_window, addback_ethresh, True,
                                              nonlinearity_correction_name=nlc_name)
-particle_gamma491_dt = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, 0, 0.1), "particle_gamma_dt", "mesh_time - gamma time (s)", 
+particle_gamma491_dt = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, -15e-6, 15e-6), "particle_gamma_dt", "mesh_time - gamma time (s)", 
                                              "mesh_pre_amp_t - time", "(tpc_particle_id==1 || tpc_particle_id==2)&& (addback_energy>490) && (addback_energy<493)", event_build_window, addback_ethresh, True,
                                              nonlinearity_correction_name=nlc_name)
 
