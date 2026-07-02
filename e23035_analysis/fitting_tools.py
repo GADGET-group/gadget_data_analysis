@@ -1688,3 +1688,125 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         for j in range(len(fit_params)): p.SetParameter(j, fit_params[j])
         component_peak_funcs.append(p)
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
+
+
+def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options='LS0QEI'): 
+    """
+    Fits a function to a 2D histogram.
+    fit_range should be ((x_low, x_high), (y_low, y_high))
+    """
+    # 1. Unique ID & Setup
+    unique_id = uuid.uuid4().hex[:8]
+    canvas_name = f"c_fit2d_{unique_id}"
+    canvas = ROOT.TCanvas(canvas_name, f"Fit Result 2D: {unique_id}", 1200, 400)
+
+    (x_low, x_high), (y_low, y_high) = fit_range
+
+    x_axis = histogram.GetXaxis()
+    y_axis = histogram.GetYaxis()
+    
+    bin_x_low = x_axis.FindBin(x_low)
+    bin_x_high = x_axis.FindBin(x_high)
+    x_low_snap = x_axis.GetBinLowEdge(bin_x_low)
+    x_high_snap = x_axis.GetBinUpEdge(bin_x_high)
+    n_bins_x = bin_x_high - bin_x_low + 1
+    
+    bin_y_low = y_axis.FindBin(y_low)
+    bin_y_high = y_axis.FindBin(y_high)
+    y_low_snap = y_axis.GetBinLowEdge(bin_y_low)
+    y_high_snap = y_axis.GetBinUpEdge(bin_y_high)
+    n_bins_y = bin_y_high - bin_y_low + 1
+
+    # 2. Create Subset Histogram
+    sub_hist = ROOT.TH2D(f"sub2d_{unique_id}", "Data", n_bins_x, x_low_snap, x_high_snap, n_bins_y, y_low_snap, y_high_snap)
+    
+    for i in range(1, n_bins_x + 1):
+        source_bin_x = bin_x_low + i - 1
+        for j in range(1, n_bins_y + 1):
+            source_bin_y = bin_y_low + j - 1
+            sub_hist.SetBinContent(i, j, histogram.GetBinContent(source_bin_x, source_bin_y))
+            sub_hist.SetBinError(i, j, histogram.GetBinError(source_bin_x, source_bin_y))
+
+    # 3. Fit Function Setup
+    func_name = f'to_fit2d_{unique_id}'
+    n_params = len(initial_values)
+    
+    if callable(function_string):
+        f_to_fit = ROOT.TF2(func_name, function_string, x_low_snap, x_high_snap, y_low_snap, y_high_snap, n_params)
+        f_to_fit._pyfunc = function_string 
+    else:
+        f_to_fit = ROOT.TF2(func_name, function_string, x_low_snap, x_high_snap, y_low_snap, y_high_snap)
+        
+    if len(bounds) != n_params:
+        raise ValueError("Length of initial_values must match length of bounds.")
+    if names is not None and len(names) != n_params:
+        raise ValueError("Length of names must match length of initial_values.")
+    
+    for i in range(n_params):
+        if bounds[i][0] == bounds[i][1]:
+            f_to_fit.FixParameter(i, bounds[i][0])
+        elif bounds[i][0] == -np.inf and bounds[i][1] == np.inf:
+            f_to_fit.SetParameter(i, initial_values[i])
+            f_to_fit.SetParLimits(i, 0, 0)
+        else:
+            f_to_fit.SetParameter(i, initial_values[i])
+            f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
+        
+        if names:
+            f_to_fit.SetParName(i, names[i])
+        else:
+            f_to_fit.SetParName(i, f'p{i}')
+
+    f_to_fit.SetNpx(100)
+    f_to_fit.SetNpy(100)
+
+    # 4. Perform Fit
+    fit_res = sub_hist.Fit(f_to_fit, fit_options)
+    attempts = 0
+    
+    while (not fit_res.Get() or not fit_res.IsValid()) and attempts < 20:
+        fit_res = sub_hist.Fit(f_to_fit, fit_options)
+        attempts += 1
+
+    # 5. Create Fit and Residual Histograms
+    h_fit = sub_hist.Clone(f"h_fit2d_{unique_id}")
+    h_fit.SetTitle("Fit")
+    h_fit.Reset() 
+    
+    h_resid = sub_hist.Clone(f"h_resid2d_{unique_id}")
+    h_resid.SetTitle("Residuals (Data - Fit)")
+    h_resid.Reset()
+
+    for i in range(1, sub_hist.GetNbinsX() + 1):
+        for j in range(1, sub_hist.GetNbinsY() + 1):
+            bin_x_center = sub_hist.GetXaxis().GetBinCenter(i)
+            bin_y_center = sub_hist.GetYaxis().GetBinCenter(j)
+            
+            fit_val = f_to_fit.Eval(bin_x_center, bin_y_center)
+            data_val = sub_hist.GetBinContent(i, j)
+            
+            h_fit.SetBinContent(i, j, fit_val)
+            h_fit.SetBinError(i, j, 0)
+            
+            h_resid.SetBinContent(i, j, data_val - fit_val)
+            h_resid.SetBinError(i, j, sub_hist.GetBinError(i, j))
+
+    # 6. Draw
+    canvas.Divide(3, 1)
+    
+    canvas.cd(1)
+    sub_hist.Draw("COLZ")
+    
+    canvas.cd(2)
+    h_fit.Draw("COLZ")
+    
+    canvas.cd(3)
+    h_resid.Draw("COLZ")
+
+    canvas.Update()
+
+    # Prevent garbage collection
+    canvas._h_fit = h_fit
+    canvas._h_resid = h_resid
+
+    return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
