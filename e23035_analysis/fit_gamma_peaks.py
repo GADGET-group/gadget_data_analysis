@@ -20,6 +20,13 @@ gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethr
 if True:
     runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
     fit_prefix = '60Ga'
+    cal_name = 'gm_511and2614_1'
+    nlc_name = 'c1'
+if False:
+        runs = e23035_runs.get_ddas_59_Zn_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=False)
+        fit_prefix='59Zn'
+        cal_name = 'gm_511and1301_1'
+        nlc_name = 'c1'
 if False:
     bg_run = 281
     runs = [bg_run]
@@ -39,8 +46,7 @@ event_build_window = 500 #ns
 
 
 adj_dict =  degai.crystal_adj_dict#degai.clover_adj_dict#
-cal_name = 'gm_511and2614_1'
-nlc_name = 'c1'
+
 gamma_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
 adj_ab_hist = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'ab_hist', 'addback spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
@@ -245,7 +251,7 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
     if len(current_group) > 0:
         all_peaks.append((current_group, *fit_window))
 
-force_refit=False
+force_refit=True
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if True:
     f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
@@ -260,7 +266,7 @@ if True:
         3847, 3888, 4000, 4179, 4208, 4293, 4538, 4719, 4786, 4804,
         4852, 4892, 5299, 5560, 5809
     ]
-    #force_refit=True
+    force_refit=False
     h338 = degai.get_bg_subtracted_projection(coincidence_hist, (337, 340), (315,322))
     f338=fit_peaks(h338, possible_coincidence_peaks,
             '338keV_coincidence', True, False,force_refit=force_refit)

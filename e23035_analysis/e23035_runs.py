@@ -78,7 +78,7 @@ def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
                 continue        
         if np.isnan(run):
             continue
-        if final_beam_settings and run <149:
+        if final_beam_settings and False: #TODO: currently this doesn't do anything, since the degrader was adjusted so many times
             continue
         if good_gamma and False: #TODO
             continue

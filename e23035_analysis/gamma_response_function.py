@@ -9,16 +9,13 @@ from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
 from raw_viewer import degai
 from e23035_analysis.spectrum_fitter import spectrum_fitter
 
-'''
-Notes on peak finding an automatic fitting
-https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
-'''
+experiment = 'e23035'
 gamma_bin_size = 0.25 #keV
 addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-runs = e23035_runs.get_ddas_60_Ga_runs()
+runs = e23035_runs.get_ddas_60_Ga_runs(True, False, False, True)
 
 event_build_window = 500 #ns
 
