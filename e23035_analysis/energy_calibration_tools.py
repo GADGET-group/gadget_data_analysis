@@ -937,7 +937,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
                 cal_exp = get_calibrated_energy_string(run, cal_name, ch)
                 hist_name = f'{ch}_{run}'
                 hist_title = f'{ch} Run {run}'
-                future = executor.submit(ddas_interface.get_histogram, run, binning, hist_name, hist_title, cal_exp, num_workers=1)
+                future = executor.submit(ddas_interface.get_histogram, experiment, run, binning, hist_name, hist_title, cal_exp, num_workers=1)
                 future_to_run[future] = run
             
             # Collect them as they finish
