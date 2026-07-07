@@ -201,7 +201,7 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 2110-2130,2118,?,,,,,,,,,,,,
 2130-2152,2139,58Cu,,,,1972Jo01,,,,,,,,
 ,2146,58Cu,,,,"1972Jo01, not sure of statistical signifigance",,,,,,,,
-2152-2165,2159,60Cu,5158.9,0.2,yes,1972Va19,,,,,,,,
+2152-2165,2159,60Cu,2158.9,0.2,yes,1972Va19,,,,,,,,
 2165-2180,2171,?,,,,odd peak shape,,,,,,,,
 2190-2230,2204,214Bi?,,,,,,,,,,,,
 ,2212,,,,,shoulder on 2204 peak,,,,,,,,
