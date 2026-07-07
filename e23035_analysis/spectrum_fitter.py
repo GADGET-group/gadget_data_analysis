@@ -33,6 +33,7 @@ class spectrum_fitter:
         self.fit_options = 'LS0QEI'
         self.location_wiggle=3 #bounds +/- to apply to location guesses
         self.shared_sigma=True #currently only implemented for bg_shift_guass. Will fill out param bounds for each peak based on guess.
+        self.max_implicit_cores = 100
 
     def add_peaks(self, peak_locations, window_size, sep_factor=1.25):
         '''
@@ -388,7 +389,7 @@ class spectrum_fitter:
         '''
         Fit each peak from peak_loc_guesses, and store the results
         '''
-        ROOT.EnableImplicitMT()
+        ROOT.EnableImplicitMT(self.max_implicit_cores)
         self.fit_results = []
         original_batch_state = ROOT.gROOT.IsBatch()
         ROOT.gROOT.SetBatch(True)
