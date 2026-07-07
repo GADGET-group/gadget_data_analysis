@@ -221,12 +221,17 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         
         emg_fit_parameters[true_energy] = peak_params
           
-        mu_val = fit_res.Parameter(2)
-        mu_err = fit_res.ParError(2)
+        # Get the names for mu and amplitude, handling both single and multi-peak conventions
+        mu_name = 'mu_0' if 'mu_0' in peak_params else 'mu'
+        amp_name = 'amplitude_0' if 'amplitude_0' in peak_params else 'amplitude'
+        
+        mu_val = peak_params[mu_name]['value']
+        mu_err = peak_params[mu_name]['error']
         peak_locations.append(mu_val)
         peak_location_uncertainties.append(mu_err)
-        amplitudes.append(fit_res.Parameter(1))
-        amplitude_uncertainties.append(fit_res.ParError(1))
+        
+        amplitudes.append(peak_params[amp_name]['value'])
+        amplitude_uncertainties.append(peak_params[amp_name]['error'])
         probs.append(fit_res.Prob())
         
         # 1D plot handling
@@ -1099,6 +1104,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
         
     # 5. Save P-Value Matrix to CSV
     out_dir = Path(f"e23035_analysis/calibrations/{cal_name}")
+    out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / f"stability_p_values.csv"
     df_pvals = pd.DataFrame(p_value_matrix)
     df_pvals.index.name = 'run'

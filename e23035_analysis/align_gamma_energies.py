@@ -35,7 +35,7 @@ for run in run_candidates:
         #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
         if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
             runs.append(run)
-runs = e23035_runs.get_ddas_60_Ga_runs(False, False, False, False)
+#runs = e23035_runs.get_ddas_60_Ga_runs(False, False, False, False)
 #runs = [218]#[203, 204, 275,276, 279]
 print(runs)
 n_workers=min(200, len(runs))
@@ -68,12 +68,25 @@ for num in range(1, 12):
 
 
 poly_degree = 1
-gm_label='511and2614'
+#gm_label='511and2614'
+gm_label='511and1301'
 gm_name = f'gm_{gm_label}_{poly_degree}'
 
 if gm_label == '511and2614':
     peaks = [('511', 510.99895069, 16e-7),
          ('208Tl', 2614.511, 1e-2)]
+    true_locations = [peak[1] for peak in peaks]
+    true_location_uncertainties =  [peak[2] for peak in peaks]
+    norm_dict = {loc:'slice' for loc in true_location_uncertainties}
+    pvalue_threshold_dict = {
+            'cal':1e-6,
+            true_locations[0]:{'1d':0.001, 't_indep':0.01},
+            true_locations[1]:{'1d':0.001, 't_indep':0.01},
+        } 
+    rebin_factors = [1 for loc in true_locations]#1,1,5,5]
+elif gm_label == '511and1301':
+    peaks = [('511', 510.99895069, 16e-7),
+         ('59Cu', 1301.35, 0.15)]
     true_locations = [peak[1] for peak in peaks]
     true_location_uncertainties =  [peak[2] for peak in peaks]
     norm_dict = {loc:'slice' for loc in true_location_uncertainties}
@@ -123,14 +136,15 @@ def do_gain_match(ddas_run, save_init_alignment_pdf=False):
             peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess*0.99, loc_guess*1.01), \
                            (-fit_window_width, fit_window_width), rebin_factors[i]))
         energy_calibration_tools.make_energy_calibration(ddas_run, gm_name, adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict, 
-                                                         poly_degree=poly_degree, peak_model='bg_shift_gaus')
+                                                         poly_degree=poly_degree, peak_model='gaus')
     if save_init_alignment_pdf:
         #save histogram showing energy alignment 
-        crystal_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'e')
+        crystal_e_hists = degai.get_crystal_histograms(experiment, ddas_run, (6000, 0, 6000), 'e')
         canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
         ROOT.gPad.SetLogz(1)
         canvas.Update()
         fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/initial_alignment.pdf"
+        os.makedirs(os.path.dirname(fname), exist_ok=True)
         canvas.Print(fname+'(')
         dE_to_plot = 100
         for loc in true_locations:
@@ -142,12 +156,13 @@ def do_gain_match(ddas_run, save_init_alignment_pdf=False):
                 canvas.Print(fname)
 
     #save histogram showing energy alignment after gain matching
-    gm_e_hists = degai.get_crystal_histograms(ddas_run, (6000, 0, 6000), 'cal', gm_name)
+    gm_e_hists = degai.get_crystal_histograms(experiment, ddas_run, (6000, 0, 6000), 'cal', gm_name)
     canvas, th2 = root_vis_tools.create_2d_hist_from_dict(gm_e_hists, "with gain match applied")
     ROOT.gPad.SetLogz(1)
     
     canvas.Update()
     fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/gain_match.pdf"
+    os.makedirs(os.path.dirname(fname), exist_ok=True)
     canvas.Print(fname+'(')
     dE_to_plot = 100
     for loc in true_locations:
@@ -232,7 +247,7 @@ def process_all():
                 
             pbar.close()
             
-    #make_summary_pdf()
+    make_summary_pdf()
 
     #make_nonlinearity_correction()
     

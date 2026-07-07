@@ -57,6 +57,36 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
             runs.append(run)
     return runs
 
+def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_beam_settings, tpc_data_valid=True):
+    '''
+    good_gamma: runs for which I beleive the gamma array was performing well
+    good_low_energy_tpc: Runs during which the SCA threshold was behaving correctly. Important for protons with energy <~1.2 MeV
+    good_long_tracks_tpc: Runs with get settings which properly captured long tracks Only important above ~2.2 MeV, and likely only for protons.
+    final_beam_settings: only include runs with final beam settings (38 degree degrader and reduced momentum acceptance)
+    TPC data valid: requires GET data to be in the merged tree
+    '''
+    runs = []
+
+    if tpc_data_valid:
+        run_selector = (run_df['Run Type']=='59Zn')
+    else:
+        run_selector = (run_df['Run Type']=='59Zn') & (run_df['Field Cage Functional?']=='yes')
+
+    for run, get_run in zip(run_df['DDAS'][run_selector], run_df['GET'][run_selector]):
+        if tpc_data_valid:
+            if not np.isfinite(get_run):
+                continue        
+        if np.isnan(run):
+            continue
+        if final_beam_settings and run <149:
+            continue
+        if good_gamma and False: #TODO
+            continue
+        #SCA and GET settings are correct for all 59Zn runs, so don't need to exclude any runs for high/low proton energy
+        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
+            runs.append(run)
+    return runs
+
 def is_iterable(obj):
     try:
         iter(obj)
