@@ -4,10 +4,11 @@ import ROOT
 import array
 import os
 
-def show_init_cal_comparison(fit_name):
+def show_init_cal_comparison(fit_name, use_in_cal_only=True, fit_column='mu'):
     '''
-    Create and show a TGraph comparing the true energy to fit mu for each peak in peak_fitting/gamma_peaks.csv
-    where "use in cal" is true. Fit values are pulled from peak_fitting/{fit_name}.csv. Plot a line with slope
+    Create and show a TGraph comparing the true energy to fit mu (or the specified parameter) for each peak in peak_fitting/gamma_peaks.csv
+    If use_in_cal_only is true, then only peaks with "use in cal" set in the csv file will be used.
+    Fit values are pulled from peak_fitting/{fit_name}.csv. Plot a line with slope
     of one and intercept of 0. In smaller axis below the main scatter plot, show (true energy) - (fit energy).
     '''
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,13 +29,14 @@ def show_init_cal_comparison(fit_name):
             cal_col = col
             break
             
-    if cal_col is None:
-        print("Could not find calibration column in gamma_peaks.csv")
-        return None
-
-    # Filter for peaks used in calibration
-    use_in_cal = peaks_df[cal_col].astype(str).str.lower().str.strip()
-    cal_peaks = peaks_df[(use_in_cal == 'yes') | (use_in_cal == 'true') | (use_in_cal == '1') | (use_in_cal == 'y')]
+    if use_in_cal_only:
+        if cal_col is None:
+            print("Could not find calibration column in gamma_peaks.csv")
+            return None
+        use_in_cal = peaks_df[cal_col].astype(str).str.lower().str.strip()
+        cal_peaks = peaks_df[(use_in_cal == 'yes') | (use_in_cal == 'true') | (use_in_cal == '1') | (use_in_cal == 'y')]
+    else:
+        cal_peaks = peaks_df
     
     decay_groups = {}
     
@@ -58,13 +60,16 @@ def show_init_cal_comparison(fit_name):
             decay_label = 'Unknown'
             
         # Find closest loc_guess in fit_df
-        if 'loc_guess' in fit_df.columns and 'mu_val' in fit_df.columns:
+        val_col = f'{fit_column}_val'
+        err_col = f'{fit_column}_err'
+        
+        if 'loc_guess' in fit_df.columns and val_col in fit_df.columns:
             diffs = np.abs(fit_df['loc_guess'] - peak_e)
             if len(diffs) > 0:
                 closest_idx = diffs.idxmin()
                 if diffs[closest_idx] < 5.0: # Ensure it's a reasonable match
-                    fit_mu = fit_df.loc[closest_idx, 'mu_val']
-                    fit_mu_err = fit_df.loc[closest_idx, 'mu_err'] if 'mu_err' in fit_df.columns else 0.0
+                    fit_mu = fit_df.loc[closest_idx, val_col]
+                    fit_mu_err = fit_df.loc[closest_idx, err_col] if err_col in fit_df.columns else 0.0
                     if pd.isna(fit_mu_err):
                         fit_mu_err = 0.0
                         
@@ -86,7 +91,7 @@ def show_init_cal_comparison(fit_name):
         return None
         
     mg_main = ROOT.TMultiGraph()
-    mg_main.SetTitle("Initial Calibration Comparison;True Energy (keV);Fit #mu (keV)")
+    mg_main.SetTitle(f"Initial Calibration Comparison;True Energy (keV);Fit {fit_column} (keV)")
     
     mg_res = ROOT.TMultiGraph()
     mg_res.SetTitle(";True Energy (keV);True - Fit (keV)")
@@ -182,3 +187,71 @@ def show_init_cal_comparison(fit_name):
     
     # Return objects so they are not garbage collected by PyROOT
     return c1, pad1, pad2, mg_main, mg_res, legend, graphs, line, line_zero
+
+def fit_polynomial_to_cal_comparison(cal_results, order=1):
+    '''
+    Fits an N-th order polynomial to the TMultiGraph produced by show_init_cal_comparison.
+    Draws the fit on the main pad and the expected residual on the bottom pad.
+    Returns the main fit function, the residual fit function, and the fit result.
+    '''
+    if not cal_results or len(cal_results) < 9:
+        print("Invalid results from show_init_cal_comparison")
+        return None
+        
+    c1 = cal_results[0]
+    pad1 = cal_results[1]
+    pad2 = cal_results[2]
+    mg_main = cal_results[3]
+    line_zero = cal_results[8]
+    
+    # Check if canvas is still alive in ROOT to avoid segfaults
+    canvas_alive = False
+    if c1:
+        for c in ROOT.gROOT.GetListOfCanvases():
+            if c.GetName() == c1.GetName():
+                canvas_alive = True
+                break
+
+    if canvas_alive:
+        pad1.cd()
+    
+    # "polN" is ROOT's built-in polynomial function
+    fit_name = f"pol{order}"
+    
+    # Fit the multigraph. "S" returns the TFitResultPtr. "0" prevents drawing if canvas is closed.
+    fit_opt = "S" if canvas_alive else "S0"
+    fit_result = mg_main.Fit(fit_name, fit_opt)
+    
+    fit_func = mg_main.GetFunction(fit_name)
+    res_func = None
+    
+    if fit_func:
+        fit_func.SetLineColor(ROOT.kBlue)
+        fit_func.SetLineStyle(1)
+        fit_func.SetLineWidth(2)
+        
+        # Create residual function: x - polynomial(x)
+        formula = "x - (" + " + ".join([f"[{i}]*TMath::Power(x,{i})" for i in range(order+1)]) + ")"
+        
+        xmin = line_zero.GetX1()
+        xmax = line_zero.GetX2()
+        res_func = ROOT.TF1(f"res_pol{order}", formula, xmin, xmax)
+        
+        for i in range(order+1):
+            res_func.SetParameter(i, fit_func.GetParameter(i))
+            
+        res_func.SetLineColor(ROOT.kBlue)
+        res_func.SetLineStyle(1)
+        res_func.SetLineWidth(2)
+        
+        if canvas_alive:
+            pad2.cd()
+            res_func.Draw("SAME")
+            c1.Update()
+    else:
+        print("Fit failed.")
+        
+    if not canvas_alive:
+        print("Note: The canvas was closed, so the fits were calculated but could not be drawn.")
+        
+    return fit_func, res_func, fit_result

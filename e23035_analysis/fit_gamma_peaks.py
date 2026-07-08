@@ -17,7 +17,7 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-if False:
+if True:
     runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
     fit_prefix = '60Ga'
     cal_name = 'gm_511and2614_1'
