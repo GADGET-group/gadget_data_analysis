@@ -17,16 +17,20 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-if True:
+if False:
     runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
     fit_prefix = '60Ga'
     cal_name = 'gm_511and2614_1'
     nlc_name = 'c1'
-if False:
+    beam_on_selection = "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)"
+    beam_off_selection = "time_since_beam_off<0.094"
+else:
         runs = e23035_runs.get_ddas_59_Zn_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=False)
         fit_prefix='59Zn'
         cal_name = 'gm_511and1301_1'
         nlc_name = 'c1'
+        beam_on_selection = "(time_since_beam_off>0.5) && (time_since_beam_off<0.995)"
+        beam_off_selection = "time_since_beam_off<0.494"
 if False:
     bg_run = 281
     runs = [bg_run]
@@ -47,6 +51,8 @@ event_build_window = 500 #ns
 
 adj_dict =  degai.crystal_adj_dict#degai.clover_adj_dict#
 
+
+
 gamma_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
 adj_ab_hist = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'ab_hist', 'addback spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
@@ -55,23 +61,35 @@ ab_to_crystal_comparison = root_vis_tools.draw_overlaid_histograms({'addback':ad
                                                                     x_label='energy (keV)', y_label='counts/0.25 keV')
 
 gamma_beam_off_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
-                                          "time_since_beam_off<0.094", event_build_window, addback_ethresh, True,
+                                          beam_off_selection, event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
 gamma_beam_on_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
-                                          "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
+                                          beam_on_selection, event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
 beam_on_off_drawing= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist},
                                                              x_label='energy (keV)', y_label='counts/0.25 keV')
 
 gamma_beam_off_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_off_gammas_ab', 'beam off gamma spectrum_ab', 'addback_energy', 
-                                          "time_since_beam_off<0.094", event_build_window, addback_ethresh, True,
+                                          beam_off_selection, event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
 gamma_beam_on_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_on_gammas_ab', 'beam on gamma spectrum_ab', 'addback_energy', 
-                                          "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)", event_build_window, addback_ethresh, True,
+                                          beam_on_selection, event_build_window, addback_ethresh, True,
                                         nonlinearity_correction_name=nlc_name)
 beam_on_off_drawing_ab= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist_ab, 'beam on':gamma_beam_on_hist_ab, 'all':gamma_hist},
                                                              x_label='addback energy (keV)', y_label='counts/0.25 keV')
 
+if True: #make plot comparing 60Ga to 59Zn runs
+        ga_runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
+        zn_runs = e23035_runs.get_ddas_59_Zn_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
+        ga_gamma_hist = degai.get_histogram(experiment, ga_runs, adj_dict, 'gm_511and2614_1', gamma_binning, 'ga_gamma_hist', '60Ga gamma spectrum', 'addback_energy',
+                                 '', event_build_window, addback_ethresh, True,
+                                  nonlinearity_correction_name=nlc_name)
+        zn_gamma_hist = degai.get_histogram(experiment, zn_runs, adj_dict, 'gm_511and1301_1', gamma_binning, 'zn_gamma_hist', '59Zn gamma spectrum', 'addback_energy',
+                                 '', event_build_window, addback_ethresh, True,
+                                  nonlinearity_correction_name=nlc_name)
+        unscaled_zn_ga_comparison = root_vis_tools.draw_overlaid_histograms({'60Ga':ga_gamma_hist, '59Zn':zn_gamma_hist},
+                                                             x_label='gamma energy (keV)', y_label='counts/0.25 keV')
+        
 
 fit_model = 'bg_shift_nemg'#'bg_shift_ngaus'#
 sigma1_func = lambda E: 0.02078*np.sqrt(E + 742.9)
@@ -251,9 +269,9 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
     if len(current_group) > 0:
         all_peaks.append((current_group, *fit_window))
 
-force_refit=True
+force_refit=False
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-if True:
+if fit_prefix == '60Ga':
     f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
     f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 
