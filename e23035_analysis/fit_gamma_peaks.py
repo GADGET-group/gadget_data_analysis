@@ -17,7 +17,7 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-if True:
+if False:
     runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
     fit_prefix = '60Ga'
     cal_name = 'gm_511and2614_1'
@@ -271,10 +271,9 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
 
 force_refit=False
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
+f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
+f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if fit_prefix == '60Ga':
-    f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-    f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-
 #     possible_coincidence_peaks = [511, 546, 1003, 1028, 1188, 1202,  1333, 1341, 1413, 1482, 1554, 2007,
 #                 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 
 #             3337, 3378, 3588, 3848, 3888, 4177, 4208, 4719, 4806]

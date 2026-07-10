@@ -16,12 +16,9 @@ def extract_cal_data(fit_name, use_in_cal_only=True, fit_column='mu'):
     peaks_csv_path = os.path.join(script_dir, 'peak_fitting', 'gamma_peaks.csv')
     fit_csv_path = os.path.join(script_dir, 'peak_fitting', f'{fit_name}.csv')
     
-    try:
-        peaks_df = pd.read_csv(peaks_csv_path)
-        fit_df = pd.read_csv(fit_csv_path)
-    except FileNotFoundError as e:
-        print(f"Error loading CSV files: {e}")
-        return None
+
+    peaks_df = pd.read_csv(peaks_csv_path)
+    fit_df = pd.read_csv(fit_csv_path)
 
     # Find the column for "use for calibration?"
     cal_col = None
@@ -88,13 +85,14 @@ def extract_cal_data(fit_name, use_in_cal_only=True, fit_column='mu'):
             
     return decay_groups
 
-def show_cal_comparison(fit_name, use_in_cal_only=True, fit_column='mu', cal_fit=None):
+def show_cal_comparison(decay_groups, fit_name, fit_column='mu', cal_fit=None):
     '''
     Create and show a TGraph comparing the true energy to fit mu (or the specified parameter) for each peak in peak_fitting/gamma_peaks.csv
-    If use_in_cal_only is true, then only peaks with "use in cal" set in the csv file will be used.
     If cal_fit is provided (from fit_polynomial_to_cal_comparison), the calibration is applied to the fit energies and errors are propagated.
     '''
-    decay_groups = extract_cal_data(fit_name, use_in_cal_only, fit_column)
+    import copy
+    decay_groups = copy.deepcopy(decay_groups)
+    
     if decay_groups is None:
         return None
         
@@ -106,7 +104,7 @@ def show_cal_comparison(fit_name, use_in_cal_only=True, fit_column='mu', cal_fit
     # Apply calibration if provided
     if cal_fit is not None:
         for label, data in decay_groups.items():
-            cal_energies, cal_errs = apply_energy_calibration(data['fit_energies'], data['fit_errs'], cal_fit)
+            cal_energies, cal_errs = apply_energy_calibration_to_point(data['fit_energies'], data['fit_errs'], cal_fit)
             data['fit_energies'] = list(cal_energies) if not isinstance(cal_energies, list) else cal_energies
             data['fit_errs'] = list(cal_errs) if not isinstance(cal_errs, list) else cal_errs
 
@@ -325,18 +323,18 @@ def fit_polynomial_to_cal_comparison(cal_results, order=1):
         
     return fit_func, g_res_draw, fit_result
 
-def apply_energy_calibration(mu, mu_err, fit_results):
+def apply_energy_calibration_to_point(mu, mu_err, calibration_results):
     '''
     Applies the energy calibration and propagates uncertainties.
-    fit_results is expected to be a tuple (fit_func, res_func, fit_result).
+    calibration_results is expected to be a tuple (fit_func, res_func, fit_result).
     Handles both scalar values and lists/arrays.
     Returns (E_cal, E_err).
     '''
-    if not fit_results or len(fit_results) < 3:
+    if not calibration_results or len(calibration_results) < 3:
         return mu, mu_err
         
-    fit_func = fit_results[0]
-    fit_result = fit_results[2]
+    fit_func = calibration_results[0]
+    fit_result = calibration_results[2]
     
     if not fit_func or not fit_result:
         return mu, mu_err
@@ -346,7 +344,7 @@ def apply_energy_calibration(mu, mu_err, fit_results):
         cal_e = []
         cal_err = []
         for m, merr in zip(mu, mu_err):
-            e, err = apply_energy_calibration(m, merr, fit_results)
+            e, err = apply_energy_calibration_to_point(m, merr, calibration_results)
             cal_e.append(e)
             cal_err.append(err)
             
@@ -373,15 +371,56 @@ def apply_energy_calibration(mu, mu_err, fit_results):
     
     return E_cal, E_err
 
+def apply_energy_calibration_to_fit(fit_name, calibration_results):
+    '''
+    Read in the specified fit csv file, and write the (fit_index, pvalue, calibrated_energy, calibrated energy error, amplitude, amplitude error)
+    to a new csv file in the same folder with file name {original_name}_calibrated.csv.
+    '''
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    fit_csv_path = os.path.join(script_dir, 'peak_fitting', f'{fit_name}.csv')
+    
+    if not os.path.exists(fit_csv_path):
+        print(f"Fit file {fit_csv_path} not found.")
+        return
+        
+    df = pd.read_csv(fit_csv_path)
+    
+    if 'mu_val' not in df.columns or 'mu_err' not in df.columns:
+        print(f"Required columns (mu_val, mu_err) missing in {fit_csv_path}")
+        return
+        
+    cal_e, cal_err = apply_energy_calibration_to_point(df['mu_val'], df['mu_err'], calibration_results)
+    
+    out_df = pd.DataFrame()
+    out_df['fit_index'] = df['fit_index'] if 'fit_index' in df.columns else np.arange(len(df))
+    
+    if 'p_value' in df.columns:
+        out_df['pvalue'] = df['p_value']
+    elif 'pvalue' in df.columns:
+        out_df['pvalue'] = df['pvalue']
+        
+    out_df['calibrated_energy'] = cal_e
+    out_df['calibrated_energy_err'] = cal_err
+    
+    if 'amplitude_val' in df.columns:
+        out_df['amplitude'] = df['amplitude_val']
+    if 'amplitude_err' in df.columns:
+        out_df['amplitude_err'] = df['amplitude_err']
+        
+    out_csv_path = os.path.join(script_dir, 'peak_fitting', f'{fit_name}_calibrated.csv')
+    out_df.to_csv(out_csv_path, index=False)
+    print(f"Calibrated results written to {out_csv_path}")
+
 def show_comparison_of_poly_corrections(fit_name = '60Ga_beam_off_gamma',max_order=6):
-    init_cal = show_cal_comparison(fit_name)
+    decay_groups_init = extract_cal_data(fit_name, True)
+    init_cal = show_cal_comparison(decay_groups_init, fit_name)
 
     corrections = {}
     comparisons = {}
 
     for order in range(1, max_order + 1):
         correction = fit_polynomial_to_cal_comparison(init_cal, order)
-        comparison = show_cal_comparison(fit_name, cal_fit=correction)
+        comparison = show_cal_comparison(decay_groups_init, fit_name, cal_fit=correction)
         corrections[order] = correction
         comparisons[order] = comparison
 
@@ -390,7 +429,7 @@ def show_comparison_of_poly_corrections(fit_name = '60Ga_beam_off_gamma',max_ord
     # Plot 1: Calibration Error
     plt.figure()
     for order in range(1, max_order + 1):
-        errs = [apply_energy_calibration(E, 0, corrections[order])[1] for E in Es]
+        errs = [apply_energy_calibration_to_point(E, 0, corrections[order])[1] for E in Es]
         plt.plot(Es, errs, label=f'{order}{"st" if order==1 else "nd" if order==2 else "rd" if order==3 else "th"} order')
     plt.legend()
     plt.xlabel('Energy (keV)')
@@ -400,21 +439,82 @@ def show_comparison_of_poly_corrections(fit_name = '60Ga_beam_off_gamma',max_ord
     # Plot 2: Calibration Offset
     plt.figure()
     for order in range(1, max_order + 1):
-        diffs = [apply_energy_calibration(E, 0, corrections[order])[0] - E for E in Es]
+        diffs = [apply_energy_calibration_to_point(E, 0, corrections[order])[0] - E for E in Es]
         plt.plot(Es, diffs, label=f'{order}{"st" if order==1 else "nd" if order==2 else "rd" if order==3 else "th"} order')
     plt.legend()
     plt.xlabel('Energy (keV)')
     plt.ylabel('Calibrated Energy - Uncalibrated Energy (keV)')
 
-    # Plot 3: Chi2 vs Order
+    # Plot 3: Chi2/NDF vs Order
     orders = list(range(1, max_order + 1))
-    chi2_vals = [corrections[o][2].Chi2() for o in orders]
+    chi2_vals = [corrections[o][2].Chi2() / corrections[o][2].Ndf() if corrections[o][2].Ndf() > 0 else 0 for o in orders]
 
     plt.figure()
     plt.plot(orders, chi2_vals, marker='o')
     plt.xlabel('Polynomial Order')
-    plt.ylabel(r'$\chi^2$')
-    plt.title('Fit $\chi^2$ vs. Polynomial Order')
+    plt.ylabel(r'$\chi^2 / NDF$')
+    plt.title(r'Fit $\chi^2 / NDF$ vs. Polynomial Order')
     plt.grid(True)
 
+    #calibration offset / calibration error
+    plt.figure()
+    for order in range(1, max_order + 1):
+        diffs = [apply_energy_calibration_to_point(E, 0, corrections[order])[0] - E for E in Es]
+        errs = [apply_energy_calibration_to_point(E, 0, corrections[order])[1] for E in Es]
+        plt.plot(Es, np.array(diffs) / np.array(errs), label=f'{order}{"st" if order==1 else "nd" if order==2 else "rd" if order==3 else "th"} order')
+    plt.legend()
+    plt.xlabel('Energy (keV)')
+    plt.ylabel('Calibration Offset / Calibration Error')
     plt.show()
+
+cal_fit_name = '60Ga_all_gamma'
+#init_cal_decay_groups = extract_cal_data(cal_fit_name, True)
+all_decay_groups = extract_cal_data(cal_fit_name, False)
+init_cal_decay_groups = {
+    '76Ge(n,n\')':{
+        'true_energies': [562.197],
+        'fit_energies': [all_decay_groups['76Ge(n,n\')']['fit_energies'][0]],
+        'true_errs': [0.023],
+        'fit_errs': [all_decay_groups['76Ge(n,n\')']['fit_errs'][0]]
+    },
+    '27Al(n,n\')': {
+        'true_energies': [1014.56],
+        'fit_energies': [all_decay_groups['27Al*']['fit_energies'][0]],
+        'true_errs': [0.09],
+        'fit_errs': [all_decay_groups['27Al*']['fit_errs'][0]]
+    },
+    '208Tl': {
+        'true_energies': [2614.511],
+        'fit_energies': [all_decay_groups['208Tl']['fit_energies'][0]],
+        'true_errs': [0.01],
+        'fit_errs': [all_decay_groups['208Tl']['fit_errs'][0]]
+    },
+    # '60Zn': {
+    #     'true_energies': [273.4],
+    #     'fit_energies': [all_decay_groups['60Zn']['fit_energies'][0]],
+    #     'true_errs': [0.4],
+    #     'fit_errs': [all_decay_groups['60Zn']['fit_errs'][0]]
+    # },
+    '16O(n,n\')': {
+        'true_energies': [6129.89],
+        'fit_energies': [all_decay_groups['16O*']['fit_energies'][0]],
+        'true_errs': [0.04],
+        'fit_errs': [all_decay_groups['16O*']['fit_errs'][0]]
+    }
+}
+
+init_cal = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
+calibration = fit_polynomial_to_cal_comparison(init_cal, 1)
+disp_fit_name = '60Ga_beam_off_gamma'
+disp_cal_decay_groups = extract_cal_data(disp_fit_name, False)
+calibrated_data = show_cal_comparison(disp_cal_decay_groups, disp_fit_name, cal_fit=calibration)
+apply_energy_calibration_to_fit(disp_fit_name, calibration)
+
+Es = np.linspace(0, 6000, 6001)
+err = [apply_energy_calibration_to_point(E, 0, calibration)[1] for E in Es]
+plt.figure()
+plt.plot(Es, err)
+plt.xlabel('Energy (keV)')
+plt.ylabel('Uncertainty in Energy Calibration (keV)')
+#plt.yscale('log')
+plt.show(block=False)
