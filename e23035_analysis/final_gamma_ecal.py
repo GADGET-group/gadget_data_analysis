@@ -756,19 +756,71 @@ def show_cal_error(calibration,title=''):
     plt.show(block=False)
 show_cal_error(calibration,title='with additional error')
 
-cascade1=[[4852.753],[0.108]]
-cascade2=[[2434.722,1414.244, 1004.043],[0.036,0.099,0.003]]
-print('cascade consistency check')
-print('cascade 1 sum = ', apply_energy_calibration_to_cascade(cascade1[0], cascade1[1], calibration))
-print('cascade 2 sum = ', apply_energy_calibration_to_cascade(cascade2[0], cascade2[1], calibration))
+def compare_gamma_cascades(fit_name, cascades_peak_energies, calibration_results, fit_column='mu'):
+    '''
+    Compares the total calibrated energy of multiple gamma cascades from a single state.
+    cascades_peak_energies: list of lists, where each sublist contains the peak energies (from gamma_peaks.csv) for a cascade.
+    fit_name: the name of the fit csv file (e.g., '60Ga_beam_off_gamma') to pull measured mu and mu_err from.
+    calibration_results: the tuple returned from calibration.
+    '''
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    fit_csv_path = os.path.join(script_dir, 'peak_fitting', f'{fit_name}.csv')
+    
+    if not os.path.exists(fit_csv_path):
+        print(f"Fit file {fit_csv_path} not found.")
+        return
+        
+    fit_df = pd.read_csv(fit_csv_path)
+    val_col = f'{fit_column}_val'
+    err_col = f'{fit_column}_err'
+    
+    if 'loc_guess' not in fit_df.columns or val_col not in fit_df.columns:
+        print(f"Required columns missing in {fit_name}.csv")
+        return
+        
+    print(f"\n--- Cascade Consistency Check ({fit_name}) ---")
+    
+    for i, cascade_peaks in enumerate(cascades_peak_energies):
+        fit_vals = []
+        fit_errs = []
+        
+        for peak_e in cascade_peaks:
+            diffs = np.abs(fit_df['loc_guess'] - peak_e)
+            if len(diffs) > 0:
+                closest_idx = diffs.idxmin()
+                if diffs[closest_idx] < 5.0:
+                    fit_val = fit_df.loc[closest_idx, val_col]
+                    fit_err = fit_df.loc[closest_idx, err_col] if err_col in fit_df.columns else 0.0
+                    if pd.isna(fit_err):
+                        fit_err = 0.0
+                    fit_vals.append(fit_val)
+                    fit_errs.append(fit_err)
+                else:
+                    print(f"  Warning: Peak {peak_e} not found in {fit_name}.csv within 5 keV tolerance.")
+            else:
+                print(f"  Warning: No data in {fit_name}.csv")
+                
+        if len(fit_vals) != len(cascade_peaks):
+            print(f"Cascade {i+1}: Could not find all peaks, skipping.")
+            continue
+            
+        sum_e, sum_err = apply_energy_calibration_to_cascade(fit_vals, fit_errs, calibration_results)
+        print(f"Cascade {i+1} {cascade_peaks}: Sum = {sum_e:.3f} +/- {sum_err:.3f} keV")
+        
+    print("-" * 40 + "\n")
+
+
+cascades_to_check = [
+    [[5809], [1004,4805]],
+    [[5723],[4719,1004]],
+    [[2295,1553, 1004],[3848, 1004], [1415, 2433, 1004], [4852]],
+    [[1027, 2007, 1004], [1481,1553,1004],[1481,2557]],
+    [[1443, 1553,1004],[2996, 1004]]
+]
+for to_check in cascades_to_check:
+    compare_gamma_cascades(disp_fit_name, to_check, calibration)
 
 cal_wo_aded_sigma = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
 calibration_wo_sigma_add = fit_polynomial_to_cal_comparison(cal_wo_aded_sigma, 1)
 calibration_wo_sigma_add[2].Print()
 show_cal_error(calibration_wo_sigma_add,title='without additional error')
-# sigma_add = 0.109201
-# for label in init_cal_decay_groups:
-#     init_cal_decay_groups[label]['fit_errs'] = [np.sqrt(init_cal_decay_groups[label]['fit_errs'][i] ** 2 + sigma_add ** 2) for i in range(len(init_cal_decay_groups[label]['fit_errs']))]
-# cal_w_aded_sigma = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
-# calibration_with_sigma_add = fit_polynomial_to_cal_comparison(cal_w_aded_sigma, 1)
-# calibration_with_sigma_add[2].Print()
