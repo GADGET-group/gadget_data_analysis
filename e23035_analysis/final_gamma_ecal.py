@@ -133,7 +133,13 @@ def show_cal_comparison(decay_groups, fit_name, fit_column='mu', cal_fit=None):
     legend.SetBorderSize(0)
     legend.SetFillStyle(0)
     
-    colors = [ROOT.kBlack, ROOT.kRed, ROOT.kBlue, ROOT.kGreen+2, ROOT.kMagenta, ROOT.kCyan, ROOT.kOrange+7, ROOT.kViolet, ROOT.kAzure+1]
+    colors = [
+        ROOT.kBlack, ROOT.kRed, ROOT.kBlue, ROOT.kGreen+2, ROOT.kMagenta, 
+        ROOT.kCyan, ROOT.kOrange+7, ROOT.kViolet, ROOT.kAzure+1,
+        ROOT.kPink+1, ROOT.kSpring+4, ROOT.kTeal-1, ROOT.kYellow+2, 
+        ROOT.kGray+2, ROOT.kCyan-3, ROOT.kMagenta-3, ROOT.kRed-4, 
+        ROOT.kGreen-3, ROOT.kOrange-3, ROOT.kBlue-4
+    ]
     
     graphs = [] # Keep references to prevent GC
     color_idx = 0
@@ -220,7 +226,6 @@ def show_cal_comparison(decay_groups, fit_name, fit_column='mu', cal_fit=None):
     c1.Update()
     
     return c1, pad1, pad2, mg_main, mg_res, legend, graphs, line, line_zero
-
 
 def fit_polynomial_to_cal_comparison(cal_results, order=1):
     '''
@@ -337,6 +342,174 @@ def fit_polynomial_to_cal_comparison(cal_results, order=1):
         
     return fit_func, g_res_draw, fit_result
 
+class MockCov:
+    def __init__(self, matrix):
+        self.matrix = matrix
+    def __call__(self, i, j):
+        return self.matrix[i, j]
+
+class MockFitResult:
+    def __init__(self, cov_matrix):
+        self._cov = MockCov(cov_matrix)
+    def GetCovarianceMatrix(self):
+        return self._cov
+
+class MockFitFunc:
+    def __init__(self, params):
+        self.params = params
+    def Eval(self, mu):
+        return sum(p * (mu ** i) for i, p in enumerate(self.params))
+    def Derivative(self, mu):
+        return sum(i * p * (mu ** (i - 1)) for i, p in enumerate(self.params) if i > 0)
+    def GetNpar(self):
+        return len(self.params)
+
+def fit_polynomial_to_cal_comparison_ml(cal_results, order=1):
+    '''
+    Extracts the points from the uncalibrated comparison plot and fits E_true = P(mu).
+    Assumes an additional unknown error added in quadrature.
+    Estimates this error and the fit parameters using maximum likelihood.
+    Returns the fit function (E vs mu), the residual drawing graph, and the fit result.
+    '''
+    from scipy.optimize import minimize
+    
+    if not cal_results or len(cal_results) < 9:
+        print("Invalid results from show_init_cal_comparison")
+        return None, None, None
+        
+    c1 = cal_results[0]
+    pad1 = cal_results[1]
+    pad2 = cal_results[2]
+    mg_main = cal_results[3]
+    
+    # Check if canvas is still alive in ROOT to avoid segfaults
+    canvas_alive = False
+    if c1:
+        for c in ROOT.gROOT.GetListOfCanvases():
+            if c.GetName() == c1.GetName():
+                canvas_alive = True
+                break
+
+    # Extract X=mu and Y=E_true to fit E = P(mu)
+    mu_all = []
+    e_all = []
+    mu_err_all = []
+    e_err_all = []
+    
+    # mg_main.GetListOfGraphs() holds only the main pad's graphs (E_true vs mu).
+    for g in mg_main.GetListOfGraphs():
+        for i in range(g.GetN()):
+            mu_all.append(g.GetPointY(i))
+            e_all.append(g.GetPointX(i))
+            mu_err_all.append(g.GetErrorY(i))
+            e_err_all.append(g.GetErrorX(i))
+            
+    if len(mu_all) == 0:
+        print("No points to fit.")
+        return None, None, None
+        
+    mu_all = np.array(mu_all)
+    e_all = np.array(e_all)
+    mu_err_all = np.array(mu_err_all)
+    e_err_all = np.array(e_err_all)
+
+    def nll_wrapper(x):
+        params = [x[i] for i in range(order + 1)]
+        sigma_add = x[order + 1]
+        
+        # We work with scaled mu inside nll for stability
+        mu_scaled = mu_all / 1000.0
+        
+        p_mu = sum(p * (mu_scaled ** i) for i, p in enumerate(params))
+        
+        # dP/dmu = (dP/dmu_scaled) * (dmu_scaled/dmu) = (dP/dmu_scaled) / 1000.0
+        dp_dmu = sum(i * p * (mu_scaled ** (i - 1)) for i, p in enumerate(params) if i > 0) / 1000.0
+        
+        var_eff = e_err_all**2 + (dp_dmu * mu_err_all)**2 + sigma_add**2
+        
+        # Negative log likelihood
+        return 0.5 * np.sum(np.log(2 * np.pi * var_eff) + (e_all - p_mu)**2 / var_eff)
+
+    minimizer = ROOT.Math.Factory.CreateMinimizer("Minuit2", "Migrad")
+    minimizer.SetMaxFunctionCalls(100000)
+    minimizer.SetMaxIterations(100000)
+    minimizer.SetTolerance(0.001)
+    minimizer.SetPrintLevel(1)
+    
+    functor = ROOT.Math.Functor(nll_wrapper, order + 2)
+    minimizer.SetFunction(functor)
+
+    # Initial guesses
+    minimizer.SetVariable(0, "p0", 0.0, 1.0)
+    if order >= 1:
+        minimizer.SetVariable(1, "p1", 1000.0, 1.0)
+    for i in range(2, order + 1):
+        minimizer.SetVariable(i, f"p{i}", 0.0, 0.1)
+        
+    minimizer.SetVariable(order + 1, "sigma_add", 1.0, 0.1)
+    minimizer.SetVariableLowerLimit(order + 1, 0.0)
+    
+    minimizer.Minimize()
+    
+    if minimizer.Status() != 0 and minimizer.Status() != 1:
+        raise Warning(f"Fit failed with Minuit status: {minimizer.Status()}")
+        
+    best_params_scaled = [minimizer.X()[i] for i in range(order + 1)]
+    best_sigma_add = minimizer.X()[order + 1]
+    
+    best_params = [p / (1000.0 ** i) for i, p in enumerate(best_params_scaled)]
+    
+    cov_params_scaled = np.zeros((order + 1, order + 1))
+    for i in range(order + 1):
+        for j in range(order + 1):
+            cov_params_scaled[i, j] = minimizer.CovMatrix(i, j)
+    
+    cov_params = np.zeros_like(cov_params_scaled)
+    for i in range(order + 1):
+        for j in range(order + 1):
+            cov_params[i, j] = cov_params_scaled[i, j] / (1000.0 ** (i + j))
+            
+    print(f"Polynomial ML fit (order {order}) successful. Estimated additional error: {best_sigma_add:.3f} keV")
+    
+    fit_func = MockFitFunc(best_params)
+    fit_result = MockFitResult(cov_params)
+    fit_func.sigma_add = best_sigma_add
+    
+    # Generate parametric curves to draw on the original axes: X = E_true, Y = mu
+    # We will vary mu, compute E_true = P(mu), and plot X=P(mu), Y=mu
+    mu_min = min(mu_all)
+    mu_max = max(mu_all)
+    mu_range = np.linspace(mu_min * 0.9, mu_max * 1.1, 500)
+    e_range = [fit_func.Eval(m) for m in mu_range]
+    
+    g_draw = ROOT.TGraph(len(mu_range), array.array('d', e_range), array.array('d', mu_range))
+    g_draw.SetLineColor(ROOT.kBlue)
+    g_draw.SetLineStyle(1)
+    g_draw.SetLineWidth(2)
+    
+    # Residuals: original plot shows y = True - mu vs x = True.
+    # Our model predicts True = P(mu). So expected residual is P(mu) - mu vs P(mu).
+    res_range = [e - m for e, m in zip(e_range, mu_range)]
+    g_res_draw = ROOT.TGraph(len(mu_range), array.array('d', e_range), array.array('d', res_range))
+    g_res_draw.SetLineColor(ROOT.kBlue)
+    g_res_draw.SetLineStyle(1)
+    g_res_draw.SetLineWidth(2)
+    
+    if canvas_alive:
+        pad1.cd()
+        g_draw.Draw("L SAME")
+        pad2.cd()
+        g_res_draw.Draw("L SAME")
+        c1.Update()
+    else:
+        print("Note: The canvas was closed, so the fits were calculated but could not be drawn.")
+        
+    # Prevent garbage collection of the drawing graphs
+    fit_func.g_draw = g_draw
+    fit_func.g_res_draw = g_res_draw
+        
+    return fit_func, g_res_draw, fit_result
+
 def apply_energy_calibration_to_point(mu, mu_err, calibration_results):
     '''
     Applies the energy calibration and propagates uncertainties.
@@ -381,6 +554,8 @@ def apply_energy_calibration_to_point(mu, mu_err, calibration_results):
             err2_cov += (mu**i) * (mu**j) * cov(i, j)
             
     err2 = err2_cov + (dE_dmu * mu_err)**2
+    if hasattr(fit_func, 'sigma_add'):
+        err2 += fit_func.sigma_add**2
     E_err = np.sqrt(err2) if err2 > 0 else 0.0
     
     return E_cal, E_err
@@ -423,6 +598,8 @@ def apply_energy_calibration_to_cascade(mus, mu_errs, calibration_results):
             err2_cov += S[i] * S[j] * cov(i, j)
             
     err2 = err2_cov + stat_err2
+    if hasattr(fit_func, 'sigma_add'):
+        err2 += len(mus) * (fit_func.sigma_add**2)
     E_err = np.sqrt(err2) if err2 > 0 else 0.0
     
     return E_cal, E_err
@@ -560,23 +737,38 @@ init_cal_decay_groups = {
 }
 
 init_cal = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
-calibration = fit_polynomial_to_cal_comparison(init_cal, 1)
+#calibration = fit_polynomial_to_cal_comparison(init_cal, 1)
+calibration = fit_polynomial_to_cal_comparison_ml(init_cal, 1)
 disp_fit_name = '60Ga_beam_off_gamma'
 disp_cal_decay_groups = extract_cal_data(disp_fit_name, False)
 calibrated_data = show_cal_comparison(disp_cal_decay_groups, disp_fit_name, cal_fit=calibration)
 apply_energy_calibration_to_fit(disp_fit_name, calibration)
 
-Es = np.linspace(0, 6000, 6001)
-err = [apply_energy_calibration_to_point(E, 0, calibration)[1] for E in Es]
-plt.figure()
-plt.plot(Es, err)
-plt.xlabel('Energy (keV)')
-plt.ylabel('Uncertainty in Energy Calibration (keV)')
-#plt.yscale('log')
-plt.show(block=False)
+def show_cal_error(calibration,title=''):
+    Es = np.linspace(0, 6000, 6001)
+    err = [apply_energy_calibration_to_point(E, 0, calibration)[1] for E in Es]
+    plt.figure()
+    plt.plot(Es, err)
+    plt.xlabel('Energy (keV)')
+    plt.ylabel('Uncertainty in Energy Calibration (keV)')
+    plt.title(title)
+    #plt.yscale('log')
+    plt.show(block=False)
+show_cal_error(calibration,title='with additional error')
 
 cascade1=[[4852.753],[0.108]]
 cascade2=[[2434.722,1414.244, 1004.043],[0.036,0.099,0.003]]
 print('cascade consistency check')
 print('cascade 1 sum = ', apply_energy_calibration_to_cascade(cascade1[0], cascade1[1], calibration))
 print('cascade 2 sum = ', apply_energy_calibration_to_cascade(cascade2[0], cascade2[1], calibration))
+
+cal_wo_aded_sigma = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
+calibration_wo_sigma_add = fit_polynomial_to_cal_comparison(cal_wo_aded_sigma, 1)
+calibration_wo_sigma_add[2].Print()
+show_cal_error(calibration_wo_sigma_add,title='without additional error')
+# sigma_add = 0.109201
+# for label in init_cal_decay_groups:
+#     init_cal_decay_groups[label]['fit_errs'] = [np.sqrt(init_cal_decay_groups[label]['fit_errs'][i] ** 2 + sigma_add ** 2) for i in range(len(init_cal_decay_groups[label]['fit_errs']))]
+# cal_w_aded_sigma = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
+# calibration_with_sigma_add = fit_polynomial_to_cal_comparison(cal_w_aded_sigma, 1)
+# calibration_with_sigma_add[2].Print()
