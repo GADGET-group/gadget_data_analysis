@@ -110,7 +110,21 @@ def show_cal_comparison(decay_groups, fit_name, fit_column='mu', cal_fit=None):
 
     mg_main = ROOT.TMultiGraph()
     y_axis_title = "Calibrated Energy (keV)" if cal_fit else f"Fit {fit_column} (keV)"
-    mg_main.SetTitle(f"Calibration Comparison;True Energy (keV);{y_axis_title}")
+    
+    title = f"Calibration Comparison;True Energy (keV);{y_axis_title}"
+    if cal_fit is not None:
+        chi2 = 0.0
+        ndf = 0
+        for data in decay_groups.values():
+            for te, fe, te_err, fe_err in zip(data['true_energies'], data['fit_energies'], data['true_errs'], data['fit_errs']):
+                err = np.sqrt(te_err**2 + fe_err**2)
+                if err > 0:
+                    chi2 += ((te - fe) / err)**2
+                    ndf += 1
+        p_val = ROOT.TMath.Prob(chi2, ndf) if ndf > 0 else 0.0
+        title = f"Calibration Comparison (p={p_val:.2e}, #chi^{{2}}/NDF={chi2:.1f}/{ndf});True Energy (keV);{y_axis_title}"
+        
+    mg_main.SetTitle(title)
     
     mg_res = ROOT.TMultiGraph()
     mg_res.SetTitle(";True Energy (keV);True - Fit (keV)")
@@ -371,6 +385,48 @@ def apply_energy_calibration_to_point(mu, mu_err, calibration_results):
     
     return E_cal, E_err
 
+def apply_energy_calibration_to_cascade(mus, mu_errs, calibration_results):
+    '''
+    Applies the energy calibration and propagates uncertainties to a cascade of gammas
+    to get the summed energy of the cascade.
+    mus: array-like of peak energies
+    mu_errs: array-like of peak uncertainties
+    calibration_results: tuple (fit_func, res_func, fit_result) from show_cal_comparison
+    Returns (E_cal, E_err)
+    '''
+    if not calibration_results or len(calibration_results) < 3:
+        return np.sum(mus), np.sqrt(np.sum(np.array(mu_errs)**2))
+        
+    fit_func = calibration_results[0]
+    fit_result = calibration_results[2]
+    
+    if not fit_func or not fit_result:
+        return np.sum(mus), np.sqrt(np.sum(np.array(mu_errs)**2))
+        
+    E_cal = 0.0
+    stat_err2 = 0.0
+    
+    for mu, mu_err in zip(mus, mu_errs):
+        E_cal += fit_func.Eval(mu)
+        dE_dmu = fit_func.Derivative(mu)
+        stat_err2 += (dE_dmu * mu_err)**2
+        
+    cov = fit_result.GetCovarianceMatrix()
+    n_params = fit_func.GetNpar()
+    
+    # S_j = sum(mu^j for mu in mus)
+    S = [sum(mu**j for mu in mus) for j in range(n_params)]
+    
+    err2_cov = 0.0
+    for i in range(n_params):
+        for j in range(n_params):
+            err2_cov += S[i] * S[j] * cov(i, j)
+            
+    err2 = err2_cov + stat_err2
+    E_err = np.sqrt(err2) if err2 > 0 else 0.0
+    
+    return E_cal, E_err
+
 def apply_energy_calibration_to_fit(fit_name, calibration_results):
     '''
     Read in the specified fit csv file, and write the (fit_index, pvalue, calibrated_energy, calibrated energy error, amplitude, amplitude error)
@@ -518,3 +574,9 @@ plt.xlabel('Energy (keV)')
 plt.ylabel('Uncertainty in Energy Calibration (keV)')
 #plt.yscale('log')
 plt.show(block=False)
+
+cascade1=[[4852.753],[0.108]]
+cascade2=[[2434.722,1414.244, 1004.043],[0.036,0.099,0.003]]
+print('cascade consistency check')
+print('cascade 1 sum = ', apply_energy_calibration_to_cascade(cascade1[0], cascade1[1], calibration))
+print('cascade 2 sum = ', apply_energy_calibration_to_cascade(cascade2[0], cascade2[1], calibration))
