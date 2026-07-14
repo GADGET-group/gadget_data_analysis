@@ -18,7 +18,7 @@ from e23035_analysis import e23035_runs
 experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
-    run_range= [71] #80,81,82,83,71,72
+    run_range= [71]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range =[228]
 # else: #during experiment
@@ -93,7 +93,7 @@ if experiment == 'e23035':
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
-    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.1)
+    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.05)
 veto_mask = veto_mask & (num_pads_railed==0) #& (angles>np.radians(20)) 
 
     
@@ -381,7 +381,7 @@ def plot_energy_spectrum_fixed_bin_width(bin_width=0.01):
 
     # 2. Extract selected energy data
     selected_energy = energy[plt_mask][rve_cut_select_mask]
-
+    selected_lengths = lengths[plt_mask][rve_cut_select_mask]
     if len(selected_energy) == 0:
         print("Warning: No events found in the current cut.")
         return
@@ -402,6 +402,20 @@ def plot_energy_spectrum_fixed_bin_width(bin_width=0.01):
     
     # Optional: Automatically zoom the x-axis to the data you actually selected
     plt.xlim(np.min(selected_energy) - 0.2, np.max(selected_energy) + 0.2)
+    
+    plt.show()
+
+    plt.figure(figsize=(10, 6))
+    plt.hist(selected_lengths, bins=fixed_bins, histtype='step', color='black', lw=1.5)
+   
+    plt.title(f'Range Spectrum | Selected Region from (Run {get_runs})')
+    plt.xlabel('Range (mm)')
+    plt.ylabel(f'Counts / {bin_width*1000:.0f} keV') # Updates y-axis to show bin width
+   
+    plt.grid(True, alpha=0.3)
+    
+    # Optional: Automatically zoom the x-axis to the data you actually selected
+    #plt.xlim(np.min(selected_lengths) - 0.2, np.max(selected_lengths) + 0.2)
     
     plt.show()
    
@@ -565,3 +579,17 @@ def get_cobos_present(experiment, run, num_events_to_check = 1000):
         if len(cobos) >= num_asads_expected:
             return np.sort(cobos)
     return np.sort(cobos)
+def average():
+    global rve_cut_select_mask
+    # 1. Verification
+    if rve_cut_select_mask is None:
+        print("Error: No cut defined. Run define_cut_on_gui() first.")
+        return
+
+    # 2. Extract selected energy data
+    selected_energy = energy[plt_mask][rve_cut_select_mask]
+    selected_lengths = lengths[plt_mask][rve_cut_select_mask]
+    average_energy = selected_energy.mean()
+    average_length = selected_lengths.mean()
+    print(average_energy)
+    print(average_length)
