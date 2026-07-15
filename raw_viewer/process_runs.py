@@ -252,7 +252,21 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
         metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff]}
         print('saving to ROOT file')
         with uproot.recreate(fname) as file:
-            file['events'] = events_data
+            lengths = [len(v) for v in events_data.values()]
+            if not lengths or min(lengths) == 0:
+                file['events'] = events_data
+            else:
+                total_events = min(lengths)
+                chunk_size = 50000
+                for i in range(0, total_events, chunk_size):
+                    chunk = {}
+                    for k, v in events_data.items():
+                        chunk[k] = v[i:i+chunk_size]
+                    
+                    if i == 0:
+                        file['events'] = chunk
+                    else:
+                        file['events'].extend(chunk)
             file['metadata'] = metadata
 
 def get_quantity(qname, experiment, runs):
