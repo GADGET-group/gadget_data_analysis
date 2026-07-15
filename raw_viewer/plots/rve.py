@@ -18,7 +18,7 @@ from e23035_analysis import e23035_runs
 experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
-    run_range= [71]#,81,82,83,71,72
+    run_range= [70]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range =[228]
 # else: #during experiment
@@ -93,7 +93,7 @@ if experiment == 'e23035':
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
-    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.05)
+    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.1)
 veto_mask = veto_mask & (num_pads_railed==0) #& (angles>np.radians(20)) 
 
     

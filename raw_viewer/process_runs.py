@@ -1,6 +1,7 @@
 import os
-import pickle
-import gzip
+import uproot
+import awkward as ak
+import hashlib
 import multiprocessing as mp
 import subprocess
 import socket
@@ -25,13 +26,6 @@ def get_save_path(experiment):
             save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
         elif experiment == 'e23035_prep_vault':
             save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
-        elif experiment == 'e25058_prep_vault':
-            save_path = '/egr/research-tpc/shared/experiments/e25058/processed/proc_pkl'
-        elif experiment == 'e25058':
-            save_path = '/egr/research-tpc/shared/proc_runs/e25058/proc_new_pkl'
-        elif experiment == 'e25058_20Mg':
-            save_path = '/egr/research-tpc/shared/proc_runs/e25058/proc_new_pkl'
-        
         else:
             save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
         return save_path
@@ -58,11 +52,6 @@ def get_h5_path(experiment, run_number):
         return '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
     elif experiment == 'e23035_prep_vault':
         return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
-    elif experiment == 'e25058':
-        return '/egr/research-tpc/shared/experiments/e25058/h5/run_%04d.h5'%run_number
-    elif experiment == 'e25058_20Mg':
-        return '/egr/research-tpc/shared/experiments/e25058/h5/run_%04d.h5'%run_number
-    
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
@@ -110,32 +99,43 @@ def get_h5_file(experiment, run_number):
         h5file.smart_bins_away_to_check = 25
         h5file.num_smart_background_ave_bins = 10
         h5file.cache_enable = True
-    elif experiment == 'e25058_20Mg':
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart'
-        h5file.smart_bins_away_to_check = 25
-        h5file.num_smart_background_ave_bins = 10
-        h5file.cache_enable = True
     else:
         raise ValueError
     return h5file
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def get_processed_run(experiment, run_number, force_reprocess=False):
+def process_tpc_run(experiment, run_number, force_reprocess=False):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
-    Only redoes processing if a pickled version of this information isn't available.
+    Only redoes processing if a ROOT version of this information isn't available.
     '''
     #save_path = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(get_save_path(experiment), '%s_run%d.pkl.gz'%(experiment, run_number))
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}.root')
+    
+    if force_reprocess:
+        import glob
+        save_path = get_save_path(experiment)
+        cache_patterns = [
+            f'gm_ic_{experiment}_run{run_number}_*.npy',
+            f'veto_counts_{experiment}_run{run_number}.npy',
+            f'max_veto_counts_{experiment}_run{run_number}.npy',
+            f'outer_ring_counts_{experiment}_run{run_number}.npy',
+            f'max_outer_ring_counts_{experiment}_run{run_number}.npy',
+            f'veto_mask_{experiment}_run{run_number}_*.npy'
+        ]
+        for pattern in cache_patterns:
+            for cache_file in glob.glob(os.path.join(save_path, pattern)):
+                try:
+                    os.remove(cache_file)
+                    print(f"Cleared cache file: {cache_file}")
+                except OSError as e:
+                    print(f"Error removing {cache_file}: {e}")
+    
     #fname += '.no_neg'
     if os.path.exists(fname) and not force_reprocess:
-        print('run %d previously processed, loading previous results'%run_number)
-        with gzip.open(fname, 'rb') as file:
-            return pickle.load(file)
+        print('run %d previously processed, ROOT file exists'%run_number)
+        return
     else:
         # h5file = build_sim.get_rawh5_object(experiment, run_number)
         h5file = get_h5_file(experiment, run_number)
@@ -198,29 +198,88 @@ def get_processed_run(experiment, run_number, force_reprocess=False):
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
         git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
         git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True).stdout
+        def sanitize_jagged(lst):
+            def _walk(obj):
+                if isinstance(obj, tuple):
+                    return [_walk(x) for x in obj]
+                elif isinstance(obj, list):
+                    return [_walk(x) for x in obj]
+                elif isinstance(obj, np.ndarray):
+                    if obj.dtype == object:
+                        return [_walk(x) for x in obj]
+                    return obj.tolist()
+                return obj
+            cleaned = [_walk(x) for x in lst]
+            if len(cleaned) == 0:
+                return np.empty(0, dtype=np.float64)
+            try:
+                counts = [len(x) for x in cleaned]
+                if sum(counts) == 0:
+                    return ak.unflatten(np.array([], dtype=np.float64), counts)
+            except TypeError:
+                pass
+            return ak.from_iter(cleaned)
 
+        res_centers = []
+        for c in track_centers:
+            try:
+                if len(c) == 3:
+                    res_centers.append(list(c))
+                else:
+                    res_centers.append([0.0, 0.0, 0.0])
+            except TypeError:
+                res_centers.append([0.0, 0.0, 0.0])
+                
+        res_endpoints = []
+        for ep in track_endpoints:
+            try:
+                if len(ep) == 2 and len(ep[0]) == 3 and len(ep[1]) == 3:
+                    res_endpoints.append([list(ep[0]), list(ep[1])])
+                else:
+                    res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+            except TypeError:
+                res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+                
+        events_data = {'track_center':np.array(res_centers, dtype=np.float64), 'principle_axes':sanitize_jagged(principle_axes), 'variance_along_axes': sanitize_jagged(variances_along_axes),
+                   'pad_charge': pad_charges, 'endpoints':np.array(res_endpoints, dtype=np.float64), 'charge_width':np.array(charge_widths),
+                   'width_above_threshold':np.array(width_above_thresholds), 'pad_max':pad_maxs, 'timestamps':ts}
+                   
+        counts = [len(x) for x in railed_pads]
+        if sum(counts) == 0:
+            events_data['railed_pads'] = ak.unflatten(np.array([], dtype=np.int64), counts)
+        else:
+            events_data['railed_pads'] = ak.from_iter(railed_pads)
+        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff]}
+        print('saving to ROOT file')
+        with uproot.recreate(fname) as file:
+            file['events'] = events_data
+            file['metadata'] = metadata
 
-        to_return={'track_center':track_centers, 'principle_axes':principle_axes, 'variance_along_axes': variances_along_axes,
-                   'pad_charge': pad_charges, 'endpoints':track_endpoints, 'charge_width':charge_widths,
-                   'width_above_threshold':width_above_thresholds, 'pad_max':pad_maxs, 'timestamps':ts,
-                   'git_version':git_version, 'git_status':git_status, 'git_diff':git_diff, 'railed_pads':railed_pads}
-        print('pickling')
-        with gzip.open(fname, 'wb') as file:
-            pickle.dump(to_return, file)
-        return to_return
-
-loaded_runs={}
 def get_quantity(qname, experiment, runs):
     to_return = []
     for run in runs:
-        if (experiment, run) not in loaded_runs:
-            loaded_runs[(experiment, run)] = get_processed_run(experiment, run)
-        to_return.append(loaded_runs[(experiment, run)][qname])
+        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}.root')
+        if not os.path.exists(fname):
+            process_tpc_run(experiment, run)
+            
+        with uproot.open(fname) as file:
+            if qname in file['events']:
+                if qname == 'railed_pads':
+                    arr = file['events'][qname].array(library='ak')
+                    to_return.extend(ak.to_list(arr))
+                else:
+                    arr = file['events'][qname].array(library='np')
+                    to_return.append(arr)
+            elif qname in file['metadata']:
+                arr = file['metadata'][qname].array(library='np')
+                to_return.append(arr[0])
+            else:
+                raise ValueError(f"Quantity {qname} not found in ROOT file")
+                
     if qname == 'railed_pads':
-        l = []
-        for sub in to_return:
-            l += sub
-        return l
+        return to_return
+    elif qname in ['git_version', 'git_status', 'git_diff']:
+        return to_return
     else:
         return np.concatenate(to_return, axis=0)
     
@@ -231,38 +290,98 @@ def get_lengths(experiment, runs):
     return np.sqrt(np.sum(dr*dr, axis=1))
 
 def get_veto_counts(experiment, runs):
-    veto_pad_mask = np.zeros(1024)
-    for i in raw_h5_file.VETO_PADS:
-        veto_pad_mask[i] = 1
-    return np.einsum('ij, j', get_quantity('pad_charge', experiment, runs), veto_pad_mask)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            veto_counts = np.load(cache_fname)
+        else:
+            veto_pad_mask = np.zeros(1024)
+            for i in raw_h5_file.VETO_PADS:
+                veto_pad_mask[i] = 1
+            veto_counts = np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), veto_pad_mask)
+            np.save(cache_fname, veto_counts)
+        to_return.append(veto_counts)
+    return np.concatenate(to_return, axis=0)
+
+def get_veto_mask(experiment, runs, veto_thresholds):
+    thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}.npy')
+        if os.path.exists(cache_fname):
+            veto_mask = np.load(cache_fname)
+        else:
+            pad_maxs = get_quantity('pad_max', experiment, [run])
+            veto_mask = np.all(pad_maxs < veto_thresholds, axis=1)
+            np.save(cache_fname, veto_mask)
+        to_return.append(veto_mask)
+    return np.concatenate(to_return, axis=0)
 
 def get_max_veto_counts(experiment, runs):
     '''
     gets array of max counts on any individual veto pad
     '''
-    max_pad_counts = get_quantity('pad_max', experiment, runs)
-    veto_pad_mask = np.zeros(1024)
-    for i in raw_h5_file.VETO_PADS:
-        veto_pad_mask[i] = 1
-    return np.max(max_pad_counts[:,veto_pad_mask==1], axis=1)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            max_pad_counts = np.load(cache_fname)
+        else:
+            pad_maxs = get_quantity('pad_max', experiment, [run])
+            veto_pad_mask = np.zeros(1024)
+            for i in raw_h5_file.VETO_PADS:
+                veto_pad_mask[i] = 1
+            max_pad_counts = np.max(pad_maxs[:,veto_pad_mask==1], axis=1)
+            np.save(cache_fname, max_pad_counts)
+        to_return.append(max_pad_counts)
+    return np.concatenate(to_return, axis=0)
 
 def get_outer_ring_counts(experiment, runs):
-    outer_ring_mask = np.zeros(1024)
-    for i in OUTER_RING_PADS:
-        outer_ring_mask[i] = 1
-    return np.einsum('ij, j', get_quantity('pad_charge', experiment, runs), outer_ring_mask)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            counts = np.load(cache_fname)
+        else:
+            outer_ring_mask = np.zeros(1024)
+            for i in OUTER_RING_PADS:
+                outer_ring_mask[i] = 1
+            counts = np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), outer_ring_mask)
+            np.save(cache_fname, counts)
+        to_return.append(counts)
+    return np.concatenate(to_return, axis=0)
 
 def get_outer_ring_max_counts(experiment, runs):
-    max_pad_counts = get_quantity('pad_max', experiment, runs)
-    outer_ring_mask = np.zeros(1024)
-    for i in OUTER_RING_PADS:
-        outer_ring_mask[i] = 1
-    return np.max(max_pad_counts[:,outer_ring_mask==1], axis=1)
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}.npy')
+        if os.path.exists(cache_fname):
+            max_pad_counts = np.load(cache_fname)
+        else:
+            pad_maxs = get_quantity('pad_max', experiment, [run])
+            outer_ring_mask = np.zeros(1024)
+            for i in OUTER_RING_PADS:
+                outer_ring_mask[i] = 1
+            max_pad_counts = np.max(pad_maxs[:,outer_ring_mask==1], axis=1)
+            np.save(cache_fname, max_pad_counts)
+        to_return.append(max_pad_counts)
+    return np.concatenate(to_return, axis=0)
     
 def get_gm_ic(experiment, runs, gains):
-    counts_per_pad = get_quantity('pad_charge', experiment, runs)
-    #counts per pad needs to already be on the gpu
-    return np.einsum('ij, j', counts_per_pad, gains)
+    gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
+    to_return = []
+    for run in runs:
+        cache_fname = os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}.npy')
+        if os.path.exists(cache_fname):
+            gm_ic = np.load(cache_fname)
+        else:
+            counts_per_pad = get_quantity('pad_charge', experiment, [run])
+            #counts per pad needs to already be on the gpu
+            gm_ic = np.einsum('ij, j', counts_per_pad, gains)
+            np.save(cache_fname, gm_ic)
+        to_return.append(gm_ic)
+    return np.concatenate(to_return, axis=0)
 
 def get_angle(experiment, runs):
     endpoints = np.array(get_quantity('endpoints', experiment, runs))
@@ -294,18 +413,3 @@ def get_run_and_event_numbers(experiment, runs):
         event_numbers.append(np.arange(first, last+1))
         run_numbers.append(np.ones(last - first + 1)*run)
     return np.concatenate(run_numbers, axis=0), np.concatenate(event_numbers, axis=0)
- 
-def get_cobos_present(experiment, run, num_events_to_check = 1000):
-    num_asads_expected = 4 #terminate once 4 asads have been seen
-    h5 = process_runs.get_h5_file(experiment, run)
-    h5.background_subtract_mode = 'none' #disable background subtrction since only care about channels
-    cobos = []
-    evt_bounds = h5.get_event_num_bounds()
-    for i in range(evt_bounds[0], min(evt_bounds[0] + num_events_to_check, evt_bounds[1])):
-        l = np.unique(h5.get_data(i)[:,0])
-        for j in l:
-            if j not in cobos:
-                cobos.append(j)
-        if len(cobos) >= num_asads_expected:
-            return np.sort(cobos)
-    return np.sort(cobos)

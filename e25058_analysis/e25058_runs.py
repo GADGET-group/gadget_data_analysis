@@ -12,7 +12,7 @@ from skimage.measure import points_in_poly
 from raw_viewer import process_runs, ddas_interface
 from track_fitting import srim_interface, build_sim
 
-experiment = 'e23035'
+experiment = 'e25058'
 
 current_dir = Path(__file__).parent.resolve()
 run_df = pd.read_csv(os.path.join(current_dir, 'runs.csv'))
@@ -20,69 +20,22 @@ run_df['GET'] = pd.to_numeric(run_df['GET'], errors='coerce', downcast='integer'
 run_df['DDAS'] = pd.to_numeric(run_df['DDAS'], errors='coerce', downcast='integer')
 run_df['degrader angle'] = pd.to_numeric(run_df['degrader angle'], errors='coerce', downcast='float')
 
-def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_beam_settings, tpc_data_valid=True):
+def get_ddas_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_beam_settings, tpc_data_valid=True):
     '''
-    good_gamma: runs for which I beleive the gamma array was performing well
-    good_low_energy_tpc: Runs during which the SCA threshold was behaving correctly. Important for protons with energy <~1.2 MeV
-    good_long_tracks_tpc: Runs with get settings which properly captured long tracks Only important above ~2.2 MeV, and likely only for protons.
-    final_beam_settings: only include runs with final beam settings (38 degree degrader and reduced momentum acceptance)
-    TPC data valid: requires GET data to be in the merged tree
+    Placeholder function for extracting runs. 
+    You will need to update the logic below to fit e25058's specific run conditions.
     '''
     runs = []
-    for run, get_run in zip(run_df['DDAS'][(run_df['Run Type']=='60Ga')], run_df['GET'][(run_df['Run Type']=='60Ga')]):
+    # TODO: Update 'Run Type' column filter for e25058
+    for run, get_run in zip(run_df['DDAS'], run_df['GET']):
         if tpc_data_valid:
             if not np.isfinite(get_run):
                 continue
         if np.isnan(run):
             continue
-        if final_beam_settings and run <149:
-            continue
-        if good_gamma and (run <150 or run in [174, 205, 237] or (run>=182 and run<=191) or run in [218, 238, 163]):
-            continue
-            #169-173: beam disruptions, and following short runs. Include
-            #174: attenuated beam
-            #180, 181: grow in after PID, including    
-            #205 doesn't have matching GET run
-            #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
-            #237 has some odds, remove
-            #218, 238, 163 are too short to gain match
-            #run not in [162,163,203,204,209, 213,217, 218, 238] and #runs which previously were missing h5 files
-            #TODO LN2 fill runs
-        if good_low_energy_tpc and (run <241 and run > 208):
-            continue #SCA was set to ~1 MeV during these runs
-        if good_long_tracks_tpc and run < 238:
-            #run 238 has max readout depth and final gate delay. Only important above ~2.2 MeV
-            continue
-        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
-            runs.append(run)
-    return runs
-
-def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_beam_settings, tpc_data_valid=True):
-    '''
-    good_gamma: runs for which I beleive the gamma array was performing well
-    good_low_energy_tpc: Runs during which the SCA threshold was behaving correctly. Important for protons with energy <~1.2 MeV
-    good_long_tracks_tpc: Runs with get settings which properly captured long tracks Only important above ~2.2 MeV, and likely only for protons.
-    final_beam_settings: only include runs with final beam settings (38 degree degrader and reduced momentum acceptance)
-    TPC data valid: requires GET data to be in the merged tree
-    '''
-    runs = []
-
-    if tpc_data_valid:
-        run_selector = (run_df['Run Type']=='59Zn')
-    else:
-        run_selector = (run_df['Run Type']=='59Zn') & (run_df['Field Cage Functional?']=='yes')
-
-    for run, get_run in zip(run_df['DDAS'][run_selector], run_df['GET'][run_selector]):
-        if tpc_data_valid:
-            if not np.isfinite(get_run):
-                continue        
-        if np.isnan(run):
-            continue
-        if final_beam_settings and False: #TODO: currently this doesn't do anything, since the degrader was adjusted so many times
-            continue
-        if good_gamma and False: #TODO
-            continue
-        #SCA and GET settings are correct for all 59Zn runs, so don't need to exclude any runs for high/low proton energy
+            
+        # TODO: Add your experiment specific run filters here
+        
         if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
             runs.append(run)
     return runs
@@ -110,18 +63,16 @@ def get_veto_mask(get_run):
     for pad in process_runs.raw_h5_file.VETO_PADS:
             veto_thresholds[pad] = 500#260
     veto_thresholds[509]=500
-    
+
     if is_iterable(get_run):
         return process_runs.get_veto_mask(experiment, get_run, veto_thresholds)
     return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds)
 
 def get_pad_gains(get_run):
-    #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
+    #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e25058_prep_runs61to63_gm.pkl'
     gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
-    #return np.ones(1024)*5.47e-6
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
-    #return gain_match_result.x[:1024]
     return gain_match_result.pad_gains
 
 def get_length_mm(get_run):
@@ -141,7 +92,7 @@ def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     if not is_iterable(get_run):
         get_run = [get_run]
     stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
-    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run[0]))
+    proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density(experiment, get_run[0]))
     expected_proton_length = proton_srim_table.get_stopping_distance(energies)
     lower_band = expected_proton_length - 37
     upper_band = expected_proton_length + 20
@@ -170,7 +121,7 @@ def get_alpha_mask_min_max_range(get_run, energies:np.ndarray):
     if not is_iterable(get_run):
         get_run = [get_run]
     stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('4He', 'P10')
-    alpha_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run[0]))
+    alpha_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density(experiment, get_run[0]))
     expected_alpha_length = alpha_srim_table.get_stopping_distance(energies)
     lower_band = np.zeros(len(energies))
     lower_proton, upper_proton = get_proton_mask_min_max_range(get_run, energies)
@@ -193,17 +144,14 @@ def get_pid_cut(ddas_run, species):
     if name in pid_cuts:
         return pid_cuts[name]
     
+    # TODO: Update these PID cuts for e25058
     if species == '60Ga':
         points = [(-6.22262e-7,6715.99),(-6.20756e-7,6829.88),(-6.19298e-7,6768.19),(-6.19465e-7,6635.32),(-6.2066e-7,6540.42),(-6.21903e-7,6583.12)]
     elif species == '59Zn':
         points=[(-6.20086e-7,6417.04),(-6.18461e-7,6554.65),(-6.16429e-7,6438.47),(-6.16429e-7,6307.9),(-6.18556e-7,6208.25),(-6.19943e-7,6269.94)]
     points.append(points[0])
-    if ddas_run == 113:
-        timing_offset = 0
-    elif ddas_run == 177 or ddas_run == 240:
-        timing_offset = (-6.24407e-7 + 6.22262e-7)
-    elif ddas_run == 262:
-        timing_offset = -6.2222e-7 + 6.20086e-7
+    
+    timing_offset = 0
     points_arr = np.array(points, dtype=np.float64)
     xs = np.ascontiguousarray(points_arr[:,0], dtype=np.float64) + timing_offset
     ys = np.ascontiguousarray(points_arr[:,1], dtype=np.float64)
@@ -219,7 +167,7 @@ def get_counts_in_pid_cut(ddas_run, species):
     global current_data
     if current_run != ddas_run:
         current_run = ddas_run
-        current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
+        current_file = ROOT.TFile(ddas_interface.get_merged_root_file_path(experiment, ddas_run), 'READ')
         current_data = current_file.Get('merged_data')
     cut = get_pid_cut(ddas_run, species)
     cut_name = 'run%d_%s_cut'%(ddas_run, species)
