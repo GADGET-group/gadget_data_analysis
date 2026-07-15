@@ -67,7 +67,7 @@ print('loading stuff')
 
 
 lengths = process_runs.get_lengths(experiment, get_runs)
-cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
+#cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
 veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
 charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
