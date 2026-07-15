@@ -8,6 +8,7 @@ from raw_viewer import ddas_interface, process_runs
 from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter
 
 experiment = 'e23035'
+num_workers = 200
 
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end
@@ -17,11 +18,14 @@ Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
 ddas_runs_protons_all_energies = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
+pspec = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
 ddas_runs_low_energy_protons = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
-pspec_low_enegy = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, (4000, 0, 4000), "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=256)
+pspec_low_energy = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, (4000, 0, 4000), "proton_spectrum_low_energy", "proton_spectrum_low_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
 ddas_runs_alphas = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
-aspec = ddas_interface.get_histogram(experiment, ddas_runs_alphas, (700, 2000, 9000), 'alpha spectrum', 'alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=256)
+aspec = ddas_interface.get_histogram(experiment, ddas_runs_alphas, (700, 2000, 9000), 'alpha_spectrum', 'alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers)
+
+alpha_energy_v_tsbo = ddas_interface.get_histogram(experiment, ddas_runs_alphas, (100, 0, 0.100, 140, 2000, 9000), "alpha_energy_v_tsbo", "alpha energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==2", num_workers=num_workers)
+proton_energy_v_tsbo = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo", "proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers)
 
 sigma_tpc = lambda E: (0.011107*E/1e3 + 0.008813049)*1e3
 
@@ -65,7 +69,7 @@ f_all_proton = fit_peaks(pspec,
                          proton_peak_guesses,
                          'all_proton_energies', force_refit=force_refit
                         ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
-f_proton_low_enegy = fit_peaks(pspec_low_enegy, 
+f_proton_low_energy = fit_peaks(pspec_low_energy, 
                          proton_peak_guesses,
                          'low_energy_proton_energies', force_refit=force_refit
                         ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})

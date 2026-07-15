@@ -541,6 +541,7 @@ class spectrum_fitter:
         return to_return
 
     def show_fit_results(self, peak_index, show_fit_params=True, show_components=False):
+        ROOT.gROOT.SetBatch(False) 
         if 0 <= peak_index < len(self.fit_results):
             orig_canvas = self.fit_results[peak_index]['canvas']
             

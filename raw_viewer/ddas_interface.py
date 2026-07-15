@@ -275,6 +275,7 @@ def make_merged_root_file(experiment, ddas_run):
         out_tree.Branch('tpc_particle_id', tree_ptype, 'tpc_particle_id/I')
         out_tree.Branch('tpc_should_veto', tree_should_veto, 'tpc_should_veto/O')
         out_tree.Branch('tpc_track_angle', tree_track_angle, 'tpc_track_angle/D')
+        out_tree.Branch('get_timestamp', tree_get_timestamp, 'get_timestamp/D')
         
         tree_track_centroid = np.array([0., 0., 0.], dtype=np.float64)
         out_tree.Branch('tpc_track_centroid', tree_track_centroid, 'tpc_track_centroid[3]/D')
