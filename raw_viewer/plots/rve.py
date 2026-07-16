@@ -18,7 +18,7 @@ from e23035_analysis import e23035_runs
 experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
-    run_range= [70]#,81,82,83,71,72
+    run_range= [71]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range =[228]
 # else: #during experiment
@@ -109,8 +109,8 @@ plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.c
 plt.colorbar()
 plt.xlabel('Energy (MeV)')
 plt.ylabel('Range (mm)')
-plt.xlim(0, 4)
-plt.ylim(0, 160)
+plt.xlim(0, 6)
+plt.ylim(0, 140)
 
 
 # self.poly_selector = matplotlib.widgets.PolygonSelector(ax,self.set_cut_polygon)
