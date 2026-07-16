@@ -7,6 +7,155 @@ import uuid
 import numpy as np
 import matplotlib.pylab as plt
 
+'''
+Only the first three functions in this file are needed to apply the calibraiton.
+'''
+
+def apply_energy_calibration_to_point(mu, mu_err, calibration_results):
+    '''
+    Applies the energy calibration and propagates uncertainties.
+    calibration_results is expected to be a tuple (fit_func, res_func, fit_result).
+    Handles both scalar values and lists/arrays.
+    Returns (E_cal, E_err).
+    '''
+    if not calibration_results or len(calibration_results) < 3:
+        return mu, mu_err
+        
+    fit_func = calibration_results[0]
+    fit_result = calibration_results[2]
+    
+    if not fit_func or not fit_result:
+        return mu, mu_err
+        
+    # Handle array-like inputs recursively
+    if isinstance(mu, (list, np.ndarray, pd.Series)):
+        cal_e = []
+        cal_err = []
+        for m, merr in zip(mu, mu_err):
+            e, err = apply_energy_calibration_to_point(m, merr, calibration_results)
+            cal_e.append(e)
+            cal_err.append(err)
+            
+        if isinstance(mu, np.ndarray):
+            return np.array(cal_e), np.array(cal_err)
+        elif isinstance(mu, pd.Series):
+            return pd.Series(cal_e, index=mu.index), pd.Series(cal_err, index=mu_err.index)
+        return cal_e, cal_err
+        
+    # Scalar computation
+    E_cal = fit_func.Eval(mu)
+    dE_dmu = fit_func.Derivative(mu)
+    
+    cov = fit_result.GetCovarianceMatrix()
+    n_params = fit_func.GetNpar()
+    
+    err2_cov = 0.0
+    for i in range(n_params):
+        for j in range(n_params):
+            err2_cov += (mu**i) * (mu**j) * cov(i, j)
+            
+    err2 = err2_cov + (dE_dmu * mu_err)**2
+    if hasattr(fit_func, 'sigma_add'):
+        err2 += fit_func.sigma_add**2
+    E_err = np.sqrt(err2) if err2 > 0 else 0.0
+    
+    return E_cal, E_err
+
+def apply_energy_calibration_to_cascade(mus, mu_errs, calibration_results):
+    '''
+    Applies the energy calibration and propagates uncertainties to a cascade of gammas
+    to get the summed energy of the cascade.
+    mus: array-like of peak energies
+    mu_errs: array-like of peak uncertainties
+    calibration_results: tuple (fit_func, res_func, fit_result) from show_cal_comparison
+    Returns (E_cal, E_err)
+    '''
+    if not calibration_results or len(calibration_results) < 3:
+        return np.sum(mus), np.sqrt(np.sum(np.array(mu_errs)**2))
+        
+    fit_func = calibration_results[0]
+    fit_result = calibration_results[2]
+    
+    if not fit_func or not fit_result:
+        return np.sum(mus), np.sqrt(np.sum(np.array(mu_errs)**2))
+        
+    E_cal = 0.0
+    stat_err2 = 0.0
+    
+    for mu, mu_err in zip(mus, mu_errs):
+        E_cal += fit_func.Eval(mu)
+        dE_dmu = fit_func.Derivative(mu)
+        stat_err2 += (dE_dmu * mu_err)**2
+        
+    cov = fit_result.GetCovarianceMatrix()
+    n_params = fit_func.GetNpar()
+    
+    # S_j = sum(mu^j for mu in mus)
+    S = [sum(mu**j for mu in mus) for j in range(n_params)]
+    
+    err2_cov = 0.0
+    for i in range(n_params):
+        for j in range(n_params):
+            err2_cov += S[i] * S[j] * cov(i, j)
+            
+    err2 = err2_cov + stat_err2
+    if hasattr(fit_func, 'sigma_add'):
+        err2 += len(mus) * (fit_func.sigma_add**2)
+    E_err = np.sqrt(err2) if err2 > 0 else 0.0
+    
+    return E_cal, E_err
+
+def get_fit_results(fit_guesses, fit_name, fit_column='mu', fit_df=None):
+    '''
+    Retrieves the fit values and errors for a list of peak location guesses.
+    If fit_df is provided, it avoids reloading the CSV.
+    Returns (fit_vals, fit_errs) or (None, None) if any peak is not found.
+    '''
+    if fit_df is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        fit_csv_path = os.path.join(script_dir, 'peak_fitting', f'{fit_name}.csv')
+        
+        if not os.path.exists(fit_csv_path):
+            print(f"Fit file {fit_csv_path} not found.")
+            return None, None
+            
+        fit_df = pd.read_csv(fit_csv_path)
+
+    val_col = f'{fit_column}_val'
+    err_col = f'{fit_column}_err'
+    
+    if 'loc_guess' not in fit_df.columns or val_col not in fit_df.columns:
+        print(f"Required columns missing in {fit_name}.csv")
+        return None, None
+
+    fit_vals = []
+    fit_errs = []
+    
+    # Handle single value
+    if not hasattr(fit_guesses, '__iter__') or isinstance(fit_guesses, str):
+        fit_guesses = [fit_guesses]
+        
+    for peak_e in fit_guesses:
+        diffs = np.abs(fit_df['loc_guess'] - peak_e)
+        if len(diffs) > 0:
+            closest_idx = diffs.idxmin()
+            if diffs[closest_idx] < 5.0:
+                fit_val = fit_df.loc[closest_idx, val_col]
+                fit_err = fit_df.loc[closest_idx, err_col] if err_col in fit_df.columns else 0.0
+                if pd.isna(fit_err):
+                    fit_err = 0.0
+                fit_vals.append(fit_val)
+                fit_errs.append(fit_err)
+            else:
+                print(f"  Warning: Peak {peak_e} not found in {fit_name}.csv within 5 keV tolerance.")
+        else:
+            print(f"  Warning: No data in {fit_name}.csv")
+            
+    if len(fit_vals) != len(fit_guesses):
+        return None, None
+        
+    return fit_vals, fit_errs
+
 def extract_cal_data(fit_name, use_in_cal_only=True, fit_column='mu'):
     '''
     Extracts the data from gamma_peaks.csv and the fit results CSV.
@@ -85,7 +234,7 @@ def extract_cal_data(fit_name, use_in_cal_only=True, fit_column='mu'):
             
     return decay_groups
 
-def show_cal_comparison(decay_groups, fit_name, fit_column='mu', cal_fit=None):
+def show_cal_comparison(decay_groups, fit_name, fit_column='mu', cal_fit=None, draw=True):
     '''
     Create and show a TGraph comparing the true energy to fit mu (or the specified parameter) for each peak in peak_fitting/gamma_peaks.csv
     If cal_fit is provided (from fit_polynomial_to_cal_comparison), the calibration is applied to the fit energies and errors are propagated.
@@ -180,50 +329,61 @@ def show_cal_comparison(decay_groups, fit_name, fit_column='mu', cal_fit=None):
         
         graphs.extend([g_main, g_res])
 
-    uid = uuid.uuid4().hex[:6]
-    c1 = ROOT.TCanvas(f"c1_{fit_name}_{'calibrated' if cal_fit else 'init'}_{uid}", "Calibration Comparison", 800, 800)
-    
-    pad1 = ROOT.TPad(f"pad1_{uid}", "pad1", 0, 0.3, 1, 1.0)
-    pad1.SetBottomMargin(0.02)
-    pad1.Draw()
-    c1.cd()
-    pad2 = ROOT.TPad(f"pad2_{uid}", "pad2", 0, 0.0, 1, 0.3)
-    pad2.SetTopMargin(0.02)
-    pad2.SetBottomMargin(0.3)
-    pad2.Draw()
+    min_e = min(all_true_energies) * 0.9 if all_true_energies else 0
+    max_e = max(all_true_energies) * 1.1 if all_true_energies else 0
 
-    pad1.cd()
-    mg_main.Draw("AP")
-    
-    # Hide x-axis labels on main plot since they share the same axis
-    mg_main.GetXaxis().SetLabelSize(0)
-    mg_main.GetXaxis().SetTitleSize(0)
-    
-    legend.Draw()
-    
-    min_e = min(all_true_energies) * 0.9
-    max_e = max(all_true_energies) * 1.1
-    line = ROOT.TLine(min_e, min_e, max_e, max_e)
-    line.SetLineColor(ROOT.kRed)
-    line.SetLineStyle(2)
-    line.Draw("SAME")
-    
-    pad2.cd()
-    mg_res.Draw("AP")
-    
-    # Adjust sizes for bottom pad
-    mg_res.GetXaxis().SetTitleSize(0.12)
-    mg_res.GetXaxis().SetLabelSize(0.12)
-    mg_res.GetYaxis().SetTitleSize(0.12)
-    mg_res.GetYaxis().SetLabelSize(0.12)
-    mg_res.GetYaxis().SetTitleOffset(0.4)
-    
-    line_zero = ROOT.TLine(min_e, 0, max_e, 0)
-    line_zero.SetLineColor(ROOT.kRed)
-    line_zero.SetLineStyle(2)
-    line_zero.Draw("SAME")
-    
-    c1.Update()
+    if draw:
+        uid = uuid.uuid4().hex[:6]
+        c1 = ROOT.TCanvas(f"c1_{fit_name}_{'calibrated' if cal_fit else 'init'}_{uid}", "Calibration Comparison", 800, 800)
+        
+        pad1 = ROOT.TPad(f"pad1_{uid}", "pad1", 0, 0.3, 1, 1.0)
+        pad1.SetBottomMargin(0.02)
+        pad1.Draw()
+        c1.cd()
+        pad2 = ROOT.TPad(f"pad2_{uid}", "pad2", 0, 0.0, 1, 0.3)
+        pad2.SetTopMargin(0.02)
+        pad2.SetBottomMargin(0.3)
+        pad2.Draw()
+
+        pad1.cd()
+        mg_main.Draw("AP")
+        
+        # Hide x-axis labels on main plot since they share the same axis
+        if mg_main.GetXaxis():
+            mg_main.GetXaxis().SetLabelSize(0)
+            mg_main.GetXaxis().SetTitleSize(0)
+        
+        legend.Draw()
+        
+        line = ROOT.TLine(min_e, min_e, max_e, max_e)
+        line.SetLineColor(ROOT.kRed)
+        line.SetLineStyle(2)
+        line.Draw("SAME")
+        
+        pad2.cd()
+        mg_res.Draw("AP")
+        
+        # Adjust sizes for bottom pad
+        if mg_res.GetXaxis():
+            mg_res.GetXaxis().SetTitleSize(0.12)
+            mg_res.GetXaxis().SetLabelSize(0.12)
+        if mg_res.GetYaxis():
+            mg_res.GetYaxis().SetTitleSize(0.12)
+            mg_res.GetYaxis().SetLabelSize(0.12)
+            mg_res.GetYaxis().SetTitleOffset(0.4)
+        
+        line_zero = ROOT.TLine(min_e, 0, max_e, 0)
+        line_zero.SetLineColor(ROOT.kRed)
+        line_zero.SetLineStyle(2)
+        line_zero.Draw("SAME")
+        
+        c1.Update()
+    else:
+        c1 = None
+        pad1 = None
+        pad2 = None
+        line = None
+        line_zero = None
     
     return c1, pad1, pad2, mg_main, mg_res, legend, graphs, line, line_zero
 
@@ -511,100 +671,6 @@ def fit_polynomial_to_cal_comparison_ml(cal_results, order=1):
         
     return fit_func, g_res_draw, fit_result
 
-def apply_energy_calibration_to_point(mu, mu_err, calibration_results):
-    '''
-    Applies the energy calibration and propagates uncertainties.
-    calibration_results is expected to be a tuple (fit_func, res_func, fit_result).
-    Handles both scalar values and lists/arrays.
-    Returns (E_cal, E_err).
-    '''
-    if not calibration_results or len(calibration_results) < 3:
-        return mu, mu_err
-        
-    fit_func = calibration_results[0]
-    fit_result = calibration_results[2]
-    
-    if not fit_func or not fit_result:
-        return mu, mu_err
-        
-    # Handle array-like inputs recursively
-    if isinstance(mu, (list, np.ndarray, pd.Series)):
-        cal_e = []
-        cal_err = []
-        for m, merr in zip(mu, mu_err):
-            e, err = apply_energy_calibration_to_point(m, merr, calibration_results)
-            cal_e.append(e)
-            cal_err.append(err)
-            
-        if isinstance(mu, np.ndarray):
-            return np.array(cal_e), np.array(cal_err)
-        elif isinstance(mu, pd.Series):
-            return pd.Series(cal_e, index=mu.index), pd.Series(cal_err, index=mu_err.index)
-        return cal_e, cal_err
-        
-    # Scalar computation
-    E_cal = fit_func.Eval(mu)
-    dE_dmu = fit_func.Derivative(mu)
-    
-    cov = fit_result.GetCovarianceMatrix()
-    n_params = fit_func.GetNpar()
-    
-    err2_cov = 0.0
-    for i in range(n_params):
-        for j in range(n_params):
-            err2_cov += (mu**i) * (mu**j) * cov(i, j)
-            
-    err2 = err2_cov + (dE_dmu * mu_err)**2
-    if hasattr(fit_func, 'sigma_add'):
-        err2 += fit_func.sigma_add**2
-    E_err = np.sqrt(err2) if err2 > 0 else 0.0
-    
-    return E_cal, E_err
-
-def apply_energy_calibration_to_cascade(mus, mu_errs, calibration_results):
-    '''
-    Applies the energy calibration and propagates uncertainties to a cascade of gammas
-    to get the summed energy of the cascade.
-    mus: array-like of peak energies
-    mu_errs: array-like of peak uncertainties
-    calibration_results: tuple (fit_func, res_func, fit_result) from show_cal_comparison
-    Returns (E_cal, E_err)
-    '''
-    if not calibration_results or len(calibration_results) < 3:
-        return np.sum(mus), np.sqrt(np.sum(np.array(mu_errs)**2))
-        
-    fit_func = calibration_results[0]
-    fit_result = calibration_results[2]
-    
-    if not fit_func or not fit_result:
-        return np.sum(mus), np.sqrt(np.sum(np.array(mu_errs)**2))
-        
-    E_cal = 0.0
-    stat_err2 = 0.0
-    
-    for mu, mu_err in zip(mus, mu_errs):
-        E_cal += fit_func.Eval(mu)
-        dE_dmu = fit_func.Derivative(mu)
-        stat_err2 += (dE_dmu * mu_err)**2
-        
-    cov = fit_result.GetCovarianceMatrix()
-    n_params = fit_func.GetNpar()
-    
-    # S_j = sum(mu^j for mu in mus)
-    S = [sum(mu**j for mu in mus) for j in range(n_params)]
-    
-    err2_cov = 0.0
-    for i in range(n_params):
-        for j in range(n_params):
-            err2_cov += S[i] * S[j] * cov(i, j)
-            
-    err2 = err2_cov + stat_err2
-    if hasattr(fit_func, 'sigma_add'):
-        err2 += len(mus) * (fit_func.sigma_add**2)
-    E_err = np.sqrt(err2) if err2 > 0 else 0.0
-    
-    return E_cal, E_err
-
 def apply_energy_calibration_to_fit(fit_name, calibration_results):
     '''
     Read in the specified fit csv file, and write the (fit_index, pvalue, calibrated_energy, calibrated energy error, amplitude, amplitude error)
@@ -640,6 +706,8 @@ def apply_energy_calibration_to_fit(fit_name, calibration_results):
         out_df['amplitude'] = df['amplitude_val']
     if 'amplitude_err' in df.columns:
         out_df['amplitude_err'] = df['amplitude_err']
+    if 'loc_guess' in df.columns:
+        out_df['loc_guess'] = df['loc_guess']
         
     out_csv_path = os.path.join(script_dir, 'peak_fitting', f'{fit_name}_calibrated.csv')
     out_df.to_csv(out_csv_path, index=False)
@@ -738,26 +806,9 @@ def compare_gamma_cascades(fit_name, cascades_peak_energies, calibration_results
     print(f"\n--- Cascade Consistency Check ({fit_name}) ---")
     
     for i, cascade_peaks in enumerate(cascades_peak_energies):
-        fit_vals = []
-        fit_errs = []
+        fit_vals, fit_errs = get_fit_results(cascade_peaks, fit_name, fit_column, fit_df)
         
-        for peak_e in cascade_peaks:
-            diffs = np.abs(fit_df['loc_guess'] - peak_e)
-            if len(diffs) > 0:
-                closest_idx = diffs.idxmin()
-                if diffs[closest_idx] < 5.0:
-                    fit_val = fit_df.loc[closest_idx, val_col]
-                    fit_err = fit_df.loc[closest_idx, err_col] if err_col in fit_df.columns else 0.0
-                    if pd.isna(fit_err):
-                        fit_err = 0.0
-                    fit_vals.append(fit_val)
-                    fit_errs.append(fit_err)
-                else:
-                    print(f"  Warning: Peak {peak_e} not found in {fit_name}.csv within 5 keV tolerance.")
-            else:
-                print(f"  Warning: No data in {fit_name}.csv")
-                
-        if len(fit_vals) != len(cascade_peaks):
+        if fit_vals is None:
             print(f"Cascade {i+1}: Could not find all peaks, skipping.")
             continue
             
@@ -770,35 +821,37 @@ def compare_gamma_cascades(fit_name, cascades_peak_energies, calibration_results
 
 
 cal_fit_name = '60Ga_all_gamma'
-#init_cal_decay_groups = extract_cal_data(cal_fit_name, True)
-all_decay_groups = extract_cal_data(cal_fit_name, False)
-
 init_cal_decay_groups=extract_cal_data(cal_fit_name,use_in_cal_only=True)
-init_cal = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
+init_cal = show_cal_comparison(init_cal_decay_groups, cal_fit_name, draw=False)
 calibration = fit_polynomial_to_cal_comparison_ml(init_cal, 1)
-show_cal_comparison(init_cal_decay_groups, cal_fit_name, cal_fit=calibration)
-disp_fit_name = '60Ga_all_gamma'
-disp_cal_decay_groups = extract_cal_data(disp_fit_name, True)
-calibrated_data = show_cal_comparison(disp_cal_decay_groups, disp_fit_name, cal_fit=calibration)
-apply_energy_calibration_to_fit(disp_fit_name, calibration)
-apply_energy_calibration_to_fit('60Ga_beam_off_gamma', calibration)
-show_cal_error(calibration,title='with additional error')
 
-# init_cal_decay_groups_scaled=extract_cal_data(cal_fit_name,use_in_cal_only=True)
-# for group in init_cal_decay_groups:
-#     init_cal_decay_groups_scaled[group]['true_errs'] = [e*np.sqrt(len(init_cal_decay_groups[group]['true_errs'])) for e in init_cal_decay_groups[group]['true_errs']]
-# cal_wo_aded_sigma = show_cal_comparison(init_cal_decay_groups_scaled, cal_fit_name)
-# calibration_wo_sigma_add = fit_polynomial_to_cal_comparison(cal_wo_aded_sigma, 1)
-# calibration_wo_sigma_add[2].Print()
-# show_cal_error(calibration_wo_sigma_add,title='without additional error')
+if __name__ == '__main__':
+    all_decay_groups = extract_cal_data(cal_fit_name, False)
 
-cascades_to_check = [
-    [[5809], [1004,4805]],
-    [[5723],[4719,1004]],
-    [[2295,1553, 1004],[3848, 1004], [1415, 2433, 1004], [4852]],
-    [[1027, 2007, 1004], [1481,1553,1004],[1481,2557]],
-    [[1443, 1553,1004],[2996, 1004]]
-    ]
+    show_cal_comparison(init_cal_decay_groups, cal_fit_name)
+    show_cal_comparison(init_cal_decay_groups, cal_fit_name, cal_fit=calibration)
+    disp_fit_name = '60Ga_all_gamma'
+    disp_cal_decay_groups = extract_cal_data(disp_fit_name, True)
+    calibrated_data = show_cal_comparison(disp_cal_decay_groups, disp_fit_name, cal_fit=calibration)
+    apply_energy_calibration_to_fit(disp_fit_name, calibration)
+    apply_energy_calibration_to_fit('60Ga_beam_off_gamma', calibration)
+    show_cal_error(calibration,title='with additional error')
 
-for to_check in cascades_to_check:
-    compare_gamma_cascades(disp_fit_name, to_check, calibration)
+    # init_cal_decay_groups_scaled=extract_cal_data(cal_fit_name,use_in_cal_only=True)
+    # for group in init_cal_decay_groups:
+    #     init_cal_decay_groups_scaled[group]['true_errs'] = [e*np.sqrt(len(init_cal_decay_groups[group]['true_errs'])) for e in init_cal_decay_groups[group]['true_errs']]
+    # cal_wo_aded_sigma = show_cal_comparison(init_cal_decay_groups_scaled, cal_fit_name)
+    # calibration_wo_sigma_add = fit_polynomial_to_cal_comparison(cal_wo_aded_sigma, 1)
+    # calibration_wo_sigma_add[2].Print()
+    # show_cal_error(calibration_wo_sigma_add,title='without additional error')
+
+    cascades_to_check = [
+        [[5809], [1004,4805]],
+        [[5723],[4719,1004]],
+        [[2295,1553, 1004],[3848, 1004], [1415, 2433, 1004], [4852]],
+        [[1027, 2007, 1004], [1481,1553,1004],[1481,2557]],
+        [[1443, 1553,1004],[2996, 1004]]
+        ]
+
+    for to_check in cascades_to_check:
+        compare_gamma_cascades(disp_fit_name, to_check, calibration)
