@@ -456,6 +456,7 @@ def fit_polynomial_to_cal_comparison_ml(cal_results, order=1):
         
     best_params_scaled = [minimizer.X()[i] for i in range(order + 1)]
     best_sigma_add = minimizer.X()[order + 1]
+    best_sigma_add_err = minimizer.Errors()[order + 1]
     
     best_params = [p / (1000.0 ** i) for i, p in enumerate(best_params_scaled)]
     
@@ -469,7 +470,7 @@ def fit_polynomial_to_cal_comparison_ml(cal_results, order=1):
         for j in range(order + 1):
             cov_params[i, j] = cov_params_scaled[i, j] / (1000.0 ** (i + j))
             
-    print(f"Polynomial ML fit (order {order}) successful. Estimated additional error: {best_sigma_add:.3f} keV")
+    print(f"Polynomial ML fit (order {order}) successful. Estimated additional error: {best_sigma_add:.3f} +/- {best_sigma_add_err:.3f} keV")
     
     fit_func = MockFitFunc(best_params)
     fit_result = MockFitResult(cov_params)
@@ -771,49 +772,22 @@ def compare_gamma_cascades(fit_name, cascades_peak_energies, calibration_results
 cal_fit_name = '60Ga_all_gamma'
 #init_cal_decay_groups = extract_cal_data(cal_fit_name, True)
 all_decay_groups = extract_cal_data(cal_fit_name, False)
-init_cal_decay_groups = {
-    '76Ge(n,n\')':{
-        'true_energies': [562.197],
-        'fit_energies': [all_decay_groups['76Ge(n,n\')']['fit_energies'][0]],
-        'true_errs': [0.023],
-        'fit_errs': [all_decay_groups['76Ge(n,n\')']['fit_errs'][0]]
-    },
-    '27Al(n,n\')': {
-        'true_energies': [1014.56],
-        'fit_energies': [all_decay_groups['27Al*']['fit_energies'][0]],
-        'true_errs': [0.09],
-        'fit_errs': [all_decay_groups['27Al*']['fit_errs'][0]]
-    },
-    '208Tl': {
-        'true_energies': [2614.511],
-        'fit_energies': [all_decay_groups['208Tl']['fit_energies'][0]],
-        'true_errs': [0.01],
-        'fit_errs': [all_decay_groups['208Tl']['fit_errs'][0]]
-    },
-    # '60Zn': {
-    #     'true_energies': [273.4],
-    #     'fit_energies': [all_decay_groups['60Zn']['fit_energies'][0]],
-    #     'true_errs': [0.4],
-    #     'fit_errs': [all_decay_groups['60Zn']['fit_errs'][0]]
-    # },
-    '16O(n,n\')': {
-        'true_energies': [6129.89],
-        'fit_energies': [all_decay_groups['16O*']['fit_energies'][0]],
-        'true_errs': [0.04],
-        'fit_errs': [all_decay_groups['16O*']['fit_errs'][0]]
-    }
-}
 
+init_cal_decay_groups=extract_cal_data(cal_fit_name,use_in_cal_only=True)
 init_cal = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
-#calibration = fit_polynomial_to_cal_comparison(init_cal, 1)
 calibration = fit_polynomial_to_cal_comparison_ml(init_cal, 1)
-disp_fit_name = '60Ga_beam_off_gamma'
-disp_cal_decay_groups = extract_cal_data(disp_fit_name, False)
+show_cal_comparison(init_cal_decay_groups, cal_fit_name, cal_fit=calibration)
+disp_fit_name = '60Ga_all_gamma'
+disp_cal_decay_groups = extract_cal_data(disp_fit_name, True)
 calibrated_data = show_cal_comparison(disp_cal_decay_groups, disp_fit_name, cal_fit=calibration)
 apply_energy_calibration_to_fit(disp_fit_name, calibration)
+apply_energy_calibration_to_fit('60Ga_beam_off_gamma', calibration)
 show_cal_error(calibration,title='with additional error')
 
-# cal_wo_aded_sigma = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
+# init_cal_decay_groups_scaled=extract_cal_data(cal_fit_name,use_in_cal_only=True)
+# for group in init_cal_decay_groups:
+#     init_cal_decay_groups_scaled[group]['true_errs'] = [e*np.sqrt(len(init_cal_decay_groups[group]['true_errs'])) for e in init_cal_decay_groups[group]['true_errs']]
+# cal_wo_aded_sigma = show_cal_comparison(init_cal_decay_groups_scaled, cal_fit_name)
 # calibration_wo_sigma_add = fit_polynomial_to_cal_comparison(cal_wo_aded_sigma, 1)
 # calibration_wo_sigma_add[2].Print()
 # show_cal_error(calibration_wo_sigma_add,title='without additional error')
