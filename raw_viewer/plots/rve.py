@@ -18,7 +18,7 @@ from e23035_analysis import e23035_runs
 experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
-    run_range= [71]#,81,82,83,71,72
+    run_range= [70,71,72,76,77,78,79,80,81,82,83]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range =[228]
 # else: #during experiment

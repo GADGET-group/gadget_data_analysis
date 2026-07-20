@@ -26,8 +26,10 @@ def get_save_path(experiment):
             save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
         elif experiment == 'e23035_prep_vault':
             save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
-        else:
+        elif experiment == 'e25058_20Mg':
             save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
+        else:
+            save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_new_pkl'%experiment
         return save_path
     elif 'gadget' in socket.gethostname().lower():
         if experiment == 'e23035_prep_vault':
