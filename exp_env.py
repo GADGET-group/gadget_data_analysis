@@ -26,7 +26,7 @@ experiment = 'e25058'
 
 def process_run(run):
     try:
-        process_runs.get_processed_run(experiment, run, True)
+        process_runs.process_tpc_run(experiment, run, True)
         print('processed run ', run)
     except Exception as e:
         print('error processing run ', run)
@@ -37,6 +37,6 @@ if __name__ == '__main__':
     from e23035_analysis.e23035_runs import run_df
     import numpy as np
     #runs = run_df['GET'][np.isfinite(run_df['GET'])]
-    runs=[70] #49, 61,62,63,64,65]
+    runs= [215]#[70,71,72,76,77,78,79,80,81,82,83] #49, 61,62,63,64,65]
     with multiprocessing.Pool(50) as pool:
         pool.map(process_run, runs)

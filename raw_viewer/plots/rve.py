@@ -9,6 +9,7 @@ import ROOT
 import numpy as np
 from tqdm import tqdm
 from scipy import optimize
+from matplotlib.ticker import MultipleLocator
 
 from raw_viewer import process_runs
 from  raw_viewer import raw_h5_file
@@ -18,9 +19,9 @@ from e23035_analysis import e23035_runs
 experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
-    run_range= [70,71,72,76,77,78,79,80,81,82,83]#,81,82,83,71,72
+    run_range= [215,216,228,255,260,269]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
-    run_range =[228]
+    run_range =[216,228,255,260,269]
 # else: #during experiment
 #     #run_range = np.concatenate((np.arange(140,219+1), np.arange(263, 279+1)))#60Ga with SCA set ~300 keV
 #     #run_range = np.arange(263, 279+1)#60Ga with SCA set ~300 keV & 0.5 us gate delay
@@ -93,7 +94,7 @@ if experiment == 'e23035':
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
-    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.1)
+    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.05)
 veto_mask = veto_mask & (num_pads_railed==0) #& (angles>np.radians(20)) 
 
     
@@ -272,6 +273,8 @@ def define_cut_on_gui():
     poly_selector = matplotlib.widgets.PolygonSelector(ax,set_cut_polygon)
     # if len(self.rve_cut_verticies) > 0:
     #     self.poly_selector.verts = self.rve_cut_verticies
+    ax.set_xlim(0, 6)
+    ax.set_ylim(0, 140)
     fig.show()
 
 evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)
@@ -353,7 +356,7 @@ def plot_energy_spectrum(bins=400):
     plt.figure(figsize=(10, 6))
     plt.hist(selected_energy, bins=bins, histtype='step', color='black', lw=1.5)
    
-    plt.title(f'Energy Spectrum | Selected Protons (Run {get_runs})')
+    plt.title(f'Energy Spectrum | From (Run {get_runs})')
     plt.xlabel('Energy (MeV)')
     plt.ylabel('Counts')
    
@@ -388,13 +391,13 @@ def plot_energy_spectrum_fixed_bin_width(bin_width=0.01):
 
     # 3. Create fixed bins (from 0 to 8 MeV, stepping by bin_width)
     # This guarantees the bins are always the exact same size regardless of the cut
-    fixed_bins = np.arange(0, 8.0, bin_width)
+    fixed_bins = np.arange(0, 8.0 + bin_width, bin_width)
 
     # 4. Plotting
     plt.figure(figsize=(10, 6))
     plt.hist(selected_energy, bins=fixed_bins, histtype='step', color='black', lw=1.5)
    
-    plt.title(f'Energy Spectrum | Selected Region from (Run {get_runs})')
+    plt.title(f'Energy Spectrum | From (Run {get_runs})')
     plt.xlabel('Energy (MeV)')
     plt.ylabel(f'Counts / {bin_width*1000:.0f} keV') # Updates y-axis to show bin width
    
@@ -593,3 +596,923 @@ def average():
     average_length = selected_lengths.mean()
     print(average_energy)
     print(average_length)
+def get_total_run_duration(runs=None, exp=None):
+    """
+    Calculate the total duration of all selected runs.
+
+    Duration for each run:
+        last event timestamp - first event timestamp
+
+    Returns
+    -------
+    total_seconds : float
+        Sum of the durations of all runs.
+    """
+
+    if exp is None:
+        exp = experiment
+
+    if runs is None:
+        runs = get_runs
+
+    total_seconds = 0.0
+
+    print("\nRun durations")
+    print("-" * 45)
+
+    for run in runs:
+        timestamps = process_runs.get_quantity(
+            'timestamps',
+            exp,
+            [int(run)]
+        )
+
+        timestamps = np.asarray(timestamps, dtype=float)
+        timestamps = timestamps[np.isfinite(timestamps)]
+
+        if len(timestamps) < 2:
+            print(f"Run {run}: insufficient timestamps")
+            continue
+
+        run_duration = timestamps[-1] - timestamps[0]
+        total_seconds += run_duration
+
+        print(
+            f"Run {run}: "
+            f"{run_duration:.2f} seconds "
+            f"({run_duration / 60:.2f} minutes)"
+        )
+
+    print("-" * 45)
+    print(f"Total duration: {total_seconds:.2f} seconds")
+    print(f"Total duration: {total_seconds / 60:.2f} minutes")
+    print(f"Total duration: {total_seconds / 3600:.3f} hours")
+
+    return total_seconds
+def fit_peak(
+        peak_guess,
+        fit_window=None,
+        fit_half_width=0.15,
+        bin_width=0.005,
+        sigma_guess=0.030,
+        particle_name="events",
+        rve_xlim=None,
+        rve_ylim=(0, 140)
+    ):
+    """
+    Draw a polygon cut on the Range-vs-Energy plot and fit the
+    selected energy peak with:
+
+        Gaussian peak + linear background
+
+    The fitted Gaussian area is the background-subtracted number
+    of detected particles in the peak.
+
+    Parameters
+    ----------
+    peak_guess : float
+        Approximate peak energy in MeV.
+        Example: 0.800 for an 800-keV peak.
+
+    fit_window : tuple or None
+        Explicit fit limits in MeV, such as (0.65, 0.95).
+        If None, peak_guess +/- fit_half_width is used.
+
+    fit_half_width : float
+        Half-width of fit window when fit_window is None.
+
+    bin_width : float
+        Energy histogram bin width in MeV.
+        0.005 MeV = 5 keV.
+
+    sigma_guess : float
+        Initial Gaussian sigma estimate in MeV.
+
+    particle_name : str
+        Label such as "protons", "alphas", or "events".
+
+    rve_xlim : tuple or None
+        X-axis limits for Range-vs-Energy plot.
+        If None, automatically zooms around the fit region.
+
+    rve_ylim : tuple
+        Range-axis limits in mm.
+
+    Returns
+    -------
+    result : dict or None
+        Dictionary containing peak area, centroid, width,
+        uncertainties, fit quality, and polygon vertices.
+    """
+
+    from matplotlib.widgets import PolygonSelector
+    from math import erf, sqrt
+
+    # ----------------------------------------------------------
+    # Determine the energy fit limits
+    # ----------------------------------------------------------
+    if fit_window is None:
+        fit_low = peak_guess - fit_half_width
+        fit_high = peak_guess + fit_half_width
+    else:
+        fit_low, fit_high = fit_window
+
+    if fit_low >= fit_high:
+        raise ValueError("fit_window must satisfy fit_low < fit_high.")
+
+    if not fit_low <= peak_guess <= fit_high:
+        raise ValueError(
+            "peak_guess must be inside the requested fit window."
+        )
+
+    if bin_width <= 0:
+        raise ValueError("bin_width must be positive.")
+
+    if sigma_guess <= 0:
+        raise ValueError("sigma_guess must be positive.")
+
+    # ----------------------------------------------------------
+    # Get events that already pass your normal rve.py cuts
+    # ----------------------------------------------------------
+    plot_energy = np.asarray(energy[plt_mask], dtype=float)
+    plot_length = np.asarray(lengths[plt_mask], dtype=float)
+
+    finite_mask = (
+        np.isfinite(plot_energy) &
+        np.isfinite(plot_length)
+    )
+
+    plot_energy = plot_energy[finite_mask]
+    plot_length = plot_length[finite_mask]
+
+    if len(plot_energy) == 0:
+        print("No events pass plt_mask.")
+        return None
+
+    if rve_xlim is None:
+        rve_xlim = (
+            max(0, fit_low - 0.25),
+            fit_high + 0.25
+        )
+
+    points = np.column_stack(
+        (plot_energy, plot_length)
+    )
+
+    final_result = {
+        "success": False
+    }
+
+    # ----------------------------------------------------------
+    # Create interactive figure
+    # ----------------------------------------------------------
+    fig, (ax_rve, ax_fit) = plt.subplots(
+        1,
+        2,
+        figsize=(15, 6)
+    )
+
+    try:
+        fig.canvas.manager.set_window_title(
+            f"Fit peak near {peak_guess * 1000:.0f} keV"
+        )
+    except Exception:
+        pass
+
+    ax_rve.hist2d(
+        plot_energy,
+        plot_length,
+        bins=rve_bins,
+        norm=matplotlib.colors.LogNorm()
+    )
+
+    ax_rve.set_title(
+        "Draw a polygon around the particle band"
+    )
+    ax_rve.set_xlabel("Energy (MeV)")
+    ax_rve.set_ylabel("Range (mm)")
+    ax_rve.set_xlim(*rve_xlim)
+    ax_rve.set_ylim(*rve_ylim)
+
+    ax_fit.set_title(
+        "Complete the polygon to fit the peak"
+    )
+    ax_fit.set_xlabel("Energy (MeV)")
+    ax_fit.set_ylabel(
+        f"Counts / {bin_width * 1000:.1f} keV"
+    )
+    ax_fit.set_xlim(fit_low, fit_high)
+
+    # ----------------------------------------------------------
+    # Run whenever the polygon is completed or changed
+    # ----------------------------------------------------------
+    def onselect(vertices):
+
+        selected_path = Path(vertices)
+        inside_polygon = selected_path.contains_points(points)
+
+        selected_energy = plot_energy[inside_polygon]
+
+        in_fit_window = (
+            (selected_energy >= fit_low) &
+            (selected_energy <= fit_high)
+        )
+
+        fit_energy = selected_energy[in_fit_window]
+
+        ax_fit.clear()
+        ax_fit.set_xlabel("Energy (MeV)")
+        ax_fit.set_ylabel(
+            f"Counts / {bin_width * 1000:.1f} keV"
+        )
+        ax_fit.set_xlim(fit_low, fit_high)
+
+        if len(fit_energy) < 20:
+            ax_fit.set_title(
+                "Not enough events in the polygon and fit window"
+            )
+            fig.canvas.draw_idle()
+            return
+
+        # ------------------------------------------------------
+        # Create histogram with fixed-width bins
+        # ------------------------------------------------------
+        bin_edges = np.arange(
+            fit_low,
+            fit_high + bin_width,
+            bin_width
+        )
+
+        if len(bin_edges) < 7:
+            ax_fit.set_title(
+                "Fit window has too few histogram bins"
+            )
+            fig.canvas.draw_idle()
+            return
+
+        counts, bin_edges = np.histogram(
+            fit_energy,
+            bins=bin_edges
+        )
+
+        bin_centers = (
+            bin_edges[:-1] + bin_edges[1:]
+        ) / 2
+
+        actual_bin_width = bin_edges[1] - bin_edges[0]
+
+        # ------------------------------------------------------
+        # Gaussian area parameterization
+        #
+        # area is the total Gaussian integral in counts.
+        #
+        # bg_left and bg_right are background count densities
+        # in counts/MeV at the edges of the fit window.
+        # ------------------------------------------------------
+        def model(
+                x,
+                area,
+                centroid,
+                sigma,
+                bg_left,
+                bg_right
+            ):
+
+            gaussian = (
+                area *
+                actual_bin_width /
+                (np.sqrt(2 * np.pi) * sigma) *
+                np.exp(
+                    -0.5 *
+                    ((x - centroid) / sigma) ** 2
+                )
+            )
+
+            position = (
+                (x - fit_low) /
+                (fit_high - fit_low)
+            )
+
+            background_density = (
+                bg_left * (1 - position) +
+                bg_right * position
+            )
+
+            background = (
+                background_density *
+                actual_bin_width
+            )
+
+            return gaussian + background
+
+        def gaussian_component(
+                x,
+                area,
+                centroid,
+                sigma
+            ):
+
+            return (
+                area *
+                actual_bin_width /
+                (np.sqrt(2 * np.pi) * sigma) *
+                np.exp(
+                    -0.5 *
+                    ((x - centroid) / sigma) ** 2
+                )
+            )
+
+        def background_component(
+                x,
+                bg_left,
+                bg_right
+            ):
+
+            position = (
+                (x - fit_low) /
+                (fit_high - fit_low)
+            )
+
+            background_density = (
+                bg_left * (1 - position) +
+                bg_right * position
+            )
+
+            return (
+                background_density *
+                actual_bin_width
+            )
+
+        # ------------------------------------------------------
+        # Initial parameter estimates
+        # ------------------------------------------------------
+        number_of_edge_bins = max(
+            2,
+            len(counts) // 5
+        )
+
+        left_background_guess = (
+            np.median(
+                counts[:number_of_edge_bins]
+            ) /
+            actual_bin_width
+        )
+
+        right_background_guess = (
+            np.median(
+                counts[-number_of_edge_bins:]
+            ) /
+            actual_bin_width
+        )
+
+        background_guess_per_bin = np.linspace(
+            left_background_guess,
+            right_background_guess,
+            len(counts)
+        ) * actual_bin_width
+
+        excess_counts = np.clip(
+            counts - background_guess_per_bin,
+            0,
+            None
+        )
+
+        area_guess = max(
+            float(np.sum(excess_counts)),
+            1.0
+        )
+
+        initial_parameters = [
+            area_guess,
+            peak_guess,
+            sigma_guess,
+            max(left_background_guess, 0),
+            max(right_background_guess, 0)
+        ]
+
+        lower_bounds = [
+            0,
+            fit_low,
+            actual_bin_width / 3,
+            0,
+            0
+        ]
+
+        upper_bounds = [
+            np.inf,
+            fit_high,
+            (fit_high - fit_low) / 2,
+            np.inf,
+            np.inf
+        ]
+
+        # Poisson uncertainties for histogram bins
+        count_errors = np.sqrt(
+            np.maximum(counts, 1)
+        )
+
+        try:
+            parameters, covariance = optimize.curve_fit(
+                model,
+                bin_centers,
+                counts,
+                p0=initial_parameters,
+                sigma=count_errors,
+                absolute_sigma=True,
+                bounds=(lower_bounds, upper_bounds),
+                maxfev=100000
+            )
+
+        except Exception as error:
+            ax_fit.step(
+                bin_centers,
+                counts,
+                where="mid"
+            )
+
+            ax_fit.set_title(
+                f"Fit failed: {error}"
+            )
+
+            print("Peak fit failed:", error)
+            fig.canvas.draw_idle()
+            return
+
+        (
+            fitted_area,
+            fitted_centroid,
+            fitted_sigma,
+            fitted_bg_left,
+            fitted_bg_right
+        ) = parameters
+
+        parameter_errors = np.sqrt(
+            np.diag(covariance)
+        )
+
+        area_error = parameter_errors[0]
+        centroid_error = parameter_errors[1]
+        sigma_error = parameter_errors[2]
+
+        fitted_fwhm = (
+            2 * np.sqrt(2 * np.log(2)) *
+            fitted_sigma
+        )
+
+        fwhm_error = (
+            2 * np.sqrt(2 * np.log(2)) *
+            sigma_error
+        )
+
+        # Fraction of the fitted Gaussian inside fit window
+        lower_argument = (
+            (fit_low - fitted_centroid) /
+            (sqrt(2) * fitted_sigma)
+        )
+
+        upper_argument = (
+            (fit_high - fitted_centroid) /
+            (sqrt(2) * fitted_sigma)
+        )
+
+        fraction_inside_window = (
+            0.5 *
+            (
+                erf(upper_argument) -
+                erf(lower_argument)
+            )
+        )
+
+        area_inside_window = (
+            fitted_area *
+            fraction_inside_window
+        )
+
+        background_counts = (
+            0.5 *
+            (fitted_bg_left + fitted_bg_right) *
+            (fit_high - fit_low)
+        )
+
+        # Fit quality
+        fitted_bin_counts = model(
+            bin_centers,
+            *parameters
+        )
+
+        chi_squared = np.sum(
+            (
+                (counts - fitted_bin_counts) /
+                count_errors
+            ) ** 2
+        )
+
+        degrees_of_freedom = (
+            len(counts) - len(parameters)
+        )
+
+        if degrees_of_freedom > 0:
+            reduced_chi_squared = (
+                chi_squared /
+                degrees_of_freedom
+            )
+        else:
+            reduced_chi_squared = np.nan
+
+        # ------------------------------------------------------
+        # Plot fit results
+        # ------------------------------------------------------
+        smooth_energy = np.linspace(
+            fit_low,
+            fit_high,
+            1000
+        )
+
+        ax_fit.step(
+            bin_centers,
+            counts,
+            where="mid",
+            label="Selected data"
+        )
+
+        ax_fit.plot(
+            smooth_energy,
+            model(
+                smooth_energy,
+                *parameters
+            ),
+            label="Gaussian + background"
+        )
+
+        ax_fit.plot(
+            smooth_energy,
+            background_component(
+                smooth_energy,
+                fitted_bg_left,
+                fitted_bg_right
+            ),
+            linestyle="--",
+            label="Background"
+        )
+
+        ax_fit.plot(
+            smooth_energy,
+            gaussian_component(
+                smooth_energy,
+                fitted_area,
+                fitted_centroid,
+                fitted_sigma
+            ),
+            linestyle=":",
+            label="Gaussian peak"
+        )
+
+        ax_fit.axvline(
+            fitted_centroid,
+            linestyle=":"
+        )
+
+        ax_fit.set_xlabel("Energy (MeV)")
+        ax_fit.set_ylabel(
+            f"Counts / {actual_bin_width * 1000:.1f} keV"
+        )
+
+        ax_fit.set_xlim(fit_low, fit_high)
+
+        ax_fit.set_title(
+            f"Area = {fitted_area:.0f} ± "
+            f"{area_error:.0f} {particle_name}"
+        )
+
+        ax_fit.legend()
+
+        # ------------------------------------------------------
+        # Save result from latest polygon
+        # ------------------------------------------------------
+        final_result.clear()
+
+        final_result.update({
+            "success": True,
+
+            # Main result
+            "area": fitted_area,
+            "area_error": area_error,
+
+            # Peak position and width
+            "centroid_mev": fitted_centroid,
+            "centroid_error_mev": centroid_error,
+            "sigma_mev": fitted_sigma,
+            "sigma_error_mev": sigma_error,
+            "fwhm_mev": fitted_fwhm,
+            "fwhm_error_mev": fwhm_error,
+
+            # Additional count information
+            "area_inside_fit_window": area_inside_window,
+            "fraction_inside_fit_window": fraction_inside_window,
+            "background_counts_in_window": background_counts,
+            "selected_events": len(selected_energy),
+            "raw_events_in_fit_window": len(fit_energy),
+
+            # Fit quality
+            "chi_squared": chi_squared,
+            "degrees_of_freedom": degrees_of_freedom,
+            "reduced_chi_squared": reduced_chi_squared,
+
+            # Settings
+            "peak_guess_mev": peak_guess,
+            "fit_low_mev": fit_low,
+            "fit_high_mev": fit_high,
+            "bin_width_mev": actual_bin_width,
+            "runs": np.asarray(get_runs).copy(),
+            "cut_vertices": np.asarray(vertices).copy()
+        })
+
+        print("\n" + "=" * 60)
+        print(
+            f"Peak fit near "
+            f"{peak_guess * 1000:.1f} keV"
+        )
+        print(f"Runs: {get_runs}")
+        print(
+            f"Events inside polygon: "
+            f"{len(selected_energy)}"
+        )
+        print(
+            f"Raw events in fit window: "
+            f"{len(fit_energy)}"
+        )
+        print("-" * 60)
+        print(
+            f"Centroid: "
+            f"{fitted_centroid * 1000:.2f} ± "
+            f"{centroid_error * 1000:.2f} keV"
+        )
+        print(
+            f"Sigma: "
+            f"{fitted_sigma * 1000:.2f} ± "
+            f"{sigma_error * 1000:.2f} keV"
+        )
+        print(
+            f"FWHM: "
+            f"{fitted_fwhm * 1000:.2f} ± "
+            f"{fwhm_error * 1000:.2f} keV"
+        )
+        print(
+            f"Background in fit window: "
+            f"{background_counts:.1f} events"
+        )
+        print(
+            f"Reduced chi-squared: "
+            f"{reduced_chi_squared:.3f}"
+        )
+        print("-" * 60)
+        print(
+            f"BACKGROUND-SUBTRACTED AREA: "
+            f"{fitted_area:.0f} ± "
+            f"{area_error:.0f} {particle_name}"
+        )
+        print("=" * 60)
+
+        fig.canvas.draw_idle()
+
+    selector = PolygonSelector(
+        ax_rve,
+        onselect
+    )
+
+    print("\nInstructions:")
+    print(
+        "1. Draw a polygon following the particle band."
+    )
+    print(
+        "2. Include the peak and some energy region "
+        "on both sides for background fitting."
+    )
+    print(
+        "3. Adjust the polygon until the fit looks reasonable."
+    )
+    print(
+        "4. Close the figure to return the final result."
+    )
+
+    plt.tight_layout()
+    plt.show(block=True)
+
+    # Keep selector alive until the window closes
+    _ = selector
+
+    if final_result.get("success", False):
+        return final_result
+
+    print("No successful peak fit was completed.")
+    return None
+
+def plot_energy_spectrum_fixed_bin_width1(
+        bin_width=0.01,
+        title=" Proton Energy Spectrum",
+        energy_range=(0.0, 8.0),
+        xlim=None,
+        font_scale=4.0,
+        line_width=3.0,
+        log_y=False,
+        save_path=None
+    ):
+    global rve_cut_select_mask
+
+    # Check that a Range-vs-Energy polygon cut exists
+    if rve_cut_select_mask is None:
+        print("Error: No cut has been defined.")
+        print("Run define_cut_on_gui() and draw a polygon first.")
+        return None
+
+    # plt_mask is applied before the polygon selector in define_cut_on_gui()
+    masked_energy = np.asarray(energy[plt_mask], dtype=float)
+    cut_mask = np.asarray(rve_cut_select_mask, dtype=bool)
+
+    # Make sure the polygon mask still matches the currently loaded data
+    if len(cut_mask) != len(masked_energy):
+        print("Error: The polygon cut does not match the current data.")
+        print("Run define_cut_on_gui() again and redraw the cut.")
+        return None
+
+    # Energy values of events inside the polygon
+    selected_energy = masked_energy[cut_mask]
+
+    # Remove NaN and infinite values
+    selected_energy = selected_energy[
+        np.isfinite(selected_energy)
+    ]
+
+    if len(selected_energy) == 0:
+        print("Warning: No events were found inside the current cut.")
+        return None
+
+    energy_min, energy_max = energy_range
+
+    if energy_min >= energy_max:
+        raise ValueError(
+            "energy_range must satisfy minimum < maximum."
+        )
+
+    if bin_width <= 0:
+        raise ValueError("bin_width must be greater than zero.")
+
+    # Include the upper endpoint
+    fixed_bins = np.arange(
+        energy_min,
+        energy_max + bin_width,
+        bin_width
+    )
+
+    # Count events using the same bins that will be plotted
+    counts, bin_edges = np.histogram(
+        selected_energy,
+        bins=fixed_bins
+    )
+
+    # Large slide-friendly font sizes
+    title_font = 10.0 * font_scale
+    label_font = 10.0 * font_scale
+    tick_font = 8.0 * font_scale
+
+    fig, ax = plt.subplots(figsize=(16, 10))
+
+    ax.hist(
+        selected_energy,
+        bins=fixed_bins,
+        histtype="step",
+        linewidth=line_width,
+        color="black"
+    )
+
+    ax.set_title(
+        title,
+        fontsize=title_font,
+        pad=24
+    )
+
+    ax.set_xlabel(
+        "Energy (MeV)",
+        fontsize=label_font,
+        labelpad=18
+    )
+
+    ax.set_ylabel(
+        f"Counts / {bin_width * 1000:.0f} keV",
+        fontsize=label_font,
+        labelpad=18
+    )
+
+    # Enlarge both tick numbers and tick marks
+    ax.tick_params(
+        axis="both",
+        which="major",
+        labelsize=tick_font,
+        width=2.5,
+        length=10,
+        pad=10
+    )
+
+    ax.tick_params(
+        axis="both",
+        which="minor",
+        width=2.0,
+        length=6
+    )
+
+    # Enlarge scientific-notation multiplier, such as ×10^4
+    ax.xaxis.get_offset_text().set_fontsize(tick_font)
+    ax.yaxis.get_offset_text().set_fontsize(tick_font)
+
+    # Use fewer major tick labels so the enlarged numbers do not overlap
+    ax.xaxis.set_major_locator(MultipleLocator(0.25))
+    ax.locator_params(axis="y", nbins=6)
+
+    # Make the plot border more visible on a slide
+    for spine in ax.spines.values():
+        spine.set_linewidth(2.5)
+
+    ax.grid(
+        True,
+        alpha=0.25,
+        linewidth=1.5
+    )
+
+    if log_y:
+        ax.set_yscale("log")
+    else:
+        ax.set_ylim(bottom=0)
+
+    # Automatically zoom around the selected spectrum
+    if xlim is None:
+        data_width = np.ptp(selected_energy)
+
+        padding = max(
+            0.05,
+            0.08 * data_width
+        )
+
+        display_low = max(
+            energy_min,
+            np.min(selected_energy) - padding
+        )
+
+        display_high = min(
+            energy_max,
+            np.max(selected_energy) + padding
+        )
+
+        # Avoid identical limits for an extremely narrow selection
+        if display_high <= display_low:
+            display_low = max(
+                energy_min,
+                np.min(selected_energy) - 0.05
+            )
+            display_high = min(
+                energy_max,
+                np.max(selected_energy) + 0.05
+            )
+
+        ax.set_xlim(display_low, display_high)
+
+    else:
+        if xlim[0] >= xlim[1]:
+            raise ValueError(
+                "xlim must satisfy minimum < maximum."
+            )
+
+        ax.set_xlim(xlim)
+
+    fig.tight_layout()
+
+    if save_path is not None:
+        save_directory = os.path.dirname(save_path)
+
+        if save_directory:
+            os.makedirs(
+                save_directory,
+                exist_ok=True
+            )
+
+        fig.savefig(
+            save_path,
+            dpi=300,
+            bbox_inches="tight"
+        )
+
+        print(f"Figure saved to: {save_path}")
+
+    plt.show()
+
+    print(
+        f"Projected {len(selected_energy)} selected events "
+        f"onto the energy axis."
+    )
+
+    return {
+        "selected_energy": selected_energy,
+        "counts": counts,
+        "bin_edges": bin_edges,
+        "total_selected_events": len(selected_energy),
+        "bin_width_mev": bin_width
+    }
