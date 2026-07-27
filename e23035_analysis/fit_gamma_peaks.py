@@ -17,20 +17,38 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-if False:
+fit_prefix = 'source'
+beam_on_selection = None
+beam_off_selection = None
+if fit_prefix == '60Ga':
     runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
-    fit_prefix = '60Ga'
     cal_name = 'gm_511and2614_1'
     nlc_name = 'c1'
     beam_on_selection = "(time_since_beam_off>0.1) && (time_since_beam_off<0.195)"
     beam_off_selection = "time_since_beam_off<0.094"
-else:
-        runs = e23035_runs.get_ddas_59_Zn_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=False)
-        fit_prefix='59Zn'
-        cal_name = 'gm_511and1301_1'
-        nlc_name = 'c1'
-        beam_on_selection = "(time_since_beam_off>0.5) && (time_since_beam_off<0.995)"
-        beam_off_selection = "time_since_beam_off<0.494"
+elif fit_prefix == '59Zn':
+    runs = e23035_runs.get_ddas_59_Zn_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=False)
+    cal_name = 'gm_511and1301_1'
+    nlc_name = 'c1'
+    beam_on_selection = "(time_since_beam_off>0.5) && (time_since_beam_off<0.995)"
+    beam_off_selection = "time_since_beam_off<0.494"
+elif fit_prefix == 'source':
+    source_type = '60Co'
+    source_position = 'all'
+    
+    df = e23035_runs.run_df
+    if source_position == 'all':
+        mask = df['source type'] == source_type
+    else:
+        mask = (df['source type'] == source_type) & (df['source location'] == source_position)
+        
+    runs = df.loc[mask, 'DDAS'].dropna().astype(int).tolist()
+    fit_prefix = f'source_{source_type}_{source_position}'
+    
+    beam_on_selection = beam_off_selection = None
+    # Provide default values for cal_name and nlc_name to prevent NameError
+    cal_name = 'gm_511and2614_1'
+    nlc_name = 'c1'
 if False:
     bg_run = 281
     runs = [bg_run]
@@ -60,23 +78,37 @@ adj_ab_hist = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30)
 ab_to_crystal_comparison = root_vis_tools.draw_overlaid_histograms({'addback':adj_ab_hist, 'sum':gamma_hist}, title='addback to sum comparison',
                                                                     x_label='energy (keV)', y_label='counts/0.25 keV')
 
-gamma_beam_off_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
-                                          beam_off_selection, event_build_window, addback_ethresh, True,
-                                        nonlinearity_correction_name=nlc_name)
-gamma_beam_on_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
-                                          beam_on_selection, event_build_window, addback_ethresh, True,
-                                        nonlinearity_correction_name=nlc_name)
-beam_on_off_drawing= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist},
-                                                             x_label='energy (keV)', y_label='counts/0.25 keV')
+gamma_beam_off_hist = None
+if beam_off_selection is not None:
+    gamma_beam_off_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_off_gammas', 'beam off gamma spectrum', 'addback_energy', 
+                                              beam_off_selection, event_build_window, addback_ethresh, True,
+                                            nonlinearity_correction_name=nlc_name)
 
-gamma_beam_off_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_off_gammas_ab', 'beam off gamma spectrum_ab', 'addback_energy', 
-                                          beam_off_selection, event_build_window, addback_ethresh, True,
-                                        nonlinearity_correction_name=nlc_name)
-gamma_beam_on_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_on_gammas_ab', 'beam on gamma spectrum_ab', 'addback_energy', 
-                                          beam_on_selection, event_build_window, addback_ethresh, True,
-                                        nonlinearity_correction_name=nlc_name)
-beam_on_off_drawing_ab= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist_ab, 'beam on':gamma_beam_on_hist_ab, 'all':gamma_hist},
-                                                             x_label='addback energy (keV)', y_label='counts/0.25 keV')
+gamma_beam_on_hist = None
+if beam_on_selection is not None:
+    gamma_beam_on_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'beam_on_gammas', 'beam on gamma spectrum', 'addback_energy', 
+                                              beam_on_selection, event_build_window, addback_ethresh, True,
+                                            nonlinearity_correction_name=nlc_name)
+
+if beam_off_selection is not None and beam_on_selection is not None:
+    beam_on_off_drawing= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist, 'beam on':gamma_beam_on_hist, 'all':gamma_hist},
+                                                                 x_label='energy (keV)', y_label='counts/0.25 keV')
+
+gamma_beam_off_hist_ab = None
+if beam_off_selection is not None:
+    gamma_beam_off_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_off_gammas_ab', 'beam off gamma spectrum_ab', 'addback_energy', 
+                                              beam_off_selection, event_build_window, addback_ethresh, True,
+                                            nonlinearity_correction_name=nlc_name)
+
+gamma_beam_on_hist_ab = None
+if beam_on_selection is not None:
+    gamma_beam_on_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_on_gammas_ab', 'beam on gamma spectrum_ab', 'addback_energy', 
+                                              beam_on_selection, event_build_window, addback_ethresh, True,
+                                            nonlinearity_correction_name=nlc_name)
+
+if beam_off_selection is not None and beam_on_selection is not None:
+    beam_on_off_drawing_ab= root_vis_tools.draw_overlaid_histograms({'beam off':gamma_beam_off_hist_ab, 'beam on':gamma_beam_on_hist_ab, 'all':gamma_hist},
+                                                                 x_label='addback energy (keV)', y_label='counts/0.25 keV')
 
 if True: #make plot comparing 60Ga to 59Zn runs
         ga_runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=True)
@@ -271,8 +303,10 @@ with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
 
 force_refit=False
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
+if gamma_beam_off_hist is not None:
+    f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
+if gamma_beam_on_hist is not None:
+    f_beam_on = fit_peaks(gamma_beam_on_hist, all_peaks, 'beam_on_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if fit_prefix == '60Ga':
 #     possible_coincidence_peaks = [511, 546, 1003, 1028, 1188, 1202,  1333, 1341, 1413, 1482, 1554, 2007,
 #                 2293, 2334, 2390, 2435, 2484, 2507, 2826, 2996, 

@@ -778,7 +778,7 @@ def show_cal_error(calibration,title=''):
     plt.ylabel('Uncertainty in Energy Calibration (keV)')
     plt.title(title)
     #plt.yscale('log')
-    plt.show(block=False)
+    plt.show(block=True)
 
 
 def compare_gamma_cascades(fit_name, cascades_peak_energies, calibration_results, fit_column='mu'):
@@ -828,10 +828,10 @@ calibration = fit_polynomial_to_cal_comparison_ml(init_cal, 1)
 if __name__ == '__main__':
     all_decay_groups = extract_cal_data(cal_fit_name, False)
 
-    show_cal_comparison(init_cal_decay_groups, cal_fit_name)
-    show_cal_comparison(init_cal_decay_groups, cal_fit_name, cal_fit=calibration)
+    _before_cal = show_cal_comparison(init_cal_decay_groups, cal_fit_name)
+    _cal_points_after_cal = show_cal_comparison(init_cal_decay_groups, cal_fit_name, cal_fit=calibration)
     disp_fit_name = '60Ga_all_gamma'
-    disp_cal_decay_groups = extract_cal_data(disp_fit_name, True)
+    disp_cal_decay_groups = extract_cal_data(disp_fit_name, False)
     calibrated_data = show_cal_comparison(disp_cal_decay_groups, disp_fit_name, cal_fit=calibration)
     apply_energy_calibration_to_fit(disp_fit_name, calibration)
     apply_energy_calibration_to_fit('60Ga_beam_off_gamma', calibration)
