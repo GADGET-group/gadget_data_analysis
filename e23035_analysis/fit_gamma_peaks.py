@@ -18,6 +18,8 @@ upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 fit_prefix = 'source'
+force_refit=True
+
 beam_on_selection = None
 beam_off_selection = None
 if fit_prefix == '60Ga':
@@ -35,7 +37,8 @@ elif fit_prefix == '59Zn':
 elif fit_prefix == 'source':
     source_type = '60Co'
     source_position = 'all'
-    
+    cal_name = 'gm_511and2614_1'
+    nlc_name = 'c1'
     df = e23035_runs.run_df
     if source_position == 'all':
         mask = df['source type'] == source_type
@@ -46,9 +49,6 @@ elif fit_prefix == 'source':
     fit_prefix = f'source_{source_type}_{source_position}'
     
     beam_on_selection = beam_off_selection = None
-    # Provide default values for cal_name and nlc_name to prevent NameError
-    cal_name = 'gm_511and2614_1'
-    nlc_name = 'c1'
 if False:
     bg_run = 281
     runs = [bg_run]
@@ -56,6 +56,36 @@ if False:
 if False:
     runs = [280, 278, 277, 274, 271, 270, 269, 268]
     fit_prefix = '59Zn'
+
+#define which peaks shoul be fit
+if fit_prefix == 'source':
+    if source_type == '60Co':
+        all_peaks = [(1173, 1163, 1183), (1332, 1322, 1342)]
+    elif source_type == '152Eu':
+        all_peaks = []
+else:
+    all_peaks = []
+    with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
+        reader = csv.reader(f)
+        current_group = []
+        fit_window=(0,0)
+        for row in reader:
+            if row:
+                if row[0]=='STOP':
+                    break
+                try:
+                    if len(row[0]) > 0:
+                        if len(current_group) > 0:
+                            all_peaks.append((current_group, *fit_window))
+                            current_group = []
+                        start, stop = row[0].split('-')
+                        fit_window = (float(start), float(stop))
+                    current_group.append(float(row[1]))
+                except Exception as e:
+                    print(f'failed to load peak from row {row}: {e}')
+        
+        if len(current_group) > 0:
+            all_peaks.append((current_group, *fit_window))
 
 
 run_duration = 0
@@ -275,33 +305,6 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo, nexp=1):
             print(f"Half-life {i} for Egate {Egate}: {hl:.4g} ({lower_err:.4g}/+{upper_err:.4g}) s. Bounds: [{hl + lower_err:.4g}, {hl + upper_err:.4g}] s")
 
 
-#fit_decay_curve((0,4000), (0.015, 0.095), source=Eproton_v_tsbo)
-#fit_decay_curve((3400, 4000), (0.015, 0.095), source=Ealpha_v_tsbo)
-
-all_peaks = []
-with open('e23035_analysis/peak_fitting/gamma_peaks.csv', 'r') as f:
-    reader = csv.reader(f)
-    current_group = []
-    fit_window=(0,0)
-    for row in reader:
-        if row:
-            if row[0]=='STOP':
-                break
-            try:
-                if len(row[0]) > 0:
-                    if len(current_group) > 0:
-                        all_peaks.append((current_group, *fit_window))
-                        current_group = []
-                    start, stop = row[0].split('-')
-                    fit_window = (float(start), float(stop))
-                current_group.append(float(row[1]))
-            except Exception as e:
-                print(f'failed to load peak from row {row}: {e}')
-    
-    if len(current_group) > 0:
-        all_peaks.append((current_group, *fit_window))
-
-force_refit=False
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if gamma_beam_off_hist is not None:
     f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)

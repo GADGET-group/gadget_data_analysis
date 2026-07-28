@@ -17,9 +17,23 @@ experiment = 'e23035'
 Notes on peak finding an automatic fitting
 https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
 '''
+redo_existing = False #if True, redo gain match even if a gain match has already been made for the run.
 gamma_bin_size = 1 #keV
 gamma_binning = (int((7000-0)/gamma_bin_size),0,7000) #was 1-12000 w/ 1 keV bins
-run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='59Zn')]#[(e23035_runs.run_df['Run Type'].str.lower()=='background')]#
+runs_to_align_desc = 'source'
+if runs_to_align_desc == '59Zn':
+    run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='59Zn')]
+    gm_label='511and1301'
+elif runs_to_align_desc == '60Ga':
+    gm_label='511and2614'
+    run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
+elif runs_to_align_desc == 'background':
+    run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type'].str.lower()=='background')]
+elif runs_to_align_desc == 'source':
+    run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['source type'].str.len()>0)]
+    gm_label='511and2614'
+
+#
 runs = []
 for run in run_candidates:
     if np.isnan(run):
@@ -68,8 +82,7 @@ for num in range(1, 12):
 
 
 poly_degree = 1
-#gm_label='511and2614'
-gm_label='511and1301'
+
 gm_name = f'gm_{gm_label}_{poly_degree}'
 
 if gm_label == '511and2614':
@@ -114,12 +127,20 @@ elif False:
             true_locations[3]:{'1d':0.0001, 't_indep':0.01}
         }
 
-def do_gain_match(ddas_run, save_init_alignment_pdf=False):
+redo_existing = False
+
+def do_gain_match(ddas_run, save_init_alignment_pdf=True):
     '''
     ddas_run
     clover: 1a, 1b, etc
     '''
     ddas_run = int(ddas_run)
+    
+    if not redo_existing:
+        fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/gain_match.pdf"
+        if os.path.exists(fname):
+            return
+
     original_batch_state = ROOT.gROOT.IsBatch()
     ROOT.gROOT.SetBatch(True)
     
@@ -247,7 +268,7 @@ def process_all():
                 
             pbar.close()
             
-    make_summary_pdf()
+    #make_summary_pdf()
 
     #make_nonlinearity_correction()
     
