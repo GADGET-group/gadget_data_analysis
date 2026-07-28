@@ -113,6 +113,11 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
     #save_path = os.path.dirname(os.path.abspath(__file__))
     fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}.root')
     
+    #git info to save
+    git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
+    git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
+    git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True, error='replace').stdout
+
     if force_reprocess:
         import glob
         save_path = get_save_path(experiment)
@@ -193,11 +198,6 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
         
         ts = h5file.get_timestamps_array()
 
-
-        #git info to save
-        git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
-        git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
-        git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True).stdout
         def sanitize_jagged(lst):
             def _walk(obj):
                 if isinstance(obj, tuple):
