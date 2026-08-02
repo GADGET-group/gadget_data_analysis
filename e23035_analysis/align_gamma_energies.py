@@ -20,7 +20,7 @@ https://root.cern/root/htmldoc/guides/spectrum/Spectrum.html
 redo_existing = False #if True, redo gain match even if a gain match has already been made for the run.
 gamma_bin_size = 1 #keV
 gamma_binning = (int((7000-0)/gamma_bin_size),0,7000) #was 1-12000 w/ 1 keV bins
-runs_to_align_desc = 'source'
+runs_to_align_desc = 'all'
 if runs_to_align_desc == '59Zn':
     run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='59Zn')]
     gm_label='511and1301'
@@ -32,26 +32,28 @@ elif runs_to_align_desc == 'background':
 elif runs_to_align_desc == 'source':
     run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['source type'].str.len()>0)]
     gm_label='511and2614'
-
+elif runs_to_align_desc == 'all':
+    run_candidates = e23035_runs.run_df['DDAS']
+    gm_label='1461and2614'
 #
 runs = []
+t_tot = 0
 for run in run_candidates:
     if np.isnan(run):
         print(f'run {run} is nan, skipping')
         continue
    # t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
-    if True: #not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238] and run>=150 and run not in[159, 169, 170,171, 172,173,174, 180, 181] and not (run>=182 and run<=191):# and (tf-t0)>600:
-        #275, 576, 279 need h5 to be transfered
-        #only looking at runs later than 150 since these definitely use final beam settings
-        #169-173: beam disruptions, and following short runs
-        #174: attenuated beam
-        #180, 181: grow in after PID
-        #Runs 182-191 also have poor beharior. Run 187 was LN2 fill, but reason for other runs is unknown.
-        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
+
+    if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
+        try:
+            t1, t2 =  ddas_interface.get_first_and_last_ddas_time(experiment, run)
+            t_tot += t2 - t1
             runs.append(run)
-#runs = e23035_runs.get_ddas_60_Ga_runs(False, False, False, False)
-#runs = [218]#[203, 204, 275,276, 279]
+        except Exception as e:
+            print('failed to open run ', run)
+            print(e)
 print(runs)
+print(f'total run time: {t_tot/3600} hours')
 n_workers=min(200, len(runs))
 
 #get pre-experiment energy calibration to make finding the 511 and 2614 keV peaks easier
@@ -109,6 +111,18 @@ elif gm_label == '511and1301':
             true_locations[1]:{'1d':0.001, 't_indep':0.01},
         }
     
+    rebin_factors = [1 for loc in true_locations]#1,1,5,5]
+elif gm_label == '1461and2614':
+    peaks = [('40K', 1460.820, 5e-3),
+         ('208Tl', 2614.511, 1e-2)]
+    true_locations = [peak[1] for peak in peaks]
+    true_location_uncertainties =  [peak[2] for peak in peaks]
+    norm_dict = {loc:'slice' for loc in true_location_uncertainties}
+    pvalue_threshold_dict = {
+            'cal':1e-6,
+            true_locations[0]:{'1d':0.001, 't_indep':0.01},
+            true_locations[1]:{'1d':0.001, 't_indep':0.01},
+        } 
     rebin_factors = [1 for loc in true_locations]#1,1,5,5]
 elif False:
     peaks = [('511', 510.99895069, 16e-7),
@@ -277,12 +291,6 @@ def make_summary_pdf():
 
     stability_binning = (int(7000/5), 0, 7000)
     energy_calibration_tools.create_stability_summary(gm_name, stability_binning, 0.01, 200, runs)
-
-t_tot = 0
-for run in runs:
-    t1, t2 =  ddas_interface.get_first_and_last_ddas_time(experiment, run)
-    t_tot += t2 - t1
-print(f'total run time: {t_tot/3600} hours')
 
 def make_nonlinearity_correction():
     peak_list = [('511', 510.99895069, 16e-7),

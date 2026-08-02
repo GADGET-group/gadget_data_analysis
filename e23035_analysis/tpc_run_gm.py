@@ -1,3 +1,8 @@
+'''
+This file has some methods I was playing with to automatically gain match all runs, but it didn't ork out.
+Outside "show_stability_hist", all the functions in this file turned out to be pretty useless.
+'''
+
 import numpy as np
 import ROOT
 from e23035_analysis import e23035_runs, root_vis_tools, spectrum_fitter
