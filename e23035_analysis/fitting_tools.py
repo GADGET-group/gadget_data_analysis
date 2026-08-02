@@ -10,6 +10,73 @@ import ROOT
 import numpy as np
 import uuid
 
+class ParamManager:
+    def __init__(self):
+        self.names = []
+        self.initial_values = []
+        self.bounds = []
+        self.idx_map = {}
+        
+    def add(self, name, guess, bound):
+        if name not in self.idx_map:
+            self.idx_map[name] = len(self.names)
+            self.names.append(name)
+            self.initial_values.append(guess)
+            self.bounds.append(bound)
+        return self.idx_map[name]
+        
+    def get_idx(self, name):
+        return self.idx_map.get(name, -1)
+
+def resolve_string_param(param_name, default_guess, default_bounds, parameterizations, pm, current_mu_idx=None):
+    p_dict = None
+    if parameterizations:
+        if param_name in parameterizations:
+            p_dict = parameterizations[param_name]
+        elif param_name.split('_')[0] in parameterizations:
+            p_dict = parameterizations[param_name.split('_')[0]]
+            
+    if p_dict:
+        # Register any new free parameters this formula introduces
+        for j, pname in enumerate(p_dict.get('params', [])):
+            if pm.get_idx(pname) == -1: # Add if not exists
+                pm.add(pname, p_dict['guesses'][j], p_dict['bounds'][j])
+                
+        formula_str = p_dict['formula']
+        
+        # Replace {mu} placeholder if applicable (usually only for sigma/tau)
+        if current_mu_idx is not None and '{mu}' in formula_str:
+            formula_str = formula_str.replace('{mu}', f"[{current_mu_idx}]")
+            
+        # Replace any known parameter names with their global ROOT indices
+        # We look for both {param_name} and [param_name] syntax for flexibility
+        for pname in pm.names:
+            formula_str = formula_str.replace(f"{{{pname}}}", f"[{pm.get_idx(pname)}]")
+            formula_str = formula_str.replace(f"[{pname}]", f"[{pm.get_idx(pname)}]")
+            
+        return f"({formula_str})", -1
+    else:
+        idx = pm.add(param_name, default_guess, default_bounds)
+        return f"[{idx}]", idx
+
+def resolve_python_param(param_name, p, pm, parameterizations, current_mu=None):
+    p_dict = None
+    if parameterizations:
+        if param_name in parameterizations:
+            p_dict = parameterizations[param_name]
+        elif param_name.split('_')[0] in parameterizations:
+            p_dict = parameterizations[param_name.split('_')[0]]
+            
+    if p_dict:
+        args = []
+        if current_mu is not None and p_dict.get('pass_mu', False):
+            args.append(current_mu)
+            
+        args += [p[pm.get_idx(name)] for name in p_dict.get('params', [])]
+        return p_dict['formula'](*args)
+    else:
+        return p[pm.get_idx(param_name)]
+
 def fit_hist(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options = 'LS0QEI'): 
     # 1. Unique ID & Setup
     unique_id = uuid.uuid4().hex[:8]
@@ -464,7 +531,7 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
 
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None): 
+def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI', parameterizations=None): 
     from scipy.special import erfcx, erfc
     if param_bounds is None:
         param_bounds = {}
@@ -472,43 +539,11 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
 
     bin_width = spectrum.GetBinWidth(1)
     
-    # Python evaluation function utilizing erfcx
-    def emg_eval(x, p):
-        val_x = x[0]
-        bg_const = p[0]
-        amp = p[1]
-        mu = p[2]
-        sigma = p[3]
-        tau = p[4]
-        
-        norm = amp * bin_width / (2.0 * tau)
-        
-        # Unified argument logic
-        z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
-        
-        if z_arg < -25: 
-            # Fallback to stable exp*erfc for extreme negative arguments
-            exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
-            if exp_arg > 700: 
-                peak_val = 0.0
-            else: 
-                peak_val = norm * np.exp(exp_arg) * erfc(z_arg)
-        else: 
-            # Stable erfcx form for the main peak and tail
-            gaus_arg = (val_x - mu) / sigma
-            gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
-            erfcx_part = erfcx(z_arg)
-            peak_val = norm * gaus_part * erfcx_part
-            
-        return bg_const + peak_val
-
-    # Setup Parameters and Initial Guesses
-    sigma_guess = get_sigma(data_source, e_guess)
-    tau_guess = 3
-    
     spectrum.GetXaxis().SetRangeUser(*fit_window)
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    sigma_guess = get_sigma(data_source, e_guess)
     A_guess = (spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess) * sigma_guess / bin_width
+    tau_guess = 3
     
     if data_source == 'gamma_adc':
         tau_bounds = (0.01, 10)
@@ -521,26 +556,61 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
 
     spectrum.GetXaxis().UnZoom()
 
-    initial_values = [bg_guess, A_guess, e_guess, sigma_guess, tau_guess]
+    pm = ParamManager()
+    bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
+    amp_idx = pm.add("amplitude", A_guess, param_bounds.get('amplitude', A_bounds))
+    mu_idx = pm.add("mu", e_guess, param_bounds.get('mu', (e_low, e_high)))
+    
+    if parameterizations:
+        for p_target, p_dict in parameterizations.items():
+            for j, pname in enumerate(p_dict['params']):
+                pm.add(pname, p_dict['guesses'][j], p_dict['bounds'][j])
 
-    bounds = [
-        param_bounds.get('bg_const', (0, np.inf)),
-        param_bounds.get('amplitude', A_bounds),
-        param_bounds.get('mu', (e_low, e_high)),
-        param_bounds.get('sigma', sigma_bounds),
-        param_bounds.get('tau', tau_bounds)
-    ]
+    if not (parameterizations and 'sigma' in parameterizations):
+        pm.add("sigma", sigma_guess, param_bounds.get('sigma', sigma_bounds))
+        
+    if not (parameterizations and 'tau' in parameterizations):
+        pm.add("tau", tau_guess, param_bounds.get('tau', tau_bounds))
 
-    names = ["bg_const", "amplitude", "mu", "sigma", "tau"]
+    # Python evaluation function utilizing erfcx
+    def emg_eval(x, p):
+        val_x = x[0]
+        bg_const = p[pm.get_idx("bg_const")]
+        amp = resolve_python_param("amplitude", p, pm, parameterizations)
+        mu = resolve_python_param("mu", p, pm, parameterizations)
+        sigma = resolve_python_param("sigma", p, pm, parameterizations, current_mu=mu)
+        tau = resolve_python_param("tau", p, pm, parameterizations, current_mu=mu)
+            
+        if sigma <= 0 or tau <= 0:
+            return 1e10
+        
+        norm = amp * bin_width / (2.0 * tau)
+        
+        z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
+        
+        if z_arg < -25: 
+            exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
+            if exp_arg > 700: 
+                peak_val = 0.0
+            else: 
+                peak_val = norm * np.exp(exp_arg) * erfc(z_arg)
+        else: 
+            gaus_arg = (val_x - mu) / sigma
+            gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
+            erfcx_part = erfcx(z_arg)
+            peak_val = norm * gaus_part * erfcx_part
+            
+        return bg_const + peak_val
 
     # Call fit engine (passing ONLY the python function)
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=emg_eval, 
-        initial_values=initial_values, 
-        bounds=bounds, 
+        initial_values=pm.initial_values, 
+        bounds=pm.bounds, 
         fit_range=(e_low, e_high), 
-        names=names
+        names=pm.names,
+        fit_options=fit_options
     )
 
     comp_id = uuid.uuid4().hex[:6]
@@ -548,98 +618,71 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     
     # Reconstruct individual TF1 components for visualization
     def bg_eval(x, p):
-        return p[0]
+        return p[pm.get_idx("bg_const")]
         
-    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, 1)
+    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, len(pm.names))
     background._pyfunc = bg_eval
-    background.SetParameter(0, fit_params[0])
+    for i in range(len(fit_params)):
+        background.SetParameter(i, fit_params[i])
     
     def peak_eval(x, p):
-        return emg_eval(x, [0, p[1], p[2], p[3], p[4]])
+        p_copy = list(p)
+        p_copy[pm.get_idx("bg_const")] = 0
+        return emg_eval(x, p_copy)
 
-    peaks = ROOT.TF1(f'emg_{comp_id}', peak_eval, e_low, e_high, 5)
+    peaks = ROOT.TF1(f'emg_{comp_id}', peak_eval, e_low, e_high, len(pm.names))
     peaks._pyfunc = peak_eval
-    for i in range(1, 5):
+    for i in range(len(fit_params)):
         peaks.SetParameter(i, fit_params[i])
         
     component_peak_funcs = [peaks]
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI'): 
+def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI', parameterizations=None): 
     """
     Fits a standard Gaussian + constant background using the fit_func engine.
     """
     if param_bounds is None:
         param_bounds = {}
     e_low, e_high = fit_window
-
-    # 1. Construct the Mathematical Model
-    # [0]: Constant Background
-    # [1]: Amplitude (Area)
-    # [2]: Mean (mu)
-    # [3]: Sigma (sigma)
-    
-    bg_string = "[0]"
-    
-    # Gaussian normalized to area [1]
-    # Using GetBinWidth(1) instead of 0, as 0 is technically the underflow bin in ROOT
     bin_width = spectrum.GetBinWidth(1) 
     
-    # 2.50662827 is sqrt(2*pi)
-    gaus_string = f"([1] * {bin_width} / ([3] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[2])/[3]) * ((x-[2])/[3]))"
-    function_string = f"{bg_string} + {gaus_string}"
-
-    # 2. Setup Parameters and Initial Guesses
     sigma_guess = get_sigma(data_source, e_guess)
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
-
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
-    
-    # Estimate Area: (Max Height - Background) * Sigma * sqrt(2*pi) / bin_width
     max_height = spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess
     A_guess = max_height * sigma_guess * 2.50662827 / bin_width
-    A_guess = max(A_guess, 1.0) # Prevent 0 or negative area guesses
+    A_guess = max(A_guess, 1.0)
     
     if data_source == 'gamma_adc':
         sigma_bounds = (1, 20)
         A_bounds = (1, np.inf)
     else:
-        # Fallback bounds if other data sources are passed
         sigma_bounds = (0.1, 100)
         A_bounds = (0, np.inf)
 
     spectrum.GetXaxis().UnZoom()
 
-    initial_values = [
-        bg_guess,      # p0: bg_const
-        A_guess,       # p1: amplitude
-        e_guess,       # p2: mu
-        sigma_guess    # p3: sigma
-    ]
-
-    bg_bounds = param_bounds.get('bg_const', (0, np.inf))
-    A_bounds = param_bounds.get('amplitude', A_bounds)
-    mu_bounds = param_bounds.get('mu', (e_low, e_high))
-    sigma_bounds = param_bounds.get('sigma', sigma_bounds)
-
-    bounds = [
-        bg_bounds,       # p0: bg_const
-        A_bounds,        # p1: amplitude
-        mu_bounds,       # p2: mu bounds
-        sigma_bounds     # p3: sigma 
-    ]
-
-    names = ["bg_const", "amplitude", "mu", "sigma"]
+    pm = ParamManager()
+    bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
+    amp_string, amp_idx = resolve_string_param("amplitude", A_guess, param_bounds.get('amplitude', A_bounds), parameterizations, pm)
+    mu_string, mu_idx = resolve_string_param("mu", e_guess, param_bounds.get('mu', (e_low, e_high)), parameterizations, pm)
+    sigma_string, sigma_idx = resolve_string_param("sigma", sigma_guess, param_bounds.get('sigma', sigma_bounds), parameterizations, pm, current_mu_idx=mu_idx)
+    
+    bg_string = f"[{bg_idx}]"
+    
+    gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
+    function_string = f"{bg_string} + {gaus_string}"
 
     # 3. Call our generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
-        initial_values=initial_values, 
-        bounds=bounds, 
+        initial_values=pm.initial_values, 
+        bounds=pm.bounds, 
         fit_range=(e_low, e_high), 
-        names=names,
+        names=pm.names,
         fit_options = fit_options
     )
 
@@ -659,7 +702,7 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     component_peak_funcs = [peaks]
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI', shared_sigma=True): 
+def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI', shared_sigma=True, parameterizations=None): 
     """
     Fits a standard Gaussian + a step-like background shift using the fit_func engine.
     data_source can be specified to get default guesses and values for sigma and A
@@ -674,82 +717,24 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         e_guess_list = e_guess
         
     n_peaks = len(e_guess_list)
-
-    # 1. Construct the Mathematical Model
-    # [0]: Constant Background
-    # [1]: Slope Background
-    # [2]: Amplitude (Area) for peak 0
-    # [3]: Mean (mu) for peak 0
-    # [4]: Sigma for peak 0 (or shared across all peaks if shared_sigma=True)
-    # [5]: shift in background (left - right) as fraction of peak area, shared for all peaks
-    # If n_peaks > 1:
-    #   If shared_sigma=True:
-    #     [6]: Amplitude of peak 1
-    #     [7]: Mean of peak 1
-    # ...
-    #   If shared_sigma=False:
-    #     [6]: Amplitude of peak 1
-    #     [7]: Mean of peak 1
-    #     [8]: Sigma of peak 1
-    #     ...
-    
-    # Gaussian normalized to area [1]
-    # Using GetBinWidth(1) instead of 0, as 0 is technically the underflow bin in ROOT
     bin_width = spectrum.GetBinWidth(1) 
     
-    bg_string = "[0] + [1]*x"
-    gaus_strings = []
-    
-    for i in range(n_peaks):
-        if shared_sigma:
-            if i == 0:
-                amp_idx = 2
-                mu_idx = 3
-            else:
-                amp_idx = 4 + 2 * i
-                mu_idx = 5 + 2 * i
-            sigma_idx = 4
-        else:
-            if i == 0:
-                amp_idx = 2
-                mu_idx = 3
-                sigma_idx = 4
-            else:
-                amp_idx = 3 + 3 * i
-                mu_idx = 4 + 3 * i
-                sigma_idx = 5 + 3 * i
-            
-        bg_string += f" + 0.5*[{amp_idx}]*[5]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{sigma_idx}]))"
-        
-        # 2.50662827 is sqrt(2*pi)
-        gaus_string = f"([{amp_idx}] * {bin_width} / ([{sigma_idx}] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[{sigma_idx}]) * ((x-[{mu_idx}])/[{sigma_idx}]))"
-        gaus_strings.append(gaus_string)
-
-    function_string = f"{bg_string} + {' + '.join(gaus_strings)}"
-
-    # 2. Setup Parameters and Initial Guesses
+    # Setup Parameters and Initial Guesses
     if data_source is None:
         sigma_guess = 1
     else:
         sigma_guess = get_sigma(data_source, e_guess)
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
-
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
-    
-    # Calculate max and min within the zoomed fit window
     max_bin = spectrum.GetMaximumBin()
     min_bin = spectrum.GetMinimumBin()
     max_val = spectrum.GetBinContent(max_bin)
-    min_val = spectrum.GetBinContent(min_bin)
     
-    # Estimate Area: (Max Height - Background) * Sigma * sqrt(2*pi) / bin_width
     max_height = max_val - bg_guess
     A_guess = max_height * sigma_guess * 2.50662827 / bin_width
-    A_guess = max(A_guess, 1.0) # Prevent 0 or negative area guesses
-    
-    # The absolute maximum physical shift is the difference between the max and min bins
-    bg_shift_limit = 1#max_val - min_val
+    A_guess = max(A_guess, 1.0)
+    bg_shift_limit = 1
     
     if data_source is None:
         sigma_bounds = (0.1, 100)
@@ -758,69 +743,62 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         sigma_bounds = (1, 20)
         A_bounds_default = (1, np.inf)
     else:
-        # Fallback bounds if other data sources are passed
         sigma_bounds = (0.1, 100)
         A_bounds_default = (0, np.inf)
 
     spectrum.GetXaxis().UnZoom()
 
-    initial_values = [
-        bg_guess,      # p0: bg_const
-        0.0,           # p1: bg_slope
-        A_guess,       # p2: amplitude 0
-        e_guess_list[0], # p3: mu 0
-        sigma_guess,   # p4: sigma
-        0.002          # p5: bg_shift
-    ]
+    pm = ParamManager()
+    bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
+    bgslope_idx = pm.add("bg_slope", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
+    
+    # Reserve bg_shift idx
+    bg_shift_idx = pm.add("bg_shift", 0.002, param_bounds.get('bg_shift', (0, bg_shift_limit)))
+    
+    # Process parameterized parameters globally
+    if parameterizations:
+        for p_target, p_dict in parameterizations.items():
+            for j, pname in enumerate(p_dict['params']):
+                pm.add(pname, p_dict['guesses'][j], p_dict['bounds'][j])
 
-    bg_bounds = param_bounds.get('bg_const', (-np.inf, np.inf))
-    bg_slope_bounds = param_bounds.get('bg_slope', (-np.inf, np.inf))
-    A_bounds = param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default))
-    mu_bounds = param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high)))
-    sigma_name_0 = 'sigma' if shared_sigma else 'sigma_0'
-    sigma_bounds_current = param_bounds.get(sigma_name_0, param_bounds.get('sigma', sigma_bounds))
-    bg_shift_bounds = param_bounds.get('bg_shift', (0, bg_shift_limit))
-
-    bounds = [
-        bg_bounds,       # p0: bg_const
-        bg_slope_bounds, # p1: bg_slope
-        A_bounds,        # p2: amplitude 0
-        mu_bounds,       # p3: mu 0
-        sigma_bounds_current, # p4: sigma 
-        bg_shift_bounds  # p5: bg_shift
-    ]
-
-    if n_peaks == 1:
-        names = ["bg_const", "bg_slope", "amplitude", "mu", "sigma", "bg_shift"]
-    else:
-        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", sigma_name_0, "bg_shift"]
-
-    for i in range(1, n_peaks):
-        if shared_sigma:
-            initial_values.extend([A_guess, e_guess_list[i]])
-            bounds.extend([
-                param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
-                param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
-            ])
-            names.extend([f"amplitude_{i}", f"mu_{i}"])
+    bg_string = f"[{bg_idx}] + [{bgslope_idx}]*x"
+    gaus_strings = []
+    
+    for i in range(n_peaks):
+        if n_peaks == 1:
+            amp_name, mu_name, sig_name = "amplitude", "mu", "sigma"
         else:
-            i_sigma_guess = 1 if data_source is None else get_sigma(data_source, e_guess_list[i])
-            initial_values.extend([A_guess, e_guess_list[i], i_sigma_guess])
-            bounds.extend([
-                param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
-                param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high))),
-                param_bounds.get(f'sigma_{i}', param_bounds.get('sigma', sigma_bounds))
-            ])
-            names.extend([f"amplitude_{i}", f"mu_{i}", f"sigma_{i}"])
+            amp_name, mu_name = f"amplitude_{i}", f"mu_{i}"
+            sig_name = "sigma" if shared_sigma else f"sigma_{i}"
+            
+        a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', A_bounds_default))
+        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+        s_bnd = param_bounds.get(sig_name, param_bounds.get('sigma', sigma_bounds))
+        
+        amp_string, amp_idx = resolve_string_param(amp_name, A_guess, a_bnd, parameterizations, pm)
+        mu_string, mu_idx = resolve_string_param(mu_name, e_guess_list[i], m_bnd, parameterizations, pm)
+        
+        if not shared_sigma and data_source is not None:
+            i_sigma_guess = get_sigma(data_source, e_guess_list[i])
+        else:
+            i_sigma_guess = sigma_guess
+            
+        sigma_string, sigma_idx = resolve_string_param(sig_name, i_sigma_guess, s_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+            
+        bg_string += f" + 0.5*{amp_string}*[{bg_shift_idx}]*TMath::Erfc((x-{mu_string})/(1.41421356*{sigma_string}))"
+        gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
+        gaus_strings.append(gaus_string)
+
+    function_string = f"{bg_string} + {' + '.join(gaus_strings)}"
 
     # 3. Call our generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
-        initial_values=initial_values, 
-        bounds=bounds, 
+        initial_values=pm.initial_values, 
+        bounds=pm.bounds, 
         fit_range=(e_low, e_high), 
-        names=names,
+        names=pm.names,
         fit_options = fit_options
     )
 
@@ -848,7 +826,7 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None, fit_options = 'LS0QEI'): 
+def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None, fit_options = 'LS0QEI', parameterizations=None): 
     from scipy.special import erfcx, erfc
     if param_bounds is None:
         param_bounds = {}
@@ -861,30 +839,85 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         
     n_peaks = len(e_guess_list)
 
-    # 1. Call fit_gaussian_w_bg_shift to get initial guesses
+    # We don't pass parameterizations to the initial gaussian fit to avoid issues where 
+    # the user passes a python callable (intended for the EMG python engine), which 
+    # the string-based gaussian engine cannot parse. The gaussian fit will just provide
+    # standard independent guesses for Amplitude and Mu, and the global parameterizations
+    # will fall back to their user-defined 'guesses' when initialized below.
     gaus_res = fit_gaussian_w_bg_shift(spectrum, e_guess, fit_window, data_source, param_bounds)
-    gaus_params = np.array(gaus_res[0].Parameters())
+    gaus_params_obj = gaus_res[0]
     gaus_res[5].Close()
 
     bin_width = spectrum.GetBinWidth(1) 
     
+    if data_source is None:
+        A_bounds_default = (0, np.inf)
+        sigma_bounds = (0.1, 100)
+        tau_bounds = (0.01, 100)
+    elif data_source == 'gamma_adc':
+        A_bounds_default = (1, np.inf)
+        sigma_bounds = (1, 20)
+        tau_bounds = (0.01, 100)
+    else:
+        A_bounds_default = (0, np.inf)
+        sigma_bounds = (0.1, 100)
+        tau_bounds = (0.01, 100)
+
+    bg_shift_limit = 1
+
+    pm = ParamManager()
+    
+    gaus_p_map = {}
+    if gaus_params_obj.IsValid() or True: 
+        for i in range(gaus_params_obj.NPar()):
+            gaus_p_map[gaus_res[7].GetParName(i)] = gaus_params_obj.Parameter(i)
+            
+    pm.add("bg_const", gaus_p_map.get("bg_const", 0), param_bounds.get('bg_const', (-np.inf, np.inf)))
+    pm.add("bg_slope", gaus_p_map.get("bg_slope", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
+    pm.add("bg_shift", gaus_p_map.get("bg_shift", 0.002), param_bounds.get('bg_shift', (0, bg_shift_limit)))
+    
+    if parameterizations:
+        for p_target, p_dict in parameterizations.items():
+            for j, pname in enumerate(p_dict['params']):
+                guess_val = gaus_p_map.get(pname, p_dict['guesses'][j])
+                pm.add(pname, guess_val, p_dict['bounds'][j])
+                
+    for i in range(n_peaks):
+        if n_peaks == 1:
+            amp_name, mu_name = "amplitude", "mu"
+        else:
+            amp_name, mu_name = f"amplitude_{i}", f"mu_{i}"
+            
+        a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', A_bounds_default))
+        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+        
+        pm.add(amp_name, gaus_p_map.get(amp_name, 100), a_bnd)
+        pm.add(mu_name, gaus_p_map.get(mu_name, e_guess_list[i]), m_bnd)
+        
+    if not (parameterizations and 'sigma' in parameterizations):
+        pm.add("sigma", gaus_p_map.get("sigma", 1), param_bounds.get('sigma', sigma_bounds))
+        
+    if not (parameterizations and 'tau' in parameterizations):
+        pm.add("tau", 0.1, param_bounds.get('tau', tau_bounds))
+        
     def emg_bg_shift_eval(x, p):
         val_x = x[0]
-        bg_const = p[0]
-        bg_slope = p[1]
-        sigma = p[4]
-        bg_shift = p[5]
-        tau = p[6]
+        bg_const = p[pm.get_idx("bg_const")]
+        bg_slope = p[pm.get_idx("bg_slope")]
+        bg_shift = p[pm.get_idx("bg_shift")]
         
         total = bg_const + bg_slope * val_x
         for i in range(n_peaks):
-            if i == 0:
-                amp = p[2]
-                mu = p[3]
-            else:
-                amp = p[5 + 2 * i]
-                mu = p[6 + 2 * i]
-                
+            amp_name = "amplitude" if n_peaks == 1 else f"amplitude_{i}"
+            mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
+            amp = resolve_python_param(amp_name, p, pm, parameterizations)
+            mu = resolve_python_param(mu_name, p, pm, parameterizations)
+            sigma = resolve_python_param("sigma", p, pm, parameterizations, current_mu=mu)
+            tau = resolve_python_param("tau", p, pm, parameterizations, current_mu=mu)
+            
+            if sigma <= 0 or tau <= 0:
+                return 1e10
+            
             # Background Step Component
             total += 0.5 * amp * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
             
@@ -904,63 +937,14 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
             
         return total
 
-    # 3. Setup Parameters and Initial Guesses
-    if data_source is None:
-        A_bounds_default = (0, np.inf)
-        sigma_bounds = (0.1, 100)
-        tau_bounds = (0.01, 100)
-    elif data_source == 'gamma_adc':
-        A_bounds_default = (1, np.inf)
-        sigma_bounds = (1, 20)
-        tau_bounds = (0.01, 100)
-    else:
-        A_bounds_default = (0, np.inf)
-        sigma_bounds = (0.1, 100)
-        tau_bounds = (0.01, 100)
-
-    bg_shift_limit = 1
-
-    initial_values = [
-        gaus_params[0], # p0: bg_const
-        gaus_params[1], # p1: bg_slope
-        gaus_params[2], # p2: amplitude 0
-        gaus_params[3], # p3: mu 0
-        gaus_params[4], # p4: sigma
-        gaus_params[5], # p5: bg_shift
-        0.1             # p6: tau guess
-    ]
-
-    bounds = [
-        param_bounds.get('bg_const', (-np.inf, np.inf)),
-        param_bounds.get('bg_slope', (-np.inf, np.inf)),
-        param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default)),
-        param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high))),
-        param_bounds.get('sigma', sigma_bounds),
-        param_bounds.get('bg_shift', (0, bg_shift_limit)),
-        param_bounds.get('tau', tau_bounds)
-    ]
-
-    if n_peaks == 1:
-        names = ["bg_const", "bg_slope", "amplitude", "mu", "sigma", "bg_shift", "tau"]
-    else:
-        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", "sigma", "bg_shift", "tau"]
-
-    for i in range(1, n_peaks):
-        initial_values.extend([gaus_params[4 + 2 * i], gaus_params[5 + 2 * i]])
-        bounds.extend([
-            param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
-            param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
-        ])
-        names.extend([f"amplitude_{i}", f"mu_{i}"])
-
     # 4. Call generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=emg_bg_shift_eval, 
-        initial_values=initial_values, 
-        bounds=bounds, 
+        initial_values=pm.initial_values, 
+        bounds=pm.bounds, 
         fit_range=(e_low, e_high), 
-        names=names,
+        names=pm.names,
         fit_options = fit_options
     )
 
@@ -973,38 +957,16 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         
     # Peak component
     def peak_eval(x, p):
-        val_x = x[0]
-        sigma = p[4]
-        tau = p[6]
+        p_copy = list(p)
+        p_copy[pm.get_idx("bg_const")] = 0
+        p_copy[pm.get_idx("bg_slope")] = 0
+        p_copy[pm.get_idx("bg_shift")] = 0
+        return emg_bg_shift_eval(x, p_copy)
         
-        total = 0.0
-        for i in range(n_peaks):
-            if i == 0:
-                amp = p[2]
-                mu = p[3]
-            else:
-                amp = p[5 + 2 * i]
-                mu = p[6 + 2 * i]
-            
-            norm = amp * bin_width / (2.0 * tau)
-            z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
-
-            if z_arg < -25:
-                exp_arg = (sigma**2)/(2*tau**2) + (val_x - mu)/tau
-                if exp_arg < 700:
-                    total += norm * np.exp(exp_arg) * erfc(z_arg)
-            else:
-                gaus_arg = (val_x - mu) / sigma
-                gaus_part = np.exp(-0.5 * gaus_arg * gaus_arg)
-                erfcx_part = erfcx(z_arg)
-                total += norm * gaus_part * erfcx_part
-                
-        return total
-        
-    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, len(initial_values))
+    background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, len(pm.names))
     background._pyfunc = bg_eval
     
-    peaks = ROOT.TF1(f'emg_{comp_id}', peak_eval, e_low, e_high, len(initial_values))
+    peaks = ROOT.TF1(f'emg_{comp_id}', peak_eval, e_low, e_high, len(pm.names))
     peaks._pyfunc = peak_eval
     
     for i in range(len(fit_params)):
@@ -1016,14 +978,23 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         def make_eval(peak_idx):
             def eval_func(x, p):
                 val_x = x[0]
-                sigma = p[4]
-                tau = p[6]
-                if peak_idx == 0:
-                    amp = p[2]
-                    mu = p[3]
+                amp_name = "amplitude" if n_peaks == 1 else f"amplitude_{peak_idx}"
+                mu_name = "mu" if n_peaks == 1 else f"mu_{peak_idx}"
+                amp = p[pm.get_idx(amp_name)]
+                mu = p[pm.get_idx(mu_name)]
+                if parameterizations and 'sigma' in parameterizations:
+                    p_dict = parameterizations['sigma']
+                    sigma_args = [mu] + [p[pm.get_idx(name)] for name in p_dict['params']]
+                    sigma = p_dict['formula'](*sigma_args)
                 else:
-                    amp = p[5 + 2 * peak_idx]
-                    mu = p[6 + 2 * peak_idx]
+                    sigma = p[pm.get_idx("sigma")]
+                if parameterizations and 'tau' in parameterizations:
+                    p_dict = parameterizations['tau']
+                    tau_args = [mu] + [p[pm.get_idx(name)] for name in p_dict['params']]
+                    tau = p_dict['formula'](*tau_args)
+                else:
+                    tau = p[pm.get_idx("tau")]
+                    
                 norm = amp * bin_width / (2.0 * tau)
                 z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
                 if z_arg < -25:
@@ -1034,7 +1005,7 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
                     return norm * np.exp(-0.5 * gaus_arg * gaus_arg) * erfcx(z_arg)
             return eval_func
         peak_eval_i = make_eval(i)
-        p = ROOT.TF1(f'emg_peak_{i}_{comp_id}', peak_eval_i, e_low, e_high, len(initial_values))
+        p = ROOT.TF1(f'emg_peak_{i}_{comp_id}', peak_eval_i, e_low, e_high, len(pm.names))
         p._pyfunc = peak_eval_i
         for j in range(len(fit_params)):
             p.SetParameter(j, fit_params[j])

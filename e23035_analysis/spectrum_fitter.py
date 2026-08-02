@@ -34,6 +34,7 @@ class spectrum_fitter:
         self.location_wiggle=3 #bounds +/- to apply to location guesses
         self.shared_sigma=True #currently only implemented for bg_shift_guass. Will fill out param bounds for each peak based on guess.
         self.max_implicit_cores = 100
+        self.parameterizations = {}
 
     def add_peaks(self, peak_locations, window_size, sep_factor=1.25):
         '''
@@ -170,7 +171,8 @@ class spectrum_fitter:
             'peak_model': self.peak_model,
             'peaks_to_fit': self.peaks_to_fit,
             'fit_options': self.fit_options,
-            'num_fit_results': len(self.fit_results)
+            'num_fit_results': len(self.fit_results),
+            'parameterizations': self.parameterizations
         }
 
         # We extract and store just the source code of the lambda functions 
@@ -389,7 +391,8 @@ class spectrum_fitter:
         '''
         Fit each peak from peak_loc_guesses, and store the results
         '''
-        ROOT.EnableImplicitMT(self.max_implicit_cores)
+        if self.peak_model.lower() not in ['emg', 'bg_shift_emg', 'bg_shift_nemg']:
+            ROOT.EnableImplicitMT(self.max_implicit_cores)
         self.fit_results = []
         original_batch_state = ROOT.gROOT.IsBatch()
         ROOT.gROOT.SetBatch(True)
@@ -426,11 +429,13 @@ class spectrum_fitter:
 
             if self.peak_model.lower() == 'gaus':
                 res = fitting_tools.fit_gaussian_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options,
+                    parameterizations=self.parameterizations
                 )
             elif self.peak_model.lower() == 'emg':
                 res = fitting_tools.fit_emg_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options
+                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options,
+                    parameterizations=self.parameterizations
                 )
             elif self.peak_model.lower() == 'bg_shift_gaus':
                 if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
@@ -439,10 +444,12 @@ class spectrum_fitter:
                         param_bounds[f'sigma_{i}'] = self.param_bound_functions['sigma'](loc)
                 
                 res = fitting_tools.fit_gaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
-                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma)
+                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
+                                    parameterizations=self.parameterizations)
             elif self.peak_model.lower() == 'bg_shift_emg':
                 res = fitting_tools.fit_emg_w_bg_shift(self.spectrum, loc_guess, fit_range, 
-                                    param_bounds=param_bounds, fit_options=self.fit_options)
+                                    param_bounds=param_bounds, fit_options=self.fit_options,
+                                    parameterizations=self.parameterizations)
             elif self.peak_model.lower() == 'bg_shift_ngaus':
                 res = fitting_tools.fit_ngaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, self.ngaus,
                                     param_bounds=param_bounds, fit_options=self.fit_options)
@@ -676,6 +683,9 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
     
     if python_state.get('param_bound_functions'):
         fitter.param_bound_functions = python_state['param_bound_functions']
+    
+    if python_state.get('parameterizations'):
+        fitter.parameterizations = python_state['parameterizations']
 
     # 4. Reconstruct Fit Results
     num_fits = python_state.get('num_fit_results', 0)
