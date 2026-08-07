@@ -1,7 +1,6 @@
 import os
 import pickle
 
-
 import numpy as np
 import scipy.spatial.distance
 import scipy.optimize as opt
@@ -9,9 +8,10 @@ import scipy.interpolate as interpolate
 import h5py
 import matplotlib.pylab as plt
 import matplotlib.colors as colors
+import matplotlib.cm 
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
-
+from sklearn import datasets, linear_model
 
 try:
     import cupy as cp
@@ -23,7 +23,6 @@ except:
     import scipy.special as cpspecial
     cp.asnumpy = lambda x: x
     USE_GPU = False
-
 
 import skimage.measure
 
@@ -94,7 +93,7 @@ class raw_h5_file:
                         (1.0, 1.0, 1.0))
         self.cmap = LinearSegmentedColormap('test',cdict)
 
-        self.background_subtract_mode = 'none' #none, fixed window, smart, or convolution
+        self.background_subtract_mode = 'none' #none, fixed window, smart, smart2, or convolution
         self.background_convolution_kernel = None#bin backgrounds are determined by convolving the trace with this array
         self.remove_outliers = False
         self.num_background_bins = (0,0) #number of time bins to use for per event background subtraction
@@ -110,6 +109,9 @@ class raw_h5_file:
         self.num_smart_background_ave_bins = 5 
         #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
         self.smart_bins_away_to_check = 3
+        self.smart2_min_bins_in_peak = 10
+        self.smart2_min_sigma = 2
+        self.smart2_ransac_percentile = 100
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
 
@@ -127,10 +129,35 @@ class raw_h5_file:
         self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
         self.cached_data = None
         self.cached_xyte = self.cached_xyze = None
+        
+        # Cache for fast lookup of new bucketed group structure
+        self._batch_existence_cache = {}
 
         #look at first event and figure out number of time bins
-        first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
+        first_event = self.get_event_num_bounds()[0]
+        first_event_data = self._get_event_dataset(first_event, kind='data')
         self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
+
+    def _get_event_dataset(self, event_number, kind='data'):
+        """
+        Helper method to retrieve the dataset for a given event, supporting 
+        both the new bucketed ('batch_XXXX') structure and the legacy flat structure.
+        """
+        dataset_name = "evt%d_%s" % (event_number, kind)
+        batch_index = int(event_number // 10000)
+        batch_name = "batch_%04d" % batch_index
+        
+        get_group = self.h5_file['get']
+        
+        # Check cache to avoid repeatedly querying HDF5 metadata 
+        if batch_name not in self._batch_existence_cache:
+            self._batch_existence_cache[batch_name] = batch_name in get_group
+            
+        # Return nested bucketed path, or fallback to root flat path
+        if self._batch_existence_cache[batch_name]:
+            return get_group[batch_name][dataset_name]
+        else:
+            return get_group[dataset_name]
 
     def get_pad_from_xy(self, xy):
         '''
@@ -151,7 +178,7 @@ class raw_h5_file:
         Returns timestamp in seconds.
         '''
         #timestamps are stored in units of 10ns
-        return self.h5_file['get']['evt%d_header'%event_number][1]/1e8 
+        return self._get_event_dataset(event_number, kind='header')[1]/1e8 
 
     def get_timestamps_array(self):
         '''
@@ -163,6 +190,18 @@ class raw_h5_file:
         for i, evt in tqdm.tqdm(enumerate(range(first, last+1))):
             to_return[i] = self.get_timestamp(evt)
         return to_return
+
+    def get_railed_pads(self, event_number):
+        '''
+        Returns a list of pads which railed in the current event
+        '''
+        data = self._get_event_dataset(event_number, kind='data')
+        traces = data[:,FIRST_DATA_BIN:]
+        which_ones_railed = np.logical_not(np.all(traces<4095, axis=1))
+        ch_info = data[which_ones_railed,0:4]
+        return [self.chnls_to_pad[tuple(info)] for info in ch_info]
+
+        
 
     def get_data(self, event_number):
         '''
@@ -180,7 +219,7 @@ class raw_h5_file:
         if self.cache_enable and event_number == self.cached_event:
             return np.array(self.cached_data, copy=True)
 
-        data = self.h5_file['get']['evt%d_data'%event_number]
+        data = self._get_event_dataset(event_number, kind='data')
 
         
         if self.asads != 'all' or self.cobos != 'all' or self.pads != 'all':
@@ -254,7 +293,7 @@ class raw_h5_file:
                         line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
                     if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
                         line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        #for smart baseline subtraction, zeroing traces outside thepeak window is handled by baseline subtraction
+        #for smart baseline subtraction, zeroing traces outside the peak window is handled by baseline subtraction
         
         #pad gain match is applied after baseline subtraction because a number of baseline subtraction
         #parameters are mostly driven by noise, which we don't expect to strongly correlate with pad gain
@@ -270,7 +309,7 @@ class raw_h5_file:
             self.cached_event = event_number
         return data
 
-    def calculate_background(self, trace):
+    def calculate_background(self, trace, debug_plots=False):
         '''
         Return calculated background for each timebin.
 
@@ -311,15 +350,93 @@ class raw_h5_file:
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            #slope, offset = np.polyfit(xs, ys, 1)
-            offset = np.mean(ys)
+            slope, offset = np.polyfit(xs, ys, 1)
+            #offset = np.mean(ys)
             #baseline will be the trace except in the peak region,
             #so that everything away from the peak is zero'd out
             baseline = np.array(trace, copy=True)
             # for i in range(peak_start, peak_end+1):
             #     baseline[i] = slope*i + offset
-            baseline[np.arange(peak_start, peak_end+1)] = offset
+            #baseline[np.arange(peak_start, peak_end+1)] = offset
+            x_peak = np.arange(peak_start, peak_end)
+            baseline[x_peak] = offset + slope*x_peak
             return baseline
+        elif self.background_subtract_mode == 'smart2':
+            '''
+            RANSAC lowest 25% of points to get initial baseline estimate
+            Find peak with maximum value and more than 5 consecutive bins above the baseline found by RANSAC. Trim trace to 10 bins to each side of the found block of bins.
+            Starting from the left of the trimmed trace, find the first place where the current time bin is more than MAD (from RANSAC) counts below the sample 10 samples later, and further trim the trace here. Do the same thing from the right.
+            Go 10 bins away from each end of the peak, and fit a line to the next 20 bins to get a local estimate of the baseline
+            '''
+            #use ransac to fit a line to background
+            x = np.arange(len(trace)).reshape(-1, 1)
+            ransac = linear_model.RANSACRegressor()
+            ransac.fit(x, trace.reshape(-1, 1))
+            ransac_baseline = ransac.predict(x).flatten()
+            #threshold = self.smart2_threshold + np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
+            above_threshold = trace>ransac_baseline#threshold
+            peak_labels = skimage.measure.label(above_threshold*1, background=0)
+            # print('ransac baseline: ', ransac_baseline)
+            # print('trace: ', trace)
+            # print('labels: ', peak_labels)
+            not_background = peak_labels[peak_labels!=0]
+            if len(not_background) == 0:
+                return trace
+            labels, num_bins = np.unique(not_background, return_counts=True)
+            most_counts, largest_index = 0,0
+            for i in range(len(labels)):
+                label = labels[i]
+                max_counts = np.max(trace[peak_labels==label])
+                if max_counts > most_counts and num_bins[i] > self.smart2_min_bins_in_peak:
+                    most_counts = max_counts
+                    largest_index = i
+            #largest_index = np.argmax(num_bins)
+            largest_label = labels[largest_index]
+
+            baseline = np.array(trace, copy=True)
+            if num_bins[largest_index] < self.smart2_min_bins_in_peak:
+                return trace
+            
+            selected_label_indicies = np.where(peak_labels==largest_label)[0]
+            peak_start = max(0, selected_label_indicies[0] - self.smart_bins_away_to_check)
+            peak_end = min(len(trace)-1, selected_label_indicies[-1]+self.smart_bins_away_to_check)
+            #get threshold for trimming peak from MAD
+            peak_thresh = self.smart2_min_sigma*np.std(np.concatenate([trace[:peak_start]-ransac_baseline[:peak_start], 
+                                                                       trace[peak_end:]-ransac_baseline[peak_end:]]))
+            #print(peak_thresh)
+            i = np.argmax(trace)
+            if trace[i] - ransac_baseline[i] < peak_thresh:
+                return trace
+            #peak_thresh = np.max(np.abs(trace[ransac.inlier_mask_] - ransac_baseline[ransac.inlier_mask_]))
+            #print(peak_thresh)
+            while peak_start< peak_end:
+                if trace[peak_start] < trace[min(peak_start + self.smart_bins_away_to_check, len(trace)-1)] - peak_thresh:
+                    break
+                peak_start += 1
+            while peak_end > peak_start:
+                if trace[peak_end] < trace[max(0, peak_end - self.smart_bins_away_to_check)] - peak_thresh:
+                    break
+                peak_end -= 1
+            # print(peak_start, peak_end)
+            if peak_start == peak_end:
+                return trace
+
+            if False:
+                #fit a line through the points just outside the peak region
+                xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
+                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins+1, len(trace)))])
+                ys = trace[xs]
+                slope, offset = np.polyfit(xs, ys, 1)
+            #offset = np.mean(ys)
+            #baseline will be the trace except in the peak region,
+            #so that everything away from the peak is zero'd out
+            baseline = np.array(trace, copy=True)
+            # for i in range(peak_start, peak_end+1):
+            #     baseline[i] = slope*i + offset
+            x_peak = np.arange(peak_start, peak_end)
+            baseline[x_peak] = ransac_baseline[x_peak]
+            return baseline
+
         assert False #invalid mode
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=False):
@@ -516,15 +633,14 @@ class raw_h5_file:
                     max_veto_pad_counts = trace_max
             if self.include_counts_on_veto_pads or not pad in VETO_PADS: #don't inlcude veto pad energy
                 counts += np.sum(trace[trace>self.ic_counts_threshold])
-            if trace_max >= 4095:
-                pads_railed.append(pad)
+        
         dxy, dz, angle = self.get_track_length_angle(event_num)
-        return max_veto_pad_counts, dxy, dz, counts, angle, pads_railed
+        return max_veto_pad_counts, dxy, dz, counts, angle, self.get_railed_pads(event_num)
     
 
 
     def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False, 
-                      mode='raw', bounds=(0.1, 10), thresh_to_replace=2000):
+                      mode='raw', bounds=(0.5, 2), thresh_to_replace=2000):
         print('gain matching using %d events'%len(event_numbers))
         print('getting list of energy per pad for each event')
         pad_counts = []
@@ -576,13 +692,10 @@ class raw_h5_file:
         print('average event adc counts:', np.mean(event_adc_counts))
         pad_counts /= np.mean(event_adc_counts)
         print('performing minimization')
-        pad_counts = cp.array(pad_counts)
-        num_events = len(event_adc_counts)
         def raw_objective_function(gains):
-            gains = cp.array(gains)
             #print(np.shape(pad_counts), np.shape(gains))
-            adc_counts_in_each_event = cp.einsum('ij,j', pad_counts, gains)
-            return np.sqrt(cp.sum((adc_counts_in_each_event - 1)**2).get()/num_events)*2.355
+            adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
+            return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
         
         num_grid_points = 20
         pad_xy_index = np.array([self.pad_to_xy_index[pad] if pad in self.pad_to_xy_index else (0,0) for pad in range(NUM_PADS)])
@@ -704,17 +817,21 @@ class raw_h5_file:
         cbar = fig.colorbar(ax.get_children()[0])
         max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(event_num)
         length = np.sqrt(dxy**2 + dz**2)
-        plt.title('event %d, total counts=%d / %f MeV\n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
-                                                                                               energy*energy_scale_factor + energy_offset, length,
-                                                                                               np.degrees(angle), len(pads_railed)))
+        plt.title('event %d, total counts=%d \n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
+                                                                                                length,
+                                                                                                np.degrees(angle), len(pads_railed)))
         plt.show(block=block)
     
     def get_2d_image(self, data):
         #data should be a dictionary of numbers to put in the image, indexed by pad
-        image = np.zeros(np.shape(self.pad_plane))
-        for pad in data:
+        image = -1*np.ones(np.shape(self.pad_plane))
+        for pad in self.pad_to_xy_index:
             x,y = self.pad_to_xy_index[pad]
-            image[y,x] = data[pad]
+            if pad in data:
+                image[y,x] = data[pad]
+            else:
+                image[y,x] = np.inf
+            
         #image[image<0]=0
         return image
 
@@ -732,7 +849,9 @@ class raw_h5_file:
         fig.suptitle(title)
 
         # Top plot: padplane image
-        im = ax1.imshow(image, norm=colors.LogNorm())
+        cmap = matplotlib.cm.get_cmap('viridis').copy()
+        cmap.set_under(color='black')
+        im = ax1.imshow(image, cmap=cmap, vmin=np.min(image[image>=0]), vmax=np.max(image[image<np.inf]))#norm=colors.LogNorm()
         fig.colorbar(im, ax=ax1)
         ax1.set_title('Padplane Image')
 
@@ -758,7 +877,7 @@ class raw_h5_file:
             fig.canvas.mpl_connect('button_press_event', onclick)
         plt.show(block=block)
         return fig
-
+    
     def show_2d_projection(self, event_number, block=True, fig_name=None):
         pads, traces = self.get_pad_traces(event_number)
         trace_dict = {pad: trace for pad, trace in zip(pads, traces)}
@@ -766,22 +885,58 @@ class raw_h5_file:
         should_veto, dxy, dz, energy, angle, pads_railed_list = self.process_event(event_number)
         length = np.sqrt(dxy**2 + dz**2)
         title='event %d, total counts=%d, length=%f mm, angle=%f, veto=%d'%(event_number, energy, length, np.degrees(angle), should_veto)
-        return self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+        # return self.show_padplane_image(data, trace_dict=trace_dict, block=block, fig_name=fig_name, title=title)
+    
+        image = self.get_2d_image(data)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 6), constrained_layout=True, num=fig_name, clear=True)
+        fig.suptitle(title)
+
+        # Top plot: padplane image
+        cmap = matplotlib.cm.get_cmap('viridis').copy()
+        cmap.set_under(color='black')
+        im = ax1.imshow(image, cmap=cmap, vmin=np.min(image[image>=0]), vmax=np.max(image[image<np.inf]))#norm=colors.LogNorm()
+        fig.colorbar(im, ax=ax1)
+        ax1.set_title('Padplane Image')
+
+        # Bottom plot: sum of traces
+        if trace_dict != None:
+            summed_trace = np.sum([trace_dict[pad] for pad in trace_dict], axis=0)
+            ax2.plot(summed_trace)
+            ax2.set_title('Summed Trace')
+            ax2.set_xlabel('Time')
+            ax2.set_ylabel('ADC Counts')
+            if type(trace_dict) != type(None):
+                def onclick(event):
+                    x, y = int(np.round(event.xdata)), int(np.round(event.ydata))
+                    pad = self.xy_index_to_pad.get((x, y))
+                    if pad in trace_dict:
+                        self.show_traces_w_baseline_estimate(event_number, False, pad_to_plot=pad)
+
+            fig.canvas.mpl_connect('button_press_event', onclick)
+        plt.show(block=block)
+        return fig
 
 
 
-    def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None):
+    def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None, pad_to_plot=None):
         '''
         plots traces without background subtraction, with backgrounds shown as ... lines
+        If pad is specified, plot only the one pad
         '''
         plt.figure(fig_name)
         plt.clf()
         old_background_mode = self.background_subtract_mode
+        old_cache = self.cache_enable
+        self.cache_enable = False
         self.background_subtract_mode = 'none' #will set back after drawing traces
         old_mode = self.data_select_mode
         self.data_select_mode = 'all data'
         pads, pad_data = self.get_pad_traces(event_num)
+        self.cache_enable = old_cache
         for pad, data in zip(pads, pad_data):
+            if type(pad) != type(None) and pad != pad_to_plot:
+                continue
             r = pad/1024*.8
             g = (pad%512)/512*.8
             b = (pad%256)/256*.8
@@ -791,6 +946,8 @@ class raw_h5_file:
                 plt.plot(data, color=(r,g,b), label='%d'%pad)
         self.background_subtract_mode = old_background_mode
         for pad, data in zip(pads, pad_data):
+            if type(pad) != type(None) and pad != pad_to_plot:
+                continue 
             r = pad/1024*.8
             g = (pad%512)/512*.8
             b = (pad%256)/256*.8
@@ -798,4 +955,3 @@ class raw_h5_file:
         self.data_select_mode = old_mode
         plt.legend(loc='upper right')
         plt.show(block=block)
-
