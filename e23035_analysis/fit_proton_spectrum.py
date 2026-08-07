@@ -25,10 +25,10 @@ ddas_runs_protons_all_energies = e23035_runs.get_ddas_60_Ga_runs(good_gamma=Fals
 pspec = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, proton_binning, "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
 ddas_runs_low_energy_protons = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
 pspec_low_energy = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, proton_binning, "proton_spectrum_low_energy", "proton_spectrum_low_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
-ddas_runs_alphas = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
-aspec = ddas_interface.get_histogram(experiment, ddas_runs_alphas, alpha_binning, 'alpha_spectrum', 'alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers)
+ddas_runs_alphas_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
+aspec_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, alpha_binning, 'alpha_spectrum_60Ga', '60Ga run alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers)
 
-alpha_energy_v_tsbo = ddas_interface.get_histogram(experiment, ddas_runs_alphas, (100, 0, 0.100, 140, 2000, 9000), "alpha_energy_v_tsbo", "alpha energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==2", num_workers=num_workers)
+alpha_energy_v_tsbo = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, (100, 0, 0.100, 140, 2000, 9000), "alpha_energy_v_tsbo", "alpha energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==2", num_workers=num_workers)
 proton_energy_v_tsbo = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo", "proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers)
 
 sigma_tpc = lambda E: (0.011107*E/1e3 + 0.008813049)*1e3
@@ -41,17 +41,25 @@ def fit_exists(save_name):
 def get_fitter(save_name):
     return spectrum_fitter.load_spectrum_fitter_from_file(get_save_path(save_name)+'.root')
 
-def fit_peaks(spectrum, peaks, save_name, zero_bg_shift=False, likelihood=True, force_refit=False, additional_param_bounds={}):
+def fit_peaks(spectrum, peaks, save_name, zero_bg_shift=False, likelihood=True, force_refit=False, additional_param_bounds={}, loc_wiggle=10):
     '''
     manual_bounds: if False, use add peaks function to cluster peaks and set fitting bounds.
     '''
     if not force_refit and fit_exists(save_name):
         return get_fitter(save_name)
     f = spectrum_fitter.spectrum_fitter(spectrum, 'bg_shift_gaus') # This will now use N=2 by default
-    f.param_bound_functions['sigma'] = lambda E: (sigma_tpc(E), sigma_tpc(E))
+    #f.param_bound_functions['sigma'] = lambda E: (sigma_tpc(E), sigma_tpc(E))
+    f.parameterizations = {
+        'sigma': {
+            'formula': '[sigma_c] + [sigma_m]*({mu})',
+            'params': ['sigma_c', 'sigma_m'],
+            'guesses': [0., 0.01],
+            'bounds': [(-100, 100), (0.0001, 0.1)]
+        }
+    }
     f.spectrum.GetXaxis().UnZoom()
     f.peaks_to_fit = peaks
-    f.location_wiggle = 10
+    f.location_wiggle = loc_wiggle
     f.shared_sigma = False
     if zero_bg_shift:
         f.param_bound_functions['bg_shift'] = lambda E: (0, 0)
@@ -66,23 +74,26 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift=False, likelihood=True, 
 ROOT.Math.MinimizerOptions.SetDefaultErrorDef(1)
 proton_peak_guesses = [([725, 814, 913, 950, 1060],500,1000),
                              ([1060, 1109,1160, 1212, 1260],1000,1288),
-                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
+                             ([1330, 1380, 1440, 1488, 1560], 1300, 1580),
+                             ([1625, 1730, 1780, 1820, 1840], 1585, 1900),
+                             ([2040, 2250, 2520, 2610, 3140], 1910, 3500)
+                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460, 2500, 3140],1300,3500)
                              ]
 f_all_proton = fit_peaks(pspec, 
                          proton_peak_guesses,
                          'all_proton_energies', force_refit=force_refit
-                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1)})
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1), 'amplitude': lambda E:(1, 1e6)}, loc_wiggle=20)
 f_proton_low_energy = fit_peaks(pspec_low_energy, 
                          proton_peak_guesses,
                          'low_energy_proton_energies', force_refit=force_refit
                         ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1)})
                         
 
-f_alpha = fit_peaks(aspec, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
+f_alpha = fit_peaks(aspec_60Ga, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
                     'alpha', force_refit=force_refit,
-                    additional_param_bounds={'bg_slope':lambda E: (0,0)})#3356
+                    additional_param_bounds={'bg_slope':lambda E: (0,0), 'amplitude': lambda E:(1, 1e6)})#3356
 
-f_alpha2 = fit_peaks(aspec, [([3529, 3662,3810,3890,4000, 4125], 2800, 4400)],
+f_alpha2 = fit_peaks(aspec_60Ga, [([3529, 3662,3810,3890,4000, 4125], 2800, 4400)],
                     '_a', force_refit=force_refit,
                     additional_param_bounds={'bg_slope':lambda E: (0,0)})#3356
 
@@ -102,7 +113,7 @@ f_all_proton_3sigma = fit_peaks(pspec,
                          'all_proton_energies_3_sigma', force_refit=force_refit
                         ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
 
-f_alpha_3sigma  = fit_peaks(aspec, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
+f_alpha_3sigma  = fit_peaks(aspec_60Ga, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
                     'alpha_3sigma', force_refit=force_refit,
                     additional_param_bounds={'bg_slope':lambda E: (0,0)})
 ROOT.Math.MinimizerOptions.SetDefaultErrorDef(1)

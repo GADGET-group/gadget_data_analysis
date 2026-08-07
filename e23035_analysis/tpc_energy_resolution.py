@@ -142,14 +142,13 @@ plt.show(block=False)
 sigma_func = lambda E: (f_sqrt(E,*popt_sqrt), f_sqrt(E,*popt_sqrt))
 f_zn_test = spectrum_fitter.spectrum_fitter(pspec_zn_protons, 'bg_shift_gaus')
 f_zn_test.peaks_to_fit = [([821,913], 600,980), ([1061, 1116, 1179,1263,1369,1465], 1040, 1500),
-             ([1061, 1116, 1179,1263,1369,1465,1778,1817,1857, 2025, 2089, 2182, 2197, 2250, 2390, 2435], 1040, 2500)]
+             #([1061, 1116, 1179,1263,1369,1465,1778,1817,1857, 2025, 2089, 2182, 2197, 2250, 2390, 2435], 1040, 2500),
+             ([1778,1817,1857, 2025, 2089, 2197, 2390],1600, 2500)] #2182, 2250, 2435
 f_zn_test.parameterizations = {
     'sigma': {
         'formula': '[sigma_c] + [sigma_m]*({mu})',
-        #'formula': 'sqrt([sigma_c] + [sigma_m]*({mu}))',
         'params': ['sigma_c', 'sigma_m'],
         'guesses': [0., 0.01],
-        #'bounds': [(-1000, 1000), (0, 10)]
         'bounds': [(-100, 100), (0.0001, 0.1)]
     }
 }
