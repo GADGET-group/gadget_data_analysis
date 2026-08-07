@@ -144,7 +144,7 @@ class raw_h5_file:
         both the new bucketed ('batch_XXXX') structure and the legacy flat structure.
         """
         dataset_name = "evt%d_%s" % (event_number, kind)
-        batch_index = int(event_number // 10000)
+        batch_index = int(event_number // 5000)
         batch_name = "batch_%04d" % batch_index
         
         get_group = self.h5_file['get']
