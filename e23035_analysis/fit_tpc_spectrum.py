@@ -1,4 +1,5 @@
 import os
+import csv
 from pathlib import Path
 
 import ROOT
@@ -21,19 +22,54 @@ Ga60_cycle_efficiency =  0.37410064021102757
 proton_binning = (4000//5, 0, 4000)
 alpha_binning = (7000//10, 2000, 9000)
 
-ddas_runs_protons_all_energies = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, proton_binning, "proton_spectrum", "proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
+ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
 ddas_runs_low_energy_protons = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
-pspec_low_energy = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, proton_binning, "proton_spectrum_low_energy", "proton_spectrum_low_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
+pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum_low_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
 ddas_runs_alphas_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
 aspec_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, alpha_binning, 'alpha_spectrum_60Ga', '60Ga run alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers)
+ddas_runs_high_energy_protons_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=False, good_long_tracks_tpc=True)
+pspec_high_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_high_energy_protons_60Ga, proton_binning, "proton_spectrum_high_energy_60Ga", "60Ga proton_spectrum_high_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
 
-alpha_energy_v_tsbo = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, (100, 0, 0.100, 140, 2000, 9000), "alpha_energy_v_tsbo", "alpha energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==2", num_workers=num_workers)
-proton_energy_v_tsbo = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo", "proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers)
+alpha_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, (100, 0, 0.100, 140, 2000, 9000), "alpha_energy_v_tsbo_60Ga", "60Ga alpha energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==2", num_workers=num_workers)
+proton_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo_60Ga", "60Ga proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers)
 
 sigma_tpc = lambda E: (0.011107*E/1e3 + 0.008813049)*1e3
 
+ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
+aspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, alpha_binning, 'alpha_spectrum_59Zn', '59Zn alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers)
+
+
+
 fit_path = 'e23035_analysis/tpc_spectrum_fitting/'
+
+def load_peaks_from_csv(filename):
+    all_peaks = []
+    with open(os.path.join(fit_path, filename), 'r') as f:
+        reader = csv.reader(f)
+        current_group = []
+        fit_window=(0,0)
+        for i, row in enumerate(reader):
+            if i == 0 or not row:
+                continue
+            if row[0]=='STOP':
+                break
+            try:
+                if len(row[0]) > 0:
+                    if len(current_group) > 0:
+                        all_peaks.append((current_group, *fit_window))
+                        current_group = []
+                    start, stop = row[0].split('-')
+                    fit_window = (float(start), float(stop))
+                current_group.append(float(row[1]))
+            except Exception as e:
+                print(f'failed to load peak from row {row}: {e}')
+        
+        if len(current_group) > 0:
+            all_peaks.append((current_group, *fit_window))
+    return all_peaks
+
 def get_save_path(save_name):
     return os.path.join(fit_path,save_name)
 def fit_exists(save_name):
@@ -72,50 +108,27 @@ def fit_peaks(spectrum, peaks, save_name, zero_bg_shift=False, likelihood=True, 
     return f
 
 ROOT.Math.MinimizerOptions.SetDefaultErrorDef(1)
-proton_peak_guesses = [([725, 814, 913, 950, 1060],500,1000),
-                             ([1060, 1109,1160, 1212, 1260],1000,1288),
-                             ([1330, 1380, 1440, 1488, 1560], 1300, 1580),
-                             ([1625, 1730, 1780, 1820, 1840], 1585, 1900),
-                             ([2040, 2250, 2520, 2610, 3140], 1910, 3500)
-                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460, 2500, 3140],1300,3500)
-                             ]
-f_all_proton = fit_peaks(pspec, 
+proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
+f_all_proton_60Ga = fit_peaks(pspec_all_energy_60Ga, 
                          proton_peak_guesses,
-                         'all_proton_energies', force_refit=force_refit
+                         '60Ga_all_proton_energies', force_refit=force_refit
                         ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1), 'amplitude': lambda E:(1, 1e6)}, loc_wiggle=20)
-f_proton_low_energy = fit_peaks(pspec_low_energy, 
+f_proton_low_energy_60Ga = fit_peaks(pspec_low_energy_60Ga, 
                          proton_peak_guesses,
-                         'low_energy_proton_energies', force_refit=force_refit
+                         '60Ga_low_energy_proton_energies', force_refit=force_refit
                         ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1)})
-                        
+f_high_energy_proton_60Ga = fit_peaks(pspec_high_energy_60Ga, 
+                         proton_peak_guesses,
+                         '60Ga_high_energy_proton_energies', force_refit=force_refit
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1)})
 
-f_alpha = fit_peaks(aspec_60Ga, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
-                    'alpha', force_refit=force_refit,
-                    additional_param_bounds={'bg_slope':lambda E: (0,0), 'amplitude': lambda E:(1, 1e6)})#3356
+alpha_guess = load_peaks_from_csv('alpha_peaks.csv')
+f_alpha_60Ga = fit_peaks(aspec_60Ga, alpha_guess,
+                    '60Ga_alpha', force_refit=force_refit,
+                    additional_param_bounds={'bg_slope':lambda E: (0,0), 'amplitude': lambda E:(1, 1e6)}, loc_wiggle=50)#3356
 
-f_alpha2 = fit_peaks(aspec_60Ga, [([3529, 3662,3810,3890,4000, 4125], 2800, 4400)],
-                    '_a', force_refit=force_refit,
-                    additional_param_bounds={'bg_slope':lambda E: (0,0)})#3356
-
-f_proton2 = fit_peaks(pspec, 
-                         [([1060, 1109,1160, 1212],1000,1288),
-                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
-                             ],
-                         '_p', force_refit=force_refit
-                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
-#do 3 sigma
-ROOT.Math.MinimizerOptions.SetDefaultErrorDef(9)
-f_all_proton_3sigma = fit_peaks(pspec, 
-                         [([725, 814, 913, 950, 1060],500,1000),
-                             ([1060, 1109,1160, 1212, 1260],1000,1288),
-                             #([1330, 1380, 1440, 1468, 1541, 1625, 1710, 1780, 1820, 1860, 1950, 2030, 2090, 2180, 2200, 2250, 2410, 2460],1288,2800)
-                             ],
-                         'all_proton_energies_3_sigma', force_refit=force_refit
-                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-0.1,0.1)})
-
-f_alpha_3sigma  = fit_peaks(aspec_60Ga, [([3374, 3529, 3662,3810, 3890,4000, 4125], 2800, 4400)],
-                    'alpha_3sigma', force_refit=force_refit,
-                    additional_param_bounds={'bg_slope':lambda E: (0,0)})
+f_proton_59Zn = fit_peaks(pspec_59Zn, proton_peak_guesses, '59Zn_protons', force_refit=force_refit,
+                            additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1), 'amplitude': lambda E:(1, 1e6)}, loc_wiggle=20)
 ROOT.Math.MinimizerOptions.SetDefaultErrorDef(1)
 # Ensure batch mode is off so any interactive plots will display
 ROOT.gROOT.SetBatch(False)

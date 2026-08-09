@@ -257,7 +257,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
                 file['events'] = events_data
             else:
                 total_events = min(lengths)
-                chunk_size = 50000
+                chunk_size = 1000
                 for i in range(0, total_events, chunk_size):
                     chunk = {}
                     for k, v in events_data.items():
