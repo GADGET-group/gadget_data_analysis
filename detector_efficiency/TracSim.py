@@ -5,8 +5,8 @@ Simulate tracks in a material
 @author: Alex Adams
 """
 
-import star_reader
-import physical_constants as pc
+from detector_efficiency import star_reader
+from detector_efficiency import physical_constants as pc
 import numpy as np
 import matplotlib.pylab as plt
 
@@ -130,7 +130,7 @@ source_distribution = uniform_distribution
 gadget_alpha = TPCVolume(P10_alpha, gadget2_active_volume, source_distribution)
 gadget_proton = TPCVolume(P10_proton, gadget2_active_volume, source_distribution)
 
-if False:
+if True:
     width = 10*pc.mm
     gadget_alpha_width = DiffusionTPCVolume(P10_alpha, gadget2_active_volume, source_distribution, width)
     gadget_proton_width = DiffusionTPCVolume(P10_proton, gadget2_active_volume, source_distribution, width)

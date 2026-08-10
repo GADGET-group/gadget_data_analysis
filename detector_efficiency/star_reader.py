@@ -14,10 +14,13 @@ signifigantly overpredict stopping distance for low energy particles
 
 import pandas as pd
 import numpy as np
-import physical_constants as pc
+import os
+from detector_efficiency import physical_constants as pc
 
 class Material:
     def __init__(self, filename, density):
+        if not os.path.isabs(filename) and not os.path.exists(filename):
+            filename = os.path.join(os.path.dirname(__file__), filename)
         table = pd.read_csv(filename, sep=' ', header=None).to_numpy()[:,0:2]
         self.energies = table[:, 0]*pc.MeV
         self.stopping_powers = table[:, 1]*pc.MeV*pc.cm**2/pc.g
