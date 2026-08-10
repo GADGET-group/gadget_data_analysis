@@ -108,8 +108,7 @@ def get_DDAS_run_number(get_run_number):
 def get_veto_mask(get_run):
     veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
     for pad in process_runs.raw_h5_file.VETO_PADS:
-            veto_thresholds[pad] = 500#260
-    veto_thresholds[509]=500
+            veto_thresholds[pad] = 200
     
     if is_iterable(get_run):
         return process_runs.get_veto_mask(experiment, get_run, veto_thresholds)
@@ -174,7 +173,7 @@ def get_alpha_mask_min_max_range(get_run, energies:np.ndarray):
     expected_alpha_length = alpha_srim_table.get_stopping_distance(energies)
     lower_band = np.zeros(len(energies))
     lower_proton, upper_proton = get_proton_mask_min_max_range(get_run, energies)
-    upper_band = np.min([lower_proton-10, expected_alpha_length + 30], axis=0)
+    upper_band = np.min([lower_proton-10, expected_alpha_length + 22], axis=0)
     return lower_band, upper_band
 
 def get_alpha_mask(get_run):
