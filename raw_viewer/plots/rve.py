@@ -20,8 +20,8 @@ experiment = 'e23035'#_prep_vault'
  
 if experiment == 'e23035':
     if True:
-        #run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
-        run_range = range(263, 280)
+        run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+        #run_range = range(263, 280)
     else:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
@@ -75,7 +75,7 @@ if load_ddas:
     times_since_beam_off = np.concatenate(times_since_beam_off)
 
 veto_thresh = 500#np.inf
-rve_bins = (300, 300)
+rve_bins = (600, 600)
 phist_bins = np.linspace(0, 4, 1001)
 alphahist_bins = 100
 
@@ -141,13 +141,10 @@ plt.ylabel('range (mm)')
 # if len(self.rve_cut_verticies) > 0:
 #     self.poly_selector.verts = self.rve_cut_verticies
 # fig.show()
-m = (108.4-32.2)/(3.628-2.25)
-m2 = (23.3-35.5)/(1-2.4)
 #alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
 if experiment == 'e23035':
     alpha_mask = e23035_runs.get_alpha_mask(get_runs)
 
-    m = (159.2-26.2)/(2.81-0.619)
     #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
     proton_mask = e23035_runs.get_proton_mask(get_runs)
     #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)

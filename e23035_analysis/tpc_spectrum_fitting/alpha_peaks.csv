@@ -9,7 +9,7 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 ,4000,,,,,
 ,4125,,,,,
 5400-7000,5886,,,,,
-,6150,,6288.08,0.1,yes,
+,6150,,6288.08,0.1,no,
 ,6253,,,,,
 ,6587,,6778.3,0.5,yes,
 8000-8900,8520,," 8784.86",0.12,yes,

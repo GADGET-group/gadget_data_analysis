@@ -143,15 +143,15 @@ def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
     proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run[0]))
     expected_proton_length = proton_srim_table.get_stopping_distance(energies)
-    lower_band = expected_proton_length - 37
+    lower_band = expected_proton_length - 57
     upper_band = expected_proton_length + 20
 
-    x1, x2 = 0.81, 2
-    y1 = proton_srim_table.get_stopping_distance(x1)
-    y2 = proton_srim_table.get_stopping_distance(x2)-37
+    x1, x2 = 0.81, 2.14
+    y1 = proton_srim_table.get_stopping_distance(x1)-2
+    y2 = proton_srim_table.get_stopping_distance(x2)-57
     lower_band[energies<x2] = y1 + (y2-y1)/(x2-x1)*(energies[energies<x2]-x1)
 
-    xa, xb = 0.4, 1
+    xa, xb = 0.42, 1
     ya = y1 + (y2-y1)/(x2-x1)*(xa-x1)
     yb = proton_srim_table.get_stopping_distance(xb)+20
     upper_band[energies<xb] = ya + (yb-ya)/(xb-xa)*(energies[energies<xb]-xa)

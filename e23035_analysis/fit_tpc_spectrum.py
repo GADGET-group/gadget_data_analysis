@@ -113,15 +113,15 @@ proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
 f_all_proton_60Ga = fit_peaks(pspec_all_energy_60Ga, 
                          proton_peak_guesses,
                          '60Ga_all_proton_energies', force_refit=force_refit
-                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1), 'amplitude': lambda E:(1, 1e6)}, loc_wiggle=20)
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 2000 else (-1,1), 'amplitude': lambda E:(1, 1e6)}, loc_wiggle=20)
 f_proton_low_energy_60Ga = fit_peaks(pspec_low_energy_60Ga, 
                          proton_peak_guesses,
                          '60Ga_low_energy_protons', force_refit=force_refit
-                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1)})
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 2000 else (-1,1)})
 f_high_energy_proton_60Ga = fit_peaks(pspec_high_energy_60Ga, 
                          proton_peak_guesses,
                          '60Ga_high_energy_protons', force_refit=force_refit
-                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1)})
+                        ,additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 2000 else (-1,1)})
 
 alpha_guess = load_peaks_from_csv('alpha_peaks.csv')
 f_alpha_60Ga = fit_peaks(aspec_60Ga, alpha_guess,
@@ -180,6 +180,8 @@ def make_energy_calibration(fit_name, peaks_csv, show_fit_result=True, force_0_o
     graph.SetMarkerStyle(20)
     
     fit_func = ROOT.TF1(f"calib_fit_{fit_name}", "pol1", min(x_vals)*0.9, max(x_vals)*1.1)
+    if force_0_offset:
+        fit_func.FixParameter(0, 0)
     fit_res = graph.Fit(fit_func, "SQ")
     
     offset = fit_func.GetParameter(0)
@@ -299,7 +301,7 @@ def apply_fit_to_csv(fit_to_aply, apply_to, cal_name='calibrated'):
                 
             writer.writerow(row)
 
-ecal_60Ga = make_energy_calibration('60Ga_alpha', 'alpha_peaks.csv', show_fit_result=True)
+ecal_60Ga = make_energy_calibration('60Ga_alpha', 'alpha_peaks.csv', show_fit_result=True, force_0_offset=False)
 apply_fit_to_csv(ecal_60Ga, '60Ga_alpha', 'alpha_cal')
 apply_fit_to_csv(ecal_60Ga, '59Zn_protons', 'alpha_cal')
 apply_fit_to_csv(ecal_60Ga, '60Ga_low_energy_protons', 'alpha_cal')

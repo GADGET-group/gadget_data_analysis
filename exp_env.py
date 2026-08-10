@@ -13,6 +13,7 @@ def import_or_reload(module_name):
         importlib.import_module(module_name)
 
 def rve():
+    import_or_reload('e23035_analysis.e23035_runs')
     import_or_reload('raw_viewer.plots.rve')
 
 def rates():
