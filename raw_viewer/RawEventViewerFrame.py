@@ -222,7 +222,12 @@ class RawEventViewerFrame(ttk.Frame):
                                                          command=self.check_state_changed)
         self.settings_checkbutton_map['remove_outliers']=self.remove_outlier_var
         remove_outliers_check.grid(row=2, column=1)
-        self.background_mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        self.reconstruct_railed_var = tk.IntVar()
+        reconstruct_railed_check = ttk.Checkbutton(settings_frame, text='reconstruct railed traces', variable=self.reconstruct_railed_var, 
+                                                            command=self.check_state_changed)
+        self.settings_checkbutton_map['reconstruct_railed_traces']=self.reconstruct_railed_var
+        reconstruct_railed_check.grid(row=2, column=2)
+        self.reconstruct_railed_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
         
         ttk.Label(settings_frame, text='zscale (mm/time bin):').grid(row=3,column=0)
         self.zscale_entry = ttk.Entry(settings_frame)
@@ -593,6 +598,7 @@ class RawEventViewerFrame(ttk.Frame):
         else:
             self.h5file.pads = np.fromstring(pads, sep=',')
         self.h5file.background_subtract_mode=self.background_mode_var.get()
+        self.h5file.reconstruct_railed_pads = self.reconstruct_railed_var.get()
         r_include = int(self.include_width_entry.get())
         r_exclude = int(self.exclude_width_entry.get())
         self.h5file.background_convolution_kernel = np.ones(r_include*2+1)

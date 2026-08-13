@@ -13,6 +13,7 @@ import matplotlib.cm
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 from sklearn import datasets, linear_model
+from raw_viewer.dev import railed_pad_repair
 
 try:
     import cupy as cp
@@ -116,6 +117,9 @@ class raw_h5_file:
         self.smart2_ransac_percentile = 100
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
+        #if True, will try to fit a skew normal distrubution to bins just to the left and right of the railed region, and use this to replace the railed region
+        self.reconstruct_railed_pads = False 
+        self.railed_pad_reconstruct_fit_bins = (8,8) #bins to the (left, right) of the railed region to use for fitting
 
         self.apply_gain_match = False
         self.pad_gains=np.ones(NUM_PADS)
@@ -232,6 +236,9 @@ class raw_h5_file:
                 else:
                     #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
                     continue
+                if self.reconstruct_railed_pads:
+                    if np.max(line[FIRST_DATA_BIN:]) == 4095:
+                        line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
                 if self.background_subtract_mode!='none':
                     line[FIRST_DATA_BIN:] -= self.calculate_background(line[FIRST_DATA_BIN:])
                 if self.remove_outliers:

@@ -101,22 +101,23 @@ def repair(railed_trace, repair_start_offset, repair_stop_offset, rail_val=4095)
         
     return repaired_trace
 
-# Test Execution
-f = process_runs.get_h5_file('e23035', 131)
-f.background_subtract_mode = 'none'
-pads, traces = f.get_pad_traces(3292)#(2745)
-traces = np.array(traces)
-railed_trace = traces[np.where(traces==4095)[0][0]]
-#repaired_trace = repair(railed_trace, 20, 3)
-plt.plot(railed_trace)
-plt.plot(repair(railed_trace, 20, 20))
-plt.show()
-
-#try "reparing" a non railed pads
-def g(i):
-    plt.plot(traces[i])
-    threshold = (np.max(traces[i]) - np.min(traces[i]))*0.75 + np.min(traces[i])
-    plt.plot(repair(traces[i], 8, 8, threshold))
-    plt.plot((0, len(traces[i])), (threshold, threshold))
+if False:
+    # Test Execution
+    f = process_runs.get_h5_file('e23035', 131)
+    f.background_subtract_mode = 'none'
+    pads, traces = f.get_pad_traces(2745)#(2745)
+    traces = np.array(traces)
+    railed_trace = traces[np.where(traces==4095)[0][0]]
+    #repaired_trace = repair(railed_trace, 20, 3)
+    plt.plot(railed_trace)
+    plt.plot(repair(railed_trace, 20, 20))
     plt.show()
+
+    #try "reparing" a non railed pads
+    def g(i):
+        plt.plot(traces[i])
+        threshold = (np.max(traces[i]) - np.min(traces[i]))*0.75 + np.min(traces[i])
+        plt.plot(repair(traces[i], 8, 8, threshold))
+        plt.plot((0, len(traces[i])), (threshold, threshold))
+        plt.show()
 
