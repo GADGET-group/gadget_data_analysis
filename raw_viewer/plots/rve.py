@@ -16,7 +16,7 @@ from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
-experiment = 'e23035'#_prep_vault'
+experiment = 'e23035_prep_vault'
  
 if experiment == 'e23035':
     if True:
@@ -35,7 +35,7 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = np.arange(61, 63+1) #calibration before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [73]#[61, 62, 63]
+    run_range = [49]#[61, 62, 63]
     
 
 # else: #during experiment
@@ -95,7 +95,7 @@ if experiment == 'e23035':
         gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
         with open(gain_match_path, 'rb') as f:
             gain_match_result = pickle.load(f)
-        pad_gains = np.ones(1024)*np.average(gain_match_result.x)
+        pad_gains =gain_match_result.x
         energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
         
 else:
@@ -103,7 +103,7 @@ else:
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
     #pad_gains = gain_match_result.x[:1024]
-    pad_gains = gain_match_result.pad_gains
+    pad_gains = np.ones(1024)*np.mean(gain_match_result.pad_gains)
     energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 angles = process_runs.get_angle(experiment, get_runs)
 
@@ -119,7 +119,7 @@ else:
     pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
     num_pads_railed = np.array([len(prl) for prl in pads_railed])
     veto_mask = (veto_max < veto_thresh)
-    veto_mask = veto_mask & (num_pads_railed==0)# & (angles>np.radians(8)) 
+    veto_mask = veto_mask #& (num_pads_railed==0)# & (angles>np.radians(8)) 
 
     
 if load_ddas:
@@ -324,21 +324,21 @@ def show_event(run, evt):
     h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
     h5file.plot_traces(evt, block=False)
 
+if experiment != 'e23035_prep_vault':
+    plt.figure()
+    proton_mask = proton_mask & (energy<3.5)
+    plt.title('protons')
+    plt.hist2d(energy[proton_mask],evt_runs[proton_mask],bins=(300,np.arange(min(get_runs)-0.5, max(get_runs)+0.5)),  norm=matplotlib.colors.LogNorm())
+    plt.xlabel('energy (MeV)')
+    plt.ylabel('run number')
+    plt.colorbar()
+    plt.show(block=False)
 
-plt.figure()
-proton_mask = proton_mask & (energy<3.5)
-plt.title('protons')
-plt.hist2d(energy[proton_mask],evt_runs[proton_mask],bins=(300,np.arange(min(get_runs)-0.5, max(get_runs)+0.5)),  norm=matplotlib.colors.LogNorm())
-plt.xlabel('energy (MeV)')
-plt.ylabel('run number')
-plt.colorbar()
-plt.show(block=False)
-
-plt.figure()
-alpha_mask = alpha_mask & (energy<10)
-plt.title('alphas')
-plt.hist2d(energy[alpha_mask],evt_runs[alpha_mask],bins=(50,np.arange(min(get_runs)-0.5, max(get_runs)+0.5)),  norm=matplotlib.colors.LogNorm())
-plt.xlabel('energy (MeV)')
-plt.ylabel('run number')
-plt.colorbar()
-plt.show(block=False)
+    plt.figure()
+    alpha_mask = alpha_mask & (energy<10)
+    plt.title('alphas')
+    plt.hist2d(energy[alpha_mask],evt_runs[alpha_mask],bins=(50,np.arange(min(get_runs)-0.5, max(get_runs)+0.5)),  norm=matplotlib.colors.LogNorm())
+    plt.xlabel('energy (MeV)')
+    plt.ylabel('run number')
+    plt.colorbar()
+    plt.show(block=False)

@@ -18,7 +18,7 @@ from raw_viewer.dev import railed_pad_repair
 try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    #cp.cuda.runtime.setDevice(2)
+    cp.cuda.runtime.setDevice(2)
     USE_GPU = True
 except:
     cp = np
@@ -226,7 +226,7 @@ class raw_h5_file:
             pad_image = np.zeros(np.shape(self.pad_plane))
 
 
-        #Loop over each pad, performing background subtraction and marking the pad in the pad image
+        #Loop over each pad, reconstructing railed traces, then performing baseline subtraction, and marking the pad in the pad image
         #which will be used for outlier removal.
         if self.background_subtract_mode!='none' or self.remove_outliers:
             for line in data:
@@ -420,6 +420,13 @@ class raw_h5_file:
             x_peak = np.arange(peak_start, peak_end)
             baseline[x_peak] = ransac_baseline[x_peak]
             return baseline
+        elif self.background_subtract_mode == 'snip':
+            p = 20 # window size
+            baseline = np.copy(trace)
+            for i in range(1, p + 1):
+                temp = (baseline[:-2*i] + baseline[2*i:]) / 2.0
+                baseline[i:-i] = np.minimum(baseline[i:-i], temp)
+            return baseline
 
         assert False #invalid mode
 
@@ -524,6 +531,46 @@ class raw_h5_file:
         #returns first event number, last event number
         return int(self.h5_file['meta']['meta'][0]), int(self.h5_file['meta']['meta'][2])
         #return int(self.h5_file['meta']['meta'][0]), np.min((int(self.h5_file['meta']['meta'][2]), int(self.h5_file['meta']['meta'][0])+10000))#TODO
+
+    def get_settings_hash(self):
+        import hashlib
+        import json
+        settings = {
+            'zscale': self.zscale,
+            'background_subtract_mode': self.background_subtract_mode,
+            'remove_outliers': self.remove_outliers,
+            'num_background_bins': self.num_background_bins,
+            'length_counts_threshold': self.length_counts_threshold,
+            'ic_counts_threshold': self.ic_counts_threshold,
+            'data_select_mode': self.data_select_mode,
+            'near_peak_window_width': self.near_peak_window_width,
+            'num_smart_background_ave_bins': self.num_smart_background_ave_bins,
+            'smart_bins_away_to_check': self.smart_bins_away_to_check,
+            'smart2_min_bins_in_peak': self.smart2_min_bins_in_peak,
+            'smart2_min_sigma': self.smart2_min_sigma,
+            'smart2_ransac_percentile': self.smart2_ransac_percentile,
+            'require_peak_within': self.require_peak_within,
+            'include_counts_on_veto_pads': self.include_counts_on_veto_pads,
+            'reconstruct_railed_pads': self.reconstruct_railed_pads,
+            'railed_pad_reconstruct_fit_bins': self.railed_pad_reconstruct_fit_bins,
+            'apply_gain_match': self.apply_gain_match,
+            'asads': self.asads,
+            'cobos': self.cobos,
+            'pads': self.pads
+        }
+        
+        def serialize(obj):
+            if isinstance(obj, (list, tuple, np.ndarray)):
+                if isinstance(obj, np.ndarray):
+                    obj = obj.tolist()
+                return [serialize(i) for i in obj]
+            elif isinstance(obj, float) and np.isinf(obj):
+                return "inf" if obj > 0 else "-inf"
+            return obj
+            
+        serialized_settings = {k: serialize(v) for k, v in settings.items()}
+        settings_str = json.dumps(serialized_settings, sort_keys=True)
+        return hashlib.sha256(settings_str.encode()).hexdigest()[:16]
 
 
     def get_pad_traces(self, event_number, include_veto_pads=True):

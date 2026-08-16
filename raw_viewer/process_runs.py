@@ -90,6 +90,8 @@ def get_h5_file(experiment, run_number):
         h5file.num_smart_background_ave_bins = 20
         h5file.smart2_min_bins_in_peak = 5
         h5file.smart2_min_sigma = 2
+        h5file.remove_outliers = True
+        h5file.reconstruct_railed_pads =True
         h5file.cache_enable = True
     elif experiment == 'e25058':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -111,22 +113,24 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
     Only redoes processing if a ROOT version of this information isn't available.
     '''
     #save_path = os.path.dirname(os.path.abspath(__file__))
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}.root')
+    h5file = get_h5_file(experiment, run_number)
+    settings_hash = h5file.get_settings_hash()
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}_{settings_hash}.root')
     
     #git info to save
     git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
     git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
-    git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True, error='replace').stdout
+    git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True, errors='replace').stdout
 
     if force_reprocess:
         import glob
         save_path = get_save_path(experiment)
         cache_patterns = [
             f'gm_ic_{experiment}_run{run_number}_*.npy',
-            f'veto_counts_{experiment}_run{run_number}.npy',
-            f'max_veto_counts_{experiment}_run{run_number}.npy',
-            f'outer_ring_counts_{experiment}_run{run_number}.npy',
-            f'max_outer_ring_counts_{experiment}_run{run_number}.npy',
+            f'veto_counts_{experiment}_run{run_number}_*.npy',
+            f'max_veto_counts_{experiment}_run{run_number}_*.npy',
+            f'outer_ring_counts_{experiment}_run{run_number}_*.npy',
+            f'max_outer_ring_counts_{experiment}_run{run_number}_*.npy',
             f'veto_mask_{experiment}_run{run_number}_*.npy'
         ]
         for pattern in cache_patterns:
@@ -143,7 +147,6 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
         return
     else:
         # h5file = build_sim.get_rawh5_object(experiment, run_number)
-        h5file = get_h5_file(experiment, run_number)
         print('processing run %d'%run_number)
         first_event, last_event = h5file.get_event_num_bounds()
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
@@ -272,7 +275,9 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
 def get_quantity(qname, experiment, runs):
     to_return = []
     for run in runs:
-        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}.root')
+        h5file = get_h5_file(experiment, run)
+        settings_hash = h5file.get_settings_hash()
+        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{settings_hash}.root')
         if not os.path.exists(fname):
             process_tpc_run(experiment, run)
             
@@ -306,7 +311,9 @@ def get_lengths(experiment, runs):
 def get_veto_counts(experiment, runs):
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}.npy')
+        h5file = get_h5_file(experiment, run)
+        settings_hash = h5file.get_settings_hash()
+        cache_fname = os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}_{settings_hash}.npy')
         if os.path.exists(cache_fname):
             veto_counts = np.load(cache_fname)
         else:
@@ -322,7 +329,9 @@ def get_veto_mask(experiment, runs, veto_thresholds):
     thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}.npy')
+        h5file = get_h5_file(experiment, run)
+        settings_hash = h5file.get_settings_hash()
+        cache_fname = os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}_{settings_hash}.npy')
         if os.path.exists(cache_fname):
             veto_mask = np.load(cache_fname)
         else:
@@ -338,7 +347,9 @@ def get_max_veto_counts(experiment, runs):
     '''
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}.npy')
+        h5file = get_h5_file(experiment, run)
+        settings_hash = h5file.get_settings_hash()
+        cache_fname = os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}_{settings_hash}.npy')
         if os.path.exists(cache_fname):
             max_pad_counts = np.load(cache_fname)
         else:
@@ -354,7 +365,9 @@ def get_max_veto_counts(experiment, runs):
 def get_outer_ring_counts(experiment, runs):
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}.npy')
+        h5file = get_h5_file(experiment, run)
+        settings_hash = h5file.get_settings_hash()
+        cache_fname = os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
         if os.path.exists(cache_fname):
             counts = np.load(cache_fname)
         else:
@@ -369,7 +382,9 @@ def get_outer_ring_counts(experiment, runs):
 def get_outer_ring_max_counts(experiment, runs):
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}.npy')
+        h5file = get_h5_file(experiment, run)
+        settings_hash = h5file.get_settings_hash()
+        cache_fname = os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
         if os.path.exists(cache_fname):
             max_pad_counts = np.load(cache_fname)
         else:
@@ -386,7 +401,9 @@ def get_gm_ic(experiment, runs, gains):
     gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}.npy')
+        h5file = get_h5_file(experiment, run)
+        settings_hash = h5file.get_settings_hash()
+        cache_fname = os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}_{settings_hash}.npy')
         if os.path.exists(cache_fname):
             gm_ic = np.load(cache_fname)
         else:
