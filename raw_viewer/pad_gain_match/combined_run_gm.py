@@ -33,7 +33,7 @@ from scipy import fftpack
 
 from raw_viewer import process_runs
 
-gpu_device = 3
+gpu_devices = [0,1,3]
 load_result1 = False
 load_result2 = False
 load_result3 = False
@@ -76,18 +76,41 @@ h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0])
 freqs_to_use = 20
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
-with cp.cuda.Device(gpu_device):
-    cpp_gpu = cp.array(cpp)
+cpp_gpus = []
+if len(cpp) > 0:
+    chunk_size = (len(cpp) + len(gpu_devices) - 1) // len(gpu_devices)
+    for i, dev in enumerate(gpu_devices):
+        start = i * chunk_size
+        end = min((i + 1) * chunk_size, len(cpp))
+        if start < len(cpp):
+            with cp.cuda.Device(dev):
+                cpp_gpus.append(cp.array(cpp[start:end]))
 
-def get_gm_ic(gains, counts_per_pad=cpp_gpu, return_gpu=False):
-    #counts per pad needs to already be on the gpu
-    with cp.cuda.Device(gpu_device):
-        gains_gpu = cp.array(gains)
-        to_return = cp.einsum('ij, j', counts_per_pad, gains_gpu)
-    if return_gpu:
-        return to_return
+def get_gm_ic(gains, counts_per_pad=None, return_gpu=False):
+    if counts_per_pad is not None:
+        dev = counts_per_pad.device
+        with dev:
+            gains_gpu = cp.array(gains)
+            to_return = cp.einsum('ij, j', counts_per_pad, gains_gpu)
+        if return_gpu:
+            return to_return
+        else:
+            return cp.asnumpy(to_return)
     else:
-        return cp.asnumpy(to_return)
+        results = []
+        for cpp_chunk in cpp_gpus:
+            dev = cpp_chunk.device
+            with dev:
+                gains_gpu = cp.array(gains)
+                res = cp.einsum('ij, j', cpp_chunk, gains_gpu)
+                results.append(cp.asnumpy(res))
+        if len(results) > 0:
+            to_return = np.concatenate(results)
+        else:
+            to_return = np.array([])
+        if return_gpu:
+            raise ValueError("return_gpu=True not supported for chunked processing")
+        return to_return
 
 def get_init_spectrum_guess(init_gain_guess):  
     image = np.ones(np.shape(h5.pad_plane))*init_gain_guess
@@ -159,153 +182,197 @@ plt.colorbar()
 plt.show(block=(not load_result1))
 
 def do_gain_match(cut_masks, true_energies, init_guess=None, offset='none'):
-    gm_slices = []
+    gm_slices_by_cut = []
     default_guess = []
     num_in_slice = []
     
-    with cp.cuda.Device(gpu_device):
-        for cut_mask, true_energy in zip(cut_masks, true_energies):
-            gm_slices.append(cpp_gpu[cut_mask, :])
-            default_guess.append(cp.asnumpy(true_energy/cp.mean(cp.sum(gm_slices[-1], axis=1))))
-            num_in_slice.append(cp.shape(gm_slices[-1])[0])
-            print('cut with true energy of %f MeV has %d events'%(true_energy, num_in_slice[-1]))
+    for cut_mask, true_energy in zip(cut_masks, true_energies):
+        slice_events = cpp[cut_mask, :]
+        num_in_slice.append(len(slice_events))
+        mean_charge = np.mean(np.sum(slice_events, axis=1))
+        default_guess.append(true_energy / mean_charge)
+        print('cut with true energy of %f MeV has %d events'%(true_energy, len(slice_events)))
 
-        if gain_match_mode == 'fft':
-            init_guess = get_init_spectrum_guess(np.average(default_guess))
-            print('num params:', len(init_guess))
-            bounds=np.array([(-np.inf, np.inf)]*len(init_guess))
+        chunks = []
+        chunk_size = (len(slice_events) + len(gpu_devices) - 1) // len(gpu_devices)
+        for i_dev, dev in enumerate(gpu_devices):
+            start = i_dev * chunk_size
+            end = min((i_dev + 1) * chunk_size, len(slice_events))
+            if start < len(slice_events):
+                with cp.cuda.Device(dev):
+                    chunks.append(cp.array(slice_events[start:end]))
+        gm_slices_by_cut.append(chunks)
 
-            def obj_func(x):
-                gains = get_pad_gains(x)
-                e_list = []
-                
-                for gm_slice in gm_slices:
-                    e_list.append(get_gm_ic(gains, gm_slice, True))
+    if gain_match_mode == 'fft':
+        init_guess = get_init_spectrum_guess(np.average(default_guess))
+        print('num params:', len(init_guess))
+        bounds=np.array([(-np.inf, np.inf)]*len(init_guess))
 
-                to_return = 0
-                with cp.cuda.Device(gpu_device):
-                    for es, true_e, num in zip(e_list, true_energies, num_in_slice):
-                        to_return += np.sqrt(cp.asnumpy(cp.sum((es - true_e)**2))/num)/true_energy*2.355
-                return to_return
+        def obj_func(x):
+            gains = get_pad_gains(x)
             
-            def callback(intermediate_result):
-                print(intermediate_result)
-                gains = get_pad_gains(intermediate_result.x)
-                print('gains',np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+            cut_error_sq_devs = []
+            for i_cut, true_e in enumerate(true_energies):
+                chunk_errs = []
+                for gm_slice in gm_slices_by_cut[i_cut]:
+                    dev = gm_slice.device
+                    with dev:
+                        e = get_gm_ic(gains, gm_slice, True)
+                        err_sq = cp.sum((e - true_e)**2)
+                        chunk_errs.append(err_sq)
+                cut_error_sq_devs.append(chunk_errs)
 
-            print('objective function for initial guess: ', obj_func(init_guess))
-            start_time = time.time()
-            print('starting minimization')
-            res =  optimize.minimize(obj_func, init_guess, callback=callback, bounds=bounds, options={'maxfun':1000000})
+            to_return = 0
+            for i_cut, (true_e, num) in enumerate(zip(true_energies, num_in_slice)):
+                cut_error_sq = 0
+                for err_sq in cut_error_sq_devs[i_cut]:
+                    dev = err_sq.device
+                    with dev:
+                        cut_error_sq += cp.asnumpy(err_sq)
+                to_return += np.sqrt(cut_error_sq / num) / true_e * 2.355
+            return to_return
+        
+        def callback(intermediate_result):
+            print(intermediate_result)
+            gains = get_pad_gains(intermediate_result.x)
+            print('gains',np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
 
-            print('time to perform minimization: %f s'%(time.time() - start_time))
-            res.cut_masks = cut_masks
-            res.true_energies = true_energies
-            res.exp_runs = exp_runs
-            res.freq_to_cut = freq_bins_to_cut
-            res.pad_gains = get_pad_gains(res.x)
-            return res
-        else: # individual mode
-            run_indexs = [] 
-            num_params = 1024
-            if per_run_variation:
-                if offset == 'none':
-                    num_params += len(runs)-1
-                elif offset == 'constant':
-                    num_params += 2*(len(runs)-1)
-            else:
-                if offset == 'constant':
-                    num_params += 1
-                    
-            for cut_mask in cut_masks:
-                run_idx = run_numbers[cut_mask].copy()
-                for i, r in enumerate(runs):
-                    run_idx[run_numbers[cut_mask] == r] = i
-                run_indexs.append(cp.array(run_idx))
+        print('objective function for initial guess: ', obj_func(init_guess))
+        start_time = time.time()
+        print('starting minimization')
+        res =  optimize.minimize(obj_func, init_guess, callback=callback, bounds=bounds, options={'maxfun':1000000})
 
+        print('time to perform minimization: %f s'%(time.time() - start_time))
+        res.cut_masks = cut_masks
+        res.true_energies = true_energies
+        res.exp_runs = exp_runs
+        res.freq_to_cut = freq_bins_to_cut
+        res.pad_gains = get_pad_gains(res.x)
+        return res
+    else: # individual mode
+        run_indexs_by_cut = [] 
+        num_params = 1024
+        if per_run_variation:
             if offset == 'none':
-                default_guess = np.ones(num_params)*np.average(default_guess)
-                bounds=np.array([(0, np.inf)]*num_params)
-                if per_run_variation:
-                    default_guess[-1*len(runs):] = 1
-                    bounds[-1*len(runs):] = (0,2)
+                num_params += len(runs)-1
             elif offset == 'constant':
-                default_guess = np.ones(num_params)*np.average(default_guess)
-                if per_run_variation:
-                    default_guess[-2*len(runs):-1*len(runs)] = 1
-                    default_guess[-1*len(runs):] = 0
-                default_guess[-1] = 0
-                bounds=np.array([(0, np.inf)]*num_params)
-                if per_run_variation:
-                    bounds[-2*len(runs):-1*len(runs)] = (0,2)
-                    bounds[-1*len(runs):] = (-np.inf, np.inf)
-                else:
-                    bounds[-1] = (-np.inf, np.inf)
-            if type(init_guess) == type(None):
-                init_guess = default_guess
+                num_params += 2*(len(runs)-1)
+        else:
+            if offset == 'constant':
+                num_params += 1
+                
+        for cut_mask in cut_masks:
+            run_idx = run_numbers[cut_mask].copy()
+            for i, r in enumerate(runs):
+                run_idx[run_numbers[cut_mask] == r] = i
             
-            def obj_func(x):
-                if offset == 'none':
-                    if per_run_variation:
-                        gains = x[:-1*(len(runs)-1)]
-                        per_run_gain = cp.array(x[-1*(len(runs)-1):])
-                        per_run_gain = cp.concatenate((per_run_gain, cp.array([1.0])))
-                    else:
-                        gains = x
-                elif offset == 'constant':
-                    if per_run_variation:
-                        gains = x[:-2*len(runs)]
-                        per_run_gain =cp.array(x[-2*len(runs):-1*len(runs)])
-                        per_run_offset = cp.array(x[-1*len(runs):])
-                    else:
-                        gains = x[:-1]
-                    offset_constant = x[-1]*1e4
-                e_list = []
-                for gm_slice, ri in zip(gm_slices, run_indexs):
-                    e_list.append(get_gm_ic(gains, gm_slice, True))
-                    if offset == 'none' and per_run_variation:
-                        e_list[-1] *= per_run_gain[ri]
-                    if offset == 'constant':
-                        if per_run_variation:
-                            e_list[-1] += per_run_offset[ri]*1e4
-                        else:
-                            e_list[-1] += offset_constant
-                to_return = 0
-                with cp.cuda.Device(gpu_device):
-                    for es, true_e, num in zip(e_list, true_energies, num_in_slice):
-                        to_return += np.sqrt(cp.asnumpy(cp.sum((es - true_e)**2))/num)/true_energy*2.355
-                return to_return
-            
-            def callback(intermediate_result):
-                print(intermediate_result)
-                if offset == 'none':
-                    if per_run_variation:
-                        gains = intermediate_result.x[:-1*len(runs)]
-                        per_run_gains = intermediate_result.x[-1*(len(runs)-1):]
-                    else:
-                        gains = intermediate_result.x
-                elif offset == 'constant':
-                    if per_run_variation:
-                        gains = intermediate_result.x[:-2*len(runs)]
-                        per_run_gains = intermediate_result.x[-2*len(runs):-1*len(runs)]
-                    else:
-                        gains = intermediate_result.x[:-1]
-                print('gains',np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
-                if per_run_variation:
-                    print('per run gains:', np.mean(per_run_gains), np.std(per_run_gains), np.min(per_run_gains), np.max(per_run_gains))
+            chunks = []
+            chunk_size = (len(run_idx) + len(gpu_devices) - 1) // len(gpu_devices)
+            for i_dev, dev in enumerate(gpu_devices):
+                start = i_dev * chunk_size
+                end = min((i_dev + 1) * chunk_size, len(run_idx))
+                if start < len(run_idx):
+                    with cp.cuda.Device(dev):
+                        chunks.append(cp.array(run_idx[start:end]))
+            run_indexs_by_cut.append(chunks)
 
-            print('objective function for initial guess: ', obj_func(init_guess))
-            start_time = time.time()
-            print('starting minimization')
-            res =  optimize.minimize(obj_func, init_guess, callback=callback, bounds=bounds, options={'maxfun':1000000})
-            print('time to perform minimization: %f s'%(time.time() - start_time))
-            res.cut_masks = cut_masks
-            res.true_energies = true_energies
-            res.runs = runs
-            res.offset = offset
-            res.per_run_variation = per_run_variation
-            res.exp_runs = exp_runs
-            return res
+        if offset == 'none':
+            default_guess = np.ones(num_params)*np.average(default_guess)
+            bounds=np.array([(0, np.inf)]*num_params)
+            if per_run_variation:
+                default_guess[-1*len(runs):] = 1
+                bounds[-1*len(runs):] = (0,2)
+        elif offset == 'constant':
+            default_guess = np.ones(num_params)*np.average(default_guess)
+            if per_run_variation:
+                default_guess[-2*len(runs):-1*len(runs)] = 1
+                default_guess[-1*len(runs):] = 0
+            default_guess[-1] = 0
+            bounds=np.array([(0, np.inf)]*num_params)
+            if per_run_variation:
+                bounds[-2*len(runs):-1*len(runs)] = (0,2)
+                bounds[-1*len(runs):] = (-np.inf, np.inf)
+            else:
+                bounds[-1] = (-np.inf, np.inf)
+        if type(init_guess) == type(None):
+            init_guess = default_guess
+        
+        def obj_func(x):
+            if offset == 'none':
+                if per_run_variation:
+                    gains = x[:-1*(len(runs)-1)]
+                    prg_cpu = x[-1*(len(runs)-1):]
+                    prg_cpu = np.concatenate((prg_cpu, np.array([1.0])))
+                else:
+                    gains = x
+            elif offset == 'constant':
+                if per_run_variation:
+                    gains = x[:-2*len(runs)]
+                    prg_cpu = x[-2*len(runs):-1*len(runs)]
+                    pro_cpu = x[-1*len(runs):]
+                else:
+                    gains = x[:-1]
+                offset_constant = x[-1]*1e4
+            cut_error_sq_devs = []
+            for i_cut, true_e in enumerate(true_energies):
+                chunk_errs = []
+                for gm_slice, ri in zip(gm_slices_by_cut[i_cut], run_indexs_by_cut[i_cut]):
+                    dev = gm_slice.device
+                    with dev:
+                        e = get_gm_ic(gains, gm_slice, True)
+                        if offset == 'none' and per_run_variation:
+                            prg_dev = cp.array(prg_cpu)
+                            e *= prg_dev[ri]
+                        if offset == 'constant':
+                            if per_run_variation:
+                                pro_dev = cp.array(pro_cpu)
+                                e += pro_dev[ri]*1e4
+                            else:
+                                e += offset_constant
+                        err_sq = cp.sum((e - true_e)**2)
+                        chunk_errs.append(err_sq)
+                cut_error_sq_devs.append(chunk_errs)
+
+            to_return = 0
+            for i_cut, (true_e, num) in enumerate(zip(true_energies, num_in_slice)):
+                cut_error_sq = 0
+                for err_sq in cut_error_sq_devs[i_cut]:
+                    dev = err_sq.device
+                    with dev:
+                        cut_error_sq += cp.asnumpy(err_sq)
+                to_return += np.sqrt(cut_error_sq / num) / true_e * 2.355
+            return to_return
+        
+        def callback(intermediate_result):
+            print(intermediate_result)
+            if offset == 'none':
+                if per_run_variation:
+                    gains = intermediate_result.x[:-1*len(runs)]
+                    per_run_gains = intermediate_result.x[-1*(len(runs)-1):]
+                else:
+                    gains = intermediate_result.x
+            elif offset == 'constant':
+                if per_run_variation:
+                    gains = intermediate_result.x[:-2*len(runs)]
+                    per_run_gains = intermediate_result.x[-2*len(runs):-1*len(runs)]
+                else:
+                    gains = intermediate_result.x[:-1]
+            print('gains',np.mean(gains), np.std(gains), np.min(gains), np.max(gains))
+            if per_run_variation:
+                print('per run gains:', np.mean(per_run_gains), np.std(per_run_gains), np.min(per_run_gains), np.max(per_run_gains))
+
+        print('objective function for initial guess: ', obj_func(init_guess))
+        start_time = time.time()
+        print('starting minimization')
+        res =  optimize.minimize(obj_func, init_guess, callback=callback, bounds=bounds, options={'maxfun':1000000})
+        print('time to perform minimization: %f s'%(time.time() - start_time))
+        res.cut_masks = cut_masks
+        res.true_energies = true_energies
+        res.runs = runs
+        res.offset = offset
+        res.per_run_variation = per_run_variation
+        res.exp_runs = exp_runs
+        return res
 
 if load_result1:
     if gain_match_mode == 'fft':

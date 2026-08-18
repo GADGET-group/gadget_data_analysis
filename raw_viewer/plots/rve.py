@@ -16,12 +16,13 @@ from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'
  
 if experiment == 'e23035':
     if True:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
         #run_range = range(263, 280)
+        run_range = [233]
     else:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
@@ -99,11 +100,12 @@ if experiment == 'e23035':
         energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
         
 else:
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
     #pad_gains = gain_match_result.x[:1024]
     pad_gains = gain_match_result.pad_gains
+    pad_gains = np.ones(np.shape(gain_match_result.pad_gains))*np.mean(gain_match_result.pad_gains)
     energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 angles = process_runs.get_angle(experiment, get_runs)
 

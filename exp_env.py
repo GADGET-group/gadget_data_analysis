@@ -25,7 +25,7 @@ def rate_summary():
 def xy_centering():
     import_or_reload('raw_viewer.plots.xy_centering')
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'
 
 def process_run(run):
     try:
@@ -61,7 +61,7 @@ if __name__ == '__main__':
         with multiprocessing.Pool(10) as pool:
             pool.map(merge_ddas, runs)
     if True:
-            runs = [16,17,20,35,49]#run_df['GET'][np.isfinite(run_df['GET'])]
+            runs = run_df['GET'][np.isfinite(run_df['GET'])]
             #runs=[257, 256, 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241]#49, 61,62,63,64,65]
             with multiprocessing.Pool(100) as pool:
                 pool.map(process_run, runs)

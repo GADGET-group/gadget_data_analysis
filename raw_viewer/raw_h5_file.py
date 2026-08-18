@@ -421,11 +421,25 @@ class raw_h5_file:
             baseline[x_peak] = ransac_baseline[x_peak]
             return baseline
         elif self.background_subtract_mode == 'snip':
-            p = 20 # window size
-            baseline = np.copy(trace)
+            p = self.smart_bins_away_to_check#20 # window size
+            
+            # LLS transform: log(log(y + 1) + 1)
+            y = np.array(trace, dtype=float, copy=True)
+            baseline = np.log(np.log(y + 1) + 1)
+            
+            # Pad with reflection to handle boundary bins cleanly
+            baseline = np.pad(baseline, pad_width=p, mode='reflect')
+            
             for i in range(1, p + 1):
                 temp = (baseline[:-2*i] + baseline[2*i:]) / 2.0
                 baseline[i:-i] = np.minimum(baseline[i:-i], temp)
+            
+            # Remove padding
+            baseline = baseline[p:-p]
+            
+            # Inverse LLS transform
+            baseline = np.exp(np.exp(baseline) - 1) - 1
+            
             return baseline
 
         assert False #invalid mode
