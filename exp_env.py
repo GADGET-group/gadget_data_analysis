@@ -25,11 +25,11 @@ def rate_summary():
 def xy_centering():
     import_or_reload('raw_viewer.plots.xy_centering')
 
-experiment = 'e23035'
+experiment = 'e23035_prep_vault'
 
 def process_run(run):
     try:
-        process_runs.process_tpc_run(experiment, run, True)
+        process_runs.process_tpc_run(experiment, run, False)
         print('processed run ', run)
     except Exception as e:
         print('error processing run ', run)
@@ -47,6 +47,7 @@ def merge_ddas(ddas_run, remerge=True):
         print('error merging ddas run ', ddas_run)
         print(e)
 if __name__ == '__main__':
+    multiprocessing.set_start_method('spawn')
     #runs = [49]#range(61,74)#[74,75,76,77]
     from e23035_analysis.e23035_runs import run_df
     import numpy as np
@@ -60,7 +61,7 @@ if __name__ == '__main__':
         with multiprocessing.Pool(10) as pool:
             pool.map(merge_ddas, runs)
     if True:
-            runs = run_df['GET'][np.isfinite(run_df['GET'])]
+            runs = [16,17,20,35,49]#run_df['GET'][np.isfinite(run_df['GET'])]
             #runs=[257, 256, 255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241]#49, 61,62,63,64,65]
             with multiprocessing.Pool(100) as pool:
                 pool.map(process_run, runs)

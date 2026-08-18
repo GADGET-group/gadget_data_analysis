@@ -1,9 +1,13 @@
 USE_GPU = True
 
+import os
 import time
 import pickle
 
 import numpy as np
+
+RES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gain_match_results')
+os.makedirs(RES_DIR, exist_ok=True)
 if USE_GPU:
     import cupy as cp
 else:
@@ -28,38 +32,39 @@ from scipy import fftpack
 
 from raw_viewer import process_runs
 
-gpu_device = 2
-load_result1 = True
-load_result2 = True
-load_result3 = True
+gpu_device = 0
+load_result1 = False
+load_result2 = False
+load_result3 = False
 
 
-runs = (49,)#(61,62,63)#(20,)#(20,)#(38,49)#17,20,21,38,49,60,
-exp = 'e23035_prep_vault'
+exp_runs = [('e23035_prep_vault', (16,17,20,35,49))]
 
-veto_thresh = 400
 rve_bins = 400
 
-lengths = process_runs.get_lengths(exp, runs)
-cpp = process_runs.get_quantity('pad_charge', exp, runs)
-#veto_counts = process_runs.get_veto_counts(exp, runs)
-veto_max = process_runs.get_max_veto_counts(exp, runs)
-charge_widths = process_runs.get_quantity('charge_width', exp,runs)
+lengths = np.concatenate([process_runs.get_lengths(e, r) for e, r in exp_runs])
+cpp = np.concatenate([process_runs.get_quantity('pad_charge', e, r) for e, r in exp_runs])
+#veto_counts = np.concatenate([process_runs.get_veto_counts(e, r) for e, r in exp_runs])
+veto_max = np.concatenate([process_runs.get_max_veto_counts(e, r) for e, r in exp_runs])
+charge_widths = np.concatenate([process_runs.get_quantity('charge_width', e, r) for e, r in exp_runs])
 #veto_mask = (veto_max < veto_thresh)&(charge_widths>3.25)#(veto_counts < veto_thresh)&(charge_widths>2.5)
 veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
 for pad in process_runs.raw_h5_file.VETO_PADS:
-    veto_thresholds[pad] = 500#260
-max_pad_counts = process_runs.get_quantity('pad_max', exp, runs)
-pads_railed = process_runs.get_quantity('railed_pads', exp, runs)
+    veto_thresholds[pad] = 200#260
+max_pad_counts = np.concatenate([process_runs.get_quantity('pad_max', e, r) for e, r in exp_runs])
+pads_railed = []
+for e, r in exp_runs:
+    pads_railed.extend(process_runs.get_quantity('railed_pads', e, r))
 num_pads_railed = np.array([len(prl) for prl in pads_railed])
-angles = process_runs.get_angle(exp, runs)
+angles = np.concatenate([process_runs.get_angle(e, r) for e, r in exp_runs])
 
-veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)&(num_pads_railed==0)&(np.degrees(angles)>8)
+veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)#&(num_pads_railed==0)&(np.degrees(angles)>8)
 
-run_numbers, event_numbers = process_runs.get_run_and_event_numbers(exp, runs)
+run_numbers = np.concatenate([process_runs.get_run_and_event_numbers(e, r)[0] for e, r in exp_runs])
+event_numbers = np.concatenate([process_runs.get_run_and_event_numbers(e, r)[1] for e, r in exp_runs])
 
-h5 = process_runs.get_h5_file(exp, runs[0])
-freqs_to_use = 30
+h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0])
+freqs_to_use = 20
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
 
@@ -85,10 +90,12 @@ no_gm_ic = get_gm_ic(np.ones(1024))
 
 #set up initial gain match cuts
 cuts1 = []
-true_energies = [6.28808, 6.7883]#,8.784 ]#, 0.7856]# only includes energy deposited as ionization
-cuts1.append((no_gm_ic>1.1e6) & (no_gm_ic<1.31e6) & (lengths>50) & (lengths<65.5) & veto_mask)
+true_energies = [6.28808, 6.7883,8.784 ]#, 0.7856]# only includes energy deposited as ionization
+cuts1.append((((no_gm_ic>1.05e6) & (no_gm_ic<1.31e6) & (lengths>50) & (lengths<65.5)) |
+              ((no_gm_ic>5.65e5)&(no_gm_ic<1.09e6)&(lengths>62.3)&(lengths<68)))
+              & veto_mask)
 cuts1.append((no_gm_ic>1.13e6) & (no_gm_ic<1.4e6) & (lengths>66) & (lengths<76) & veto_mask)
-#cuts1.append((no_gm_ic>1.35e6) & (no_gm_ic<1.85e6) & (lengths>90) & (lengths< 105) & veto_mask)
+cuts1.append((no_gm_ic>1.35e6) & (no_gm_ic<1.85e6) & (lengths>90) & (lengths< 105) & veto_mask)
 
 
 
@@ -97,7 +104,7 @@ plt.hist(veto_max, 100)
 
 fig = plt.figure()
 plt_mask = veto_mask&(lengths<150)&(lengths>1)
-plt.title('without gain match, runs: '+str(runs))
+plt.title('without gain match, exp_runs: '+str(exp_runs))
 plt.hist2d(no_gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 plt.xlabel('integrated charge')
 
@@ -143,7 +150,7 @@ def get_pad_gains(x):
 
 
 def do_gain_match(cut_masks, true_energies):
-    h5 = process_runs.get_h5_file(exp, runs[0]) #used to make pad plane images
+    h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0]) #used to make pad plane images
     
     gm_slices = []
     default_guess = []
@@ -201,25 +208,25 @@ def do_gain_match(cut_masks, true_energies):
         print('time to perform minimization: %f s'%(time.time() - start_time))
         res.cut_masks = cut_masks
         res.true_energies = true_energies
-        res.runs = runs
+        res.exp_runs = exp_runs
         res.freq_to_cut = freq_bins_to_cut
         res.pad_gains = get_pad_gains(res.x)
         return res
 
 
 if load_result1:
-    with open('fft%d_res1.pkl'%(freqs_to_use), 'rb') as f:
+    with open(os.path.join(RES_DIR, 'fft%d_res1.pkl'%(freqs_to_use)), 'rb') as f:
         res1 = pickle.load(f)
 else:
     res1 = do_gain_match(cuts1, true_energies)
-    with open('fft%d_res1.pkl'%(freqs_to_use), 'wb') as f:
+    with open(os.path.join(RES_DIR, 'fft%d_res1.pkl'%(freqs_to_use)), 'wb') as f:
         pickle.dump(res1, f)
 #print(res1)
 
 def show_plots(res,block=False):
     gm_ic = apply_gm_result(res)
     plt.figure()
-    plt.title('gain match applied, runs: '+str(runs))
+    plt.title('gain match applied, exp_runs: '+str(exp_runs))
     plt.hist2d(gm_ic[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
     plt.colorbar()
     plt.xlabel('Energy (MeV)')
@@ -243,7 +250,7 @@ def show_plots(res,block=False):
     #show pad plane image
     plt.figure()
     plt.title('pad gains')
-    h5 = process_runs.get_h5_file(exp, runs[0])
+    h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0])
     pad_gains = get_pad_gains(res.x)
     d = {}
     for i in range(len(pad_gains)):
@@ -275,11 +282,11 @@ if True:
     plt.show()
 
     if load_result2:
-        with open('fft%d_res2.pkl'%(freqs_to_use), 'rb') as f:
+        with open(os.path.join(RES_DIR, 'fft%d_res2.pkl'%(freqs_to_use)), 'rb') as f:
             res2 = pickle.load(f)
     else:
         res2 = do_gain_match(cuts2, true_energies2)
-        with open('fft%d_res2.pkl'%(freqs_to_use), 'wb') as f:
+        with open(os.path.join(RES_DIR, 'fft%d_res2.pkl'%(freqs_to_use)), 'wb') as f:
             pickle.dump(res2, f)
     print(res2)
     show_plots(res2)
@@ -304,12 +311,12 @@ if True:
     plt.show()
 
     if load_result3:
-        with open('fft%d_res3.pkl'%(freqs_to_use), 'rb') as f:
+        with open(os.path.join(RES_DIR, 'fft%d_res3.pkl'%(freqs_to_use)), 'rb') as f:
             res3 = pickle.load(f)
     else:
         
         res3 = do_gain_match(cuts3, true_energies3)
-        with open('fft%d_res3.pkl'%(freqs_to_use), 'wb') as f:
+        with open(os.path.join(RES_DIR, 'fft%d_res3.pkl'%(freqs_to_use)), 'wb') as f:
             pickle.dump(res3, f)
     print(res3)
     show_plots(res3)
@@ -364,7 +371,7 @@ print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/
 
 # print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5]), 2.355*fit_params2[3]/fit_params2[2])
 
-angles = process_runs.get_angle(exp, runs)
+angles = np.concatenate([process_runs.get_angle(e, r) for e, r in exp_runs])
 plt.figure()
 plt.scatter(gm_ic3[veto_mask],lengths[veto_mask],c=np.degrees(angles[veto_mask]), marker='.')
 plt.colorbar()

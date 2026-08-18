@@ -35,7 +35,7 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = np.arange(61, 63+1) #calibration before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [49]#[61, 62, 63]
+    run_range = [16,20,35,49]#[61, 62, 63]
     
 
 # else: #during experiment
@@ -92,10 +92,10 @@ if experiment == 'e23035':
     if True: #use default gain match
         energy = e23035_runs.get_energy_MeV(get_runs)
     else:
-        gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
-        with open(gain_match_path, 'rb') as f:
-            gain_match_result = pickle.load(f)
-        pad_gains =gain_match_result.x
+        # gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/fft6_res3.pkl'
+        # with open(gain_match_path, 'rb') as f:
+        #     gain_match_result = pickle.load(f)
+        # pad_gains = gain_match_result.pad_gains
         energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
         
 else:
@@ -103,7 +103,7 @@ else:
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
     #pad_gains = gain_match_result.x[:1024]
-    pad_gains = np.ones(1024)*np.mean(gain_match_result.pad_gains)
+    pad_gains = gain_match_result.pad_gains
     energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 angles = process_runs.get_angle(experiment, get_runs)
 
