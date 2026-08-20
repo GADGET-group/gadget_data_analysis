@@ -16,13 +16,13 @@ from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
-experiment = 'e23035'
+experiment = 'e23035_prep_vault'
  
 if experiment == 'e23035':
     if True:
-        run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')]# & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
+        run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')  & (e23035_runs.run_df['final beam settings?'] == 'yes')] 
         #run_range = range(263, 280)
-        run_range = [233]
+        #run_range = [131]
     else:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
@@ -36,7 +36,7 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = np.arange(61, 63+1) #calibration before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [16,20,35,49]#[61, 62, 63]
+    run_range = [49]#16,20,35,#[61, 62, 63]
     
 
 # else: #during experiment
@@ -64,13 +64,30 @@ print('get_runs:', get_runs)
 
 load_ddas = False
 
+print('loading stuff')
+num_workers = min(100, len(get_runs))
+
+quantities_to_get = ['charge_width', 'endpoints', 'timestamps']
+if experiment != 'e23035':
+    quantities_to_get.append('railed_pads')
+    
+results = process_runs.get_quantity(quantities_to_get, experiment, get_runs, show_load_progress=True, num_workers=num_workers)
+charge_widths = results[0]
+endpoints = results[1]
+timestamps = results[2]
+if experiment != 'e23035':
+    pads_railed = results[3]
+print('root data loaded')
+
+run_numbers, event_numbers = process_runs.get_run_and_event_numbers(experiment, get_runs)
+
 if load_ddas:
     ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
     print(ddas_runs)
     print('getting times since beam off for each event')
     times_since_beam_off = []
     for ddas_run, get_run in tqdm(zip(ddas_runs, get_runs)):
-        get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
+        get_ts = timestamps[run_numbers == get_run]
         times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
         print(get_run, len(times_since_beam_off[-1]), len(get_ts))
     times_since_beam_off = np.concatenate(times_since_beam_off)
@@ -79,46 +96,42 @@ veto_thresh = 500#np.inf
 rve_bins = (600, 600)
 phist_bins = np.linspace(0, 4, 1001)
 alphahist_bins = 100
+lengths = process_runs.get_lengths(endpoints)
+angles = process_runs.get_angle(endpoints)
+print('lengths and angles calculated')
 
-print('loading stuff')
-
-
-lengths = process_runs.get_lengths(experiment, get_runs)
 #cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
-veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
-charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
+veto_max = process_runs.get_max_veto_counts(experiment, get_runs, num_workers=num_workers)
+print('veto max loaded')
+
+
 #energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 if experiment == 'e23035':
     if True: #use default gain match
-        energy = e23035_runs.get_energy_MeV(get_runs)
+        energy = e23035_runs.get_energy_MeV(get_runs, num_workers=num_workers)
     else:
         # gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/fft6_res3.pkl'
         # with open(gain_match_path, 'rb') as f:
         #     gain_match_result = pickle.load(f)
         # pad_gains = gain_match_result.pad_gains
-        energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
-        
+        energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains, num_workers=num_workers) 
 else:
     gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
     #pad_gains = gain_match_result.x[:1024]
     pad_gains = gain_match_result.pad_gains
-    pad_gains = np.ones(np.shape(gain_match_result.pad_gains))*np.mean(gain_match_result.pad_gains)
+    #pad_gains = np.ones(np.shape(gain_match_result.pad_gains))*np.mean(gain_match_result.pad_gains)
     energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
-angles = process_runs.get_angle(experiment, get_runs)
+print('energies loaded')
 
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
 
 if experiment == 'e23035':
-    veto_mask = e23035_runs.get_veto_mask(get_runs)
-    endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
-    min_z = np.min(endpoints[:,:,2], axis=1)
-    veto_mask = veto_mask&(min_z>5)
+    veto_mask = e23035_runs.get_veto_mask(endpoints=endpoints, max_veto_counts=veto_max)
 else:
-    pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
     num_pads_railed = np.array([len(prl) for prl in pads_railed])
     veto_mask = (veto_max < veto_thresh)
     veto_mask = veto_mask #& (num_pads_railed==0)# & (angles>np.radians(8)) 
@@ -145,10 +158,10 @@ plt.ylabel('range (mm)')
 # fig.show()
 #alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
 if experiment == 'e23035':
-    alpha_mask = e23035_runs.get_alpha_mask(get_runs)
+    alpha_mask = e23035_runs.get_alpha_mask(get_runs, lengths=lengths, energy=energy, veto_mask=veto_mask)
 
     #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
-    proton_mask = e23035_runs.get_proton_mask(get_runs)
+    proton_mask = e23035_runs.get_proton_mask(get_runs, lengths=lengths, energy=energy, veto_mask=veto_mask)
     #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
     # palpha_cut = veto_mask&(energy>1.6)&(energy<1.8)&(lengths>27.5)&(lengths<40)
     # print(np.where(palpha_cut))
@@ -176,7 +189,6 @@ if experiment == 'e23035':
     plt.colorbar()
     print(str(get_runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
-    timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
     time_since_last_event = timestamps - np.roll(timestamps, 1)
     time_since_last_event[0] = .15 #we don't actuallly know what this is for the first event, so just putting a typical value for start of window
 
@@ -203,16 +215,23 @@ if experiment == 'e23035':
     #TODO: correct for times runs were not instantly started again after previous run ended
     run_t_offset = [0]
     run_ts = []
-    for ddas_run in get_runs:
-        run_ts.append(process_runs.get_quantity('timestamps', experiment, [ddas_run]))
+    for get_run in get_runs:
+        run_ts.append(timestamps[run_numbers == get_run])
     for i in range(1, len(get_runs)):
-        if run_ts[i][0] <= run_ts[i-1][-1]:
-            run_t_offset.append(run_t_offset[-1] + run_ts[i-1][-1])
+        if len(run_ts[i]) > 0 and len(run_ts[i-1]) > 0:
+            if run_ts[i][0] <= run_ts[i-1][-1]:
+                run_t_offset.append(run_t_offset[-1] + run_ts[i-1][-1])
+            else:
+                run_t_offset.append(run_t_offset[-1])
         else:
             run_t_offset.append(run_t_offset[-1])
     for i in range(len(get_runs)):
-        run_ts[i] = run_ts[i] + run_t_offset[i]
-    run_ts = np.concatenate(run_ts)
+        if len(run_ts[i]) > 0:
+            run_ts[i] = run_ts[i] + run_t_offset[i]
+    if len(run_ts) > 0:
+        run_ts = np.concatenate(run_ts)
+    else:
+        run_ts = np.array([])
 
     plt.figure()
     plt.title('alphas')
@@ -326,7 +345,7 @@ def show_event(run, evt):
     h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
     h5file.plot_traces(evt, block=False)
 
-if experiment != 'e23035_prep_vault':
+if experiment != 'e23035_prep_vault' and len(get_runs) > 1:
     plt.figure()
     proton_mask = proton_mask & (energy<3.5)
     plt.title('protons')

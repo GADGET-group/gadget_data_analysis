@@ -36,6 +36,7 @@ def get_save_path(experiment):
             return '/Volumes/e25058_v1/e25058/proc_pkl'
 
 def get_h5_path(experiment, run_number):
+    run_number = int(run_number)
     h5_base_path = ''
     if socket.gethostname() == 'tpcgpu':
         h5_base_path = '/egr/research-tpc/shared/experiments'
@@ -56,6 +57,7 @@ def get_h5_path(experiment, run_number):
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
 def get_h5_file(experiment, run_number):
+    run_number = int(run_number)
     raw_h5_path = get_h5_path(experiment, run_number)
     if experiment == 'e21072':
         h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
@@ -105,6 +107,13 @@ def get_h5_file(experiment, run_number):
         raise ValueError
     return h5file
 
+_settings_hash_cache = {}
+def get_experiment_settings_hash(experiment, example_run):
+    if experiment not in _settings_hash_cache:
+        h5file = get_h5_file(experiment, example_run)
+        _settings_hash_cache[experiment] = h5file.get_settings_hash()
+    return _settings_hash_cache[experiment]
+
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
 def process_tpc_run(experiment, run_number, force_reprocess=False):
@@ -112,6 +121,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a ROOT version of this information isn't available.
     '''
+    run_number = int(run_number)
     #save_path = os.path.dirname(os.path.abspath(__file__))
     h5file = get_h5_file(experiment, run_number)
     settings_hash = h5file.get_settings_hash()
@@ -272,150 +282,202 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
                         file['events'].extend(chunk)
             file['metadata'] = metadata
 
-def get_quantity(qname, experiment, runs):
-    to_return = []
-    for run in runs:
-        h5file = get_h5_file(experiment, run)
-        settings_hash = h5file.get_settings_hash()
-        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{settings_hash}.root')
-        if not os.path.exists(fname):
-            process_tpc_run(experiment, run)
-            
-        with uproot.open(fname) as file:
+def _load_run_quantities(args):
+    experiment, run, qnames, settings_hash = args
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{settings_hash}.root')
+    if not os.path.exists(fname):
+        process_tpc_run(experiment, run)
+        
+    result = {}
+    with uproot.open(fname) as file:
+        for qname in qnames:
             if qname in file['events']:
                 if qname == 'railed_pads':
                     arr = file['events'][qname].array(library='ak')
-                    to_return.extend(ak.to_list(arr))
+                    val = ak.to_list(arr)
+                    result[qname] = val
                 else:
                     arr = file['events'][qname].array(library='np')
-                    to_return.append(arr)
+                    val = arr
+                    result[qname] = val
             elif qname in file['metadata']:
                 arr = file['metadata'][qname].array(library='np')
-                to_return.append(arr[0])
+                val = arr[0]
+                result[qname] = val
             else:
                 raise ValueError(f"Quantity {qname} not found in ROOT file")
-                
-    if qname == 'railed_pads':
-        return to_return
-    elif qname in ['git_version', 'git_status', 'git_diff']:
-        return to_return
+    return result
+
+def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1):
+    is_single = isinstance(qname, str)
+    qnames = [qname] if is_single else qname
+    runs = [int(r) for r in runs]
+    to_return = {q: [] for q in qnames}
+    
+    if show_load_progress:
+        print(f'loading {qnames} for {runs}')
+        
+    settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0)
+    args_list = [(experiment, run, qnames, settings_hash) for run in runs]
+    
+    if num_workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            if show_load_progress:
+                results = list(tqdm(executor.map(_load_run_quantities, args_list), total=len(runs)))
+            else:
+                results = list(executor.map(_load_run_quantities, args_list))
     else:
-        return np.concatenate(to_return, axis=0)
+        results = []
+        iterable = tqdm(args_list) if show_load_progress else args_list
+        for args in iterable:
+            results.append(_load_run_quantities(args))
+            
+    for res in results:
+        for q in qnames:
+            if q == 'railed_pads':
+                to_return[q].extend(res[q])
+            else:
+                to_return[q].append(res[q])
+                
+    final_returns = []
+    for q in qnames:
+        if q == 'railed_pads':
+            final_returns.append(to_return[q])
+        elif q in ['git_version', 'git_status', 'git_diff']:
+            final_returns.append(to_return[q])
+        else:
+            final_returns.append(np.concatenate(to_return[q], axis=0))
+            
+    if is_single:
+        return final_returns[0]
+    else:
+        return final_returns
+    
+def _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=1):
+    def process_run(run):
+        cache_fname = cache_fname_fn(run)
+        if os.path.exists(cache_fname):
+            return np.load(cache_fname)
+        else:
+            res = compute_fn(run)
+            np.save(cache_fname, res)
+            return res
+            
+    if num_workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            to_return = list(executor.map(process_run, runs))
+    else:
+        to_return = [process_run(r) for r in runs]
+    return np.concatenate(to_return, axis=0)
     
 
-def get_lengths(experiment, runs):
-    endpoints = np.array(get_quantity('endpoints', experiment, runs))
+def get_lengths(experiment_or_endpoints, runs=None, num_workers=1):
+    if runs is None:
+        endpoints = np.array(experiment_or_endpoints)
+    else:
+        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers))
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.sqrt(np.sum(dr*dr, axis=1))
 
-def get_veto_counts(experiment, runs):
-    to_return = []
-    for run in runs:
-        h5file = get_h5_file(experiment, run)
-        settings_hash = h5file.get_settings_hash()
-        cache_fname = os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}_{settings_hash}.npy')
-        if os.path.exists(cache_fname):
-            veto_counts = np.load(cache_fname)
-        else:
-            veto_pad_mask = np.zeros(1024)
-            for i in raw_h5_file.VETO_PADS:
-                veto_pad_mask[i] = 1
-            veto_counts = np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), veto_pad_mask)
-            np.save(cache_fname, veto_counts)
-        to_return.append(veto_counts)
-    return np.concatenate(to_return, axis=0)
+def get_veto_counts(experiment, runs, num_workers=1):
+    runs = [int(r) for r in runs]
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run)
+        return os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        veto_pad_mask = np.zeros(1024)
+        for i in raw_h5_file.VETO_PADS:
+            veto_pad_mask[i] = 1
+        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), veto_pad_mask)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_veto_mask(experiment, runs, veto_thresholds):
+def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1):
+    runs = [int(r) for r in runs]
     thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
-    to_return = []
-    for run in runs:
-        h5file = get_h5_file(experiment, run)
-        settings_hash = h5file.get_settings_hash()
-        cache_fname = os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}_{settings_hash}.npy')
-        if os.path.exists(cache_fname):
-            veto_mask = np.load(cache_fname)
-        else:
-            pad_maxs = get_quantity('pad_max', experiment, [run])
-            veto_mask = np.all(pad_maxs < veto_thresholds, axis=1)
-            np.save(cache_fname, veto_mask)
-        to_return.append(veto_mask)
-    return np.concatenate(to_return, axis=0)
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run)
+        return os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        pad_maxs = get_quantity('pad_max', experiment, [run])
+        return np.all(pad_maxs < veto_thresholds, axis=1)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_max_veto_counts(experiment, runs):
+def get_max_veto_counts(experiment, runs, num_workers=1):
     '''
     gets array of max counts on any individual veto pad
     '''
-    to_return = []
-    for run in runs:
-        h5file = get_h5_file(experiment, run)
-        settings_hash = h5file.get_settings_hash()
-        cache_fname = os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}_{settings_hash}.npy')
-        if os.path.exists(cache_fname):
-            max_pad_counts = np.load(cache_fname)
-        else:
-            pad_maxs = get_quantity('pad_max', experiment, [run])
-            veto_pad_mask = np.zeros(1024)
-            for i in raw_h5_file.VETO_PADS:
-                veto_pad_mask[i] = 1
-            max_pad_counts = np.max(pad_maxs[:,veto_pad_mask==1], axis=1)
-            np.save(cache_fname, max_pad_counts)
-        to_return.append(max_pad_counts)
-    return np.concatenate(to_return, axis=0)
-
-def get_outer_ring_counts(experiment, runs):
-    to_return = []
-    for run in runs:
-        h5file = get_h5_file(experiment, run)
-        settings_hash = h5file.get_settings_hash()
-        cache_fname = os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
-        if os.path.exists(cache_fname):
-            counts = np.load(cache_fname)
-        else:
-            outer_ring_mask = np.zeros(1024)
-            for i in OUTER_RING_PADS:
-                outer_ring_mask[i] = 1
-            counts = np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), outer_ring_mask)
-            np.save(cache_fname, counts)
-        to_return.append(counts)
-    return np.concatenate(to_return, axis=0)
-
-def get_outer_ring_max_counts(experiment, runs):
-    to_return = []
-    for run in runs:
-        h5file = get_h5_file(experiment, run)
-        settings_hash = h5file.get_settings_hash()
-        cache_fname = os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
-        if os.path.exists(cache_fname):
-            max_pad_counts = np.load(cache_fname)
-        else:
-            pad_maxs = get_quantity('pad_max', experiment, [run])
-            outer_ring_mask = np.zeros(1024)
-            for i in OUTER_RING_PADS:
-                outer_ring_mask[i] = 1
-            max_pad_counts = np.max(pad_maxs[:,outer_ring_mask==1], axis=1)
-            np.save(cache_fname, max_pad_counts)
-        to_return.append(max_pad_counts)
-    return np.concatenate(to_return, axis=0)
+    runs = [int(r) for r in runs]
     
-def get_gm_ic(experiment, runs, gains):
-    gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
-    to_return = []
-    for run in runs:
-        h5file = get_h5_file(experiment, run)
-        settings_hash = h5file.get_settings_hash()
-        cache_fname = os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}_{settings_hash}.npy')
-        if os.path.exists(cache_fname):
-            gm_ic = np.load(cache_fname)
-        else:
-            counts_per_pad = get_quantity('pad_charge', experiment, [run])
-            #counts per pad needs to already be on the gpu
-            gm_ic = np.einsum('ij, j', counts_per_pad, gains)
-            np.save(cache_fname, gm_ic)
-        to_return.append(gm_ic)
-    return np.concatenate(to_return, axis=0)
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run)
+        return os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        pad_maxs = get_quantity('pad_max', experiment, [run])
+        veto_pad_mask = np.zeros(1024)
+        for i in raw_h5_file.VETO_PADS:
+            veto_pad_mask[i] = 1
+        return np.max(pad_maxs[:,veto_pad_mask==1], axis=1)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_angle(experiment, runs):
-    endpoints = np.array(get_quantity('endpoints', experiment, runs))
+def get_outer_ring_counts(experiment, runs, num_workers=1):
+    runs = [int(r) for r in runs]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run)
+        return os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        outer_ring_mask = np.zeros(1024)
+        for i in OUTER_RING_PADS:
+            outer_ring_mask[i] = 1
+        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), outer_ring_mask)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+
+def get_outer_ring_max_counts(experiment, runs, num_workers=1):
+    runs = [int(r) for r in runs]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run)
+        return os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        pad_maxs = get_quantity('pad_max', experiment, [run])
+        outer_ring_mask = np.zeros(1024)
+        for i in OUTER_RING_PADS:
+            outer_ring_mask[i] = 1
+        return np.max(pad_maxs[:,outer_ring_mask==1], axis=1)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+    
+def get_gm_ic(experiment, runs, gains, num_workers=1):
+    runs = [int(r) for r in runs]
+    gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run)
+        return os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        counts_per_pad = get_quantity('pad_charge', experiment, [run])
+        return np.einsum('ij, j', counts_per_pad, gains)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+
+def get_angle(experiment_or_endpoints, runs=None, num_workers=1):
+    if runs is None:
+        endpoints = np.array(experiment_or_endpoints)
+    else:
+        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers))
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.arctan2(np.sqrt(dr[:,0]**2 + dr[:,1]**2), np.abs(dr[:,2]))
 
@@ -436,6 +498,7 @@ def get_time_since_beam_off(experiment, runs):
     return np.concatenate(to_return, axis=0)
 
 def get_run_and_event_numbers(experiment, runs):
+    runs = [int(r) for r in runs]
     run_numbers = []
     event_numbers = []
     for run in runs:

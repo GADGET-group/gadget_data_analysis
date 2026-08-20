@@ -105,18 +105,34 @@ def get_DDAS_run_number(get_run_number):
     return run_df['DDAS'][run_df['GET']==get_run_number].iloc[0]
 
 
-def get_veto_mask(get_run):
-    veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
-    for pad in process_runs.raw_h5_file.VETO_PADS:
-            veto_thresholds[pad] = 200
-    
-    if is_iterable(get_run):
-        return process_runs.get_veto_mask(experiment, get_run, veto_thresholds)
-    return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds)
+def get_veto_mask(get_run=None, endpoints=None, max_veto_counts=None):
+    if max_veto_counts is not None:
+        veto_mask = max_veto_counts < 200
+    else:
+        if get_run is None:
+            raise ValueError("Must provide either max_veto_counts or get_run")
+        veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
+        for pad in process_runs.raw_h5_file.VETO_PADS:
+                veto_thresholds[pad] = 200
+        
+        if is_iterable(get_run):
+            veto_mask = process_runs.get_veto_mask(experiment, get_run, veto_thresholds)
+        else:
+            veto_mask = process_runs.get_veto_mask(experiment, [get_run], veto_thresholds)
+            
+    if endpoints is None:
+        if get_run is None:
+            raise ValueError("Must provide either endpoints or get_run")
+        if not is_iterable(get_run):
+            get_run = [get_run]
+        endpoints = process_runs.get_quantity('endpoints', experiment, get_run)
+        
+    min_z = np.min(endpoints[:,:,2], axis=1)
+    return veto_mask & (min_z > 5)
 
-def get_pad_gains(get_run):
+def get_pad_gains():
     #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
     #return np.ones(1024)*5.47e-6
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
@@ -128,13 +144,10 @@ def get_length_mm(get_run):
         get_run = [get_run]
     return process_runs.get_lengths(experiment, get_run)
 
-def get_energy_MeV(get_run):
+def get_energy_MeV(get_run, num_workers=1):
     if not is_iterable(get_run):
         get_run = [get_run]
-    to_return = []
-    for i in get_run:
-        to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(i)))
-    return np.concatenate(to_return)
+    return process_runs.get_gm_ic(experiment, get_run, get_pad_gains(), num_workers=num_workers)
 
 def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     if not is_iterable(get_run):
@@ -156,12 +169,15 @@ def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     upper_band[energies<xb] = ya + (yb-ya)/(xb-xa)*(energies[energies<xb]-xa)
     return lower_band, upper_band
 
-def get_proton_mask(get_run):
+def get_proton_mask(get_run, lengths=None, energy=None, veto_mask=None):
     if not is_iterable(get_run):
         get_run = [get_run]
-    lengths = get_length_mm(get_run)
-    energy = get_energy_MeV(get_run)
-    veto_mask = get_veto_mask(get_run)
+    if lengths is None:
+        lengths = get_length_mm(get_run)
+    if energy is None:
+        energy = get_energy_MeV(get_run)
+    if veto_mask is None:
+        veto_mask = get_veto_mask(get_run)
     lower_band, upper_band = get_proton_mask_min_max_range(get_run, energy)
     return veto_mask & (lengths < upper_band) & (lengths > lower_band)
 
@@ -176,12 +192,15 @@ def get_alpha_mask_min_max_range(get_run, energies:np.ndarray):
     upper_band = np.min([lower_proton-10, expected_alpha_length + 22], axis=0)
     return lower_band, upper_band
 
-def get_alpha_mask(get_run):
+def get_alpha_mask(get_run, lengths=None, energy=None, veto_mask=None):
     if not is_iterable(get_run):
         get_run = [get_run]
-    lengths = get_length_mm(get_run)
-    energy = get_energy_MeV(get_run)
-    veto_mask = get_veto_mask(get_run)
+    if lengths is None:
+        lengths = get_length_mm(get_run)
+    if energy is None:
+        energy = get_energy_MeV(get_run)
+    if veto_mask is None:
+        veto_mask = get_veto_mask(get_run)
     lower_band, upper_band = get_alpha_mask_min_max_range(get_run, energy)    
     return veto_mask & (lengths > lower_band) & (lengths < upper_band)
 

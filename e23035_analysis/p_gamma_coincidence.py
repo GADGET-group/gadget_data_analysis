@@ -23,7 +23,7 @@ n_workers = min(len(runs), 255) #cap at 150 so as not to murder the TPCGPU
 
 
 
-adj_dict =  degai.crystal_adj_dict#degai.clover_adj_dict#
+adj_dict =  degai.get_adjacency_dict(30)#degai.crystal_adj_dict#degai.clover_adj_dict#
 cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
 gamma_bin_size = 0.25 #keV
@@ -106,10 +106,13 @@ gammaE_v_protonE_bg_subtracted = gammaE_v_protonE.Clone()
 gammaE_v_protonE_bg_subtracted.SetName('gammaE_v_protonE_bg_subtracted')
 gammaE_v_protonE_bg_subtracted.SetTitle('gamma energy (keV) vs proton energy (keV) with accidental coincidences subtracted')
 gammaE_v_protonE_bg_subtracted.Add(gammaE_v_protonE_accidental, -(tstop-tstart)/(t_accidental_stop-t_accidental_start))
+
 h491 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted,(488, 494), (471,486))
+h491_new = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted,(488, 494), (494, 501))
 h914 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (911, 917), (918,927))
 h1398 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (1395, 1401), (1420,1430))
 h511 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (508, 513), (518,529))
+
 overlay3 = root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h914,'1398 keV':h1398, '511 keV':h511})
 
 pscaled = protons.Clone('pscaled')
