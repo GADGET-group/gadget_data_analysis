@@ -56,76 +56,42 @@ def get_h5_path(experiment, run_number):
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
-def get_h5_file(experiment, run_number):
+def get_h5_file(experiment, run_number, config_filename='smart2_w_br.csv'):
     run_number = int(run_number)
     raw_h5_path = get_h5_path(experiment, run_number)
-    if experiment == 'e21072':
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.92, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart'
-        h5file.smart_bins_away_to_check = 10
-        h5file.num_smart_background_ave_bins = 10
-        h5file.cache_enable = True
-    elif experiment == 'e23035_prep_2cobo':
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup2cobos.csv')
-        h5file.length_counts_threshold = 25
-        h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart'
-        h5file.smart_bins_away_to_check = 25
-        h5file.num_smart_background_ave_bins = 10
-        h5file.cache_enable = True
-    elif experiment == 'e23035_prep_4cobo':
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=0.544, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart'
-        h5file.smart_bins_away_to_check = 25
-        h5file.num_smart_background_ave_bins = 10
-        h5file.cache_enable = True
-    elif experiment == 'e23035_prep_vault' or experiment == 'e23035':
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart2'
-        h5file.smart_bins_away_to_check = 3
-        h5file.num_smart_background_ave_bins = 20
-        h5file.smart2_min_bins_in_peak = 5
-        h5file.smart2_min_sigma = 2
-        h5file.remove_outliers = True
-        h5file.reconstruct_railed_pads =True
-        h5file.cache_enable = True
-    elif experiment == 'e25058':
-        h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
-        h5file.length_counts_threshold = 100
-        h5file.ic_counts_threshold = 0
-        h5file.background_subtract_mode = 'smart'
-        h5file.smart_bins_away_to_check = 25
-        h5file.num_smart_background_ave_bins = 10
-        h5file.cache_enable = True
-    else:
-        raise ValueError
+    
+    config_path = os.path.join(os.path.dirname(__file__), 'tpc_processing_configs', config_filename)
+    
+    # Defaults in case not all are in config
+    h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+    
+    if os.path.exists(config_path):
+        h5file.load_config(config_path)
+    
     return h5file
 
 _settings_hash_cache = {}
-def get_experiment_settings_hash(experiment, example_run):
-    if experiment not in _settings_hash_cache:
-        h5file = get_h5_file(experiment, example_run)
-        _settings_hash_cache[experiment] = h5file.get_settings_hash()
-    return _settings_hash_cache[experiment]
+def get_experiment_settings_hash(experiment, example_run, config_filename='smart2_w_br.csv'):
+    key = (experiment, config_filename)
+    if key not in _settings_hash_cache:
+        h5file = get_h5_file(experiment, example_run, config_filename)
+        _settings_hash_cache[key] = h5file.get_settings_hash()
+        h5file.close()
+    return _settings_hash_cache[key]
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def process_tpc_run(experiment, run_number, force_reprocess=False):
+def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename='smart2_w_br.csv'):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a ROOT version of this information isn't available.
     '''
     run_number = int(run_number)
     #save_path = os.path.dirname(os.path.abspath(__file__))
-    h5file = get_h5_file(experiment, run_number)
+    h5file = get_h5_file(experiment, run_number, config_filename)
     settings_hash = h5file.get_settings_hash()
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}_{settings_hash}.root')
+    config_name = os.path.splitext(config_filename)[0]
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}_{config_name}.root')
     
     #git info to save
     git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
@@ -262,7 +228,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
             events_data['railed_pads'] = ak.unflatten(np.array([], dtype=np.int64), counts)
         else:
             events_data['railed_pads'] = ak.from_iter(railed_pads)
-        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff]}
+        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff], 'settings_hash':[settings_hash]}
         print('saving to ROOT file')
         with uproot.recreate(fname) as file:
             lengths = [len(v) for v in events_data.values()]
@@ -283,13 +249,18 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
             file['metadata'] = metadata
 
 def _load_run_quantities(args):
-    experiment, run, qnames, settings_hash = args
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{settings_hash}.root')
+    experiment, run, qnames, settings_hash, config_filename = args
+    config_name = os.path.splitext(config_filename)[0]
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
     if not os.path.exists(fname):
-        process_tpc_run(experiment, run)
+        process_tpc_run(experiment, run, config_filename=config_filename)
         
     result = {}
     with uproot.open(fname) as file:
+        file_hash = file['metadata']['settings_hash'].array(library='np')[0]
+        if file_hash != settings_hash:
+            raise ValueError(f"Settings hash in file {fname} ({file_hash}) does not match current settings hash ({settings_hash}) for config {config_filename}")
+        
         for qname in qnames:
             if qname in file['events']:
                 if qname == 'railed_pads':
@@ -308,7 +279,7 @@ def _load_run_quantities(args):
                 raise ValueError(f"Quantity {qname} not found in ROOT file")
     return result
 
-def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1):
+def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename='smart2_w_br.csv'):
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
     runs = [int(r) for r in runs]
@@ -317,12 +288,13 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
     if show_load_progress:
         print(f'loading {qnames} for {runs}')
         
-    settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0)
-    args_list = [(experiment, run, qnames, settings_hash) for run in runs]
+    settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0, config_filename)
+    args_list = [(experiment, run, qnames, settings_hash, config_filename) for run in runs]
     
     if num_workers > 1:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        from concurrent.futures import ProcessPoolExecutor
+        import multiprocessing
+        with ProcessPoolExecutor(max_workers=num_workers, mp_context=multiprocessing.get_context('spawn')) as executor:
             if show_load_progress:
                 results = list(tqdm(executor.map(_load_run_quantities, args_list), total=len(runs)))
             else:
@@ -373,54 +345,54 @@ def _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=1):
     return np.concatenate(to_return, axis=0)
     
 
-def get_lengths(experiment_or_endpoints, runs=None, num_workers=1):
+def get_lengths(experiment_or_endpoints, runs=None, num_workers=1, config_filename='smart2_w_br.csv'):
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
-        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers))
+        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers, config_filename=config_filename))
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.sqrt(np.sum(dr*dr, axis=1))
 
-def get_veto_counts(experiment, runs, num_workers=1):
+def get_veto_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
     runs = [int(r) for r in runs]
     def cache_fname_fn(run):
-        settings_hash = get_experiment_settings_hash(experiment, run)
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
         return os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}_{settings_hash}.npy')
         
     def compute_fn(run):
         veto_pad_mask = np.zeros(1024)
         for i in raw_h5_file.VETO_PADS:
             veto_pad_mask[i] = 1
-        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), veto_pad_mask)
+        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run], config_filename=config_filename), veto_pad_mask)
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1):
+def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1, config_filename='smart2_w_br.csv'):
     runs = [int(r) for r in runs]
     thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
     
     def cache_fname_fn(run):
-        settings_hash = get_experiment_settings_hash(experiment, run)
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
         return os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}_{settings_hash}.npy')
         
     def compute_fn(run):
-        pad_maxs = get_quantity('pad_max', experiment, [run])
+        pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
         return np.all(pad_maxs < veto_thresholds, axis=1)
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_max_veto_counts(experiment, runs, num_workers=1):
+def get_max_veto_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
     '''
     gets array of max counts on any individual veto pad
     '''
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
-        settings_hash = get_experiment_settings_hash(experiment, run)
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
         return os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}_{settings_hash}.npy')
         
     def compute_fn(run):
-        pad_maxs = get_quantity('pad_max', experiment, [run])
+        pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
         veto_pad_mask = np.zeros(1024)
         for i in raw_h5_file.VETO_PADS:
             veto_pad_mask[i] = 1
@@ -428,30 +400,30 @@ def get_max_veto_counts(experiment, runs, num_workers=1):
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_outer_ring_counts(experiment, runs, num_workers=1):
+def get_outer_ring_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
-        settings_hash = get_experiment_settings_hash(experiment, run)
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
         return os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
         
     def compute_fn(run):
         outer_ring_mask = np.zeros(1024)
         for i in OUTER_RING_PADS:
             outer_ring_mask[i] = 1
-        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run]), outer_ring_mask)
+        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run], config_filename=config_filename), outer_ring_mask)
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_outer_ring_max_counts(experiment, runs, num_workers=1):
+def get_outer_ring_max_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
-        settings_hash = get_experiment_settings_hash(experiment, run)
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
         return os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
         
     def compute_fn(run):
-        pad_maxs = get_quantity('pad_max', experiment, [run])
+        pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
         outer_ring_mask = np.zeros(1024)
         for i in OUTER_RING_PADS:
             outer_ring_mask[i] = 1
@@ -459,50 +431,50 @@ def get_outer_ring_max_counts(experiment, runs, num_workers=1):
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
     
-def get_gm_ic(experiment, runs, gains, num_workers=1):
+def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename='smart2_w_br.csv'):
     runs = [int(r) for r in runs]
     gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
     
     def cache_fname_fn(run):
-        settings_hash = get_experiment_settings_hash(experiment, run)
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
         return os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}_{settings_hash}.npy')
         
     def compute_fn(run):
-        counts_per_pad = get_quantity('pad_charge', experiment, [run])
+        counts_per_pad = get_quantity('pad_charge', experiment, [run], config_filename=config_filename)
         return np.einsum('ij, j', counts_per_pad, gains)
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_angle(experiment_or_endpoints, runs=None, num_workers=1):
+def get_angle(experiment_or_endpoints, runs=None, num_workers=1, config_filename='smart2_w_br.csv'):
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
-        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers))
+        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers, config_filename=config_filename))
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.arctan2(np.sqrt(dr[:,0]**2 + dr[:,1]**2), np.abs(dr[:,2]))
 
-def get_time_since_beam_off(experiment, runs):
+def get_time_since_beam_off(experiment, runs, config_filename='smart2_w_br.csv'):
     to_return = []
     for run in runs:
         times_since_start_of_window = []
-        ts = get_quantity('timestamps', experiment, [run])
+        ts = get_quantity('timestamps', experiment, [run], config_filename=config_filename)
         time_since_last_event = ts - np.roll(ts, 1)
         start_of_current_window = -np.inf
         time_since_last_event[0] = np.inf
         for t, dt in zip(ts, time_since_last_event):
             if dt > 0.1:
-                start_of_current_winow = t
-            times_since_start_of_window.append(t - start_of_current_winow)
+                start_of_current_window = t
+            times_since_start_of_window.append(t - start_of_current_window)
         times_since_start_of_window = np.array(times_since_start_of_window)
         to_return.append(times_since_start_of_window)
     return np.concatenate(to_return, axis=0)
 
-def get_run_and_event_numbers(experiment, runs):
+def get_run_and_event_numbers(experiment, runs, config_filename='smart2_w_br.csv'):
     runs = [int(r) for r in runs]
     run_numbers = []
     event_numbers = []
     for run in runs:
-        h5 = get_h5_file(experiment, run)
+        h5 = get_h5_file(experiment, run, config_filename)
         first, last  = h5.get_event_num_bounds()
         event_numbers.append(np.arange(first, last+1))
         run_numbers.append(np.ones(last - first + 1)*run)

@@ -16,7 +16,7 @@ from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'
  
 if experiment == 'e23035':
     if True:
@@ -71,7 +71,7 @@ quantities_to_get = ['charge_width', 'endpoints', 'timestamps']
 if experiment != 'e23035':
     quantities_to_get.append('railed_pads')
     
-results = process_runs.get_quantity(quantities_to_get, experiment, get_runs, show_load_progress=True, num_workers=num_workers)
+results = process_runs.get_quantity(quantities_to_get, experiment, get_runs, show_load_progress=False, num_workers=num_workers)
 charge_widths = results[0]
 endpoints = results[1]
 timestamps = results[2]

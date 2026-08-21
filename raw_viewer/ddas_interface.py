@@ -166,72 +166,39 @@ def get_time_since_beam_off(experiment, run):
             pickle.dump(to_return, save_file)
         return to_return
 
-def get_merged_root_file_path(experiment, ddas_run):
+def get_ddas_root_file_path(experiment, ddas_run):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
-    to_return =  os.path.join(os.path.split(root_file_path)[0], 'run%d_merged.root'%ddas_run)
+    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{ddas_run}_merged.root')
     if experiment == 'e25058':
         to_return += '_alex'
     return to_return
 
-def make_merged_root_file(experiment, ddas_run):
+def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename='smart2_w_br.csv'):
+    root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
+    ini_prefix = os.path.splitext(tpc_ini_filename)[0]
+    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{ddas_run}_tpc_{ini_prefix}.root')
+    if experiment == 'e25058':
+        to_return += '_alex'
+    return to_return
+
+def make_ddas_root_file(experiment, ddas_run):
     '''
-    Merge GET data stream into an existing root file, adding a new TTree called "merged_data".
-    The ddas root file is assumed to be in the uncalibrated raw format assumed by the above function, but the 
-    file written will include rough energy calibration for all the gamma detectors, and branches will have friendly names rather than a 
-    array of unlabeled channels.
-
-    Branches will be added for each channel in channel_map.csv, and given the specified name with a _t ending for ddas time,
-    _e for energy using the slope and offset in channel_map.csv, _c for raw adc counts, or _m for multiplicity. A _cr branch will also
-    be created which has the adc_counts + uniform random number from -0.5 to 0.5.
-    Additionally, the following branches will be added for GET data:
-    Energy, track length, particle type (0=uncatagorized, 1=proton, 2=alpha), should_veto, get_timetamp
-
-    An initial energy calibraiton will be provided for DDAS channels using the slope and offset specified in the channel map.
-
-    All times will be stored in seconds, and energies will be stored in keV if a calibraiton is available. Track lengths are in mm.
-    Track angles are in degrees.
-
+    Create a root file with a new TTree called "merged_data".
     '''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     
-    log_path = os.path.join(os.path.split(root_file_path)[0], 'run%d_merge.log'%ddas_run)
+    log_path = os.path.join(os.path.split(root_file_path)[0], f'run{ddas_run}_merge.log')
     if experiment == 'e25058':
         log_path += '_alex'
-    output_path = get_merged_root_file_path(experiment, ddas_run)
+    output_path = get_ddas_root_file_path(experiment, ddas_run)
     with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
         git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
         git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True).stdout
-        log_file.write('preparing to merge ddas run %d with any corresponding GET runs\n'%ddas_run)
+        log_file.write('preparing to process ddas run %d \n'%ddas_run)
         log_file.write('git commit %s\n'%git_version)
         log_file.write('git status: %s\n'%git_status)
         log_file.write('git diff: %s\n'%git_diff)
-
-        import importlib
-        try:
-            exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
-            get_runs = np.sort(exp_runs.run_df['GET'][(exp_runs.run_df['DDAS']==ddas_run) & np.isfinite(exp_runs.run_df['GET'])] )
-        except (ImportError, AttributeError):
-            log_file.write(f'no runs module or compatible run_df found for {experiment}, skipping GET data merge\n')
-            get_runs = []
-
-        if len(get_runs)>0:
-            log_file.write('found corresponding GET runs: %s\n'%str(get_runs))
-            tpc_energy_MeV = exp_runs.get_energy_MeV(get_runs)
-            proton_mask = exp_runs.get_proton_mask(get_runs)
-            alpha_mask = exp_runs.get_alpha_mask(get_runs)
-            track_lengths = exp_runs.get_length_mm(get_runs)
-            track_angles = np.degrees(process_runs.get_angle(experiment, get_runs))
-            get_timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
-            veto_mask = exp_runs.get_veto_mask(get_runs)
-            track_centroids = process_runs.get_quantity('track_center', experiment, get_runs)
-            get_run_ids, get_event_ids = process_runs.get_run_and_event_numbers(experiment, get_runs)
-        else:
-            log_file.write('no corresponding GET runs found \n')
-            get_timestamps = []
-            track_centroids = []
-            get_event_ids = []
-            get_run_ids = []
 
         ddas_ch_map_path = f'{experiment}_analysis/channel_map.csv'
         log_file.write('loading DDAS channel map from %s\n'%ddas_ch_map_path)
@@ -258,18 +225,94 @@ def make_merged_root_file(experiment, ddas_run):
         branch_mvals = [np.array([0], dtype=np.int32) for i in ch_names]
         branch_counts = [np.array([0], dtype=np.int32) for i in ch_names]
         branch_counts_ss = [np.array([0], dtype=np.float64) for i in ch_names] #sliding scale method counts
-        tree_tpc_energy, tree_track_length = np.array([0.], dtype=np.float64), np.array([0.], dtype=np.float64)
-        tree_track_angle = np.array([0.], dtype=np.float64)
-        tree_ptype = np.array([0], dtype=np.int32)
-        tree_should_veto = np.array([True], dtype=bool)
-        tree_get_timestamp = np.array([np.nan])
-
+        
         for i in range(len(ch_names)):
             out_tree.Branch(ch_names[i]+'_e', branch_evals[i], ch_names[i]+'_e/D')
             out_tree.Branch(ch_names[i]+'_t', branch_tvals[i], ch_names[i]+'_t/D')
             out_tree.Branch(ch_names[i]+'_m', branch_mvals[i], ch_names[i]+'_m/I')
             out_tree.Branch(ch_names[i]+'_c', branch_counts[i], ch_names[i]+'_c/I')
             out_tree.Branch(ch_names[i]+'_cr', branch_counts_ss[i], ch_names[i]+'_cr/D')
+            
+        tsbo = np.array([np.nan], dtype=np.float64)
+        out_tree.Branch('time_since_beam_off', tsbo, 'time_since_beam_off/D')
+        tsco = np.array([np.nan], dtype=np.float64)
+        out_tree.Branch('time_since_chopper_off', tsco, 'time_since_chopper_off/D')
+
+        log_file.write('Starting process \n')
+        last_beam_off_time = np.nan
+        last_chopper_off_time = np.nan
+
+        for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
+            #copy over ddas values with calibration factors applied
+            in_tree.GetEntry(ddas_index)
+            for i in range(len(ch_names)):
+                branch_mvals[i][0] = multiplicities[ch_indexes[i]]
+                if branch_mvals[i][0] > 0:
+                    branch_evals[i][0] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
+                    branch_tvals[i][0] = times[ch_indexes[i]]/1e9 #store all times in seconds
+                    branch_counts[i][0] = energies[ch_indexes[i]]
+                    branch_counts_ss[i][0] = energies[ch_indexes[i]] + np.random.uniform(-0.5, 0.5)
+                else:
+                    branch_evals[i][0] = 0
+                    branch_tvals[i][0] = np.nan
+                    branch_counts[i][0] = -1 #set to -1 when multiplicity is 0
+                    branch_counts_ss[i][0] = -1
+                
+                if ch_names[i] == 'beam_off' and multiplicities[ch_indexes[i]] == 1:
+                    last_beam_off_time = times[ch_indexes[i]]/1e9
+                if ch_names[i] == 'chopper_off' and multiplicities[ch_indexes[i]] == 1:
+                    last_chopper_off_time = times[ch_indexes[i]]/1e9
+            
+            tsbo[0] = np.max(times)/1e9 - last_beam_off_time
+            tsco[0] = np.max(times)/1e9 - last_chopper_off_time
+            out_tree.Fill()
+
+        output_file.WriteObject(out_tree, "merged_data")
+
+def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename='smart2_w_br.csv'):
+    merged_path = get_ddas_root_file_path(experiment, ddas_run)
+    if not os.path.exists(merged_path):
+        make_ddas_root_file(experiment, ddas_run)
+        
+    output_path = get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
+    log_path = os.path.splitext(output_path)[0] + '.log'
+    
+    with ROOT.TFile(merged_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
+        in_tree = input_file.Get("merged_data")
+        
+        import importlib
+        try:
+            exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+            get_runs = np.sort(exp_runs.run_df['GET'][(exp_runs.run_df['DDAS']==ddas_run) & np.isfinite(exp_runs.run_df['GET'])] )
+        except (ImportError, AttributeError):
+            log_file.write(f'no runs module or compatible run_df found for {experiment}, skipping GET data merge\n')
+            get_runs = []
+
+        if len(get_runs)>0:
+            log_file.write('found corresponding GET runs: %s\n'%str(get_runs))
+            tpc_energy_MeV = exp_runs.get_energy_MeV(get_runs, tpc_ini_filename=tpc_ini_filename)
+            proton_mask = exp_runs.get_proton_mask(get_runs, tpc_ini_filename=tpc_ini_filename)
+            alpha_mask = exp_runs.get_alpha_mask(get_runs, tpc_ini_filename=tpc_ini_filename)
+            track_lengths = exp_runs.get_length_mm(get_runs, tpc_ini_filename=tpc_ini_filename)
+            track_angles = np.degrees(process_runs.get_angle(experiment, get_runs, config_filename=tpc_ini_filename))
+            get_timestamps = process_runs.get_quantity('timestamps', experiment, get_runs, config_filename=tpc_ini_filename)
+            veto_mask = exp_runs.get_veto_mask(get_runs, tpc_ini_filename=tpc_ini_filename)
+            track_centroids = process_runs.get_quantity('track_center', experiment, get_runs, config_filename=tpc_ini_filename)
+            get_run_ids, get_event_ids = process_runs.get_run_and_event_numbers(experiment, get_runs, config_filename=tpc_ini_filename)
+        else:
+            log_file.write('no corresponding GET runs found \n')
+            get_timestamps = []
+            track_centroids = []
+            get_event_ids = []
+            get_run_ids = []
+
+        out_tree = ROOT.TTree("tpc_data", "tpc_data")
+        tree_tpc_energy, tree_track_length = np.array([0.], dtype=np.float64), np.array([0.], dtype=np.float64)
+        tree_track_angle = np.array([0.], dtype=np.float64)
+        tree_ptype = np.array([0], dtype=np.int32)
+        tree_should_veto = np.array([True], dtype=bool)
+        tree_get_timestamp = np.array([np.nan])
+        
         out_tree.Branch('tpc_energy', tree_tpc_energy, 'tpc_energy/D')
         out_tree.Branch('tpc_track_length', tree_track_length, 'tpc_track_length/D')
         out_tree.Branch('tpc_particle_id', tree_ptype, 'tpc_particle_id/I')
@@ -284,69 +327,38 @@ def make_merged_root_file(experiment, ddas_run):
         out_tree.Branch('get_event_id', tree_get_event_id, 'get_event_id/I')
         tree_get_run_id = np.array([0], dtype=np.int32)
         out_tree.Branch('get_run_id', tree_get_run_id, 'get_run_id/I')
-        tsbo = np.array([np.nan], dtype=np.float64)
-        out_tree.Branch('time_since_beam_off', tsbo, 'time_since_beam_off/D')
-        tsco = np.array([np.nan], dtype=np.float64)
-        out_tree.Branch('time_since_chopper_off', tsco, 'time_since_chopper_off/D')
 
+        # We need the ddas timestamp of get_trig_accepted to align
+        get_trig_accepted_m = np.array([0], dtype=np.int32)
+        get_trig_accepted_t = np.array([0.], dtype=np.float64)
+        in_tree.SetBranchAddress("get_trig_accepted_m", get_trig_accepted_m)
+        in_tree.SetBranchAddress("get_trig_accepted_t", get_trig_accepted_t)
 
-        log_file.write('Starting merge \n')
-        ddas_index = 0
         get_evt_index = 0
-        get_trig_accepted_index = ch_indexes[np.where(ch_names=='get_trig_accepted')][0]
         last_ddas_time, last_get_time = np.nan, np.nan
         GET_DDAS_TIME_MATCH_TRHESHOLD = 10e-6
 
-        last_beam_off_time = np.nan
-        last_chopper_off_time = np.nan
-
         for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
-            #copy over ddas values with calibration factors applied
             in_tree.GetEntry(ddas_index)
-            for i in range(len(ch_names)):
-                branch_mvals[i][0] = multiplicities[ch_indexes[i]]
-                if branch_mvals[i][0] > 0:
-                    branch_evals[i][0] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
-                    #print(branch_evals[i])
-                    branch_tvals[i][0] = times[ch_indexes[i]]/1e9 #store all times in seconds
-                    branch_counts[i][0] = energies[ch_indexes[i]]
-                    branch_counts_ss[i][0] = energies[ch_indexes[i]] + np.random.uniform(-0.5, 0.5)
-                else:
-                    branch_evals[i][0] = 0
-                    branch_tvals[i][0] = np.nan
-                    branch_counts[i][0] = -1 #set to -1 when multiplicity is 0
-                    branch_counts_ss[i][0] = -1
-                #check if beam just turned off
-                #note that this uses the beam off signal and not chopper signal
-                #and so is offset by 2 ms from the true beam off. This is desirable
-                #because the chopper pules off briefl during beam on time for
-                #diagnostic reasons
-                if ch_names[i] == 'beam_off' and multiplicities[ch_indexes[i]] == 1:
-                    last_beam_off_time = times[ch_indexes[i]]/1e9
-                if ch_names[i] == 'chopper_off' and multiplicities[ch_indexes[i]] == 1:
-                    last_chopper_off_time = times[ch_indexes[i]]/1e9
             
-            tsbo[0] = np.max(times)/1e9 - last_beam_off_time
-            tsco[0] = np.max(times)/1e9 - last_chopper_off_time
-
             record_get_event = False
-            if multiplicities[get_trig_accepted_index] == 1:
+            if get_trig_accepted_m[0] == 1:
                 if get_evt_index < len(get_timestamps):
                     get_time = get_timestamps[get_evt_index] - last_get_time
-                    ddas_time = times[get_trig_accepted_index]/1e9
+                    ddas_time = get_trig_accepted_t[0]
                     if last_get_time == np.nan: #first trigger
                         record_get_event = True
                     else: #check that delta between timestamps matches
                         if (get_time - last_get_time) - (ddas_time - last_ddas_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
-                            log_file.write('GET event index %d doesn\'t match with  next DDAS event with a valid trigger; trigger likely not recorded in GET.'%get_evt_index)
+                            log_file.write('GET event index %d doesn\'t match with next DDAS event with a valid trigger; trigger likely not recorded in GET.\n'%get_evt_index)
                         elif (ddas_time - last_ddas_time)>(get_time - last_get_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
-                            log_file.write('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
-                            print('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.'%get_evt_index)
+                            log_file.write('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.\n'%get_evt_index)
                             get_evt_index += 1
                         else:
                             record_get_event = True
                 else:
-                    log_file.write('detected GET trigger in DDAS data stream, but no remaining GET events to read')
+                    log_file.write('detected GET trigger in DDAS data stream, but no remaining GET events to read\n')
+            
             if record_get_event:
                 tree_tpc_energy[0] = tpc_energy_MeV[get_evt_index]*1000
                 tree_track_length[0] = track_lengths[get_evt_index]
@@ -367,9 +379,7 @@ def make_merged_root_file(experiment, ddas_run):
                 
                 last_get_time = get_time
                 last_ddas_time = ddas_time            
-                tree_ptype
                 get_evt_index += 1
-                #print(tree_tpc_energy)
             else: #no corresponding TPC event; set TPC quantities to NaN
                 tree_get_timestamp[0] = tree_tpc_energy[0] = tree_track_length[0] = tree_track_angle[0] = np.nan
                 tree_ptype[0] = -1
@@ -379,8 +389,8 @@ def make_merged_root_file(experiment, ddas_run):
                 tree_get_event_id[0] = -1
                 tree_get_run_id[0] = -1
             out_tree.Fill()
-
-        output_file.WriteObject(out_tree, "merged_data")
+            
+        output_file.WriteObject(out_tree, "tpc_data")
 
 
 current_run, current_file, current_data = np.nan, None, None
@@ -390,12 +400,12 @@ def show_pid(experiment, ddas_run):
     global current_data
     if current_run != ddas_run:
         current_run = ddas_run
-        current_file = ROOT.TFile(get_merged_root_file_path(experiment, ddas_run), 'READ')
+        current_file = ROOT.TFile(get_ddas_root_file_path(experiment, ddas_run), 'READ')
         current_data = current_file.Get('merged_data')
     current_data.Draw('msx100_e:(cross_scint_b2_t - db_5_scint_t)>>(1000,-0.63e-6,-0.6e-6,1000,4000,8000)', 'cross_scint_b2_m==1 && db_5_scint_m==1 &&msx100_m==1', 'colz')
 
 def _worker_get_cross_scint_counts(experiment, ddas_run):
-    df = ROOT.RDataFrame('merged_data', get_merged_root_file_path(experiment, ddas_run))
+    df = ROOT.RDataFrame('merged_data', get_ddas_root_file_path(experiment, ddas_run))
     return df.Sum('cross_scint_b2_m').GetValue()
 
 rdataframes = {}
@@ -415,7 +425,7 @@ def get_cross_scint_counts(experiment, ddas_run, num_workers=None):
 
     global rdataframes
     if ddas_run not in rdataframes:
-        rdataframes[ddas_run] = ROOT.RDataFrame('merged_data', get_merged_root_file_path(experiment, ddas_run))
+        rdataframes[ddas_run] = ROOT.RDataFrame('merged_data', get_ddas_root_file_path(experiment, ddas_run))
     return rdataframes[ddas_run].Sum('cross_scint_b2_m').GetValue()
 
 def get_cross_scint_counts_during_get_run(experiment, get_run):
@@ -440,11 +450,11 @@ import concurrent.futures
 import tqdm
 import ROOT
 
-def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate):
+def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename='smart2_w_br.csv'):
     cache_dir = os.path.join(f'{experiment}_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
     
-    unique_string = str((run, tuple(binning), var_exp, selection)).encode('utf-8')
+    unique_string = str((run, tuple(binning), var_exp, selection, tpc_ini_filename)).encode('utf-8')
     hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
     cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
     
@@ -472,7 +482,9 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
                 pass
 
     # --- BUILD THE HISTOGRAM ---
-    data_file_path = get_merged_root_file_path(experiment, run) 
+    data_file_path = get_ddas_root_file_path(experiment, run)
+    if not os.path.exists(data_file_path):
+        make_ddas_root_file(experiment, run)
     data_file = ROOT.TFile.Open(data_file_path, 'READ')
     
     if not data_file or data_file.IsZombie():
@@ -482,6 +494,15 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
     if not tree:
         data_file.Close()
         raise ValueError(f"Could not find TTree 'merged_data' in {data_file_path}.")
+
+    tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
+    if not os.path.exists(tpc_friend_path):
+        make_tpc_friend_file(experiment, run, tpc_ini_filename)
+    tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
+    if tpc_friend_file and not tpc_friend_file.IsZombie():
+        tpc_tree = tpc_friend_file.Get('tpc_data')
+        if tpc_tree:
+            tree.AddFriend(tpc_tree)
         
     if ':' in var_exp:
         raw_hist = ROOT.TH2D(hash_name, "", *binning)
@@ -501,7 +522,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
     return cache_file_path, hash_name
 
 
-def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1):
+def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename='smart2_w_br.csv'):
     # --- MULTIPLE RUNS LOGIC ---
     if is_iterable_runs(ddas_run):
         sum_hist = None
@@ -510,7 +531,7 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
         if num_workers > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
-                    executor.submit(_worker_fill_run, experiment, run, binning, var_exp, selection, force_recreate) 
+                    executor.submit(_worker_fill_run, experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename) 
                     for run in run_list
                 ]
                 
@@ -525,7 +546,7 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
                     if not temp_hist:
                         cf.Close()
                         print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
-                        cache_file_path, hash_name = _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate=True)
+                        cache_file_path, hash_name = _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate=True, tpc_ini_filename=tpc_ini_filename)
                         cf = ROOT.TFile.Open(cache_file_path, 'READ')
                         temp_hist = cf.Get(hash_name)
                         
@@ -543,7 +564,7 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
             # Forced stdout and dynamic columns
             for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
                 temp_name = f"{hist_name}_run{run}"
-                hist = get_histogram(experiment, run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1)
+                hist = get_histogram(experiment, run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1, tpc_ini_filename=tpc_ini_filename)
                 
                 if sum_hist is None:
                     sum_hist = hist.Clone(hist_name)
@@ -556,7 +577,7 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
     # --- SINGLE RUN LOGIC ---
     # Wrapped in a 1-step progress bar so you always see it
     with tqdm.tqdm(total=1, desc=f"Filling {hist_name} (Single)", file=sys.stdout, dynamic_ncols=True, leave=True) as pbar:
-        cache_file_path, hash_name = _worker_fill_run(experiment, ddas_run, binning, var_exp, selection, force_recreate)
+        cache_file_path, hash_name = _worker_fill_run(experiment, ddas_run, binning, var_exp, selection, force_recreate, tpc_ini_filename)
         pbar.update(1)
     
     # --- LAYER 2: SINGLE RUN FAILSAFE ---
@@ -566,7 +587,7 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
     if not temp_hist:
         cf.Close()
         print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
-        cache_file_path, hash_name = _worker_fill_run(experiment, ddas_run, binning, var_exp, selection, force_recreate=True)
+        cache_file_path, hash_name = _worker_fill_run(experiment, ddas_run, binning, var_exp, selection, force_recreate=True, tpc_ini_filename=tpc_ini_filename)
         cf = ROOT.TFile.Open(cache_file_path, 'READ')
         temp_hist = cf.Get(hash_name)
         
@@ -615,7 +636,7 @@ def show_selected_event(experiment, ddas_run, selection, index):
     from raw_viewer import process_runs
     import os
     
-    root_file_path = get_merged_root_file_path(experiment, ddas_run)
+    root_file_path = get_ddas_root_file_path(experiment, ddas_run)
     if not os.path.exists(root_file_path):
         print(f"Error: Merged root file not found for {experiment} run {ddas_run}")
         return

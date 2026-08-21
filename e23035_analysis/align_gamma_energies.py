@@ -44,7 +44,7 @@ for run in run_candidates:
         continue
    # t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
 
-    if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
+    if os.path.exists(ddas_interface.get_ddas_root_file_path(experiment, run)):
         try:
             t1, t2 =  ddas_interface.get_first_and_last_ddas_time(experiment, run)
             t_tot += t2 - t1

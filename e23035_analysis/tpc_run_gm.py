@@ -127,7 +127,7 @@ def _load_run_data(args):
     import ROOT
     from raw_viewer import ddas_interface
     
-    root_file_path = ddas_interface.get_merged_root_file_path(experiment, run)
+    root_file_path = ddas_interface.get_ddas_root_file_path(experiment, run)
     if not os.path.exists(root_file_path):
         return run, np.array([])
         
@@ -218,7 +218,7 @@ def get_aligned_spectrum(runs, binning, scale_factors, event_selection_mask='', 
     spectrum = np.zeros(binning[0])
     
     for run, sf in zip(runs, scale_factors):
-        root_file_path = ddas_interface.get_merged_root_file_path(experiment, run)
+        root_file_path = ddas_interface.get_ddas_root_file_path(experiment, run)
         if not os.path.exists(root_file_path):
             print(f"File not found for run {run}, skipping...")
             continue

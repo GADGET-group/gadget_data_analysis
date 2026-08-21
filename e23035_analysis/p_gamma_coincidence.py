@@ -13,7 +13,7 @@ experiment = 'e23035'
 # runs = []
 # for run in run_candidates:
 #     if not np.isnan(run) and run not in [162,163,203,204,209, 213,217, 218, 238]:
-#         if os.path.exists(ddas_interface.get_merged_root_file_path(run)):
+#         if os.path.exists(ddas_interface.get_ddas_root_file_path(run)):
 #             runs.append(run)
 # runs = e23035_runs.get_ddas_60_Ga_runs()
 # print(runs)

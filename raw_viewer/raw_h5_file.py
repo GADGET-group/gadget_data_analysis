@@ -140,6 +140,75 @@ class raw_h5_file:
         first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
         self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
 
+    def close(self):
+        if self.h5_file:
+            self.h5_file.close()
+            self.h5_file = None
+
+    def load_config(self, config_path):
+        import csv
+        import ast
+        with open(config_path, 'r') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if len(row) < 3:
+                    continue
+                name = row[0].strip()
+                type_name = row[1].strip()
+                val_str = row[2].strip()
+                
+                if type_name == 'str':
+                    val = val_str
+                elif type_name == 'int':
+                    val = int(val_str)
+                elif type_name == 'float':
+                    if val_str == 'inf':
+                        val = np.inf
+                    elif val_str == '-inf':
+                        val = -np.inf
+                    else:
+                        val = float(val_str)
+                elif type_name == 'bool':
+                    val = val_str.lower() in ('true', '1', 't', 'y', 'yes')
+                elif type_name in ('list', 'tuple'):
+                    val = ast.literal_eval(val_str)
+                    if type_name == 'tuple':
+                        val = tuple(val)
+                    else:
+                        val = list(val)
+                elif type_name == 'ndarray':
+                    val = np.array(ast.literal_eval(val_str))
+                else:
+                    continue
+                
+                setattr(self, name, val)
+
+    def save_config_file(self, config_path):
+        import csv
+        import os
+        exclude = {'xy_to_pad', 'xy_to_chnls', 'xy_index_to_pad', 'pad_plane', 'padxy', 'flat_lookup', 
+                   'pad_to_xy_index', 'chnls_to_pad', 'chnls_to_xy_coord', 'chnls_to_xy_index', 'pad_to_chnl',
+                   'cmap', 'cached_data', 'cached_xyte', 'cached_xyze', 'h5_file', 'pad_backgrounds', 'file_path'}
+        os.makedirs(os.path.dirname(os.path.abspath(config_path)), exist_ok=True)
+        with open(config_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            for k, v in self.__dict__.items():
+                if k in exclude or k.startswith('__'):
+                    continue
+                t = type(v)
+                if t == str:
+                    writer.writerow([k, 'str', v])
+                elif t == int or isinstance(v, np.integer):
+                    writer.writerow([k, 'int', str(v)])
+                elif t == float or isinstance(v, np.floating):
+                    writer.writerow([k, 'float', str(v)])
+                elif t == bool or isinstance(v, np.bool_):
+                    writer.writerow([k, 'bool', str(v)])
+                elif t in (list, tuple):
+                    writer.writerow([k, t.__name__, str(v)])
+                elif t == np.ndarray:
+                    writer.writerow([k, 'ndarray', str(v.tolist())])
+
     def get_pad_from_xy(self, xy):
         '''
         xy: tuple of (x,y) to lookup pad number for

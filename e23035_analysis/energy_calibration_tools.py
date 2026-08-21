@@ -569,7 +569,7 @@ def _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branc
                 pass
 
     # --- BUILD THE HISTOGRAM ---
-    data_file_path = ddas_interface.get_merged_root_file_path(experiment, ddas_run) 
+    data_file_path = ddas_interface.get_ddas_root_file_path(experiment, ddas_run) 
     data_file = ROOT.TFile.Open(data_file_path, 'READ')
     
     if not data_file or data_file.IsZombie():

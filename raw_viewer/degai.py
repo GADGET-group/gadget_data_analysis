@@ -186,7 +186,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
-    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v5" + str(nonlinearity_correction_name) + time_align_str).encode()).hexdigest()
+    adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v6" + str(nonlinearity_correction_name) + time_align_str).encode()).hexdigest()
     if not sliding_scale:
         cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v5.root")
     else:
@@ -251,7 +251,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
             nlc_poly_matrix[i, :len(params)] = params
 
     # Set up input file for reading
-    infile = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(experiment, ddas_run))
+    infile = ROOT.TFile.Open(ddas_interface.get_ddas_root_file_path(experiment, ddas_run))
     intree = infile.Get('merged_data')
     
     invals = []
@@ -376,7 +376,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     out_tree._keepalive_file = read_file
     return out_tree
 
-def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=True, max_workers=None, force_recreate=False, nonlinearity_correction_name=None, time_alignment_ns=None):
+def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=True, max_workers=None, force_recreate=False, nonlinearity_correction_name=None, time_alignment_ns=None, tpc_ini_filename='smart2_w_br.csv'):
     """
     Generates a 1D or 2D histogram using the add_back tree and merged_data tree. Behaves just like the get_histogram function in ddas_interface, but allows refernces to 
     a "addback_energy" branch.
@@ -397,7 +397,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
             if max_workers is None or max_workers > 1:
                 with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
-                        executor.submit(get_histogram, experiment, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns) 
+                        executor.submit(get_histogram, experiment, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns, tpc_ini_filename) 
                         for run in run_list
                     ]
                     for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(run_list), desc=f"Filling {hist_name} (Parallel)"):
@@ -410,7 +410,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
                             sum_hist.Add(h)
             else:
                 for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)"):
-                    h = get_histogram(experiment, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns) 
+                    h = get_histogram(experiment, run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection, dt_window_ns, e_thresh, sliding_scale, 1, force_recreate, nonlinearity_correction_name, time_alignment_ns, tpc_ini_filename) 
                     if sum_hist is None:
                         sum_hist = h.Clone(hist_name)
                         sum_hist.SetTitle(hist_title)
@@ -426,7 +426,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     # SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + tpc_ini_filename + "v5").encode()).hexdigest()
     cache_dir = os.path.join(f'{experiment}_analysis', 'clarion_cache', 'histograms_flex')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -455,9 +455,18 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
 
     add_back_tree = get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
     
-    merged_file = ROOT.TFile.Open(ddas_interface.get_merged_root_file_path(experiment, ddas_run), 'READ')
+    merged_file = ROOT.TFile.Open(ddas_interface.get_ddas_root_file_path(experiment, ddas_run), 'READ')
     merged_tree = merged_file.Get('merged_data')
     merged_tree.AddFriend(add_back_tree)
+    
+    tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
+    if not os.path.exists(tpc_friend_path):
+        ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)
+    tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
+    if tpc_friend_file and not tpc_friend_file.IsZombie():
+        tpc_tree = tpc_friend_file.Get('tpc_data')
+        if tpc_tree:
+            merged_tree.AddFriend(tpc_tree)
 
     if ':' in var_exp:
         raw_hist = ROOT.TH2D(hash_name, "", *binning)
@@ -466,6 +475,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
         
     merged_tree.Draw(f'{var_exp}>>{hash_name}', selection, 'goff')
     raw_hist.SetDirectory(0)
+    if tpc_friend_file: tpc_friend_file.Close()
     merged_file.Close()
     
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
@@ -747,7 +757,7 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
     # CRITICAL: Add str(binning) to the hash so different binnings don't overwrite each other!
-    hash_str = hashlib.md5((str(ddas_run) + str(binning) + str(adj_dict)).encode()).hexdigest()
+    hash_str = hashlib.md5((str(ddas_run) + str(binning) + str(adj_dict) + "v2").encode()).hexdigest()
     
     cache_dir = os.path.join(f'{experiment}_analysis', 'clarion_cache', 'timing')
     os.makedirs(cache_dir, exist_ok=True)
@@ -775,7 +785,7 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     # ---------------------------------------------------------
     # 2. READ THE RAW TREE
     # ---------------------------------------------------------
-    in_filepath = ddas_interface.get_merged_root_file_path(experiment, ddas_run)
+    in_filepath = ddas_interface.get_ddas_root_file_path(experiment, ddas_run)
     infile = ROOT.TFile.Open(in_filepath, 'READ')
     if not infile or infile.IsZombie():
         raise RuntimeError(f"Cannot open {in_filepath}")

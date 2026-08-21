@@ -303,23 +303,32 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_file_entry.insert(0, file_path)
 
     def load_settings_file(self):
-        config = configparser.ConfigParser()
         file_path = self.settings_file_entry.get()
+        if file_path.endswith('.csv'):
+            self.h5file.load_config(file_path)
+            self.entry_changed(None)
+            self.check_state_changed()
+            return
+            
+        config = configparser.ConfigParser()
         config.read(file_path)
 
         for entry_name in config['ttk.Entry']:
-            entry = self.settings_entry_map[entry_name]
-            entry.delete(0, tk.END)
-            entry.insert(0, config['ttk.Entry'][entry_name])
+            if entry_name in self.settings_entry_map:
+                entry = self.settings_entry_map[entry_name]
+                entry.delete(0, tk.END)
+                entry.insert(0, config['ttk.Entry'][entry_name])
 
         for menu_name in config['ttk.OptionMenu']:
-            var_to_update = self.settings_optionmenu_map[menu_name]
-            var_to_update.set(config['ttk.OptionMenu'][menu_name])
+            if menu_name in self.settings_optionmenu_map:
+                var_to_update = self.settings_optionmenu_map[menu_name]
+                var_to_update.set(config['ttk.OptionMenu'][menu_name])
 
         
         for checkbox_name in config['ttk.CheckButton']:
-            var_to_update = self.settings_checkbutton_map[checkbox_name]
-            var_to_update.set(config['ttk.CheckButton'][checkbox_name])
+            if checkbox_name in self.settings_checkbutton_map:
+                var_to_update = self.settings_checkbutton_map[checkbox_name]
+                var_to_update.set(config['ttk.CheckButton'][checkbox_name])
 
         if 'other' in config:
             if config['other']['gain_match_path'] != 'no gain match loaded':
@@ -331,7 +340,15 @@ class RawEventViewerFrame(ttk.Frame):
 
     def save_settings_file(self,file_path=None):
         if file_path == None:
-            file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/gui_configs', title='GUI settings file save path', filetypes=([("gui config", ".gui_ini")]), defaultextension='.gui_ini')
+            file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/tpc_processing_configs', title='GUI settings file save path', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]), defaultextension='.csv')
+        
+        self.settings_file_entry.delete(0, tk.END)
+        self.settings_file_entry.insert(0, file_path)
+        
+        if file_path.endswith('.csv'):
+            self.h5file.save_config_file(file_path)
+            return
+
         config = configparser.ConfigParser()
         
         entries_to_save = {}
@@ -355,74 +372,90 @@ class RawEventViewerFrame(ttk.Frame):
             config.write(configfile)
 
     def process_run(self):
-        directory_path, h5_fname = os.path.split(self.h5file.file_path)
-        directory_path = '/egr/research-tpc/shared/proc_runs/e23035'
-        #make directory for processed data from this run, if it doesn't already exist
-        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0] + "_raw_viewer")
-        if not os.path.isdir(directory_path):
-            os.mkdir(directory_path)
-        #make directory for this export
-        settings_name = os.path.splitext(os.path.basename(self.settings_file_entry.get()))[0]
-        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0]+settings_name)
-        if  os.path.isdir(directory_path):
-            if not tkinter.messagebox.askyesno(title='overwrite files?', message='Export already exists, overwrite files?'):
-                return
+        import re
+        from raw_viewer import process_runs
+        
+        match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
+        if match:
+            experiment = match.group(1)
+            run = int(match.group(2))
         else:
-            os.mkdir(directory_path)
-
-        #copy gain match over if needed
-        if self.gain_match_label.cget("text") != 'no gain match loaded':
-            shutil.copy(self.gain_match_path, directory_path)
-            new_path = os.path.join(directory_path, os.path.split(self.gain_match_path)[-1])
-            self.load_gain_match(new_path)
-
-        self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
-        #save git version info and modified files
-        with open(os.path.join(directory_path, 'git_info.txt'), 'w') as f:
-            subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], stdout=f)
-            subprocess.run(['git', 'status'], stdout=f)
-            subprocess.run(['git', 'diff'], stdout=f)
-        #copy channel mapping files
-        shutil.copy(self.h5file.flat_lookup_file_path, directory_path)
-        #save event timestamps array
-        self.timestamps = self.h5file.get_timestamps_array()
-        np.save(os.path.join(directory_path, 'timestamps.npy'), self.timestamps)
-        #save all the other properties
-        self.h5file.cache_enable = True
-        max_veto_counts, dxy, dz, counts, angles, pads_railed_list = self.h5file.get_histogram_arrays()
-        self.h5file.cache_enable = False
-        np.save(os.path.join(directory_path, 'counts.npy'), counts)
-        np.save(os.path.join(directory_path, 'dxy.npy'), dxy)
-        np.save(os.path.join(directory_path, 'dt.npy'), dz/self.h5file.zscale)
-        np.save(os.path.join(directory_path, 'angles.npy'), angles)
-        np.save(os.path.join(directory_path, 'veto.npy'), max_veto_counts)
-        with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
-            #TODO: fix railed pads feature so it works with background subtraction turned on
-            writer = csv.writer(f)
-            writer.writerows(pads_railed_list)
-        self.max_veto_counts, self.dxys, self.dts, self.counts = max_veto_counts, dxy, dz/self.h5file.zscale, counts
-        #do zscale dependent calcuations of range and angle
+            print("Could not infer experiment and run from file path. Defaulting to e23035")
+            experiment = 'e23035'
+            match = re.search(r'run_?0*(\d+)\.h5', self.h5file.file_path)
+            run = int(match.group(1)) if match else 0
+            
+        settings_path = self.settings_file_entry.get()
+        if settings_path and settings_path.endswith('.csv'):
+            config_filename = os.path.basename(settings_path)
+            self.h5file.save_config_file(settings_path)
+        else:
+            config_filename = 'smart2_w_br.csv'
+            self.h5file.save_config_file(os.path.join(os.path.dirname(__file__), 'tpc_processing_configs', config_filename))
+            
+        print(f"Processing run {run} for experiment {experiment} with config {config_filename}")
+        process_runs.process_tpc_run(experiment, run, config_filename=config_filename)
+        
+        self.timestamps = process_runs.get_quantity('timestamps', experiment, [run], config_filename=config_filename)
+        self.max_veto_counts = process_runs.get_max_veto_counts(experiment, [run], config_filename=config_filename)
+        
+        endpoints = process_runs.get_quantity('endpoints', experiment, [run], config_filename=config_filename)
+        dr = endpoints[:, 0] - endpoints[:, 1]
+        self.dxys = np.sqrt(dr[:,0]**2 + dr[:,1]**2)
+        self.dts = np.abs(dr[:,2])
+        self.angles = process_runs.get_angle(experiment, [run], config_filename=config_filename)
+        
+        pad_charges = process_runs.get_quantity('pad_charge', experiment, [run], config_filename=config_filename)
+        if not self.h5file.include_counts_on_veto_pads:
+            veto_mask = np.zeros(1024, dtype=bool)
+            for i in raw_h5_file.VETO_PADS:
+                veto_mask[i] = True
+            pad_charges[:, veto_mask] = 0
+        self.counts = np.sum(pad_charges, axis=1)
+        
         self.entry_changed(None)
         
     def load_processed_run(self):
         '''
         Load exported data, and update GUI to match the settings used to export the given file.
         '''
-        #open file dialog in export for this run, and find which export should be opened
-        directory_path = os.path.splitext(self.h5file.file_path)[0] + '_raw_viewer'
-        directory_path = tk.filedialog.askdirectory (initialdir=directory_path, title='Select processed run to open')
-        #load GUI settings to from export
-        self.settings_file_entry.delete(0, tk.END)
-        settings_dir = os.path.join(directory_path, 'config.gui_ini')
-        self.settings_file_entry.insert(0, settings_dir)
-        self.load_settings_file()
-        #load histogram arrays
-        self.counts = np.load(os.path.join(directory_path, 'counts.npy'))
-        self.dxys = np.load(os.path.join(directory_path, 'dxy.npy'))
-        self.dts = np.abs(np.load(os.path.join(directory_path, 'dt.npy')))
-        self.max_veto_counts = np.load(os.path.join(directory_path, 'veto.npy'))
-        self.timestamps = np.load(os.path.join(directory_path, 'timestamps.npy'))
-        #do zscale dependent calcuations of range and angle
+        import re
+        from raw_viewer import process_runs
+        
+        match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
+        if match:
+            experiment = match.group(1)
+            run = int(match.group(2))
+        else:
+            print("Could not infer experiment and run from file path. Defaulting to e23035")
+            experiment = 'e23035'
+            match = re.search(r'run_?0*(\d+)\.h5', self.h5file.file_path)
+            run = int(match.group(1)) if match else 0
+            
+        settings_path = self.settings_file_entry.get()
+        if settings_path and settings_path.endswith('.csv'):
+            config_filename = os.path.basename(settings_path)
+            self.load_settings_file()
+        else:
+            config_filename = 'smart2_w_br.csv'
+            
+        self.timestamps = process_runs.get_quantity('timestamps', experiment, [run], config_filename=config_filename)
+        self.max_veto_counts = process_runs.get_max_veto_counts(experiment, [run], config_filename=config_filename)
+        
+        endpoints = process_runs.get_quantity('endpoints', experiment, [run], config_filename=config_filename)
+        dr = endpoints[:, 0] - endpoints[:, 1]
+        self.dxys = np.sqrt(dr[:,0]**2 + dr[:,1]**2)
+        self.dts = np.abs(dr[:,2])
+        self.angles = process_runs.get_angle(experiment, [run], config_filename=config_filename)
+        
+        pad_charges = process_runs.get_quantity('pad_charge', experiment, [run], config_filename=config_filename)
+        if not self.h5file.include_counts_on_veto_pads:
+            veto_mask = np.zeros(1024, dtype=bool)
+            for i in raw_h5_file.VETO_PADS:
+                veto_mask[i] = True
+            pad_charges[:, veto_mask] = 0
+        self.counts = np.sum(pad_charges, axis=1)
+        
         self.entry_changed(None)
 
 
