@@ -81,12 +81,20 @@ def get_experiment_settings_hash(experiment, example_run, config_filename='smart
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename='smart2_w_br.csv'):
+def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename='smart2_w_br.csv', gpus_to_use=None):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a ROOT version of this information isn't available.
     '''
     run_number = int(run_number)
+    if gpus_to_use is None:
+        gpus_to_use = [0]
+    try:
+        import cupy as cp
+        cp.cuda.runtime.setDevice(gpus_to_use[0])
+    except ImportError:
+        pass
+    
     #save_path = os.path.dirname(os.path.abspath(__file__))
     h5file = get_h5_file(experiment, run_number, config_filename)
     settings_hash = h5file.get_settings_hash()
@@ -249,11 +257,15 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
             file['metadata'] = metadata
 
 def _load_run_quantities(args):
-    experiment, run, qnames, settings_hash, config_filename = args
+    if len(args) == 6:
+        experiment, run, qnames, settings_hash, config_filename, gpus_to_use = args
+    else:
+        experiment, run, qnames, settings_hash, config_filename = args
+        gpus_to_use = [0]
     config_name = os.path.splitext(config_filename)[0]
     fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
     if not os.path.exists(fname):
-        process_tpc_run(experiment, run, config_filename=config_filename)
+        process_tpc_run(experiment, run, config_filename=config_filename, gpus_to_use=gpus_to_use)
         
     result = {}
     with uproot.open(fname) as file:
@@ -279,7 +291,7 @@ def _load_run_quantities(args):
                 raise ValueError(f"Quantity {qname} not found in ROOT file")
     return result
 
-def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename='smart2_w_br.csv', gpus_to_use=None):
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
     runs = [int(r) for r in runs]
@@ -289,7 +301,9 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
         print(f'loading {qnames} for {runs}')
         
     settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0, config_filename)
-    args_list = [(experiment, run, qnames, settings_hash, config_filename) for run in runs]
+    if gpus_to_use is None:
+        gpus_to_use = [0]
+    args_list = [(experiment, run, qnames, settings_hash, config_filename, [gpus_to_use[i % len(gpus_to_use)]]) for i, run in enumerate(runs)]
     
     if num_workers > 1:
         from concurrent.futures import ProcessPoolExecutor

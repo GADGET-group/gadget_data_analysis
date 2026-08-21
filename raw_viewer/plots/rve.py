@@ -17,6 +17,8 @@ from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'
+GPUs_to_use = [1,2,3]
+max_workers=150
  
 if experiment == 'e23035':
     if True:
@@ -65,13 +67,13 @@ print('get_runs:', get_runs)
 load_ddas = False
 
 print('loading stuff')
-num_workers = min(100, len(get_runs))
+num_workers = min(max_workers, len(get_runs))
 
 quantities_to_get = ['charge_width', 'endpoints', 'timestamps']
 if experiment != 'e23035':
     quantities_to_get.append('railed_pads')
     
-results = process_runs.get_quantity(quantities_to_get, experiment, get_runs, show_load_progress=False, num_workers=num_workers)
+results = process_runs.get_quantity(quantities_to_get, experiment, get_runs, show_load_progress=False, num_workers=num_workers, gpus_to_use=GPUs_to_use)
 charge_widths = results[0]
 endpoints = results[1]
 timestamps = results[2]

@@ -18,7 +18,6 @@ from raw_viewer.dev import railed_pad_repair
 try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
-    cp.cuda.runtime.setDevice(2)
     USE_GPU = True
 except:
     cp = np
