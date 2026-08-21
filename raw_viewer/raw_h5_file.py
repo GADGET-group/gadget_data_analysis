@@ -423,33 +423,34 @@ class raw_h5_file:
             #use ransac to fit a line to background
             x = np.arange(len(trace)).reshape(-1, 1)
             ransac = linear_model.RANSACRegressor()
-            ransac.fit(x, trace.reshape(-1, 1))
-            ransac_baseline = ransac.predict(x).flatten()
+            ransac.fit(x, trace) # scikit-learn handles 1D y arrays fine, no reshape needed
+            ransac_baseline = ransac.predict(x)
             #threshold = self.smart2_threshold + np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
             above_threshold = trace>ransac_baseline#threshold
-            peak_labels = skimage.measure.label(above_threshold*1, background=0)
-            # print('ransac baseline: ', ransac_baseline)
-            # print('trace: ', trace)
-            # print('labels: ', peak_labels)
-            not_background = peak_labels[peak_labels!=0]
-            if len(not_background) == 0:
+            
+            # Mathematically equivalent to skimage.measure.label for 1D boolean array
+            padded = np.concatenate(([False], above_threshold, [False]))
+            diffs = np.diff(padded.astype(np.int8))
+            starts = np.where(diffs == 1)[0]
+            ends = np.where(diffs == -1)[0]
+            
+            if len(starts) == 0:
                 return trace
-            labels, num_bins = np.unique(not_background, return_counts=True)
-            most_counts, largest_index = 0,0
-            for i in range(len(labels)):
-                label = labels[i]
-                max_counts = np.max(trace[peak_labels==label])
+                
+            num_bins = ends - starts
+            
+            most_counts, largest_index = 0, 0
+            for i in range(len(starts)):
+                # Using slicing (O(1)) instead of boolean masking (O(N)) for max_counts
+                max_counts = np.max(trace[starts[i]:ends[i]])
                 if max_counts > most_counts and num_bins[i] > self.smart2_min_bins_in_peak:
                     most_counts = max_counts
                     largest_index = i
-            #largest_index = np.argmax(num_bins)
-            largest_label = labels[largest_index]
 
-            baseline = np.array(trace, copy=True)
             if num_bins[largest_index] < self.smart2_min_bins_in_peak:
                 return trace
             
-            selected_label_indicies = np.where(peak_labels==largest_label)[0]
+            selected_label_indicies = np.arange(starts[largest_index], ends[largest_index])
             peak_start = max(0, selected_label_indicies[0] - self.smart_bins_away_to_check)
             peak_end = min(len(trace)-1, selected_label_indicies[-1]+self.smart_bins_away_to_check)
             #get threshold for trimming peak from MAD

@@ -19,6 +19,7 @@ from track_fitting import srim_interface, build_sim
 experiment = 'e23035'
 GPUs_to_use = [1,2,3]
 max_workers=150
+tpc_config = 'smart2_wo_pr.csv'
  
 if experiment == 'e23035':
     if True:
@@ -38,7 +39,7 @@ if experiment == 'e23035_prep_vault': # runs before experiment
     #run_range = np.arange(61, 63+1) #calibration before experiment
     #run_range = [17, 20, 21, 38, 49, 60, 61, 62, 63] #runs used for GM
     #run_range = np.arange(68, 73+1) #background before experiemnt 
-    run_range = [49]#16,20,35,#[61, 62, 63]
+    run_range = [49, 16,20,35,61, 62, 63]
     
 
 # else: #during experiment
@@ -73,7 +74,7 @@ quantities_to_get = ['charge_width', 'endpoints', 'timestamps']
 if experiment != 'e23035':
     quantities_to_get.append('railed_pads')
     
-results = process_runs.get_quantity(quantities_to_get, experiment, get_runs, show_load_progress=False, num_workers=num_workers, gpus_to_use=GPUs_to_use)
+results = process_runs.get_quantity(quantities_to_get, experiment, get_runs, show_load_progress=False, num_workers=num_workers, gpus_to_use=GPUs_to_use, config_filename=tpc_config)
 charge_widths = results[0]
 endpoints = results[1]
 timestamps = results[2]
@@ -81,7 +82,7 @@ if experiment != 'e23035':
     pads_railed = results[3]
 print('root data loaded')
 
-run_numbers, event_numbers = process_runs.get_run_and_event_numbers(experiment, get_runs)
+run_numbers, event_numbers = process_runs.get_run_and_event_numbers(experiment, get_runs, config_filename=tpc_config)
 
 if load_ddas:
     ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
@@ -104,20 +105,20 @@ print('lengths and angles calculated')
 
 #cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
-veto_max = process_runs.get_max_veto_counts(experiment, get_runs, num_workers=num_workers)
+veto_max = process_runs.get_max_veto_counts(experiment, get_runs, num_workers=num_workers, config_filename=tpc_config)
 print('veto max loaded')
 
 
 #energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
 if experiment == 'e23035':
     if True: #use default gain match
-        energy = e23035_runs.get_energy_MeV(get_runs, num_workers=num_workers)
+        energy = e23035_runs.get_energy_MeV(get_runs, num_workers=num_workers, tpc_ini_filename=tpc_config)
     else:
         # gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/fft6_res3.pkl'
         # with open(gain_match_path, 'rb') as f:
         #     gain_match_result = pickle.load(f)
         # pad_gains = gain_match_result.pad_gains
-        energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains, num_workers=num_workers) 
+        energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains, num_workers=num_workers, config_filename=tpc_config) 
 else:
     gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
     with open(gain_match_path, 'rb') as f:
@@ -125,14 +126,14 @@ else:
     #pad_gains = gain_match_result.x[:1024]
     pad_gains = gain_match_result.pad_gains
     #pad_gains = np.ones(np.shape(gain_match_result.pad_gains))*np.mean(gain_match_result.pad_gains)
-    energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
+    energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains, config_filename=tpc_config)
 print('energies loaded')
 
 ##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
 
 
 if experiment == 'e23035':
-    veto_mask = e23035_runs.get_veto_mask(endpoints=endpoints, max_veto_counts=veto_max)
+    veto_mask = e23035_runs.get_veto_mask(endpoints=endpoints, max_veto_counts=veto_max, tpc_ini_filename=tpc_config)
 else:
     num_pads_railed = np.array([len(prl) for prl in pads_railed])
     veto_mask = (veto_max < veto_thresh)
@@ -160,10 +161,10 @@ plt.ylabel('range (mm)')
 # fig.show()
 #alpha_mask = veto_mask&(lengths<(energy*m2+35.5 - m2*2.4))&(energy>2.7)#((lengths<(energy*m+32.2 - m*2.25))|((lengths<(energy*m2+35.5 - m2*2.4))&(energy<2.4)))
 if experiment == 'e23035':
-    alpha_mask = e23035_runs.get_alpha_mask(get_runs, lengths=lengths, energy=energy, veto_mask=veto_mask)
+    alpha_mask = e23035_runs.get_alpha_mask(get_runs, lengths=lengths, energy=energy, veto_mask=veto_mask, tpc_ini_filename=tpc_config)
 
     #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.3)
-    proton_mask = e23035_runs.get_proton_mask(get_runs, lengths=lengths, energy=energy, veto_mask=veto_mask)
+    proton_mask = e23035_runs.get_proton_mask(get_runs, lengths=lengths, energy=energy, veto_mask=veto_mask, tpc_ini_filename=tpc_config)
     #proton_mask = veto_mask&(~alpha_mask)&(lengths<(energy*m+26.6 - m*0.619))&(energy>0.95)&(energy<2.2)&(energy>1.5)&(lengths>55)
     # palpha_cut = veto_mask&(energy>1.6)&(energy<1.8)&(lengths>27.5)&(lengths<40)
     # print(np.where(palpha_cut))
@@ -333,7 +334,7 @@ def define_cut_on_gui():
     #     self.poly_selector.verts = self.rve_cut_verticies
     fig.show()
 
-evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)
+evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs, config_filename=tpc_config)
 def show_selected_event(i):
     run = evt_runs[plt_mask][rve_cut_select_mask][i]
     evt = evt_nums[plt_mask][rve_cut_select_mask][i]
@@ -342,7 +343,7 @@ def show_selected_event(i):
     
 
 def show_event(run, evt):
-    h5file = process_runs.get_h5_file(experiment, run)
+    h5file = process_runs.get_h5_file(experiment, run, config_filename=tpc_config)
     h5file.show_2d_projection(evt, block=False)
     h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
     h5file.plot_traces(evt, block=False)
