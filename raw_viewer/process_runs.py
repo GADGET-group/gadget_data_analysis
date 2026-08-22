@@ -236,7 +236,8 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
             events_data['railed_pads'] = ak.unflatten(np.array([], dtype=np.int64), counts)
         else:
             events_data['railed_pads'] = ak.from_iter(railed_pads)
-        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff], 'settings_hash':[settings_hash]}
+        settings_str = h5file.get_settings_str()
+        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff], 'settings_hash':[settings_hash], 'settings_json':[settings_str]}
         print('saving to ROOT file')
         with uproot.recreate(fname) as file:
             lengths = [len(v) for v in events_data.values()]
@@ -271,7 +272,31 @@ def _load_run_quantities(args):
     with uproot.open(fname) as file:
         file_hash = file['metadata']['settings_hash'].array(library='np')[0]
         if file_hash != settings_hash:
-            raise ValueError(f"Settings hash in file {fname} ({file_hash}) does not match current settings hash ({settings_hash}) for config {config_filename}")
+            error_msg = f"Settings hash in file {fname} ({file_hash}) does not match current settings hash ({settings_hash}) for config {config_filename}."
+            if 'settings_json' in file['metadata']:
+                import json
+                file_settings_str = file['metadata']['settings_json'].array(library='np')[0]
+                file_settings = json.loads(file_settings_str)
+                
+                h5file_current = get_h5_file(experiment, run, config_filename)
+                current_settings = json.loads(h5file_current.get_settings_str())
+                h5file_current.close()
+                
+                disagreements = []
+                for k in current_settings:
+                    if k not in file_settings:
+                        disagreements.append(f"  {k}: missing in file, current={current_settings[k]}")
+                    elif file_settings[k] != current_settings[k]:
+                        disagreements.append(f"  {k}: file={file_settings[k]}, current={current_settings[k]}")
+                for k in file_settings:
+                    if k not in current_settings:
+                        disagreements.append(f"  {k}: missing in current, file={file_settings[k]}")
+                
+                if disagreements:
+                    error_msg += "\nDisagreements:\n" + "\n".join(disagreements)
+            else:
+                error_msg += "\n(Settings details are not stored in this older root file to see the disagreement)."
+            raise ValueError(error_msg)
         
         for qname in qnames:
             if qname in file['events']:
@@ -291,6 +316,21 @@ def _load_run_quantities(args):
                 raise ValueError(f"Quantity {qname} not found in ROOT file")
     return result
 
+worker_gpu_id = None
+def _init_gpu_worker(q):
+    global worker_gpu_id
+    worker_gpu_id = q.get()
+
+def _load_run_quantities_dynamic(args):
+    global worker_gpu_id
+    args_with_gpu = list(args)
+    if worker_gpu_id is not None:
+        args_with_gpu[-1] = [worker_gpu_id]
+    return _load_run_quantities(tuple(args_with_gpu))
+
+def _load_run_quantities_chunk(args_chunk):
+    return [_load_run_quantities(args) for args in args_chunk]
+
 def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename='smart2_w_br.csv', gpus_to_use=None):
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
@@ -308,6 +348,31 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
     if num_workers > 1:
         from concurrent.futures import ProcessPoolExecutor
         import multiprocessing
+        
+        # 1. Identify which runs need GPU processing (ROOT file doesn't exist)
+        config_name = os.path.splitext(config_filename)[0]
+        needs_processing_args = []
+        for args in args_list:
+            exp, run, qnames_arg, s_hash, c_file, gpus = args
+            fname = os.path.join(get_save_path(exp), f'{exp}_run{run}_{config_name}.root')
+            if not os.path.exists(fname):
+                needs_processing_args.append(args)
+                
+        # 2. Process missing runs with strict GPU limits to prevent OOM
+        if len(needs_processing_args) > 0:
+            num_gpus = len(gpus_to_use)
+            ctx = multiprocessing.get_context('spawn')
+            q = ctx.Queue()
+            for g in gpus_to_use:
+                q.put(g)
+            with ProcessPoolExecutor(max_workers=num_gpus, mp_context=ctx, initializer=_init_gpu_worker, initargs=(q,)) as executor:
+                if show_load_progress:
+                    print(f"Processing {len(needs_processing_args)} missing runs dynamically on {num_gpus} GPUs...")
+                    list(tqdm(executor.map(_load_run_quantities_dynamic, needs_processing_args), total=len(needs_processing_args)))
+                else:
+                    list(executor.map(_load_run_quantities_dynamic, needs_processing_args))
+                    
+        # 3. Now that all ROOT files exist, rapidly load them with the full worker pool
         with ProcessPoolExecutor(max_workers=num_workers, mp_context=multiprocessing.get_context('spawn')) as executor:
             if show_load_progress:
                 results = list(tqdm(executor.map(_load_run_quantities, args_list), total=len(runs)))

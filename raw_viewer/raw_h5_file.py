@@ -592,7 +592,7 @@ class raw_h5_file:
         points = cp.concatenate((x[:, cp.newaxis], y[:, cp.newaxis], z[:, cp.newaxis]), axis=1)
         points_mean = points.mean(axis=0)
         try:
-            uu, dd, vv = cp.linalg.svd(points - points_mean)
+            uu, dd, vv = cp.linalg.svd(points - points_mean, full_matrices=False)
         except Exception as e:
             print('caught exceptions while trying to perform SVD of event '%+str(event))
             print(e)
@@ -615,8 +615,7 @@ class raw_h5_file:
         return int(self.h5_file['meta']['meta'][0]), int(self.h5_file['meta']['meta'][2])
         #return int(self.h5_file['meta']['meta'][0]), np.min((int(self.h5_file['meta']['meta'][2]), int(self.h5_file['meta']['meta'][0])+10000))#TODO
 
-    def get_settings_hash(self):
-        import hashlib
+    def get_settings_str(self):
         import json
         settings = {
             'zscale': self.zscale,
@@ -652,7 +651,11 @@ class raw_h5_file:
             return obj
             
         serialized_settings = {k: serialize(v) for k, v in settings.items()}
-        settings_str = json.dumps(serialized_settings, sort_keys=True)
+        return json.dumps(serialized_settings, sort_keys=True)
+
+    def get_settings_hash(self):
+        import hashlib
+        settings_str = self.get_settings_str()
         return hashlib.sha256(settings_str.encode()).hexdigest()[:16]
 
 

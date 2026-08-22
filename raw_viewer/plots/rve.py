@@ -16,10 +16,10 @@ from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
-experiment = 'e23035'
-GPUs_to_use = [1,2,3]
+experiment = 'e23035_prep_vault'
+GPUs_to_use = [0,1,2,3]
 max_workers=150
-tpc_config = 'smart2_wo_pr.csv'
+tpc_config = 'smart2_rpr.cv'
  
 if experiment == 'e23035':
     if True:

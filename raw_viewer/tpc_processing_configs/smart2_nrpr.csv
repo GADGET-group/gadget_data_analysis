@@ -1,0 +1,12 @@
+zscale,float,1.088
+flat_lookup_file_path,str,raw_viewer/channel_mappings/flatlookup4cobos.csv
+length_counts_threshold,float,100
+ic_counts_threshold,float,0
+background_subtract_mode,str,smart2
+smart_bins_away_to_check,int,3
+num_smart_background_ave_bins,int,20
+smart2_min_bins_in_peak,int,5
+smart2_min_sigma,float,2
+remove_outliers,bool,True
+reconstruct_railed_pads,bool,False
+cache_enable,bool,True
