@@ -10,3 +10,4 @@ smart2_min_sigma,float,2
 remove_outliers,bool,True
 reconstruct_railed_pads,bool,True
 cache_enable,bool,True
+batch_event_cache_size,int,50

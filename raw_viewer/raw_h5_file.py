@@ -293,6 +293,9 @@ class raw_h5_file:
         self.reconstruct_railed_pads = False 
         self.railed_pad_reconstruct_fit_bins = (8,8) #bins to the (left, right) of the railed region to use for fitting
 
+        self.batched_data_cache = {}
+        self.batch_event_cache_size = 1
+
         self.apply_gain_match = False
         self.pad_gains=np.ones(NUM_PADS)
 
@@ -441,101 +444,154 @@ class raw_h5_file:
         if self.cache_enable and event_number == self.cached_event:
             return np.array(self.cached_data, copy=True)
 
-        data = self.h5_file['get']['evt%d_data'%event_number]
+        if self.batch_event_cache_size > 1 and event_number in self.batched_data_cache:
+            data = self.batched_data_cache.pop(event_number)
+            if self.cache_enable:
+                self.cached_data = data
+                self.cached_event = event_number
+            return np.array(data, copy=True)
 
-        
-        if self.asads != 'all' or self.cobos != 'all' or self.pads != 'all':
-            to_copy = []
+        first_evt, last_evt = self.get_event_num_bounds()
+        batch_end = min(event_number + self.batch_event_cache_size, last_evt + 1)
+        batch_events = range(event_number, batch_end)
+
+        event_datas = {}
+        event_valid_indices = {}
+        event_pad_images = {}
+
+        massive_traces = []
+        massive_trace_lens = []
+
+        for evt in batch_events:
+            try:
+                data = self.h5_file['get']['evt%d_data'%evt]
+            except KeyError:
+                continue
+
+            if self.asads != 'all' or self.cobos != 'all' or self.pads != 'all':
+                to_copy = []
+                for i, line in enumerate(data):
+                    chnl_info = tuple(line[0:4])
+                    cobo, asad, *rest = chnl_info
+                    if chnl_info in self.chnls_to_pad:
+                        pad = self.chnls_to_pad[chnl_info]
+                        if (self.cobos == 'all' or cobo in self.cobos) and \
+                                (self.asads == 'all' or asad in self.asads) and \
+                                (self.pads == 'all' or pad in self.pads):
+                            to_copy.append(i)
+                data = np.array(data[to_copy], dtype=float, copy=True)
+            else:
+                data = np.array(data, copy=True, dtype=float)
+
+            if len(data) == 0:
+                event_datas[evt] = data
+                event_valid_indices[evt] = []
+                event_pad_images[evt] = None
+                massive_trace_lens.append(0)
+                continue
+
+            pad_image = np.zeros(np.shape(self.pad_plane)) if self.remove_outliers else None
+            valid_indices = []
+
             for i, line in enumerate(data):
-                chnl_info =  tuple(line[0:4])
-                cobo, asad, *rest = chnl_info
+                chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
-                    if (self.cobos == 'all' or cobo in self.cobos) and \
-                            (self.asads == 'all' or asad in self.asads) and \
-                            (self.pads == 'all' or pad in self.pads):
-                        to_copy.append(i)
-            data = np.array(data[to_copy], dtype=float, copy=True)
+                    valid_indices.append(i)
+                    if self.reconstruct_railed_pads:
+                        if np.max(line[FIRST_DATA_BIN:]) == 4095:
+                            line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
+                    if self.remove_outliers:
+                        x,y = self.pad_to_xy_index[pad]
+                        pad_image[x,y] = 1
 
+            event_datas[evt] = data
+            event_valid_indices[evt] = valid_indices
+            event_pad_images[evt] = pad_image
+
+            if len(valid_indices) > 0 and self.background_subtract_mode != 'none':
+                traces_2d = data[valid_indices, FIRST_DATA_BIN:]
+                massive_traces.append(traces_2d)
+                massive_trace_lens.append(len(valid_indices))
+            else:
+                massive_trace_lens.append(0)
+
+        if len(massive_traces) > 0 and self.background_subtract_mode != 'none':
+            massive_traces_2d = np.concatenate(massive_traces, axis=0)
+            massive_baselines = self.calculate_background_2d(massive_traces_2d)
+
+            idx = 0
+            for i, evt in enumerate(batch_events):
+                if evt not in event_datas: continue
+                trace_len = massive_trace_lens[i]
+                if trace_len > 0:
+                    baselines = massive_baselines[idx:idx+trace_len]
+                    valid_indices = event_valid_indices[evt]
+                    event_datas[evt][valid_indices, FIRST_DATA_BIN:] -= baselines
+                    idx += trace_len
+
+        for evt in batch_events:
+            if evt not in event_datas: continue
+            data = event_datas[evt]
+            
+            if len(data) == 0:
+                self.batched_data_cache[evt] = data
+                continue
+
+            if self.remove_outliers:
+                labeled_image = skimage.measure.label(event_pad_images[evt], background=0)
+                labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
+                if len(counts) > 0:
+                    bigest_label = labels[np.argmax(counts)]
+                    new_data = []
+                    for line in data:
+                        chnl_info = tuple(line[0:4])
+                        if chnl_info in self.chnls_to_pad:
+                            pad = self.chnls_to_pad[chnl_info]
+                            x,y = self.pad_to_xy_index[pad]
+                            if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
+                                new_data.append(line)
+                        else:
+                            continue
+                    data = np.array(new_data)
+                else:
+                    data = np.array([])
+
+            if self.data_select_mode == 'peak only':
+                for line in data:
+                    peak_index = np.argmax(line[FIRST_DATA_BIN:])
+                    line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index] = 0
+                    if peak_index < len(line[FIRST_DATA_BIN:]):
+                        line[FIRST_DATA_BIN+peak_index+1:] = 0
+            elif self.data_select_mode == 'near peak':
+                for line in data:
+                    peak_index = np.argmax(line[FIRST_DATA_BIN:])
+                    if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
+                        line[FIRST_DATA_BIN:] = 0
+                    else:
+                        if peak_index - self.near_peak_window_width > 0:
+                            line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
+                        if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
+                            line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
+                            
+            if self.apply_gain_match:
+                for line in data:
+                    chnl_info = tuple(line[0:4])
+                    if chnl_info in self.chnls_to_pad:
+                        pad = self.chnls_to_pad[chnl_info]
+                        line[FIRST_DATA_BIN:] *= self.pad_gains[pad]
+
+            self.batched_data_cache[evt] = data
+
+        if event_number in self.batched_data_cache:
+            data = self.batched_data_cache.pop(event_number)
         else:
-            data = np.array(data, copy=True, dtype=float)
-
-        if len(data) == 0:
-            return data
-
-        if self.remove_outliers:
-            pad_image = np.zeros(np.shape(self.pad_plane))
-
-
-        #Loop over each pad, reconstructing railed traces, then performing baseline subtraction, and marking the pad in the pad image
-        #which will be used for outlier removal.
-        valid_indices = []
-        valid_pads = []
-        for i, line in enumerate(data):
-            chnl_info = tuple(line[0:4])
-            if chnl_info in self.chnls_to_pad:
-                pad = self.chnls_to_pad[chnl_info]
-                valid_indices.append(i)
-                valid_pads.append(pad)
-                if self.reconstruct_railed_pads:
-                    if np.max(line[FIRST_DATA_BIN:]) == 4095:
-                        line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
-                if self.remove_outliers:
-                    x,y = self.pad_to_xy_index[pad]
-                    pad_image[x,y]=1
-                    
-        if len(valid_indices) > 0 and self.background_subtract_mode != 'none':
-            traces_2d = data[valid_indices, FIRST_DATA_BIN:]
-            baselines_2d = self.calculate_background_2d(traces_2d)
-            data[valid_indices, FIRST_DATA_BIN:] -= baselines_2d
-        if self.remove_outliers:
-            labeled_image = skimage.measure.label(pad_image, background=0)
-            labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
-            bigest_label = labels[np.argmax(counts)]
-            new_data = []
-            for line in data: #only copy over pads in the bigest blob and veto pads
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
-                x,y = self.pad_to_xy_index[pad]
-                if labeled_image[x,y] == bigest_label or pad in VETO_PADS:
-                    new_data.append(line)
-            data = np.array(new_data)
-        
-        if self.data_select_mode == 'peak only': #zero everything but the peak bin
-            for line in data:
-                peak_index = np.argmax(line[FIRST_DATA_BIN:])
-                line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index] = 0
-                if peak_index < len(line[FIRST_DATA_BIN:]):
-                    line[FIRST_DATA_BIN+peak_index+1:] = 0
-        elif self.data_select_mode == 'near peak': #zero everything outside the window
-            for line in data:
-                peak_index = np.argmax(line[FIRST_DATA_BIN:])
-                if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
-                    line[FIRST_DATA_BIN:] = 0
-                else:
-                    if peak_index - self.near_peak_window_width > 0:
-                        line[FIRST_DATA_BIN:FIRST_DATA_BIN+peak_index - self.near_peak_window_width] = 0
-                    if peak_index + self.near_peak_window_width < len(line[FIRST_DATA_BIN:]):
-                        line[FIRST_DATA_BIN+peak_index + self.near_peak_window_width:] = 0
-        #for smart baseline subtraction, zeroing traces outside the peak window is handled by baseline subtraction
-        
-        #pad gain match is applied after baseline subtraction because a number of baseline subtraction
-        #parameters are mostly driven by noise, which we don't expect to strongly correlate with pad gain
-        if self.apply_gain_match:
-            data = np.array(data, copy=True)
-            for line in data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                    line[FIRST_DATA_BIN:] *= self.pad_gains[pad]  
+            data = np.array([])
+            
         if self.cache_enable:
             self.cached_data = data
             self.cached_event = event_number
-        return data
+        return np.array(data, copy=True)
 
     def calculate_background(self, trace, debug_plots=False):
         '''
