@@ -68,11 +68,7 @@ def get_h5_file(experiment, run_number, config_filename='smart2_w_br.csv'):
     if os.path.exists(config_path):
         h5file.load_config(config_path)
     elif config_filename != 'none':
-        print(f"\n=======================================================")
-        print(f"WARNING: Config file '{config_filename}' not found at:")
-        print(f"{config_path}")
-        print(f"Silently falling back to default raw_h5_file settings!")
-        print(f"=======================================================\n")
+        raise FileNotFoundError(f"Config file '{config_filename}' not found at: {config_path}")
     
     return h5file
 
@@ -145,8 +141,21 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
             railed_pads.append(h5file.get_railed_pads(evt))
             center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
             xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
+            # pad vv to (3, 3) and dd to (3,) if needed
+            if vv.shape[0] < 3:
+                padded_vv = np.zeros((3, 3))
+                padded_vv[:vv.shape[0], :] = vv
+                vv = padded_vv
+            if dd.shape[0] < 3:
+                padded_dd = np.zeros(3)
+                padded_dd[:dd.shape[0]] = dd
+                dd = padded_dd
+                
             principle_axes.append(vv)
-            variances_along_axes.append(dd**2/(len(xs)-1))
+            if len(xs) > 1:
+                variances_along_axes.append(dd**2/(len(xs)-1))
+            else:
+                variances_along_axes.append(np.zeros(3))
             track_centers.append(center)
             pad_counts = np.zeros(1024)
             pad_maxs.append(np.zeros(1024))
@@ -163,7 +172,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
                         zs[:, np.newaxis]), 
                         axis=1)
                 rbar = points - track_centers[-1]
-                track_direction = principle_axes[-1][:, 0]
+                track_direction = principle_axes[-1][0]
                 rdotv = np.dot(rbar, track_direction)
                 #project endpoints onto track axis
                 first_point = np.min(rdotv)*track_direction + track_centers[-1]
@@ -171,7 +180,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
                 track_endpoints.append([first_point, last_point])
                 #above variance is just variance in postiion of points above some threshold
                 #instead calcualte variance along 2nd axis of charge
-                width_axis = principle_axes[-1][:, 1]
+                width_axis = principle_axes[-1][1]
                 total_charge = np.sum(es)
                 center_of_charge = np.einsum('i,ij->j',es, points)/total_charge
                 displacement_from_center = points - center_of_charge
@@ -246,6 +255,13 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
 def _load_run_quantities(args):
     if len(args) == 6:
         experiment, run, qnames, settings_hash, config_filename, gpus_to_use = args
+        import multiprocessing
+        identity = multiprocessing.current_process()._identity
+        if identity:
+            idx = (identity[0] - 1) % len(gpus_to_use)
+            gpus_to_use = [gpus_to_use[idx]]
+        else:
+            gpus_to_use = [gpus_to_use[0]]
     else:
         experiment, run, qnames, settings_hash, config_filename = args
         gpus_to_use = [0]
@@ -314,7 +330,7 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
     settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0, config_filename)
     if gpus_to_use is None:
         gpus_to_use = [0]
-    args_list = [(experiment, run, qnames, settings_hash, config_filename, [gpus_to_use[i % len(gpus_to_use)]]) for i, run in enumerate(runs)]
+    args_list = [(experiment, run, qnames, settings_hash, config_filename, gpus_to_use) for i, run in enumerate(runs)]
     
     if num_workers > 1:
         from concurrent.futures import ProcessPoolExecutor
