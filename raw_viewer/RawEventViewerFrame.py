@@ -272,6 +272,7 @@ class RawEventViewerFrame(ttk.Frame):
 
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        self.background_mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
         rve_cut_frame = ttk.LabelFrame(self, text='RvE Cut')
         ttk.Button(rve_cut_frame, text='edit cut on gui', command=self.define_cut_on_gui).grid(row=0, column=0)
@@ -298,7 +299,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.check_state_changed()
     
     def browse_for_settings_file(self):
-        file_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/gui_configs', title='select GUI settings file', filetypes=([("gui config", ".gui_ini")]))
+        file_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/tpc_processing_configs', title='select GUI settings file', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]))
         self.settings_file_entry.delete(0, tk.END)
         self.settings_file_entry.insert(0, file_path)
 
@@ -306,6 +307,7 @@ class RawEventViewerFrame(ttk.Frame):
         file_path = self.settings_file_entry.get()
         if file_path.endswith('.csv'):
             self.h5file.load_config(file_path)
+            self.sync_gui_from_h5file()
             self.entry_changed(None)
             self.check_state_changed()
             return
@@ -337,6 +339,53 @@ class RawEventViewerFrame(ttk.Frame):
         #apply settings to raw data object
         self.entry_changed(None)
         self.check_state_changed()
+
+    def sync_gui_from_h5file(self):
+        self.is_syncing = True
+        try:
+            def update_entry(entry, value):
+                entry.delete(0, tk.END)
+                entry.insert(0, str(value))
+                
+            update_entry(self.background_start_entry, self.h5file.num_background_bins[0])
+            update_entry(self.background_stop_entry, self.h5file.num_background_bins[1])
+            update_entry(self.length_threshold_entry, self.h5file.length_counts_threshold)
+            update_entry(self.energy_threshold_entry, self.h5file.ic_counts_threshold)
+            self.mode_var.set(self.h5file.data_select_mode)
+            update_entry(self.near_peak_window_entry, self.h5file.near_peak_window_width)
+            
+            if hasattr(self.h5file, 'require_peak_within'):
+                update_entry(self.peak_first_allowed_bin_entry, self.h5file.require_peak_within[0])
+                update_entry(self.peak_last_allowed_bin_entry, self.h5file.require_peak_within[1])
+                
+            def format_arr(arr):
+                if isinstance(arr, str): return arr
+                return ','.join(map(str, arr))
+                
+            if hasattr(self.h5file, 'asads'): update_entry(self.asads_entry, format_arr(self.h5file.asads))
+            if hasattr(self.h5file, 'cobos'): update_entry(self.cobos_entry, format_arr(self.h5file.cobos))
+            if hasattr(self.h5file, 'pads'): update_entry(self.pads_entry, format_arr(self.h5file.pads))
+            
+            self.background_mode_var.set(self.h5file.background_subtract_mode)
+            self.reconstruct_railed_var.set(1 if self.h5file.reconstruct_railed_pads else 0)
+            self.remove_outlier_var.set(1 if getattr(self.h5file, 'remove_outliers', False) else 0)
+            
+            if hasattr(self.h5file, 'smart_bins_away_to_check'):
+                update_entry(self.smart_bins_away_to_check_entry, self.h5file.smart_bins_away_to_check)
+            if hasattr(self.h5file, 'num_smart_background_ave_bins'):
+                update_entry(self.smart_num_background_bins_entry, self.h5file.num_smart_background_ave_bins)
+                
+            update_entry(self.zscale_entry, self.h5file.zscale)
+            
+            kernel = getattr(self.h5file, 'background_convolution_kernel', None)
+            if kernel is not None:
+                r_include = (len(kernel) - 1) // 2
+                zero_count = np.sum(kernel == 0)
+                r_exclude = zero_count // 2
+                update_entry(self.include_width_entry, r_include)
+                update_entry(self.exclude_width_entry, r_exclude)
+        finally:
+            self.is_syncing = False
 
     def save_settings_file(self,file_path=None):
         if file_path == None:
@@ -609,6 +658,8 @@ class RawEventViewerFrame(ttk.Frame):
         HistogramFitFrame(new_window, data=xdata).pack()
 
     def entry_changed(self, event):
+        if getattr(self, 'is_syncing', False):
+            return
         self.h5file.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
         self.h5file.length_counts_threshold = float(self.length_threshold_entry.get())
         self.h5file.ic_counts_threshold = float(self.energy_threshold_entry.get())

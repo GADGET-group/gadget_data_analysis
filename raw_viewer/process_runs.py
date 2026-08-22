@@ -60,13 +60,19 @@ def get_h5_file(experiment, run_number, config_filename='smart2_w_br.csv'):
     run_number = int(run_number)
     raw_h5_path = get_h5_path(experiment, run_number)
     
-    config_path = os.path.join(os.path.dirname(__file__), 'tpc_processing_configs', config_filename)
+    config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
     
     # Defaults in case not all are in config
     h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
     
     if os.path.exists(config_path):
         h5file.load_config(config_path)
+    elif config_filename != 'none':
+        print(f"\n=======================================================")
+        print(f"WARNING: Config file '{config_filename}' not found at:")
+        print(f"{config_path}")
+        print(f"Silently falling back to default raw_h5_file settings!")
+        print(f"=======================================================\n")
     
     return h5file
 
@@ -316,21 +322,6 @@ def _load_run_quantities(args):
                 raise ValueError(f"Quantity {qname} not found in ROOT file")
     return result
 
-worker_gpu_id = None
-def _init_gpu_worker(q):
-    global worker_gpu_id
-    worker_gpu_id = q.get()
-
-def _load_run_quantities_dynamic(args):
-    global worker_gpu_id
-    args_with_gpu = list(args)
-    if worker_gpu_id is not None:
-        args_with_gpu[-1] = [worker_gpu_id]
-    return _load_run_quantities(tuple(args_with_gpu))
-
-def _load_run_quantities_chunk(args_chunk):
-    return [_load_run_quantities(args) for args in args_chunk]
-
 def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename='smart2_w_br.csv', gpus_to_use=None):
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
@@ -349,30 +340,6 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
         from concurrent.futures import ProcessPoolExecutor
         import multiprocessing
         
-        # 1. Identify which runs need GPU processing (ROOT file doesn't exist)
-        config_name = os.path.splitext(config_filename)[0]
-        needs_processing_args = []
-        for args in args_list:
-            exp, run, qnames_arg, s_hash, c_file, gpus = args
-            fname = os.path.join(get_save_path(exp), f'{exp}_run{run}_{config_name}.root')
-            if not os.path.exists(fname):
-                needs_processing_args.append(args)
-                
-        # 2. Process missing runs with strict GPU limits to prevent OOM
-        if len(needs_processing_args) > 0:
-            num_gpus = len(gpus_to_use)
-            ctx = multiprocessing.get_context('spawn')
-            q = ctx.Queue()
-            for g in gpus_to_use:
-                q.put(g)
-            with ProcessPoolExecutor(max_workers=num_gpus, mp_context=ctx, initializer=_init_gpu_worker, initargs=(q,)) as executor:
-                if show_load_progress:
-                    print(f"Processing {len(needs_processing_args)} missing runs dynamically on {num_gpus} GPUs...")
-                    list(tqdm(executor.map(_load_run_quantities_dynamic, needs_processing_args), total=len(needs_processing_args)))
-                else:
-                    list(executor.map(_load_run_quantities_dynamic, needs_processing_args))
-                    
-        # 3. Now that all ROOT files exist, rapidly load them with the full worker pool
         with ProcessPoolExecutor(max_workers=num_workers, mp_context=multiprocessing.get_context('spawn')) as executor:
             if show_load_progress:
                 results = list(tqdm(executor.map(_load_run_quantities, args_list), total=len(runs)))

@@ -16,16 +16,16 @@ from raw_viewer import ddas_interface
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
-experiment = 'e23035_prep_vault'
+experiment = 'e23035'
 GPUs_to_use = [0,1,2,3]
-max_workers=150
-tpc_config = 'smart2_rpr.cv'
+max_workers=100
+tpc_config = 'smart2_nrpr.csv'
  
 if experiment == 'e23035':
     if True:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')  & (e23035_runs.run_df['final beam settings?'] == 'yes')] 
         #run_range = range(263, 280)
-        #run_range = [131]
+        #run_range = [170, 171, 172, 173]
     else:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')]
     #run_range=[148,149,150]
