@@ -192,6 +192,28 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
         ts = h5file.get_timestamps_array()
 
         def sanitize_jagged(lst):
+            if len(lst) == 0:
+                return np.empty(0, dtype=np.float64)
+                
+            # FAST PATH: Vectorized concatenation + unflatten
+            try:
+                counts = [len(x) for x in lst]
+                if sum(counts) == 0:
+                    return ak.unflatten(np.array([], dtype=np.float64), counts)
+                
+                valid_arrays = [x for x in lst if len(x) > 0]
+                flat = np.concatenate(valid_arrays)
+                return ak.unflatten(flat, counts)
+            except Exception:
+                pass
+                
+            # MEDIUM PATH: awkard native iter
+            try:
+                return ak.from_iter(lst)
+            except Exception:
+                pass
+            
+            # SLOW PATH: deep python traversal
             def _walk(obj):
                 if isinstance(obj, tuple):
                     return [_walk(x) for x in obj]
@@ -203,8 +225,6 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
                     return obj.tolist()
                 return obj
             cleaned = [_walk(x) for x in lst]
-            if len(cleaned) == 0:
-                return np.empty(0, dtype=np.float64)
             try:
                 counts = [len(x) for x in cleaned]
                 if sum(counts) == 0:

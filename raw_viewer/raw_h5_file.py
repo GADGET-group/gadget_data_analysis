@@ -18,6 +18,8 @@ from raw_viewer.dev import railed_pad_repair
 try:
     import cupy as cp
     import cupyx.scipy.special as cpspecial
+    import torch
+    from torch_ransac3d.line import line_fit
     USE_GPU = True
 except:
     cp = np
@@ -421,10 +423,25 @@ class raw_h5_file:
             Go 10 bins away from each end of the peak, and fit a line to the next 20 bins to get a local estimate of the baseline
             '''
             #use ransac to fit a line to background
-            x = np.arange(len(trace)).reshape(-1, 1)
-            ransac = linear_model.RANSACRegressor()
-            ransac.fit(x, trace) # scikit-learn handles 1D y arrays fine, no reshape needed
-            ransac_baseline = ransac.predict(x)
+            if USE_GPU:
+                pts = np.zeros((len(trace), 3))
+                pts[:, 0] = np.arange(len(trace))
+                pts[:, 1] = trace
+                pts_torch = torch.tensor(pts, dtype=torch.float32, device='cuda')
+                mad_thresh = np.median(np.abs(trace - np.median(trace)))
+                if mad_thresh == 0:
+                    mad_thresh = 1.0 # fallback
+                result = line_fit(pts=pts_torch, thresh=mad_thresh, max_iterations=100, iterations_per_batch=100, device=torch.device('cuda'))
+                px, py = result.point[0].item(), result.point[1].item()
+                dx, dy = result.direction[0].item(), result.direction[1].item()
+                x_vals = np.arange(len(trace))
+                t = (x_vals - px) / (dx if dx != 0 else 1e-8)
+                ransac_baseline = py + t * dy
+            else:
+                x = np.arange(len(trace)).reshape(-1, 1)
+                ransac = linear_model.RANSACRegressor()
+                ransac.fit(x, trace) # scikit-learn handles 1D y arrays fine, no reshape needed
+                ransac_baseline = ransac.predict(x)
             #threshold = self.smart2_threshold + np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
             above_threshold = trace>ransac_baseline#threshold
             
@@ -594,9 +611,11 @@ class raw_h5_file:
         try:
             uu, dd, vv = cp.linalg.svd(points - points_mean, full_matrices=False)
         except Exception as e:
-            print('caught exceptions while trying to perform SVD of event '%+str(event))
-            print(e)
-            uu, vv, dd = None
+            # print('caught exceptions while trying to perform SVD of event '+str(event))
+            # print(e)
+            pts_np = cp.asnumpy(points - points_mean)
+            uu, dd, vv = np.linalg.svd(pts_np, full_matrices=False)
+            uu, dd, vv = cp.array(uu), cp.array(dd), cp.array(vv)
 
         if return_np:
             points_mean = cp.asnumpy(points_mean)
