@@ -14,6 +14,8 @@ from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 from sklearn import datasets, linear_model
 from raw_viewer.dev import railed_pad_repair
+import scipy.signal
+import numba
 
 try:
     import cupy as cp
@@ -21,7 +23,7 @@ try:
     import torch
     from torch_ransac3d.line import line_fit
     USE_GPU = True
-except:
+except Exception as e:
     cp = np
     import scipy.special as cpspecial
     cp.asnumpy = lambda x: x
@@ -33,6 +35,175 @@ import skimage.measure
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_PADS = 1024
+
+def batched_line_fit_2d(traces, device=torch.device('cuda')):
+    # traces: numpy array (B, 512)
+    if traces.shape[0] == 0:
+        return np.empty((0, traces.shape[1]), dtype=np.float32)
+        
+    traces_torch = torch.tensor(traces, dtype=torch.float32, device=device)
+    B, N = traces_torch.shape
+    
+    # calculate mad_thresh for each batch
+    # median across dim 1
+    medians = traces_torch.median(dim=1, keepdim=True).values
+    abs_dev = torch.abs(traces_torch - medians)
+    mad_thresh = abs_dev.median(dim=1).values
+    mad_thresh = torch.clamp(mad_thresh, min=1.0) # fallback
+    
+    max_iterations = 100
+    idx = torch.randint(0, N, (B, max_iterations, 2), device=device)
+    
+    x_coords = torch.arange(N, dtype=torch.float32, device=device).unsqueeze(0).expand(B, N)
+    x_coords_expanded = x_coords.unsqueeze(1).expand(B, max_iterations, N)
+    traces_expanded = traces_torch.unsqueeze(1).expand(B, max_iterations, N)
+    
+    x_sampled = torch.gather(x_coords_expanded, 2, idx)
+    y_sampled = torch.gather(traces_expanded, 2, idx)
+    
+    x1, x2 = x_sampled[..., 0], x_sampled[..., 1]
+    y1, y2 = y_sampled[..., 0], y_sampled[..., 1]
+    
+    A = y1 - y2
+    B_coef = x2 - x1
+    C = x1 * y2 - x2 * y1
+    
+    norm = torch.sqrt(A**2 + B_coef**2) + 1e-8
+    A = A / norm
+    B_coef = B_coef / norm
+    C = C / norm
+    
+    dist = torch.abs(
+        A.unsqueeze(2) * x_coords.unsqueeze(1) + 
+        B_coef.unsqueeze(2) * traces_torch.unsqueeze(1) + 
+        C.unsqueeze(2)
+    )
+    
+    inliers = dist <= mad_thresh.view(B, 1, 1)
+    inlier_counts = inliers.sum(dim=2)
+    
+    # Invalidate iterations where x1 == x2 (which yields A=0, B=0, C=0)
+    valid_mask = (x1 != x2)
+    inlier_counts[~valid_mask] = -1
+    
+    best_iters = inlier_counts.argmax(dim=1)
+    
+    b_idx = torch.arange(B, device=device)
+    best_A = A[b_idx, best_iters]
+    best_B = B_coef[b_idx, best_iters]
+    best_C = C[b_idx, best_iters]
+    
+    baselines = -(best_A.unsqueeze(1) * x_coords + best_C.unsqueeze(1)) / (best_B.unsqueeze(1) + 1e-8)
+    return baselines.cpu().numpy()
+
+@numba.jit(nopython=True, cache=True, parallel=True)
+def _smart2_numba_peak_trimming_2d(traces, ransac_baselines, min_bins_in_peak, bins_away, min_sigma):
+    B, N = traces.shape
+    baselines = np.empty_like(traces)
+    
+    for b in numba.prange(B):
+        trace = traces[b]
+        ransac_baseline = ransac_baselines[b]
+        n = N
+        
+        # 1. Find connected components (starts and ends of peaks)
+        starts = []
+        ends = []
+        in_peak = False
+        for i in range(n):
+            if trace[i] > ransac_baseline[i]:
+                if not in_peak:
+                    starts.append(i)
+                    in_peak = True
+            else:
+                if in_peak:
+                    ends.append(i)
+                    in_peak = False
+        if in_peak:
+            ends.append(n)
+            
+        if len(starts) == 0:
+            baselines[b] = np.copy(trace)
+            continue
+            
+        # 2. Find the largest peak
+        most_counts = -1.0
+        largest_index = -1
+        for i in range(len(starts)):
+            num_bins = ends[i] - starts[i]
+            if num_bins > min_bins_in_peak:
+                max_counts = trace[starts[i]]
+                for j in range(starts[i]+1, ends[i]):
+                    if trace[j] > max_counts:
+                        max_counts = trace[j]
+                if max_counts > most_counts:
+                    most_counts = max_counts
+                    largest_index = i
+                    
+        if largest_index == -1:
+            baselines[b] = np.copy(trace)
+            continue
+            
+        # 3. Peak trimming
+        s = starts[largest_index]
+        e = ends[largest_index]
+        
+        peak_start = max(0, s - bins_away)
+        peak_end = min(n - 1, e + bins_away)
+        
+        # 4. compute peak_thresh from MAD (std of non-peak regions)
+        len1 = peak_start
+        len2 = n - peak_end
+        if (len1 + len2) > 0:
+            non_peak_diffs = np.empty(len1 + len2, dtype=np.float64)
+            for i in range(len1):
+                non_peak_diffs[i] = trace[i] - ransac_baseline[i]
+            for i in range(len2):
+                non_peak_diffs[len1 + i] = trace[peak_end + i] - ransac_baseline[peak_end + i]
+            
+            std_val = np.std(non_peak_diffs) 
+        else:
+            std_val = 0.0
+            
+        peak_thresh = min_sigma * std_val
+        
+        # 5. argmax checking
+        max_trace_val = -1e9
+        max_trace_idx = -1
+        for i in range(n):
+            if trace[i] > max_trace_val:
+                max_trace_val = trace[i]
+                max_trace_idx = i
+                
+        if (trace[max_trace_idx] - ransac_baseline[max_trace_idx]) < peak_thresh:
+            baselines[b] = np.copy(trace)
+            continue
+            
+        # 6. while loops
+        while peak_start < peak_end:
+            idx_check = min(peak_start + bins_away, n - 1)
+            if trace[peak_start] < trace[idx_check] - peak_thresh:
+                break
+            peak_start += 1
+            
+        while peak_end > peak_start:
+            idx_check = max(0, peak_end - bins_away)
+            if trace[peak_end] < trace[idx_check] - peak_thresh:
+                break
+            peak_end -= 1
+            
+        if peak_start == peak_end:
+            baselines[b] = np.copy(trace)
+            continue
+            
+        # 7. assign baseline
+        baseline = np.copy(trace)
+        for i in range(peak_start, peak_end):
+            baseline[i] = ransac_baseline[i]
+            
+        baselines[b] = baseline
+        
+    return baselines
 
 class raw_h5_file:
     def __init__(self, file_path, zscale, flat_lookup_csv):
@@ -298,22 +469,25 @@ class raw_h5_file:
 
         #Loop over each pad, reconstructing railed traces, then performing baseline subtraction, and marking the pad in the pad image
         #which will be used for outlier removal.
-        if self.background_subtract_mode!='none' or self.remove_outliers:
-            for line in data:
-                chnl_info = tuple(line[0:4])
-                if chnl_info in self.chnls_to_pad:
-                    pad = self.chnls_to_pad[chnl_info]
-                else:
-                    #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                    continue
+        valid_indices = []
+        valid_pads = []
+        for i, line in enumerate(data):
+            chnl_info = tuple(line[0:4])
+            if chnl_info in self.chnls_to_pad:
+                pad = self.chnls_to_pad[chnl_info]
+                valid_indices.append(i)
+                valid_pads.append(pad)
                 if self.reconstruct_railed_pads:
                     if np.max(line[FIRST_DATA_BIN:]) == 4095:
                         line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
-                if self.background_subtract_mode!='none':
-                    line[FIRST_DATA_BIN:] -= self.calculate_background(line[FIRST_DATA_BIN:])
                 if self.remove_outliers:
                     x,y = self.pad_to_xy_index[pad]
                     pad_image[x,y]=1
+                    
+        if len(valid_indices) > 0 and self.background_subtract_mode != 'none':
+            traces_2d = data[valid_indices, FIRST_DATA_BIN:]
+            baselines_2d = self.calculate_background_2d(traces_2d)
+            data[valid_indices, FIRST_DATA_BIN:] -= baselines_2d
         if self.remove_outliers:
             labeled_image = skimage.measure.label(pad_image, background=0)
             labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
@@ -365,170 +539,119 @@ class raw_h5_file:
 
     def calculate_background(self, trace, debug_plots=False):
         '''
-        Return calculated background for each timebin.
-
-        Trace should only contain data bins
+        Wrapper for calculate_background_2d that takes a 1D trace and returns a 1D baseline.
         '''
-        #apply consnant offset of average value of a pad within a time window
-        if self.background_subtract_mode == 'fixed window':
-            return np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
-        #rolling average to each side of a pad
-        elif self.background_subtract_mode == 'convolution':
-            return np.convolve(trace, self.background_convolution_kernel, mode='same')
-        #in the case of none, just return an array of 0s
-        elif self.background_subtract_mode == 'none':
-            return np.zeros(len(trace))
-        elif self.background_subtract_mode == 'smart':
-            peak_index = np.argmax(trace)
-            #zero traces with peaks outside specified region by returing the trace as the baseline
-            if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
-                return trace
-            #find  start of the peak, defined as where the going bin smart_bins_away_to_check
-            #is no longer at least ic_counts_threshold below the current bin
-            i = peak_index
-            while i>0:
-                j = max(0, i - self.smart_bins_away_to_check)
-                if trace[i] < trace[j] + self.ic_counts_threshold:
-                    break
-                i -= 1
-            peak_start = i
-            #find end
-            i = peak_index
-            while i < len(trace) - 1:
-                j = min(len(trace) - 1, i + self.smart_bins_away_to_check)
-                if trace[i] < trace[j] + self.ic_counts_threshold:
-                    break
-                i += 1
-            peak_end = i
-            #fit a line through the points just outside the peak region
-            xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
-                                           np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
-            ys = trace[xs]
-            slope, offset = np.polyfit(xs, ys, 1)
-            #offset = np.mean(ys)
-            #baseline will be the trace except in the peak region,
-            #so that everything away from the peak is zero'd out
-            baseline = np.array(trace, copy=True)
-            # for i in range(peak_start, peak_end+1):
-            #     baseline[i] = slope*i + offset
-            #baseline[np.arange(peak_start, peak_end+1)] = offset
-            x_peak = np.arange(peak_start, peak_end)
-            baseline[x_peak] = offset + slope*x_peak
-            return baseline
-        elif self.background_subtract_mode == 'smart2':
+        trace_2d = np.ascontiguousarray(trace, dtype=np.float64).reshape(1, -1)
+        return self.calculate_background_2d(trace_2d, debug_plots)[0]
+
+    def calculate_background_2d(self, traces_2d, debug_plots=False):
+        '''
+        Return calculated background for each timebin for a 2D array of traces.
+
+        Traces should only contain data bins
+        '''
+        if self.background_subtract_mode == 'smart2':
             '''
             RANSAC lowest 25% of points to get initial baseline estimate
             Find peak with maximum value and more than 5 consecutive bins above the baseline found by RANSAC. Trim trace to 10 bins to each side of the found block of bins.
             Starting from the left of the trimmed trace, find the first place where the current time bin is more than MAD (from RANSAC) counts below the sample 10 samples later, and further trim the trace here. Do the same thing from the right.
             Go 10 bins away from each end of the peak, and fit a line to the next 20 bins to get a local estimate of the baseline
             '''
-            #use ransac to fit a line to background
             if USE_GPU:
-                pts = np.zeros((len(trace), 3))
-                pts[:, 0] = np.arange(len(trace))
-                pts[:, 1] = trace
-                pts_torch = torch.tensor(pts, dtype=torch.float32, device='cuda')
-                mad_thresh = np.median(np.abs(trace - np.median(trace)))
-                if mad_thresh == 0:
-                    mad_thresh = 1.0 # fallback
-                result = line_fit(pts=pts_torch, thresh=mad_thresh, max_iterations=100, iterations_per_batch=100, device=torch.device('cuda'))
-                px, py = result.point[0].item(), result.point[1].item()
-                dx, dy = result.direction[0].item(), result.direction[1].item()
-                x_vals = np.arange(len(trace))
-                t = (x_vals - px) / (dx if dx != 0 else 1e-8)
-                ransac_baseline = py + t * dy
+                ransac_baseline_2d = batched_line_fit_2d(traces_2d)
             else:
-                x = np.arange(len(trace)).reshape(-1, 1)
-                ransac = linear_model.RANSACRegressor()
-                ransac.fit(x, trace) # scikit-learn handles 1D y arrays fine, no reshape needed
-                ransac_baseline = ransac.predict(x)
-            #threshold = self.smart2_threshold + np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
-            above_threshold = trace>ransac_baseline#threshold
-            
-            # Mathematically equivalent to skimage.measure.label for 1D boolean array
-            padded = np.concatenate(([False], above_threshold, [False]))
-            diffs = np.diff(padded.astype(np.int8))
-            starts = np.where(diffs == 1)[0]
-            ends = np.where(diffs == -1)[0]
-            
-            if len(starts) == 0:
-                return trace
+                ransac_baseline_2d = np.zeros_like(traces_2d)
+                x = np.arange(traces_2d.shape[1]).reshape(-1, 1)
+                for b in range(traces_2d.shape[0]):
+                    ransac = linear_model.RANSACRegressor()
+                    ransac.fit(x, traces_2d[b])
+                    ransac_baseline_2d[b] = ransac.predict(x)
                 
-            num_bins = ends - starts
-            
-            most_counts, largest_index = 0, 0
-            for i in range(len(starts)):
-                # Using slicing (O(1)) instead of boolean masking (O(N)) for max_counts
-                max_counts = np.max(trace[starts[i]:ends[i]])
-                if max_counts > most_counts and num_bins[i] > self.smart2_min_bins_in_peak:
-                    most_counts = max_counts
-                    largest_index = i
+            return _smart2_numba_peak_trimming_2d(
+                np.ascontiguousarray(traces_2d, dtype=np.float64), 
+                np.ascontiguousarray(ransac_baseline_2d, dtype=np.float64), 
+                self.smart2_min_bins_in_peak, 
+                self.smart_bins_away_to_check, 
+                self.smart2_min_sigma
+            )
 
-            if num_bins[largest_index] < self.smart2_min_bins_in_peak:
-                return trace
-            
-            selected_label_indicies = np.arange(starts[largest_index], ends[largest_index])
-            peak_start = max(0, selected_label_indicies[0] - self.smart_bins_away_to_check)
-            peak_end = min(len(trace)-1, selected_label_indicies[-1]+self.smart_bins_away_to_check)
-            #get threshold for trimming peak from MAD
-            peak_thresh = self.smart2_min_sigma*np.std(np.concatenate([trace[:peak_start]-ransac_baseline[:peak_start], 
-                                                                       trace[peak_end:]-ransac_baseline[peak_end:]]))
-            #print(peak_thresh)
-            i = np.argmax(trace)
-            if trace[i] - ransac_baseline[i] < peak_thresh:
-                return trace
-            #peak_thresh = np.max(np.abs(trace[ransac.inlier_mask_] - ransac_baseline[ransac.inlier_mask_]))
-            #print(peak_thresh)
-            while peak_start< peak_end:
-                if trace[peak_start] < trace[min(peak_start + self.smart_bins_away_to_check, len(trace)-1)] - peak_thresh:
-                    break
-                peak_start += 1
-            while peak_end > peak_start:
-                if trace[peak_end] < trace[max(0, peak_end - self.smart_bins_away_to_check)] - peak_thresh:
-                    break
-                peak_end -= 1
-            # print(peak_start, peak_end)
-            if peak_start == peak_end:
-                return trace
+        B, N = traces_2d.shape
+        baselines = np.zeros_like(traces_2d)
 
-            if False:
+        for b in range(B):
+            trace = traces_2d[b]
+            #apply consnant offset of average value of a pad within a time window
+            if self.background_subtract_mode == 'fixed window':
+                baselines[b] = np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
+            #rolling average to each side of a pad
+            elif self.background_subtract_mode == 'convolution':
+                baselines[b] = np.convolve(trace, self.background_convolution_kernel, mode='same')
+            #in the case of none, just return an array of 0s
+            elif self.background_subtract_mode == 'none':
+                baselines[b] = np.zeros(len(trace))
+            elif self.background_subtract_mode == 'smart':
+                peak_index = np.argmax(trace)
+                #zero traces with peaks outside specified region by returing the trace as the baseline
+                if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
+                    baselines[b] = trace
+                    continue
+                #find  start of the peak, defined as where the going bin smart_bins_away_to_check
+                #is no longer at least ic_counts_threshold below the current bin
+                i = peak_index
+                while i>0:
+                    j = max(0, i - self.smart_bins_away_to_check)
+                    if trace[i] < trace[j] + self.ic_counts_threshold:
+                        break
+                    i -= 1
+                peak_start = i
+                #find end
+                i = peak_index
+                while i < len(trace) - 1:
+                    j = min(len(trace) - 1, i + self.smart_bins_away_to_check)
+                    if trace[i] < trace[j] + self.ic_counts_threshold:
+                        break
+                    i += 1
+                peak_end = i
                 #fit a line through the points just outside the peak region
                 xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
-                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins+1, len(trace)))])
+                                               np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
                 ys = trace[xs]
                 slope, offset = np.polyfit(xs, ys, 1)
-            #offset = np.mean(ys)
-            #baseline will be the trace except in the peak region,
-            #so that everything away from the peak is zero'd out
-            baseline = np.array(trace, copy=True)
-            # for i in range(peak_start, peak_end+1):
-            #     baseline[i] = slope*i + offset
-            x_peak = np.arange(peak_start, peak_end)
-            baseline[x_peak] = ransac_baseline[x_peak]
-            return baseline
-        elif self.background_subtract_mode == 'snip':
-            p = self.smart_bins_away_to_check#20 # window size
-            
-            # LLS transform: log(log(y + 1) + 1)
-            y = np.array(trace, dtype=float, copy=True)
-            baseline = np.log(np.log(y + 1) + 1)
-            
-            # Pad with reflection to handle boundary bins cleanly
-            baseline = np.pad(baseline, pad_width=p, mode='reflect')
-            
-            for i in range(1, p + 1):
-                temp = (baseline[:-2*i] + baseline[2*i:]) / 2.0
-                baseline[i:-i] = np.minimum(baseline[i:-i], temp)
-            
-            # Remove padding
-            baseline = baseline[p:-p]
-            
-            # Inverse LLS transform
-            baseline = np.exp(np.exp(baseline) - 1) - 1
-            
-            return baseline
+                #offset = np.mean(ys)
+                #baseline will be the trace except in the peak region,
+                #so that everything away from the peak is zero'd out
+                baseline = np.array(trace, copy=True)
+                # for i in range(peak_start, peak_end+1):
+                #     baseline[i] = slope*i + offset
+                #baseline[np.arange(peak_start, peak_end+1)] = offset
+                x_peak = np.arange(peak_start, peak_end)
+                baseline[x_peak] = offset + slope*x_peak
+                baselines[b] = baseline
+            elif self.background_subtract_mode == 'snip':
+                p = self.smart_bins_away_to_check#20 # window size
+                
+                # LLS transform: log(log(y + 1) + 1)
+                y = np.array(trace, dtype=float, copy=True)
+                baseline = np.log(np.log(y + 1) + 1)
+                
+                # Pad with reflection to handle boundary bins cleanly
+                baseline = np.pad(baseline, pad_width=p, mode='reflect')
+                
+                for i in range(1, p + 1):
+                    temp = (baseline[:-2*i] + baseline[2*i:]) / 2.0
+                    baseline[i:-i] = np.minimum(baseline[i:-i], temp)
+                
+                # Remove padding
+                baseline = baseline[p:-p]
+                
+                # Inverse LLS transform
+                baseline = np.exp(np.exp(baseline) - 1) - 1
+                
+                baselines[b] = baseline
+            else:
+                assert False #invalid mode
 
-        assert False #invalid mode
+        return baselines
 
     def get_xyte(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''

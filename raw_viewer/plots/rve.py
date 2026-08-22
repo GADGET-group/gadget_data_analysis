@@ -17,8 +17,8 @@ from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'
-GPUs_to_use = [0,1,2,3]
-max_workers=8
+GPUs_to_use = [1,2,3]
+max_workers=len(GPUs_to_use)
 tpc_config = 'smart2_nrpr.csv'
  
 if experiment == 'e23035':
