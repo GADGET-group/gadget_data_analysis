@@ -157,21 +157,21 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
 
 
             #get track end points
-            if len(variances_along_axes[-1])==3:
+            if len(xs) > 1:
                 points = np.concatenate((xs[:, np.newaxis], 
                         ys[:, np.newaxis], 
                         zs[:, np.newaxis]), 
                         axis=1)
-                rbar = points - center
-                track_direction = vv[0]/np.sqrt(np.sum(vv[0]*vv[0]))
+                rbar = points - track_centers[-1]
+                track_direction = principle_axes[-1][:, 0]
                 rdotv = np.dot(rbar, track_direction)
                 #project endpoints onto track axis
-                first_point = np.min(rdotv)*track_direction + center#points[np.argmin(rdotv)]
-                last_point = np.max(rdotv)*track_direction + center#points[np.argmax(rdotv)]
+                first_point = np.min(rdotv)*track_direction + track_centers[-1]
+                last_point = np.max(rdotv)*track_direction + track_centers[-1]
                 track_endpoints.append([first_point, last_point])
                 #above variance is just variance in postiion of points above some threshold
                 #instead calcualte variance along 2nd axis of charge
-                width_axis = vv[1]/np.sqrt(np.sum(vv[1]*vv[1]))
+                width_axis = principle_axes[-1][:, 1]
                 total_charge = np.sum(es)
                 center_of_charge = np.einsum('i,ij->j',es, points)/total_charge
                 displacement_from_center = points - center_of_charge
@@ -191,47 +191,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
         
         ts = h5file.get_timestamps_array()
 
-        def sanitize_jagged(lst):
-            if len(lst) == 0:
-                return np.empty(0, dtype=np.float64)
-                
-            # FAST PATH: Vectorized concatenation + unflatten
-            try:
-                counts = [len(x) for x in lst]
-                if sum(counts) == 0:
-                    return ak.unflatten(np.array([], dtype=np.float64), counts)
-                
-                valid_arrays = [x for x in lst if len(x) > 0]
-                flat = np.concatenate(valid_arrays)
-                return ak.unflatten(flat, counts)
-            except Exception:
-                pass
-                
-            # MEDIUM PATH: awkard native iter
-            try:
-                return ak.from_iter(lst)
-            except Exception:
-                pass
-            
-            # SLOW PATH: deep python traversal
-            def _walk(obj):
-                if isinstance(obj, tuple):
-                    return [_walk(x) for x in obj]
-                elif isinstance(obj, list):
-                    return [_walk(x) for x in obj]
-                elif isinstance(obj, np.ndarray):
-                    if obj.dtype == object:
-                        return [_walk(x) for x in obj]
-                    return obj.tolist()
-                return obj
-            cleaned = [_walk(x) for x in lst]
-            try:
-                counts = [len(x) for x in cleaned]
-                if sum(counts) == 0:
-                    return ak.unflatten(np.array([], dtype=np.float64), counts)
-            except TypeError:
-                pass
-            return ak.from_iter(cleaned)
+
 
         res_centers = []
         for c in track_centers:
@@ -253,7 +213,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
             except TypeError:
                 res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
                 
-        events_data = {'track_center':np.array(res_centers, dtype=np.float64), 'principle_axes':sanitize_jagged(principle_axes), 'variance_along_axes': sanitize_jagged(variances_along_axes),
+        events_data = {'track_center':np.array(res_centers, dtype=np.float64), 'principle_axes':np.array(principle_axes, dtype=np.float64), 'variance_along_axes': np.array(variances_along_axes, dtype=np.float64),
                    'pad_charge': pad_charges, 'endpoints':np.array(res_endpoints, dtype=np.float64), 'charge_width':np.array(charge_widths),
                    'width_above_threshold':np.array(width_above_thresholds), 'pad_max':pad_maxs, 'timestamps':ts}
                    
