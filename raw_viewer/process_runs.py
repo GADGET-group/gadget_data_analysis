@@ -102,7 +102,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
     h5file = get_h5_file(experiment, run_number, config_filename)
     settings_hash = h5file.get_settings_hash()
     config_name = os.path.splitext(config_filename)[0]
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}_{config_name}.root')
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run_number)}_{config_name}.root')
     
     #git info to save
     git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
@@ -113,12 +113,12 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
         import glob
         save_path = get_save_path(experiment)
         cache_patterns = [
-            f'gm_ic_{experiment}_run{run_number}_*.npy',
-            f'veto_counts_{experiment}_run{run_number}_*.npy',
-            f'max_veto_counts_{experiment}_run{run_number}_*.npy',
-            f'outer_ring_counts_{experiment}_run{run_number}_*.npy',
-            f'max_outer_ring_counts_{experiment}_run{run_number}_*.npy',
-            f'veto_mask_{experiment}_run{run_number}_*.npy'
+            f'gm_ic_{experiment}_run{int(run_number)}_*.npy',
+            f'veto_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'max_veto_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'outer_ring_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'max_outer_ring_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'veto_mask_{experiment}_run{int(run_number)}_*.npy'
         ]
         for pattern in cache_patterns:
             for cache_file in glob.glob(os.path.join(save_path, pattern)):
@@ -267,7 +267,7 @@ def _load_run_quantities(args):
         experiment, run, qnames, settings_hash, config_filename = args
         gpu_to_use = 0
     config_name = os.path.splitext(config_filename)[0]
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
     if not os.path.exists(fname):
         import multiprocessing
         if multiprocessing.current_process().name != 'MainProcess':
@@ -333,7 +333,7 @@ def _worker_ensure_processed(args):
         gpu_to_use = gpus_to_use[0]
         
     config_name = os.path.splitext(config_filename)[0]
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
     if not os.path.exists(fname):
         process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
 
@@ -344,7 +344,7 @@ def ensure_processed(experiment, runs, config_filename="", show_progress=True):
     # Filter for runs that actually need processing
     runs_to_process = []
     for run in runs:
-        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
+        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
         if not os.path.exists(fname):
             runs_to_process.append(run)
             
@@ -453,7 +453,7 @@ def get_veto_counts(experiment, runs, num_workers=1, config_filename=""):
     runs = [int(r) for r in runs]
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
-        return os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}_{settings_hash}.npy')
+        return os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
         
     def compute_fn(run):
         veto_pad_mask = np.zeros(1024)
@@ -469,7 +469,7 @@ def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1, config_filen
     
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
-        return os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}_{settings_hash}.npy')
+        return os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{int(run)}_{thresh_hash}_{settings_hash}.npy')
         
     def compute_fn(run):
         pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
@@ -485,7 +485,7 @@ def get_max_veto_counts(experiment, runs, num_workers=1, config_filename=""):
     
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
-        return os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}_{settings_hash}.npy')
+        return os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
         
     def compute_fn(run):
         pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
@@ -501,7 +501,7 @@ def get_outer_ring_counts(experiment, runs, num_workers=1, config_filename=""):
     
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
-        return os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
+        return os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
         
     def compute_fn(run):
         outer_ring_mask = np.zeros(1024)
@@ -516,7 +516,7 @@ def get_outer_ring_max_counts(experiment, runs, num_workers=1, config_filename="
     
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
-        return os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}_{settings_hash}.npy')
+        return os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
         
     def compute_fn(run):
         pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
@@ -533,7 +533,7 @@ def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename=""):
     
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
-        return os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}_{settings_hash}.npy')
+        return os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{int(run)}_{gains_hash}_{settings_hash}.npy')
         
     def compute_fn(run):
         counts_per_pad = get_quantity('pad_charge', experiment, [run], config_filename=config_filename)

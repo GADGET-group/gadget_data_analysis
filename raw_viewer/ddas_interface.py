@@ -168,7 +168,7 @@ def get_time_since_beam_off(experiment, run):
 
 def get_ddas_root_file_path(experiment, ddas_run):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
-    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{ddas_run}_merged.root')
+    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merged.root')
     if experiment == 'e25058':
         to_return += '_alex'
     return to_return
@@ -176,7 +176,7 @@ def get_ddas_root_file_path(experiment, ddas_run):
 def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename=""):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     ini_prefix = os.path.splitext(tpc_ini_filename)[0]
-    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{ddas_run}_tpc_{ini_prefix}.root')
+    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_tpc_{ini_prefix}.root')
     if experiment == 'e25058':
         to_return += '_alex'
     return to_return
@@ -187,7 +187,7 @@ def make_ddas_root_file(experiment, ddas_run):
     '''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     
-    log_path = os.path.join(os.path.split(root_file_path)[0], f'run{ddas_run}_merge.log')
+    log_path = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merge.log')
     if experiment == 'e25058':
         log_path += '_alex'
     output_path = get_ddas_root_file_path(experiment, ddas_run)
@@ -584,7 +584,7 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
         else:
             # Forced stdout and dynamic columns
             for run in tqdm.tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
-                temp_name = f"{hist_name}_run{run}"
+                temp_name = f"{hist_name}_run{int(run)}"
                 hist = get_histogram(experiment, run, binning, temp_name, hist_title, var_exp, selection, force_recreate, num_workers=1, tpc_ini_filename=tpc_ini_filename)
                 
                 if sum_hist is None:
