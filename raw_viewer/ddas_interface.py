@@ -530,6 +530,20 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
 
 
 def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename=""):
+    needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
+    if needs_tpc:
+        import importlib
+        try:
+            exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+            run_list_for_check = list(ddas_run) if is_iterable_runs(ddas_run) else [ddas_run]
+            get_runs = np.unique(exp_runs.run_df['GET'][
+                (exp_runs.run_df['DDAS'].isin(run_list_for_check)) & np.isfinite(exp_runs.run_df['GET'])
+            ])
+            if len(get_runs) > 0:
+                process_runs.ensure_processed(experiment, get_runs, config_filename=tpc_ini_filename, show_progress=True)
+        except (ImportError, AttributeError):
+            pass
+
     # --- MULTIPLE RUNS LOGIC ---
     if is_iterable_runs(ddas_run):
         sum_hist = None

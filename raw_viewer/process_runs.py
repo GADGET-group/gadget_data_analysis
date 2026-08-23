@@ -16,6 +16,9 @@ OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,101
                    504,503,502,501,507,506,505,250,251,252,246,247,248,249,241,242,232,233,222,210,197,183,168,153,137,121,
                    104,87,70,53,35,17,782,800,818,835,852,869,886,902,918,933,948,962,975,987,998,997]
 
+TPC_PROCESSING_GPUS = [0, 2,3] if socket.gethostname() == 'tpcgpu' else [0]
+TPC_MAX_WORKERS_PER_GPU = 2
+
 def get_save_path(experiment):
     if socket.gethostname() == 'tpcgpu':
         if experiment == 'e21072':
@@ -83,17 +86,15 @@ def get_experiment_settings_hash(experiment, example_run, config_filename=""):
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename="", gpus_to_use=None):
+def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename="", gpu_to_use=0):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a ROOT version of this information isn't available.
     '''
     run_number = int(run_number)
-    if gpus_to_use is None:
-        gpus_to_use = [0]
     try:
         import cupy as cp
-        cp.cuda.runtime.setDevice(gpus_to_use[0])
+        cp.cuda.runtime.setDevice(gpu_to_use)
     except ImportError:
         pass
     
@@ -259,16 +260,19 @@ def _load_run_quantities(args):
         identity = multiprocessing.current_process()._identity
         if identity:
             idx = (identity[0] - 1) % len(gpus_to_use)
-            gpus_to_use = [gpus_to_use[idx]]
+            gpu_to_use = gpus_to_use[idx]
         else:
-            gpus_to_use = [gpus_to_use[0]]
+            gpu_to_use = gpus_to_use[0]
     else:
         experiment, run, qnames, settings_hash, config_filename = args
-        gpus_to_use = [0]
+        gpu_to_use = 0
     config_name = os.path.splitext(config_filename)[0]
     fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
     if not os.path.exists(fname):
-        process_tpc_run(experiment, run, config_filename=config_filename, gpus_to_use=gpus_to_use)
+        import multiprocessing
+        if multiprocessing.current_process().name != 'MainProcess':
+            print(f"WARNING: Processing TPC run {run} directly inside a worker process ({multiprocessing.current_process().name}). This can cause memory issues if too many workers run concurrently. Please call process_runs.ensure_processed() before launching parallel workers.")
+        process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
         
     result = {}
     with uproot.open(fname) as file:
@@ -318,6 +322,56 @@ def _load_run_quantities(args):
                 raise ValueError(f"Quantity {qname} not found in ROOT file")
     return result
 
+def _worker_ensure_processed(args):
+    experiment, run, config_filename, gpus_to_use = args
+    import multiprocessing
+    identity = multiprocessing.current_process()._identity
+    if identity:
+        idx = (identity[0] - 1) % len(gpus_to_use)
+        gpu_to_use = gpus_to_use[idx]
+    else:
+        gpu_to_use = gpus_to_use[0]
+        
+    config_name = os.path.splitext(config_filename)[0]
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
+    if not os.path.exists(fname):
+        process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
+
+def ensure_processed(experiment, runs, config_filename="", show_progress=True):
+    runs = [int(r) for r in runs]
+    config_name = os.path.splitext(config_filename)[0]
+    
+    # Filter for runs that actually need processing
+    runs_to_process = []
+    for run in runs:
+        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}_{config_name}.root')
+        if not os.path.exists(fname):
+            runs_to_process.append(run)
+            
+    if not runs_to_process:
+        return
+        
+    gpus_to_use = TPC_PROCESSING_GPUS
+    max_workers = len(gpus_to_use) * TPC_MAX_WORKERS_PER_GPU
+    
+    if show_progress:
+        print(f"Pre-processing {len(runs_to_process)} TPC runs with {max_workers} workers...")
+        
+    args_list = [(experiment, run, config_filename, gpus_to_use) for run in runs_to_process]
+    
+    if max_workers > 1:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=multiprocessing.get_context('spawn')) as executor:
+            if show_progress:
+                list(tqdm(executor.map(_worker_ensure_processed, args_list), total=len(args_list)))
+            else:
+                list(executor.map(_worker_ensure_processed, args_list))
+    else:
+        iterable = tqdm(args_list) if show_progress else args_list
+        for args in iterable:
+            _worker_ensure_processed(args)
+
 def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename="", gpus_to_use=None):
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
@@ -329,7 +383,7 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
         
     settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0, config_filename)
     if gpus_to_use is None:
-        gpus_to_use = [0]
+        gpus_to_use = TPC_PROCESSING_GPUS
     args_list = [(experiment, run, qnames, settings_hash, config_filename, gpus_to_use) for i, run in enumerate(runs)]
     
     if num_workers > 1:
