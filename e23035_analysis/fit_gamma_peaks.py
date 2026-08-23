@@ -17,7 +17,7 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
-fit_prefix = 'source'
+fit_prefix = '60Ga'
 force_refit=True
 
 beam_on_selection = None
@@ -73,6 +73,8 @@ else:
             if row:
                 if row[0]=='STOP':
                     break
+                if row[0] == 'fit_window': #skip header
+                    continue
                 try:
                     if len(row[0]) > 0:
                         if len(current_group) > 0:

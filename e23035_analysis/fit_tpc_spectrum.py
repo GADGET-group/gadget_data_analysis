@@ -9,6 +9,7 @@ from raw_viewer import ddas_interface, process_runs
 from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vis_tools
 
 experiment = 'e23035'
+tpc_config = 'smart2_rpr.csv'
 num_workers = 200
 force_refit=False
 
@@ -23,22 +24,22 @@ proton_binning = (4000//5, 0, 4000)
 alpha_binning = (7000//10, 2000, 9000)
 
 ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
+pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 ddas_runs_low_energy_protons = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
-pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum_low_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
+pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_low_energy_protons, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum_low_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 ddas_runs_alphas_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_long_tracks_tpc=False, good_low_energy_tpc=False)
-aspec_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, alpha_binning, 'alpha_spectrum_60Ga', '60Ga run alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers)
+aspec_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, alpha_binning, 'alpha_spectrum_60Ga', '60Ga run alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers, tpc_ini_filename=tpc_config)
 ddas_runs_high_energy_protons_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=False, good_long_tracks_tpc=True)
-pspec_high_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_high_energy_protons_60Ga, proton_binning, "proton_spectrum_high_energy_60Ga", "60Ga proton_spectrum_high_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
+pspec_high_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_high_energy_protons_60Ga, proton_binning, "proton_spectrum_high_energy_60Ga", "60Ga proton_spectrum_high_energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
-alpha_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, (100, 0, 0.100, 140, 2000, 9000), "alpha_energy_v_tsbo_60Ga", "60Ga alpha energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==2", num_workers=num_workers)
-proton_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo_60Ga", "60Ga proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers)
+alpha_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_alphas_60Ga, (100, 0, 0.100, 140, 2000, 9000), "alpha_energy_v_tsbo_60Ga", "60Ga alpha energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==2", num_workers=num_workers, tpc_ini_filename=tpc_config)
+proton_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo_60Ga", "60Ga proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
 sigma_tpc = lambda E: (0.011107*E/1e3 + 0.008813049)*1e3
 
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers)
-aspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, alpha_binning, 'alpha_spectrum_59Zn', '59Zn alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers)
+pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
+aspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, alpha_binning, 'alpha_spectrum_59Zn', '59Zn alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers, tpc_ini_filename=tpc_config)
 
 if True: #show charged particle spectra
     _0=root_vis_tools.draw_overlaid_histograms({'60Ga':aspec_60Ga, '59Zn':aspec_59Zn}, 'alpha spectra')

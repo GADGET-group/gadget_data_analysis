@@ -496,9 +496,10 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
         raise ValueError(f"Could not find TTree 'merged_data' in {data_file_path}.")
 
     tpc_friend_file = None
-    if 'tpc_' in var_exp or 'tpc_' in selection:
+    needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
+    if needs_tpc:
         if not tpc_ini_filename:
-            raise ValueError(f"tpc_ini_filename is required because TPC variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
         tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
         if not os.path.exists(tpc_friend_path):
             make_tpc_friend_file(experiment, run, tpc_ini_filename)

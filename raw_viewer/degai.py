@@ -471,9 +471,10 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     merged_tree.AddFriend(add_back_tree)
     
     tpc_friend_file = None
-    if 'tpc_' in var_exp or 'tpc_' in selection:
+    needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
+    if needs_tpc:
         if not tpc_ini_filename:
-            raise ValueError(f"tpc_ini_filename is required because TPC variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
         tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
         if not os.path.exists(tpc_friend_path):
             ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)
