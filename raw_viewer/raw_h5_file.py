@@ -212,8 +212,11 @@ class raw_h5_file:
         self.padxy = np.loadtxt(os.path.join(os.path.dirname(__file__), 'padxy.txt'), delimiter=',')
         
         self.flat_lookup_file_path = flat_lookup_csv        
+        if not os.path.isabs(self.flat_lookup_file_path) and not os.path.exists(self.flat_lookup_file_path):
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.flat_lookup_file_path = os.path.join(repo_root, self.flat_lookup_file_path)
+            
         self.flat_lookup = np.loadtxt(self.flat_lookup_file_path, delimiter=',', dtype=int)
-        
         self.pad_plane = np.genfromtxt(os.path.join(os.path.dirname(__file__),'PadPlane.csv'),delimiter=',', filling_values=-1) #used for mapping pad numbers to a 2D grid
         self.pad_to_xy_index = {} #maps pad number to (x_index,y_index)
         for y in range(len(self.pad_plane)):
@@ -312,8 +315,11 @@ class raw_h5_file:
         self.cached_xyte = self.cached_xyze = None
 
         #look at first event and figure out number of time bins
-        first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
-        self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
+        try:
+            first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
+            self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
+        except KeyError:
+            self.num_time_bins = 512 # Default value if there are no events in the h5 file
 
     def close(self):
         if self.h5_file:
@@ -410,6 +416,8 @@ class raw_h5_file:
         Returns an array with the timestamps of each event, in seconds
         '''
         first, last = self.get_event_num_bounds()
+        if last < first:
+            return np.array([])
         num_events = last - first + 1
         to_return = np.zeros(num_events)
         for i, evt in tqdm.tqdm(enumerate(range(first, last+1))):

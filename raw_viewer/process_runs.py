@@ -195,9 +195,9 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
                 track_endpoints.append([(0,0,0), (0,0,0)])
                 charge_widths.append(0)
                 width_above_thresholds.append(0)
-        track_centers = np.array(track_centers)
-        pad_charges = np.array(pad_charges)
-        pad_maxs = np.array(pad_maxs)
+        track_centers = np.array(track_centers).reshape(-1, 3)
+        pad_charges = np.array(pad_charges).reshape(-1, 1024)
+        pad_maxs = np.array(pad_maxs).reshape(-1, 1024)
         
         ts = h5file.get_timestamps_array()
 
@@ -223,11 +223,11 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
             except TypeError:
                 res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
                 
-        events_data = {'track_center':np.array(res_centers, dtype=np.float64), 'principle_axes':np.array(principle_axes, dtype=np.float64), 'variance_along_axes': np.array(variances_along_axes, dtype=np.float64),
-                   'pad_charge': pad_charges, 'endpoints':np.array(res_endpoints, dtype=np.float64), 'charge_width':np.array(charge_widths),
-                   'width_above_threshold':np.array(width_above_thresholds), 'pad_max':pad_maxs, 'timestamps':ts}
+        events_data = {'track_center':np.array(res_centers, dtype=np.float64).reshape(-1, 3), 'principle_axes':np.array(principle_axes, dtype=np.float64).reshape(-1, 3, 3), 'variance_along_axes': np.array(variances_along_axes, dtype=np.float64).reshape(-1, 3),
+                   'pad_charge': pad_charges, 'endpoints':np.array(res_endpoints, dtype=np.float64).reshape(-1, 2, 3), 'charge_width':np.array(charge_widths, dtype=np.float64),
+                   'width_above_threshold':np.array(width_above_thresholds, dtype=np.float64), 'pad_max':pad_maxs, 'timestamps':ts}
                    
-        counts = [len(x) for x in railed_pads]
+        counts = np.array([len(x) for x in railed_pads], dtype=np.int64)
         if sum(counts) == 0:
             events_data['railed_pads'] = ak.unflatten(np.array([], dtype=np.int64), counts)
         else:
@@ -572,6 +572,10 @@ def get_run_and_event_numbers(experiment, runs, config_filename=""):
     for run in runs:
         h5 = get_h5_file(experiment, run, config_filename)
         first, last  = h5.get_event_num_bounds()
-        event_numbers.append(np.arange(first, last+1))
-        run_numbers.append(np.ones(last - first + 1)*run)
+        if last < first: #empty file (attpc merger sets first to a large number until it reads the first event, and last will be 0)
+            event_numbers.append(np.array([], dtype=int))
+            run_numbers.append(np.array([], dtype=int))
+        else:
+            event_numbers.append(np.arange(first, last+1))
+            run_numbers.append(np.ones(last - first + 1)*run)
     return np.concatenate(run_numbers, axis=0), np.concatenate(event_numbers, axis=0)

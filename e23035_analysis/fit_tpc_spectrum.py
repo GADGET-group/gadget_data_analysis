@@ -11,7 +11,7 @@ from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vi
 experiment = 'e23035'
 tpc_config = 'smart2_rpr.csv'
 num_workers = 200
-force_refit=False
+force_refit=True
 
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end

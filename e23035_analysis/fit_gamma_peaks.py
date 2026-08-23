@@ -19,6 +19,7 @@ gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethr
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 fit_prefix = '60Ga'
 force_refit=True
+tpc_ini_file = 'smart2_rpr.csv'
 
 beam_on_selection = None
 beam_off_selection = None
@@ -251,10 +252,10 @@ E_v_t = degai.get_histogram(experiment, runs, adj_dict, cal_name, (2000, run_sta
 
 Eproton_v_tsbo = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, 0, 0.200, 4000, 0, 4000), "Ep_vs_tsbo", "proton energy (keV) vs time (s)", "tpc_energy:time_since_beam_off", 
                     selection='tpc_particle_id==1',
-                    dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
+                    dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_ini_file)
 Ealpha_v_tsbo = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, 0, 0.200, 700, 2000, 9000), "Ep_vs_tsbo", "alpha energy (keV) vs time (s)", "tpc_energy:time_since_beam_off", 
                     selection='tpc_particle_id==2',
-                    dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
+                    dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_ini_file)
 
 # E_v_tsco = degai.get_histogram(experiment, runs, adj_dict, cal_name, (2000, 0, 0.200, *coincidence_binning), 
 #                     "E_vs_t_c", "energy (keV) vs time since chopper off (s)", "addback_energy:time_since_chopper_off", 

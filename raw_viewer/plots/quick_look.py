@@ -10,18 +10,41 @@ from tqdm import tqdm
 from raw_viewer import process_runs
 from raw_viewer.raw_h5_file import VETO_PADS
 
-def save_images(experiment, runs, config_filename='smart2_rpr.csv'):
+def save_images(experiment, runs, config_filename='smart2_rpr.csv', skip_existing=False):
     if not isinstance(runs, (list, tuple, np.ndarray)):
         runs = [runs]
         
     for run in tqdm(runs, desc="Processing runs"):
         run = int(run)
+        
+        im_save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quick_look_pdf', experiment)
+        os.makedirs(im_save_path, exist_ok=True)
+        pdf_path = os.path.join(im_save_path, f'run{run}_quick_look.pdf')
+        
+        if skip_existing and os.path.exists(pdf_path):
+            continue
+            
         num_to_save = 10
-        h5file = process_runs.get_h5_file(experiment, run, config_filename)
+        try:
+            h5file = process_runs.get_h5_file(experiment, run, config_filename)
+        except (FileNotFoundError, OSError) as e:
+            print(f"\n{'!'*60}")
+            print(f"WARNING: Skipping Run {run}. Could not open H5 file!")
+            print(f"Error: {e}")
+            print(f"{'!'*60}\n")
+            continue
+            
         h5file.cache_enable = False
+        h5file.batch_event_cache_size = 1
+        h5file.batched_data_cache.clear()
         
         # save x-y projections for first, last, and random num_to_save images
         first, last = h5file.get_event_num_bounds()
+        if last < first:
+            print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            print(f"Skipping empty run {run}")
+            print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            continue
         actual_num_to_save = min(num_to_save, max(1, (last - first + 1) // 3))
             
         first_events = np.arange(first, first+actual_num_to_save)
@@ -29,10 +52,6 @@ def save_images(experiment, runs, config_filename='smart2_rpr.csv'):
         random_events = np.random.randint(first, last, actual_num_to_save)
         events_to_save = np.unique(np.concatenate([first_events, random_events, last_events]))
         
-        im_save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quick_look_pdf', experiment)
-        os.makedirs(im_save_path, exist_ok=True)
-        
-        pdf_path = os.path.join(im_save_path, f'run{run}_quick_look.pdf')
         with PdfPages(pdf_path) as pdf:
             for event_num in tqdm(events_to_save, desc=f"Run {run} events", leave=False):
                 # Get data for 2D image
@@ -45,7 +64,7 @@ def save_images(experiment, runs, config_filename='smart2_rpr.csv'):
                 length = np.sqrt(dxy**2 + dz**2)
                 title = f'Run {run} Event {event_num}, counts={energy:.0f}, length={length:.2f} mm, angle={np.degrees(angle):.2f}, veto={should_veto}'
                 
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+                fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6), constrained_layout=True)
                 fig.suptitle(title)
                 
                 # 2D projection
@@ -60,8 +79,24 @@ def save_images(experiment, runs, config_filename='smart2_rpr.csv'):
                 fig.colorbar(im, ax=ax1)
                 ax1.set_title('Padplane Image')
                 
-                # Traces
-                # set baseline subtraction to fixed window before saving traces
+                # Traces (Current Baseline Mode)
+                for pad, pad_data in zip(pads, traces):
+                    r = pad/1024 * 0.8
+                    g = (pad%512)/512 * 0.8
+                    b = (pad%256)/256 * 0.8
+                    if pad in VETO_PADS:
+                        ax2.plot(pad_data, '--', color=(r,g,b), label=f'{pad}')
+                    else:
+                        ax2.plot(pad_data, color=(r,g,b), label=f'{pad}')
+                        
+                if len(pads) > 0 and len(pads) <= 30:
+                    ax2.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), title="Pad #", borderaxespad=0.1, ncol=2)
+                    
+                ax2.set_title(f'Traces ({h5file.background_subtract_mode})')
+                ax2.set_xlabel('Time')
+                ax2.set_ylabel('ADC Counts')
+                
+                # Traces (Constant Mode / Fixed Window)
                 old_baseline_mode = h5file.background_subtract_mode
                 old_background_bounds = h5file.num_background_bins
                 h5file.background_subtract_mode = 'fixed window'
@@ -74,16 +109,16 @@ def save_images(experiment, runs, config_filename='smart2_rpr.csv'):
                     g = (pad%512)/512 * 0.8
                     b = (pad%256)/256 * 0.8
                     if pad in VETO_PADS:
-                        ax2.plot(pad_data, '--', color=(r,g,b), label=f'{pad}')
+                        ax3.plot(pad_data, '--', color=(r,g,b), label=f'{pad}')
                     else:
-                        ax2.plot(pad_data, color=(r,g,b), label=f'{pad}')
+                        ax3.plot(pad_data, color=(r,g,b), label=f'{pad}')
                         
                 if len(t_pads) > 0 and len(t_pads) <= 30:
-                    ax2.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), title="Pad #", borderaxespad=0.1, ncol=2)
+                    ax3.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), title="Pad #", borderaxespad=0.1, ncol=2)
                     
-                ax2.set_title('Traces')
-                ax2.set_xlabel('Time')
-                ax2.set_ylabel('ADC Counts')
+                ax3.set_title('Traces (Constant Mode)')
+                ax3.set_xlabel('Time')
+                ax3.set_ylabel('ADC Counts')
                 
                 h5file.background_subtract_mode = old_baseline_mode
                 h5file.num_background_bins = old_background_bounds
@@ -94,4 +129,4 @@ def save_images(experiment, runs, config_filename='smart2_rpr.csv'):
 if __name__ == '__main__':
     from e23035_analysis import e23035_runs
     get_runs = np.unique(e23035_runs.run_df['GET'].dropna().astype(int))
-    save_images('e23035', get_runs)
+    save_images('e23035', get_runs, skip_existing=True)
