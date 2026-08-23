@@ -56,24 +56,24 @@ def get_h5_path(experiment, run_number):
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
-def get_h5_file(experiment, run_number, config_filename='smart2_w_br.csv'):
+def get_h5_file(experiment, run_number, config_filename=""):
     run_number = int(run_number)
     raw_h5_path = get_h5_path(experiment, run_number)
-    
-    config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
     
     # Defaults in case not all are in config
     h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
     
-    if os.path.exists(config_path):
-        h5file.load_config(config_path)
-    elif config_filename != 'none':
-        raise FileNotFoundError(f"Config file '{config_filename}' not found at: {config_path}")
+    if config_filename and config_filename != 'none':
+        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
+        if os.path.exists(config_path):
+            h5file.load_config(config_path)
+        else:
+            raise FileNotFoundError(f"Config file '{config_filename}' not found at: {config_path}")
     
     return h5file
 
 _settings_hash_cache = {}
-def get_experiment_settings_hash(experiment, example_run, config_filename='smart2_w_br.csv'):
+def get_experiment_settings_hash(experiment, example_run, config_filename=""):
     key = (experiment, config_filename)
     if key not in _settings_hash_cache:
         h5file = get_h5_file(experiment, example_run, config_filename)
@@ -83,7 +83,7 @@ def get_experiment_settings_hash(experiment, example_run, config_filename='smart
 
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename='smart2_w_br.csv', gpus_to_use=None):
+def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename="", gpus_to_use=None):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a ROOT version of this information isn't available.
@@ -318,7 +318,7 @@ def _load_run_quantities(args):
                 raise ValueError(f"Quantity {qname} not found in ROOT file")
     return result
 
-def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename='smart2_w_br.csv', gpus_to_use=None):
+def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename="", gpus_to_use=None):
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
     runs = [int(r) for r in runs]
@@ -387,7 +387,7 @@ def _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=1):
     return np.concatenate(to_return, axis=0)
     
 
-def get_lengths(experiment_or_endpoints, runs=None, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_lengths(experiment_or_endpoints, runs=None, num_workers=1, config_filename=""):
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
@@ -395,7 +395,7 @@ def get_lengths(experiment_or_endpoints, runs=None, num_workers=1, config_filena
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.sqrt(np.sum(dr*dr, axis=1))
 
-def get_veto_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_veto_counts(experiment, runs, num_workers=1, config_filename=""):
     runs = [int(r) for r in runs]
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
@@ -409,7 +409,7 @@ def get_veto_counts(experiment, runs, num_workers=1, config_filename='smart2_w_b
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1, config_filename=""):
     runs = [int(r) for r in runs]
     thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
     
@@ -423,7 +423,7 @@ def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1, config_filen
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_max_veto_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_max_veto_counts(experiment, runs, num_workers=1, config_filename=""):
     '''
     gets array of max counts on any individual veto pad
     '''
@@ -442,7 +442,7 @@ def get_max_veto_counts(experiment, runs, num_workers=1, config_filename='smart2
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_outer_ring_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_outer_ring_counts(experiment, runs, num_workers=1, config_filename=""):
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
@@ -457,7 +457,7 @@ def get_outer_ring_counts(experiment, runs, num_workers=1, config_filename='smar
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_outer_ring_max_counts(experiment, runs, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_outer_ring_max_counts(experiment, runs, num_workers=1, config_filename=""):
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
@@ -473,7 +473,7 @@ def get_outer_ring_max_counts(experiment, runs, num_workers=1, config_filename='
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
     
-def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename=""):
     runs = [int(r) for r in runs]
     gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
     
@@ -487,7 +487,7 @@ def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename='smart2_w_
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_angle(experiment_or_endpoints, runs=None, num_workers=1, config_filename='smart2_w_br.csv'):
+def get_angle(experiment_or_endpoints, runs=None, num_workers=1, config_filename=""):
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
@@ -495,7 +495,7 @@ def get_angle(experiment_or_endpoints, runs=None, num_workers=1, config_filename
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.arctan2(np.sqrt(dr[:,0]**2 + dr[:,1]**2), np.abs(dr[:,2]))
 
-def get_time_since_beam_off(experiment, runs, config_filename='smart2_w_br.csv'):
+def get_time_since_beam_off(experiment, runs, config_filename=""):
     to_return = []
     for run in runs:
         times_since_start_of_window = []
@@ -511,7 +511,7 @@ def get_time_since_beam_off(experiment, runs, config_filename='smart2_w_br.csv')
         to_return.append(times_since_start_of_window)
     return np.concatenate(to_return, axis=0)
 
-def get_run_and_event_numbers(experiment, runs, config_filename='smart2_w_br.csv'):
+def get_run_and_event_numbers(experiment, runs, config_filename=""):
     runs = [int(r) for r in runs]
     run_numbers = []
     event_numbers = []

@@ -173,7 +173,7 @@ def get_ddas_root_file_path(experiment, ddas_run):
         to_return += '_alex'
     return to_return
 
-def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename='smart2_w_br.csv'):
+def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename=""):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     ini_prefix = os.path.splitext(tpc_ini_filename)[0]
     to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{ddas_run}_tpc_{ini_prefix}.root')
@@ -269,7 +269,7 @@ def make_ddas_root_file(experiment, ddas_run):
 
         output_file.WriteObject(out_tree, "merged_data")
 
-def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename='smart2_w_br.csv'):
+def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
     merged_path = get_ddas_root_file_path(experiment, ddas_run)
     if not os.path.exists(merged_path):
         make_ddas_root_file(experiment, ddas_run)
@@ -450,7 +450,7 @@ import concurrent.futures
 import tqdm
 import ROOT
 
-def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename='smart2_w_br.csv'):
+def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename=""):
     cache_dir = os.path.join(f'{experiment}_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -495,14 +495,20 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
         data_file.Close()
         raise ValueError(f"Could not find TTree 'merged_data' in {data_file_path}.")
 
-    tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
-    if not os.path.exists(tpc_friend_path):
-        make_tpc_friend_file(experiment, run, tpc_ini_filename)
-    tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
-    if tpc_friend_file and not tpc_friend_file.IsZombie():
+    tpc_friend_file = None
+    if 'tpc_' in var_exp or 'tpc_' in selection:
+        if not tpc_ini_filename:
+            raise ValueError(f"tpc_ini_filename is required because TPC variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+        tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
+        if not os.path.exists(tpc_friend_path):
+            make_tpc_friend_file(experiment, run, tpc_ini_filename)
+        tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
+        if not tpc_friend_file or tpc_friend_file.IsZombie():
+            raise FileNotFoundError(f"Could not open TPC friend file: {tpc_friend_path}")
         tpc_tree = tpc_friend_file.Get('tpc_data')
-        if tpc_tree:
-            tree.AddFriend(tpc_tree)
+        if not tpc_tree:
+            raise ValueError(f"Could not find 'tpc_data' tree in file {tpc_friend_path}")
+        tree.AddFriend(tpc_tree)
         
     if ':' in var_exp:
         raw_hist = ROOT.TH2D(hash_name, "", *binning)
@@ -522,7 +528,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
     return cache_file_path, hash_name
 
 
-def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename='smart2_w_br.csv'):
+def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename=""):
     # --- MULTIPLE RUNS LOGIC ---
     if is_iterable_runs(ddas_run):
         sum_hist = None
@@ -638,8 +644,7 @@ def show_selected_event(experiment, ddas_run, selection, index):
     
     root_file_path = get_ddas_root_file_path(experiment, ddas_run)
     if not os.path.exists(root_file_path):
-        print(f"Error: Merged root file not found for {experiment} run {ddas_run}")
-        return
+        raise FileNotFoundError(f"Merged root file not found for {experiment} run {ddas_run}")
         
     df = ROOT.RDataFrame("merged_data", root_file_path)
     filtered_df = df.Filter(selection)

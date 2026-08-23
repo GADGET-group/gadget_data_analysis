@@ -17,8 +17,8 @@ from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'
-GPUs_to_use = [2,3]
-max_workers=len(GPUs_to_use*5)
+GPUs_to_use = [0,2,3]
+max_workers=len(GPUs_to_use*3)
 tpc_config = 'smart2_rpr.csv'
  
 if experiment == 'e23035':
@@ -95,7 +95,6 @@ if load_ddas:
         print(get_run, len(times_since_beam_off[-1]), len(get_ts))
     times_since_beam_off = np.concatenate(times_since_beam_off)
 
-veto_thresh = 500#np.inf
 rve_bins = (600, 600)
 phist_bins = np.linspace(0, 4, 1001)
 alphahist_bins = 100
@@ -135,6 +134,7 @@ print('energies loaded')
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(endpoints=endpoints, max_veto_counts=veto_max, tpc_ini_filename=tpc_config)
 else:
+    veto_thresh = 500#np.inf
     num_pads_railed = np.array([len(prl) for prl in pads_railed])
     veto_mask = (veto_max < veto_thresh)
     veto_mask = veto_mask #& (num_pads_railed==0)# & (angles>np.radians(8)) 

@@ -19,6 +19,8 @@ experiment = 'e23035'
 # print(runs)
 
 runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_long_tracks_tpc=False, good_low_energy_tpc=False, final_beam_settings=True)
+if not runs:
+    raise ValueError("No valid runs found. Check the filtering criteria or if the data files exist.")
 n_workers = min(len(runs), 255) #cap at 150 so as not to murder the TPCGPU
 
 
@@ -31,6 +33,7 @@ addback_ethresh = 150
 upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy)
 event_build_window = 500 #ns
+tpc_config = 'smart2_rpr.csv'
 
 tstart, tstop = 0, 7.6e-6
 time_gate_str = f'(mesh_pre_amp_t - time)>{tstart} && (mesh_pre_amp_t - time)<{tstop}'
@@ -38,22 +41,22 @@ t_accidental_start, t_accidental_stop = -15e-6, -1e-6
 accidental_time_gate_str = f'(mesh_pre_amp_t - time)>{t_accidental_start} && (mesh_pre_amp_t - time)<{t_accidental_stop}'
 
 gammas = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
-                                  nonlinearity_correction_name=nlc_name)
+                                  nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 
 gamma_gated_on_proton = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_gated_on_protons', 'gamma rays gated on protons', 
-                'addback_energy', 'tpc_particle_id==1 &&'+time_gate_str, event_build_window, addback_ethresh, True, nonlinearity_correction_name=nlc_name)
+                'addback_energy', 'tpc_particle_id==1 &&'+time_gate_str, event_build_window, addback_ethresh, True, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 
-protons = ddas_interface.get_histogram(experiment, runs, (3000, 0, 3000), 'protons', 'proton energy (keV)', 'tpc_energy', 'tpc_particle_id==1', num_workers=n_workers)
+protons = ddas_interface.get_histogram(experiment, runs, (3000, 0, 3000), 'protons', 'proton energy (keV)', 'tpc_energy', 'tpc_particle_id==1', num_workers=n_workers, tpc_ini_filename=tpc_config)
 protons_gated_on_gammas = degai.get_histogram(experiment, runs,  adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_gammas', 'proton energy (keV) gated on gamma rays',
                                             'tpc_energy', 'tpc_particle_id==1 && (addback_energy>0)&&'+time_gate_str, event_build_window, addback_ethresh, True,
-                                            nonlinearity_correction_name=nlc_name)
+                                            nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 alphas_gated_on_gammas = degai.get_histogram(experiment, runs,  adj_dict, cal_name, (3000, 0, 9000),'alphas_gated_on_gammas', 'alpha energy (keV) gated on gamma rays',
                                              'tpc_energy', 'tpc_particle_id==2 && (addback_energy>0)&&'+time_gate_str, event_build_window, addback_ethresh, True,
-                                            nonlinearity_correction_name=nlc_name)
+                                            nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 
 gamma_gated_on_alpha = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_gated_on_alpha', 'gamma rays gated on alphas', 
                 'addback_energy', 'tpc_particle_id==2 &&'+time_gate_str, event_build_window, addback_ethresh, True,
-                 nonlinearity_correction_name=nlc_name)
+                 nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 
 c1,c2 = ROOT.TCanvas(), ROOT.TCanvas()
 c1.cd()
@@ -65,13 +68,13 @@ gamma_gated_on_proton.Draw()
 
 protons_gated_on_491 = degai.get_histogram(experiment, runs,  adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_491', 'proton energy (keV) gated on 491 keV gamma rays',
                                             'tpc_energy', 'tpc_particle_id==1 && (addback_energy>490) && (addback_energy<493)&&'+time_gate_str, event_build_window, addback_ethresh, True,
-                                            nonlinearity_correction_name=nlc_name)
+                                            nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 protons_gated_on_914 = degai.get_histogram(experiment, runs,  adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_914', 'proton energy (keV) gated on 914 keV gamma rays',
                                             'tpc_energy', 'tpc_particle_id==1 && (addback_energy>912) && (addback_energy<917)&&'+time_gate_str, event_build_window, addback_ethresh, True,
-                                            nonlinearity_correction_name=nlc_name)
+                                            nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 protons_gated_on_511 = degai.get_histogram(experiment, runs, adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_511', 'proton energy (keV) gated on 511 keV gamma rays',
                                             'tpc_energy', 'tpc_particle_id==1 && (addback_energy>509) && (addback_energy<513)&&'+time_gate_str, event_build_window, addback_ethresh, True,
-                                            nonlinearity_correction_name=nlc_name)
+                                            nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 
 
 canvas, legend, stack = root_vis_tools.draw_overlaid_histograms({'protons':protons, 'proton gated on gammas':protons_gated_on_gammas, 
@@ -86,20 +89,20 @@ canvas3, legend3, stack3 = root_vis_tools.draw_overlaid_histograms({'proton gate
                                                                      'proton gated on 511 keV gammas':protons_gated_on_511})
 particle_gamma_dt = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, -15e-6, 15e-6), "particle_gamma_dt", "mesh_time - gamma time (s)", 
                                              "mesh_pre_amp_t - time", "tpc_particle_id==1 || tpc_particle_id==2", event_build_window, addback_ethresh, True,
-                                             nonlinearity_correction_name=nlc_name)
+                                             nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 particle_gamma491_dt = degai.get_histogram(experiment, runs, adj_dict, cal_name, (200, -15e-6, 15e-6), "particle_gamma_dt", "mesh_time - gamma time (s)", 
                                              "mesh_pre_amp_t - time", "(tpc_particle_id==1 || tpc_particle_id==2)&& (addback_energy>490) && (addback_energy<493)", event_build_window, addback_ethresh, True,
-                                             nonlinearity_correction_name=nlc_name)
+                                             nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 
 gammaE_v_protonE = degai.get_histogram(experiment, runs, adj_dict, cal_name, (150, 0, 3000, 7000-150, 150, 7000), "gamma_v_proton_energy_time_gate", "gamma energy (keV) vs proton energy (keV) w/ expected (mesh time - gamma time)",
                                         "addback_energy:tpc_energy", 
                                        selection='tpc_particle_id==1 &&'+time_gate_str,
-                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
+                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 gammaE_v_protonE_accidental = degai.get_histogram(experiment, runs, adj_dict, cal_name, (150, 0, 3000, 7000-150, 150, 7000), "gamma_v_proton_energy_accidental_gate", 
                                                   "gamma energy (keV) vs proton energy (keV) for accidental coincidences",
                                         "addback_energy:tpc_energy", 
                                        selection='tpc_particle_id==1 &&'+accidental_time_gate_str,
-                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name)
+                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 gammaE_v_protonE.Sumw2()
 gammaE_v_protonE_accidental.Sumw2()
 gammaE_v_protonE_bg_subtracted = gammaE_v_protonE.Clone()

@@ -28,6 +28,8 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
     final_beam_settings: only include runs with final beam settings (38 degree degrader and reduced momentum acceptance)
     TPC data valid: requires GET data to be in the merged tree
     '''
+    if good_low_energy_tpc or good_long_tracks_tpc:
+        assert tpc_data_valid 
     runs = []
     for run, get_run in zip(run_df['DDAS'][(run_df['Run Type']=='60Ga')], run_df['GET'][(run_df['Run Type']=='60Ga')]):
         if tpc_data_valid:
@@ -53,8 +55,7 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
         if good_long_tracks_tpc and run < 238:
             #run 238 has max readout depth and final gate delay. Only important above ~2.2 MeV
             continue
-        if os.path.exists(ddas_interface.get_ddas_root_file_path(experiment, run)):
-            runs.append(run)
+        runs.append(run)
     return runs
 
 def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_beam_settings, tpc_data_valid=True):
@@ -83,8 +84,7 @@ def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
         if good_gamma and False: #TODO
             continue
         #SCA and GET settings are correct for all 59Zn runs, so don't need to exclude any runs for high/low proton energy
-        if os.path.exists(ddas_interface.get_ddas_root_file_path(experiment, run)):
-            runs.append(run)
+        runs.append(run)
     return runs
 
 def is_iterable(obj):
@@ -105,7 +105,7 @@ def get_DDAS_run_number(get_run_number):
     return run_df['DDAS'][run_df['GET']==get_run_number].iloc[0]
 
 
-def get_veto_mask(get_run=None, endpoints=None, max_veto_counts=None, tpc_ini_filename='smart2_w_br.csv'):
+def get_veto_mask(get_run=None, endpoints=None, max_veto_counts=None, tpc_ini_filename=""):
     if max_veto_counts is not None:
         veto_mask = max_veto_counts < 200
     else:
@@ -139,12 +139,12 @@ def get_pad_gains():
     #return gain_match_result.x[:1024]
     return gain_match_result.pad_gains
 
-def get_length_mm(get_run, tpc_ini_filename='smart2_w_br.csv'):
+def get_length_mm(get_run, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
     return process_runs.get_lengths(experiment, get_run, config_filename=tpc_ini_filename)
 
-def get_energy_MeV(get_run, num_workers=1, tpc_ini_filename='smart2_w_br.csv'):
+def get_energy_MeV(get_run, num_workers=1, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
     return process_runs.get_gm_ic(experiment, get_run, get_pad_gains(), num_workers=num_workers, config_filename=tpc_ini_filename)
@@ -169,7 +169,7 @@ def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     upper_band[energies<xb] = ya + (yb-ya)/(xb-xa)*(energies[energies<xb]-xa)
     return lower_band, upper_band
 
-def get_proton_mask(get_run, lengths=None, energy=None, veto_mask=None, tpc_ini_filename='smart2_w_br.csv'):
+def get_proton_mask(get_run, lengths=None, energy=None, veto_mask=None, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
     if lengths is None:
@@ -192,7 +192,7 @@ def get_alpha_mask_min_max_range(get_run, energies:np.ndarray):
     upper_band = np.min([lower_proton-10, expected_alpha_length + 22], axis=0)
     return lower_band, upper_band
 
-def get_alpha_mask(get_run, lengths=None, energy=None, veto_mask=None, tpc_ini_filename='smart2_w_br.csv'):
+def get_alpha_mask(get_run, lengths=None, energy=None, veto_mask=None, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
     if lengths is None:

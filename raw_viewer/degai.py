@@ -251,8 +251,15 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
             nlc_poly_matrix[i, :len(params)] = params
 
     # Set up input file for reading
-    infile = ROOT.TFile.Open(ddas_interface.get_ddas_root_file_path(experiment, ddas_run))
+    ddas_root_file = ddas_interface.get_ddas_root_file_path(experiment, ddas_run)
+    if not os.path.exists(ddas_root_file):
+        raise FileNotFoundError(f"ROOT data file not found: {ddas_root_file}")
+    infile = ROOT.TFile.Open(ddas_root_file)
+    if not infile or infile.IsZombie():
+        raise FileNotFoundError(f"Could not open ROOT data file: {ddas_root_file}")
     intree = infile.Get('merged_data')
+    if not intree:
+        raise ValueError(f"Could not find 'merged_data' tree in {ddas_root_file}")
     
     invals = []
     tvals = [] # NEW: Array to hold timestamps
@@ -376,7 +383,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     out_tree._keepalive_file = read_file
     return out_tree
 
-def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=True, max_workers=None, force_recreate=False, nonlinearity_correction_name=None, time_alignment_ns=None, tpc_ini_filename='smart2_w_br.csv'):
+def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, hist_title, var_exp, selection="", dt_window_ns=200, e_thresh=150, sliding_scale=True, max_workers=None, force_recreate=False, nonlinearity_correction_name=None, time_alignment_ns=None, tpc_ini_filename=""):
     """
     Generates a 1D or 2D histogram using the add_back tree and merged_data tree. Behaves just like the get_histogram function in ddas_interface, but allows refernces to 
     a "addback_energy" branch.
@@ -456,17 +463,27 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     add_back_tree = get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
     
     merged_file = ROOT.TFile.Open(ddas_interface.get_ddas_root_file_path(experiment, ddas_run), 'READ')
+    if not merged_file or merged_file.IsZombie():
+        raise FileNotFoundError(f"Could not open ROOT data file: {ddas_interface.get_ddas_root_file_path(experiment, ddas_run)}")
     merged_tree = merged_file.Get('merged_data')
+    if not merged_tree:
+        raise ValueError(f"Could not find 'merged_data' tree in file")
     merged_tree.AddFriend(add_back_tree)
     
-    tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
-    if not os.path.exists(tpc_friend_path):
-        ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)
-    tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
-    if tpc_friend_file and not tpc_friend_file.IsZombie():
+    tpc_friend_file = None
+    if 'tpc_' in var_exp or 'tpc_' in selection:
+        if not tpc_ini_filename:
+            raise ValueError(f"tpc_ini_filename is required because TPC variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+        tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
+        if not os.path.exists(tpc_friend_path):
+            ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)
+        tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
+        if not tpc_friend_file or tpc_friend_file.IsZombie():
+            raise FileNotFoundError(f"Could not open TPC friend file: {tpc_friend_path}")
         tpc_tree = tpc_friend_file.Get('tpc_data')
-        if tpc_tree:
-            merged_tree.AddFriend(tpc_tree)
+        if not tpc_tree:
+            raise ValueError(f"Could not find 'tpc_data' tree in file {tpc_friend_path}")
+        merged_tree.AddFriend(tpc_tree)
 
     if ':' in var_exp:
         raw_hist = ROOT.TH2D(hash_name, "", *binning)
