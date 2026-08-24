@@ -41,10 +41,6 @@ ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 aspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, alpha_binning, 'alpha_spectrum_59Zn', '59Zn alpha spectrum', 'tpc_energy', 'tpc_particle_id==2', num_workers=num_workers, tpc_ini_filename=tpc_config)
 
-if True: #show charged particle spectra
-    _0=root_vis_tools.draw_overlaid_histograms({'60Ga':aspec_60Ga, '59Zn':aspec_59Zn}, 'alpha spectra')
-    _1=root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
-
 fit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting')
 def load_peaks_from_csv(filename):
     all_peaks = []

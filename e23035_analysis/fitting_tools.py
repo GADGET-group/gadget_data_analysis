@@ -1812,11 +1812,15 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         
         pm.add(f"bg_const_{j}", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
         pm.add(f"bg_slope_{j}", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
-        
-    for j in range(n_spectra):
         pm.add(f"bg_shift_{j}", 0.002, param_bounds.get('bg_shift', (0, 1.0)))
 
-    # 2. Shared sigma
+    # 2. Peak parameters: shared mu (FIRST)
+    for i in range(n_peaks):
+        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
+        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+        pm.add(mu_name, e_guess_list[i], m_bnd)
+
+    # 3. Shared/Independent sigma (SECOND)
     if data_source is None:
         sigma_bounds = (0.1, 100)
     elif data_source == 'gamma_adc':
@@ -1824,18 +1828,18 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     else:
         sigma_bounds = (0.1, 100)
 
+    sigma_cpp_strings = []
     for i in range(n_peaks):
-        if shared_sigma and i == 0:
-            pm.add("sigma", sigma_guess, param_bounds.get('sigma', sigma_bounds))
-        elif not shared_sigma:
-            pm.add(f"sigma_{i}", sigma_guess, param_bounds.get(f'sigma_{i}', sigma_bounds))
-
-    # 3. Peak parameters: shared mu, independent amplitudes
-    for i in range(n_peaks):
-        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
-        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
-        pm.add(mu_name, e_guess_list[i], m_bnd)
+        mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
+        sig_name = "sigma" if shared_sigma else f"sigma_{i}"
+        s_bnd = param_bounds.get(sig_name, param_bounds.get('sigma', sigma_bounds))
+        sig_str, sig_idx = resolve_string_param(sig_name, sigma_guess, s_bnd, parameterizations, pm, current_mu_idx=mu_idx)
         
+        sig_cpp = sig_str.replace('[', 'p[').replace(']', ']')
+        sigma_cpp_strings.append(sig_cpp)
+        
+    # 4. Amplitudes (THIRD)
+    for i in range(n_peaks):
         for j in range(n_spectra):
             amp_name = f"amplitude_{i}_{j}"
             spectra[j].GetXaxis().SetRangeUser(*fit_window)
@@ -1854,15 +1858,15 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
     bg_shift_idx = [pm.get_idx(f"bg_shift_{j}") for j in range(n_spectra)]
     mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
-    sigma_idx = [pm.get_idx("sigma" if shared_sigma else f"sigma_{i}") for i in range(n_peaks)]
     amp_idx = [[pm.get_idx(f"amplitude_{i}_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
     
     bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
     bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
     bg_shift_cpp = "{" + ",".join(map(str, bg_shift_idx)) + "}"
     mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
-    sigma_cpp = "{" + ",".join(map(str, sigma_idx)) + "}"
     amp_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in amp_idx]) + "}"
+    
+    sigma_eval_cpp = "\n        ".join([f"sigma_vals[{i}] = {sigma_cpp_strings[i]};" for i in range(n_peaks)])
     
     cpp_code = f"""
     double eval_2d_gaus_{comp_id}(double *x, double *p) {{
@@ -1874,7 +1878,6 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
         int bg_shift_idx[{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
-        int sigma_idx[{n_peaks}] = {sigma_cpp};
         int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
         
         double bg_const = p[bg_const_idx[val_y]];
@@ -1884,9 +1887,12 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double total = bg_const + bg_slope * val_x;
         double bin_width = {bin_width};
         
+        double sigma_vals[{n_peaks}];
+        {sigma_eval_cpp}
+        
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
-            double sigma = p[sigma_idx[i]];
+            double sigma = sigma_vals[i];
             double amp = p[amp_idx[i][val_y]];
             
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
@@ -1958,7 +1964,13 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         pm.add(f"bg_slope_{j}", gaus_p_map.get(f"bg_slope_{j}", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
         pm.add(f"bg_shift_{j}", gaus_p_map.get(f"bg_shift_{j}", 0.002), param_bounds.get('bg_shift', (0, 1.0)))
 
-    # Shared sigma and tau
+    # 1. Peak parameters: mu (FIRST)
+    for i in range(n_peaks):
+        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
+        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+        pm.add(mu_name, gaus_p_map.get(mu_name, e_guess_list[i]), m_bnd)
+
+    # 2. Shared sigma and tau (SECOND)
     if data_source is None:
         sigma_bounds = (0.1, 100)
         tau_bounds = (0.01, 100)
@@ -1969,18 +1981,25 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         sigma_bounds = (0.1, 100)
         tau_bounds = (0.01, 100)
 
-    pm.add("sigma", gaus_p_map.get("sigma", 1), param_bounds.get('sigma', sigma_bounds))
-    pm.add("tau", 0.1, param_bounds.get('tau', tau_bounds))
-
+    sigma_cpp_strings = []
+    tau_cpp_strings = []
     for i in range(n_peaks):
-        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
-        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
-        pm.add(mu_name, gaus_p_map.get(mu_name, e_guess_list[i]), m_bnd)
+        mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         
+        s_bnd = param_bounds.get('sigma', sigma_bounds)
+        sig_str, _ = resolve_string_param("sigma", gaus_p_map.get("sigma", 1), s_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+        sigma_cpp_strings.append(sig_str.replace('[', 'p[').replace(']', ']'))
+        
+        t_bnd = param_bounds.get('tau', tau_bounds)
+        tau_str, _ = resolve_string_param("tau", 0.1, t_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+        tau_cpp_strings.append(tau_str.replace('[', 'p[').replace(']', ']'))
+        
+    # 3. Amplitudes (THIRD)
+    for i in range(n_peaks):
         for j in range(n_spectra):
             amp_name = f"amplitude_{i}_{j}"
             a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', (0, np.inf)))
-            pm.add(amp_name, gaus_p_map.get(amp_name, 100), a_bnd)
+            pm.add(amp_name, gaus_p_map.get(amp_name, 10), a_bnd)
 
     import uuid
     comp_id = uuid.uuid4().hex[:6]
@@ -1989,8 +2008,6 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
     bg_shift_idx = [pm.get_idx(f"bg_shift_{j}") for j in range(n_spectra)]
     mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
-    sigma_idx = pm.get_idx("sigma")
-    tau_idx = pm.get_idx("tau")
     amp_idx = [[pm.get_idx(f"amplitude_{i}_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
     
     bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
@@ -1998,16 +2015,11 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     bg_shift_cpp = "{" + ",".join(map(str, bg_shift_idx)) + "}"
     mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
     amp_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in amp_idx]) + "}"
-    
-    cpp_code = f"""
-    #ifndef CXX_ERFCX_DEF_FOR_2D
-    #define CXX_ERFCX_DEF_FOR_2D
-    double cxx_erfcx_2d(double x) {{
-        if (x > 25.0) return 1.0 / (1.77245385 * x); // approximation for very large x
-        return std::exp(x * x) * TMath::Erfc(x);
-    }}
-    #endif
 
+    sigma_eval_cpp = "\n        ".join([f"sigma_vals[{i}] = {sigma_cpp_strings[i]};" for i in range(n_peaks)])
+    tau_eval_cpp = "\n        ".join([f"tau_vals[{i}] = {tau_cpp_strings[i]};" for i in range(n_peaks)])
+
+    cpp_code = f"""
     double eval_2d_emg_{comp_id}(double *x, double *p) {{
         double val_x = x[0];
         int val_y = std::round(x[1]);
@@ -2023,33 +2035,37 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         double bg_slope = p[bg_slope_idx[val_y]];
         double bg_shift = p[bg_shift_idx[val_y]];
         
-        double total = bg_const + bg_slope * val_x;
         double bin_width = {bin_width};
         
-        double sigma = p[{sigma_idx}];
-        double tau = p[{tau_idx}];
-        if (sigma <= 0 || tau <= 0) return 1e10;
+        double sigma_vals[{n_peaks}];
+        {sigma_eval_cpp}
+        
+        double tau_vals[{n_peaks}];
+        {tau_eval_cpp}
+        
+        double total = bg_const + bg_slope * val_x;
         
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
             double amp = p[amp_idx[i][val_y]];
+            double sigma = sigma_vals[i];
+            double tau = tau_vals[i];
             
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
             
-            double norm = amp * bin_width / (2.0 * tau);
-            double z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356;
+            double u = (val_x - mu) / sigma;
+            double v = sigma / tau;
+            double z = (u - v) / 1.41421356;
             
-            if (z_arg < -25.0) {{
-                double exp_arg = (sigma*sigma)/(2.0*tau*tau) + (val_x - mu)/tau;
-                if (exp_arg < 700.0) {{
-                    total += norm * std::exp(exp_arg) * TMath::Erfc(z_arg);
-                }}
+            double term;
+            if (z > 26.0) {{
+                term = 0.0;
+            }} else if (z < -26.0) {{
+                term = (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * 2.0;
             }} else {{
-                double gaus_arg = (val_x - mu) / sigma;
-                double gaus_part = std::exp(-0.5 * gaus_arg * gaus_arg);
-                double erfcx_part = cxx_erfcx_2d(z_arg);
-                total += norm * gaus_part * erfcx_part;
+                term = (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * TMath::Erfc(z);
             }}
+            total += term;
         }}
         return total;
     }}

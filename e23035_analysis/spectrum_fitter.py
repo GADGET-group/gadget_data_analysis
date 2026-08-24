@@ -189,6 +189,7 @@ class spectrum_fitter:
         # 3. Iterate through fit results and save ROOT objects
         for i, res in enumerate(self.fit_results):
             if res is None: continue # Skip if parallel fitting failed for an index
+
             
             # TFitResultPtr cannot be written directly. 
             # We must call .Get() to extract the underlying C++ TFitResult object.
@@ -672,14 +673,29 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
     
     python_state = dill.loads(bytes.fromhex(state_obj.GetString().Data()))
 
-    # 2. Extract Main Spectrum and detach it from the file
-    main_spectrum = f.Get("main_spectrum")
-    if not main_spectrum:
-        raise ValueError("Main spectrum missing from file.")
-    main_spectrum.SetDirectory(0) 
+    is_multi = python_state.get('is_multi', False)
+    
+    if is_multi:
+        num_spectra = python_state.get('num_spectra', 0)
+        spectra = []
+        for idx in range(num_spectra):
+            spec = f.Get(f"spectrum_{idx}")
+            if not spec:
+                raise ValueError(f"Spectrum {idx} missing from file.")
+            spec.SetDirectory(0)
+            spectra.append(spec)
+            
+        fitter = multi_spectrum_fitter(spectra, python_state['peak_model'])
+        fitter.shared_sigma = python_state.get('shared_sigma', False)
+        fitter.location_wiggle = python_state.get('location_wiggle', 10)
+    else:
+        # 2. Extract Main Spectrum and detach it from the file
+        main_spectrum = f.Get("main_spectrum")
+        if not main_spectrum:
+            raise ValueError("Main spectrum missing from file.")
+        main_spectrum.SetDirectory(0) 
+        fitter = spectrum_fitter(main_spectrum, python_state['peak_model'])
 
-    # 3. Instantiate a new Fitter
-    fitter = spectrum_fitter(main_spectrum, python_state['peak_model'])
     fitter.peaks_to_fit = python_state['peaks_to_fit']
     fitter.fit_options = python_state.get('fit_options', 'LS0QEI')
     
@@ -703,31 +719,56 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
         else:
             res_dict['fit_res'] = ROOT.TFitResultPtr() # Empty pointer fallback
 
-        res_dict['component_peak_funcs'] = []
-        j = 0
-        while True:
-            comp_func = f.Get(f"peak_{i}_component_{j}")
-            if comp_func:
-                res_dict['component_peak_funcs'].append(comp_func)
-                j += 1
-            else:
-                break
+        if is_multi:
+            sub_hist_2d = f.Get(f"peak_{i}_sub_hist_2d")
+            if sub_hist_2d: sub_hist_2d.SetDirectory(0)
+            res_dict['sub_hist_2d'] = sub_hist_2d
+            
+            f_to_fit_2d = f.Get(f"peak_{i}_f_to_fit_2d")
+            res_dict['f_to_fit_2d'] = f_to_fit_2d
+            
+            h_fit_2d = f.Get(f"peak_{i}_h_fit_2d")
+            if h_fit_2d: h_fit_2d.SetDirectory(0)
+            res_dict['h_fit_2d'] = h_fit_2d
+            
+            h_resid_2d = f.Get(f"peak_{i}_h_resid_2d")
+            if h_resid_2d: h_resid_2d.SetDirectory(0)
+            res_dict['h_resid_2d'] = h_resid_2d
+            
+            canvas_2d = f.Get(f"peak_{i}_canvas_2d")
+            res_dict['canvas_2d'] = canvas_2d
+            
+            if f'peak_{i}_pm_names' in python_state:
+                import fitting_tools
+                pm = fitting_tools.parameter_manager(len(python_state[f'peak_{i}_pm_names']))
+                pm.names = python_state[f'peak_{i}_pm_names']
+                res_dict['pm'] = pm
+        else:
+            res_dict['component_peak_funcs'] = []
+            j = 0
+            while True:
+                comp_func = f.Get(f"peak_{i}_component_{j}")
+                if comp_func:
+                    res_dict['component_peak_funcs'].append(comp_func)
+                    j += 1
+                else:
+                    break
 
-        # Load GUI / Function Objects
-        res_dict['background_func'] = f.Get(f"peak_{i}_background_func")
-        res_dict['peak_func'] = f.Get(f"peak_{i}_peak_func")
-        res_dict['ratio_plot'] = f.Get(f"peak_{i}_ratio_plot")
-        res_dict['canvas'] = f.Get(f"peak_{i}_canvas")
-        res_dict['f_to_fit'] = f.Get(f"peak_{i}_f_to_fit")
-        
-        # Load Histograms (Must detach from the file so they aren't deleted)
-        spec_plot = f.Get(f"peak_{i}_spectrum_to_plot")
-        if spec_plot: spec_plot.SetDirectory(0)
-        res_dict['spectrum_to_plot'] = spec_plot
-        
-        h_fit = f.Get(f"peak_{i}_h_fit")
-        if h_fit: h_fit.SetDirectory(0)
-        res_dict['h_fit'] = h_fit
+            # Load GUI / Function Objects
+            res_dict['background_func'] = f.Get(f"peak_{i}_background_func")
+            res_dict['peak_func'] = f.Get(f"peak_{i}_peak_func")
+            res_dict['ratio_plot'] = f.Get(f"peak_{i}_ratio_plot")
+            res_dict['canvas'] = f.Get(f"peak_{i}_canvas")
+            res_dict['f_to_fit'] = f.Get(f"peak_{i}_f_to_fit")
+            
+            # Load Histograms (Must detach from the file so they aren't deleted)
+            spec_plot = f.Get(f"peak_{i}_spectrum_to_plot")
+            if spec_plot: spec_plot.SetDirectory(0)
+            res_dict['spectrum_to_plot'] = spec_plot
+            
+            h_fit = f.Get(f"peak_{i}_h_fit")
+            if h_fit: h_fit.SetDirectory(0)
+            res_dict['h_fit'] = h_fit
 
         fitter.fit_results.append(res_dict)
 
@@ -881,14 +922,19 @@ class multi_spectrum_fitter(spectrum_fitter):
                     spec_clone.Draw("E SAME")
                     
                 # Create a 1D function bound to this specific y value
-                # Note: creating Python callable TF1 in a loop requires handling loop variable capture carefully
+                # We must keep a strong reference to the lambda to prevent PyROOT from segfaulting!
                 def make_eval(idx):
                     return lambda x, p: f_to_fit_2d.Eval(x[0], idx)
                 
-                f1d = ROOT.TF1(f"f1d_{j}_{id(self)}", make_eval(j), e_low, e_high, 0)
+                lam = make_eval(j)
+                f1d = ROOT.TF1(f"f1d_{j}_{id(self)}", lam, e_low, e_high, 0)
                 f1d.SetLineColor(color)
                 f1d.SetLineWidth(2)
                 f1d.Draw("SAME")
+                
+                if '1d_lambdas' not in res:
+                    res['1d_lambdas'] = []
+                res['1d_lambdas'].append(lam)
                 
                 # We need to keep these references so they don't get garbage collected
                 if '1d_funcs' not in res:
@@ -962,9 +1008,179 @@ class multi_spectrum_fitter(spectrum_fitter):
                     res['resid_graphs'] = []
                 res['resid_graphs'].append(resid_graph)
                 
+            new_canvas.Draw()
             new_canvas.Update()
+            ROOT.SetOwnership(new_canvas, False)
             res['display_canvas_multi'] = new_canvas
             res['pad1'] = pad1
             res['pad2'] = pad2
         else:
             print(f"Invalid peak index: {peak_index}")
+
+    def save(self, filepath):
+        '''
+        Save fit peak locations and parameters with uncertainties to {filepath}.csv
+        (ROOT file saving for 2D simultaneous fits is not yet fully supported).
+        '''
+        if not filepath.endswith('.root'):
+            filepath += '.root'
+        csv_filepath = filepath[:-5] + '.csv'
+        print(f"Saving multi_spectrum_fitter CSV to {csv_filepath}...")
+        
+        with open(csv_filepath, 'w', newline='') as csvfile:
+            csvwriter = csv.writer(csvfile)
+            
+            # Identify all unique free parameter base names
+            free_base_params = set()
+            for res in self.fit_results:
+                if res is None or 'f_to_fit_2d' not in res or 'fit_res' not in res: continue
+                fit_res = res['fit_res']
+                f_to_fit = res['f_to_fit_2d']
+                
+                for j in range(f_to_fit.GetNpar()):
+                    param_free = True
+                    try:
+                        if hasattr(fit_res, "Get") and fit_res.Get():
+                            param_free = not fit_res.Get().IsParameterFixed(j)
+                        elif hasattr(fit_res, "IsParameterFixed"):
+                            param_free = not fit_res.IsParameterFixed(j)
+                        else:
+                            param_free = (fit_res.ParError(j) != 0.0)
+                    except Exception:
+                        param_free = (fit_res.ParError(j) != 0.0)
+                    
+                    if param_free:
+                        name = f_to_fit.GetParName(j)
+                        # amplitude_{peak}_{spec}
+                        m3 = re.match(r'^(.*)_(\d+)_(\d+)$', name)
+                        if m3:
+                            free_base_params.add(m3.group(1) + "_" + m3.group(3))
+                            continue
+                        
+                        m2 = re.match(r'^(.*)_(\d+)$', name)
+                        if m2:
+                            # could be mu_{peak} or bg_const_{spec}
+                            # we treat bg_const as global, mu as peak-specific
+                            base = m2.group(1)
+                            if base in ['bg_const', 'bg_slope', 'bg_shift']:
+                                free_base_params.add(name)
+                            else:
+                                free_base_params.add(base)
+                        else:
+                            free_base_params.add(name)
+            
+            sorted_params = sorted(list(free_base_params))
+            priorities = {'mu': 1, 'sigma': 2, 'tau': 3}
+            sorted_params.sort(key=lambda x: (priorities.get(x.split('_')[0], 100), x))
+            
+            header = ['fit_index', 'loc_guess', 'p_value']
+            for p in sorted_params:
+                header.extend([f'{p}_val', f'{p}_err'])
+            csvwriter.writerow(header)
+            
+            for i, res in enumerate(self.fit_results):
+                if res is None or 'f_to_fit_2d' not in res or 'fit_res' not in res: continue
+                
+                loc_guesses = self.peaks_to_fit[i][0]
+                if not isinstance(loc_guesses, (list, tuple, np.ndarray)):
+                    loc_guesses = [loc_guesses]
+                
+                fit_res = res['fit_res']
+                f_to_fit = res['f_to_fit_2d']
+                p_value = fit_res.Prob()
+                
+                # pre-extract all param values and errors
+                p_vals = {}
+                p_errs = {}
+                for j in range(f_to_fit.GetNpar()):
+                    name = f_to_fit.GetParName(j)
+                    p_vals[name] = fit_res.Parameter(j)
+                    p_errs[name] = fit_res.ParError(j)
+                
+                for k, loc in enumerate(loc_guesses):
+                    row_dict = {}
+                    
+                    for name, val in p_vals.items():
+                        err = p_errs[name]
+                        
+                        m3 = re.match(r'^(.*)_(\d+)_(\d+)$', name)
+                        if m3:
+                            base = m3.group(1)
+                            pk_idx = int(m3.group(2))
+                            spec_idx = m3.group(3)
+                            if pk_idx == k:
+                                row_dict[f"{base}_{spec_idx}_val"] = val
+                                row_dict[f"{base}_{spec_idx}_err"] = err
+                            continue
+                            
+                        m2 = re.match(r'^(.*)_(\d+)$', name)
+                        if m2:
+                            base = m2.group(1)
+                            idx = int(m2.group(2))
+                            if base in ['bg_const', 'bg_slope', 'bg_shift']:
+                                row_dict[name + "_val"] = val
+                                row_dict[name + "_err"] = err
+                            else:
+                                if idx == k:
+                                    row_dict[base + "_val"] = val
+                                    row_dict[base + "_err"] = err
+                            continue
+                            
+                        # global par (like shared sigma, tau)
+                        row_dict[name + "_val"] = val
+                        row_dict[name + "_err"] = err
+                        
+                    row = [i, loc, p_value]
+                    for p in sorted_params:
+                        row.append(row_dict.get(p + '_val', ''))
+                        row.append(row_dict.get(p + '_err', ''))
+                    csvwriter.writerow(row)
+        
+        # Save to ROOT file
+        f = ROOT.TFile(filepath, "RECREATE")
+        
+        for idx, spec in enumerate(self.spectra):
+            spec.Write(f"spectrum_{idx}")
+            
+        python_state = {
+            'is_multi': True,
+            'num_spectra': len(self.spectra),
+            'peak_model': self.peak_model,
+            'peaks_to_fit': self.peaks_to_fit,
+            'fit_options': self.fit_options,
+            'num_fit_results': len(self.fit_results),
+            'parameterizations': self.parameterizations,
+            'shared_sigma': getattr(self, 'shared_sigma', False),
+            'location_wiggle': getattr(self, 'location_wiggle', 10)
+        }
+        
+        import inspect
+        import dill
+        source_dict = {}
+        for k, v in self.param_bound_functions.items():
+            try:
+                source_dict[k] = inspect.getsource(v).strip()
+            except Exception:
+                source_dict[k] = str(v)
+        python_state['param_bound_functions'] = source_dict
+        
+        for i, res in enumerate(self.fit_results):
+            if res is None: continue
+            
+            if res.get('fit_res') and res['fit_res'].Get():
+                res['fit_res'].Get().Write(f"peak_{i}_fit_res")
+                
+            if res.get('sub_hist_2d'): res['sub_hist_2d'].Write(f"peak_{i}_sub_hist_2d")
+            if res.get('f_to_fit_2d'): res['f_to_fit_2d'].Write(f"peak_{i}_f_to_fit_2d")
+            if res.get('h_fit_2d'): res['h_fit_2d'].Write(f"peak_{i}_h_fit_2d")
+            if res.get('h_resid_2d'): res['h_resid_2d'].Write(f"peak_{i}_h_resid_2d")
+            if res.get('canvas_2d'): res['canvas_2d'].Write(f"peak_{i}_canvas_2d")
+            if res.get('pm'):
+                python_state[f'peak_{i}_pm_names'] = res['pm'].names
+            
+        pickled_hex_string = dill.dumps(python_state).hex()
+        obj_string = ROOT.TObjString(pickled_hex_string)
+        obj_string.Write("python_state")
+        
+        f.Close()
+        print("ROOT save complete.")
