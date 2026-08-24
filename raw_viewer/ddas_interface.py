@@ -502,7 +502,21 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
             raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
         tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
         if not os.path.exists(tpc_friend_path):
-            make_tpc_friend_file(experiment, run, tpc_ini_filename)
+            try:
+                make_tpc_friend_file(experiment, run, tpc_ini_filename)
+            except Exception as e:
+                import traceback
+                import sys
+                print(f"\n{'='*80}\n!!! CRITICAL FAILURE in make_tpc_friend_file for RUN {run} !!!\n{'='*80}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                print(f"{'='*80}\n", file=sys.stderr)
+                
+                if os.path.exists(tpc_friend_path):
+                    try:
+                        os.remove(tpc_friend_path)
+                    except OSError:
+                        pass
+                raise
         tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
         if not tpc_friend_file or tpc_friend_file.IsZombie():
             raise FileNotFoundError(f"Could not open TPC friend file: {tpc_friend_path}")
@@ -561,19 +575,40 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
                     cache_file_path, hash_name = future.result()
                     
                     # --- LAYER 2: RACE CONDITION FAILSAFE ---
-                    cf = ROOT.TFile.Open(cache_file_path, 'READ')
-                    temp_hist = cf.Get(hash_name)
+                    cf = None
+                    import time
+                    for _ in range(5):
+                        try:
+                            cf = ROOT.TFile.Open(cache_file_path, 'READ')
+                            if cf and not cf.IsZombie():
+                                break
+                        except OSError:
+                            pass
+                        time.sleep(1)
+
+                    temp_hist = cf.Get(hash_name) if cf and not cf.IsZombie() else None
                     
                     if not temp_hist:
-                        cf.Close()
-                        print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
+                        if cf: cf.Close()
+                        print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram or file unreadable. Forcing recreate...")
                         cache_file_path, hash_name = _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate=True, tpc_ini_filename=tpc_ini_filename)
-                        cf = ROOT.TFile.Open(cache_file_path, 'READ')
-                        temp_hist = cf.Get(hash_name)
+                        for _ in range(5):
+                            try:
+                                cf = ROOT.TFile.Open(cache_file_path, 'READ')
+                                if cf and not cf.IsZombie():
+                                    break
+                            except OSError:
+                                pass
+                            time.sleep(1)
+                        temp_hist = cf.Get(hash_name) if cf and not cf.IsZombie() else None
                         
-                    hist = temp_hist.Clone(f"{hist_name}_temp")
-                    hist.SetDirectory(0)
-                    cf.Close()
+                    hist = temp_hist.Clone(f"{hist_name}_temp") if temp_hist else None
+                    if hist:
+                        hist.SetDirectory(0)
+                    if cf: cf.Close()
+                    
+                    if not hist:
+                        raise RuntimeError(f"Failed to create or read histogram from {cache_file_path}")
                     
                     if sum_hist is None:
                         sum_hist = hist.Clone(hist_name)

@@ -45,7 +45,7 @@ if True: #show charged particle spectra
     _0=root_vis_tools.draw_overlaid_histograms({'60Ga':aspec_60Ga, '59Zn':aspec_59Zn}, 'alpha spectra')
     _1=root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
 
-fit_path = 'e23035_analysis/tpc_spectrum_fitting/'
+fit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting')
 def load_peaks_from_csv(filename):
     all_peaks = []
     with open(os.path.join(fit_path, filename), 'r') as f:
@@ -323,7 +323,29 @@ addback_ethresh = 150
 event_build_window = 500 #ns
 tstart, tstop = 0, 7.6e-6
 time_gate_str = f'(mesh_pre_amp_t - time)>{tstart} && (mesh_pre_amp_t - time)<{tstop}'
+t_accidental_start, t_accidental_stop = -15e-6, -1e-6
+accidental_time_gate_str = f'(mesh_pre_amp_t - time)>{t_accidental_start} && (mesh_pre_amp_t - time)<{t_accidental_stop}'
 
+gammaE_v_protonE = degai.get_histogram(experiment, runs, adj_dict, cal_name, (150, 0, 3000, 7000-150, 150, 7000), "gamma_v_proton_energy_time_gate", "gamma energy (keV) vs proton energy (keV) w/ expected (mesh time - gamma time)",
+                                        "addback_energy:tpc_energy", 
+                                       selection='tpc_particle_id==1 &&'+time_gate_str,
+                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
+gammaE_v_protonE_accidental = degai.get_histogram(experiment, runs, adj_dict, cal_name, (150, 0, 3000, 7000-150, 150, 7000), "gamma_v_proton_energy_accidental_gate", 
+                                                  "gamma energy (keV) vs proton energy (keV) for accidental coincidences",
+                                        "addback_energy:tpc_energy", 
+                                       selection='tpc_particle_id==1 &&'+accidental_time_gate_str,
+                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
+gammaE_v_protonE.Sumw2()
+gammaE_v_protonE_accidental.Sumw2()
+gammaE_v_protonE_bg_subtracted = gammaE_v_protonE.Clone()
+gammaE_v_protonE_bg_subtracted.SetName('gammaE_v_protonE_bg_subtracted')
+gammaE_v_protonE_bg_subtracted.SetTitle('gamma energy (keV) vs proton energy (keV) with accidental coincidences subtracted')
+gammaE_v_protonE_bg_subtracted.Add(gammaE_v_protonE_accidental, -(tstop-tstart)/(t_accidental_stop-t_accidental_start))
+
+h491 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted,(488, 494), (494, 501))
+h914 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (911, 917), (918,927))
+h1398 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (1395, 1401), (1420,1430))
+h511 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (508, 513), (518,529))
 
 # print('loading 59Zn data')
 # get_runs_Zn = np.array(e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='59Zn') & (e23035_runs.run_df['Field Cage Functional?'] == 'yes')])

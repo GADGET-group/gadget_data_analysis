@@ -8,7 +8,7 @@ import ROOT
 from raw_viewer import ddas_interface
 from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
 from raw_viewer import degai
-from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
+from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file, final_gamma_ecal
 
 experiment = 'e23035'
 
@@ -309,6 +309,7 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo, nexp=1):
 
 
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
+apply_energy_calibration_to_fit(f'{fit_prefix}_all_gamma', final_gamma_ecal.calibration)
 if gamma_beam_off_hist is not None:
     f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if gamma_beam_on_hist is not None:

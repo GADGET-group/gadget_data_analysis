@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 class SRIM_Table:
     def __init__(self, data_path:str, material_density:float, ionization_file=None):
@@ -8,6 +9,12 @@ class SRIM_Table:
         ionization file: Optional csv file with ion_energy in keV, fraction_energy_as_ionization. 
                          Ionization fraction is assumed to be 1 if not provided
         '''
+        if not os.path.isabs(data_path):
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            candidate_path = os.path.join(repo_root, data_path)
+            if os.path.exists(candidate_path):
+                data_path = candidate_path
+
         # Initialize lists to store the data
         energy_MeV = [0]
         electronic_stopping_MeV_um = [0]  # Stopping power in MeV/(mg/cm^2)

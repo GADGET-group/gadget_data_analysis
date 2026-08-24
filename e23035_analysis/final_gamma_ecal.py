@@ -833,8 +833,7 @@ if __name__ == '__main__':
     disp_fit_name = '60Ga_all_gamma'
     disp_cal_decay_groups = extract_cal_data(disp_fit_name, False)
     calibrated_data = show_cal_comparison(disp_cal_decay_groups, disp_fit_name, cal_fit=calibration)
-    apply_energy_calibration_to_fit(disp_fit_name, calibration)
-    apply_energy_calibration_to_fit('60Ga_beam_off_gamma', calibration)
+
     show_cal_error(calibration,title='with additional error')
 
     # init_cal_decay_groups_scaled=extract_cal_data(cal_fit_name,use_in_cal_only=True)
