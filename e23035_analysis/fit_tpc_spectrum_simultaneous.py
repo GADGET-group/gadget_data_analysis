@@ -31,9 +31,6 @@ proton_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_p
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
-if True: #show charged particle spectra
-    _1=root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
-
 fit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting')
 def load_peaks_from_csv(filename):
     all_peaks = []
@@ -76,7 +73,7 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
             'formula': '[sigma_c] + [sigma_m]*({mu})',
             'params': ['sigma_c', 'sigma_m'],
             'guesses': [26, 0.01],
-            'bounds': [(8, 30), (0.0001, 0.03)]
+            'bounds': [(4, 30), (0.0001, 0.03)]
         }
     }
     for spec in f.spectra:
@@ -92,7 +89,7 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
         f.fit_options = f.fit_options.replace('L','')
     f.fit_peaks()
     if save_name:
-        f.save(save_name)
+        f.save(save_name) 
     return f
 
 proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
@@ -105,12 +102,12 @@ f_proton_simultaneous = fit_multi_peaks(
     [pspec_all_energy_60Ga, pspec_59Zn], 
     proton_peak_guesses,
     save_path, force_refit=force_refit,
-    additional_param_bounds={'bg_slope':lambda E: (-1,1), 'amplitude': lambda E:(1, 1e6)}, 
+    additional_param_bounds={'bg_slope':lambda E: (-1,1) if E < 1000 else (0,0), 'amplitude': lambda E:(1e-3, 1e6)}, 
     loc_wiggle=10
 )
 ROOT.gROOT.SetBatch(False)
 # Display multi-spectrum fit for the first peak
-f_proton_simultaneous.show_fit_results(0, False, True)
+f_proton_simultaneous.show_fit_results(4, False, True)
 
 
 zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')

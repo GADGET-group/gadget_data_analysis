@@ -775,7 +775,13 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
         s_bnd = param_bounds.get(sig_name, param_bounds.get('sigma', sigma_bounds))
         
-        amp_string, amp_idx = resolve_string_param(amp_name, A_guess, a_bnd, parameterizations, pm)
+        peak_bin = spectrum.GetXaxis().FindBin(e_guess_list[i])
+        local_max = spectrum.GetBinContent(peak_bin)
+        for offset in range(-5, 6):
+            local_max = max(local_max, spectrum.GetBinContent(peak_bin + offset))
+        i_A_guess = max((local_max - bg_guess) * sigma_guess * 2.50662827 / bin_width, 1.0)
+        
+        amp_string, amp_idx = resolve_string_param(amp_name, i_A_guess, a_bnd, parameterizations, pm)
         mu_string, mu_idx = resolve_string_param(mu_name, e_guess_list[i], m_bnd, parameterizations, pm)
         
         if not shared_sigma and data_source is not None:
@@ -1666,6 +1672,15 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
     Fits a function to a 2D histogram.
     fit_range should be ((x_low, x_high), (y_low, y_high))
     """
+    if 'I' in fit_options:
+        import warnings
+        warnings.warn(
+            "WARNING: The 'I' (Integral) option is set for a 2D multi-spectrum fit. "
+            "ROOT's 2D numerical integrator will attempt to integrate across the discrete Y-axis (spectrum index) "
+            "which contains a step function. This may cause the adaptive integrator to crash with 'Logic error: idvax0 < 1'. "
+            "It is highly recommended to remove 'I' from fit_options for 2D multi-spectrum fits."
+        )
+        
     # 1. Unique ID & Setup
     unique_id = uuid.uuid4().hex[:8]
     canvas_name = f"c_fit2d_{unique_id}"
@@ -1844,10 +1859,14 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             amp_name = f"amplitude_{i}_{j}"
             spectra[j].GetXaxis().SetRangeUser(*fit_window)
             bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
-            max_val = spectra[j].GetBinContent(spectra[j].GetMaximumBin())
             spectra[j].GetXaxis().UnZoom()
             
-            A_guess = max((max_val - bg_guess) * sigma_guess * 2.50662827 / bin_width, 1.0)
+            peak_bin = spectra[j].GetXaxis().FindBin(e_guess_list[i])
+            local_max = spectra[j].GetBinContent(peak_bin)
+            for offset in range(-5, 6):
+                local_max = max(local_max, spectra[j].GetBinContent(peak_bin + offset))
+            
+            A_guess = max((local_max - bg_guess) * sigma_guess * 2.50662827 / bin_width, 1.0)
             a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', (0, np.inf)))
             pm.add(amp_name, A_guess, a_bnd)
 
@@ -1884,7 +1903,9 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double bg_slope = p[bg_slope_idx[val_y]];
         double bg_shift = p[bg_shift_idx[val_y]];
         
-        double total = bg_const + bg_slope * val_x;
+        double bg_val = bg_const + bg_slope * val_x;
+        if (bg_val < 0) bg_val = 0.0;
+        double total = bg_val;
         double bin_width = {bin_width};
         
         double sigma_vals[{n_peaks}];
@@ -1898,6 +1919,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
             total += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
         }}
+        if (total < 1e-9) return 1e-9;
         return total;
     }}
     
@@ -1913,7 +1935,9 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double bg_const = p[bg_const_idx[val_y]];
         double bg_slope = p[bg_slope_idx[val_y]];
         double bg_shift = p[bg_shift_idx[val_y]];
-        double total = bg_const + bg_slope * val_x;
+        double bg_val = bg_const + bg_slope * val_x;
+        if (bg_val < 0) bg_val = 0.0;
+        double total = bg_val;
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
         for (int i = 0; i < {n_peaks}; ++i) {{
@@ -1922,6 +1946,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             double amp = p[amp_idx[i][val_y]];
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
+        if (total < 1e-9) return 1e-9;
         return total;
     }}
     
@@ -2089,7 +2114,9 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         double tau_vals[{n_peaks}];
         {tau_eval_cpp}
         
-        double total = bg_const + bg_slope * val_x;
+        double bg_val = bg_const + bg_slope * val_x;
+        if (bg_val < 0) bg_val = 0.0;
+        double total = bg_val;
         
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
@@ -2113,6 +2140,7 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             }}
             total += term;
         }}
+        if (total < 1e-9) return 1e-9;
         return total;
     }}
     
@@ -2130,13 +2158,18 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         double bg_shift = p[bg_shift_idx[val_y]];
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
-        double total = bg_const + bg_slope * val_x;
+        
+        double bg_val = bg_const + bg_slope * val_x;
+        if (bg_val < 0) bg_val = 0.0;
+        double total = bg_val;
+        
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
             double sigma = sigma_vals[i];
             double amp = p[amp_idx[i][val_y]];
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
+        if (total < 1e-9) return 1e-9;
         return total;
     }}
     

@@ -798,6 +798,10 @@ class multi_spectrum_fitter(spectrum_fitter):
         # Initialize the base class with the first spectrum to reuse some base class logic
         super().__init__(spectra[0], peak_model)
         
+        # For 2D multi-spectrum fits, we must NOT use the 'I' (Integral) option because the Y axis 
+        # is discrete (spectrum index). ROOT's 2D integrator fails to converge on the step function.
+        self.fit_options = self.fit_options.replace('I', '')
+        
     def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0, fit_sig=0, spectrum_index=0):
         '''
         Finds peaks on a specific 1D spectrum.
@@ -1036,6 +1040,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                     
                 if j == 0:
                     resid_graph.Draw("AP")
+                    resid_graph.GetXaxis().SetLimits(spec.GetXaxis().GetBinLowEdge(bin_start), spec.GetXaxis().GetBinUpEdge(bin_end))
                     resid_graph.GetXaxis().SetLabelSize(0.1)
                     resid_graph.GetXaxis().SetTitleSize(0.12)
                     resid_graph.GetYaxis().SetLabelSize(0.1)
