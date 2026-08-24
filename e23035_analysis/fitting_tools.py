@@ -1900,9 +1900,55 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         }}
         return total;
     }}
+    
+    double eval_2d_gaus_bg_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        int val_y = std::round(x[1]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
+        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
+        int bg_shift_idx[{n_spectra}] = {bg_shift_cpp};
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
+        double bg_const = p[bg_const_idx[val_y]];
+        double bg_slope = p[bg_slope_idx[val_y]];
+        double bg_shift = p[bg_shift_idx[val_y]];
+        double total = bg_const + bg_slope * val_x;
+        double sigma_vals[{n_peaks}];
+        {sigma_eval_cpp}
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double mu = p[mu_idx[i]];
+            double sigma = sigma_vals[i];
+            double amp = p[amp_idx[i][val_y]];
+            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+        }}
+        return total;
+    }}
+    
+    double eval_2d_gaus_peak_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        int val_y = std::round(x[1]);
+        int target_peak = std::round(x[2]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
+        double bin_width = {bin_width};
+        double sigma_vals[{n_peaks}];
+        {sigma_eval_cpp}
+        double mu = p[mu_idx[target_peak]];
+        double sigma = sigma_vals[target_peak];
+        double amp = p[amp_idx[target_peak][val_y]];
+        return (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
+    }}
     """
     ROOT.gInterpreter.Declare(cpp_code)
     eval_2d = getattr(ROOT, f"eval_2d_gaus_{comp_id}")
+    
+    # Store component functions in pm for later use
+    pm.bg_func_name = f"eval_2d_gaus_bg_{comp_id}"
+    pm.peak_func_name = f"eval_2d_gaus_peak_{comp_id}"
+    pm.cpp_code = cpp_code
 
     # Prepare 2D Histogram
     bin_x_low = spectra[0].GetXaxis().FindBin(e_low)
@@ -2069,9 +2115,64 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         }}
         return total;
     }}
+    
+    double eval_2d_emg_bg_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        int val_y = std::round(x[1]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
+        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
+        int bg_shift_idx[{n_spectra}] = {bg_shift_cpp};
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
+        double bg_const = p[bg_const_idx[val_y]];
+        double bg_slope = p[bg_slope_idx[val_y]];
+        double bg_shift = p[bg_shift_idx[val_y]];
+        double sigma_vals[{n_peaks}];
+        {sigma_eval_cpp}
+        double total = bg_const + bg_slope * val_x;
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double mu = p[mu_idx[i]];
+            double sigma = sigma_vals[i];
+            double amp = p[amp_idx[i][val_y]];
+            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+        }}
+        return total;
+    }}
+    
+    double eval_2d_emg_peak_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        int val_y = std::round(x[1]);
+        int target_peak = std::round(x[2]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
+        double bin_width = {bin_width};
+        double sigma_vals[{n_peaks}];
+        {sigma_eval_cpp}
+        double tau_vals[{n_peaks}];
+        {tau_eval_cpp}
+        double mu = p[mu_idx[target_peak]];
+        double amp = p[amp_idx[target_peak][val_y]];
+        double sigma = sigma_vals[target_peak];
+        double tau = tau_vals[target_peak];
+        
+        double u = (val_x - mu) / sigma;
+        double v = sigma / tau;
+        double z = (u - v) / 1.41421356;
+        if (z > 26.0) return 0.0;
+        if (z < -26.0) return (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * 2.0;
+        return (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * TMath::Erfc(z);
+    }}
     """
     ROOT.gInterpreter.Declare(cpp_code)
     eval_2d = getattr(ROOT, f"eval_2d_emg_{comp_id}")
+    
+    # Store component functions in pm for later use
+    pm.bg_func_name = f"eval_2d_emg_bg_{comp_id}"
+    pm.peak_func_name = f"eval_2d_emg_peak_{comp_id}"
+    pm.cpp_code = cpp_code
 
     # Prepare 2D Histogram
     bin_x_low = spectra[0].GetXaxis().FindBin(e_low)

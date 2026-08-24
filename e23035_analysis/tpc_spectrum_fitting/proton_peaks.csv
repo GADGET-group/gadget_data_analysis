@@ -1,6 +1,5 @@
 fit_window,peak energy,from decay of,known peak energy (keV),known peak energy uncertainty(keV),use for calibration?,notes
-550-985,600,,,,,
-,668,,,,,
+550-985,668,,,,,
 ,725,60Ga,,,,
 ,763,,,,,
 ,814,59Zn,,,,

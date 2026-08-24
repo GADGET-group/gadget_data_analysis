@@ -11,7 +11,7 @@ from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vi
 experiment = 'e23035'
 tpc_config = 'smart2_rpr.csv'
 num_workers = 200
-force_refit=False
+force_refit=True
 
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end
@@ -105,12 +105,12 @@ f_proton_simultaneous = fit_multi_peaks(
     [pspec_all_energy_60Ga, pspec_59Zn], 
     proton_peak_guesses,
     save_path, force_refit=force_refit,
-    additional_param_bounds={'bg_slope':lambda E: (0,0) if E > 1000 else (-1,1), 'amplitude': lambda E:(1, 1e6)}, 
+    additional_param_bounds={'bg_slope':lambda E: (-1,1), 'amplitude': lambda E:(1, 1e6)}, 
     loc_wiggle=10
 )
 ROOT.gROOT.SetBatch(False)
 # Display multi-spectrum fit for the first peak
-f_proton_simultaneous.show_fit_results(0)
+f_proton_simultaneous.show_fit_results(0, False, True)
 
 
 zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')

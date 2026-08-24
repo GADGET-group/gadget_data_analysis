@@ -739,9 +739,16 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
             res_dict['canvas_2d'] = canvas_2d
             
             if f'peak_{i}_pm_names' in python_state:
-                import fitting_tools
-                pm = fitting_tools.parameter_manager(len(python_state[f'peak_{i}_pm_names']))
+                from e23035_analysis import fitting_tools
+                pm = fitting_tools.ParamManager()
                 pm.names = python_state[f'peak_{i}_pm_names']
+                if f'peak_{i}_bg_func_name' in python_state:
+                    pm.bg_func_name = python_state[f'peak_{i}_bg_func_name']
+                if f'peak_{i}_peak_func_name' in python_state:
+                    pm.peak_func_name = python_state[f'peak_{i}_peak_func_name']
+                if f'peak_{i}_cpp_code' in python_state:
+                    pm.cpp_code = python_state[f'peak_{i}_cpp_code']
+                    ROOT.gInterpreter.Declare(pm.cpp_code)
                 res_dict['pm'] = pm
         else:
             res_dict['component_peak_funcs'] = []
@@ -872,7 +879,7 @@ class multi_spectrum_fitter(spectrum_fitter):
         if not original_mt_state:
             ROOT.DisableImplicitMT()
 
-    def show_fit_results(self, peak_index, show_fit_params=True):
+    def show_fit_results(self, peak_index, show_fit_params=True, show_components=False):
         ROOT.gROOT.SetBatch(False) 
         if 0 <= peak_index < len(self.fit_results):
             res = self.fit_results[peak_index]
@@ -940,6 +947,41 @@ class multi_spectrum_fitter(spectrum_fitter):
                 if '1d_funcs' not in res:
                     res['1d_funcs'] = []
                 res['1d_funcs'].append((spec_clone, f1d))
+                
+                if show_components:
+                    bg_func_name = getattr(pm, 'bg_func_name', None)
+                    if bg_func_name:
+                        def make_bg_eval(idx):
+                            bg_eval_func = getattr(ROOT, bg_func_name)
+                            params = f_to_fit_2d.GetParameters()
+                            return lambda x, p: bg_eval_func(np.array([x[0], idx], dtype=np.float64), params)
+                            
+                        lam_bg = make_bg_eval(j)
+                        f1d_bg = ROOT.TF1(f"f1d_bg_{j}_{id(self)}", lam_bg, e_low, e_high, 0)
+                        f1d_bg.SetLineColor(color)
+                        f1d_bg.SetLineStyle(2)
+                        f1d_bg.SetLineWidth(1)
+                        f1d_bg.Draw("SAME")
+                        res['1d_lambdas'].append(lam_bg)
+                        res['1d_funcs'].append((None, f1d_bg))
+                        
+                    peak_func_name = getattr(pm, 'peak_func_name', None)
+                    if peak_func_name:
+                        n_peaks = sum(1 for name in pm.names if name.startswith('mu'))
+                        for i in range(n_peaks):
+                            def make_peak_eval(idx, peak_i):
+                                peak_eval_func = getattr(ROOT, peak_func_name)
+                                params = f_to_fit_2d.GetParameters()
+                                return lambda x, p: peak_eval_func(np.array([x[0], idx, peak_i], dtype=np.float64), params)
+                                
+                            lam_peak = make_peak_eval(j, i)
+                            f1d_peak = ROOT.TF1(f"f1d_peak_{j}_{i}_{id(self)}", lam_peak, e_low, e_high, 0)
+                            f1d_peak.SetLineColor(color)
+                            f1d_peak.SetLineStyle(3)
+                            f1d_peak.SetLineWidth(1)
+                            f1d_peak.Draw("SAME")
+                            res['1d_lambdas'].append(lam_peak)
+                            res['1d_funcs'].append((None, f1d_peak))
                 
             if show_fit_params:
                 # Add stats box for shared params like P-value, sigma, tau
@@ -1177,6 +1219,12 @@ class multi_spectrum_fitter(spectrum_fitter):
             if res.get('canvas_2d'): res['canvas_2d'].Write(f"peak_{i}_canvas_2d")
             if res.get('pm'):
                 python_state[f'peak_{i}_pm_names'] = res['pm'].names
+                if hasattr(res['pm'], 'bg_func_name'):
+                    python_state[f'peak_{i}_bg_func_name'] = res['pm'].bg_func_name
+                if hasattr(res['pm'], 'peak_func_name'):
+                    python_state[f'peak_{i}_peak_func_name'] = res['pm'].peak_func_name
+                if hasattr(res['pm'], 'cpp_code'):
+                    python_state[f'peak_{i}_cpp_code'] = res['pm'].cpp_code
             
         pickled_hex_string = dill.dumps(python_state).hex()
         obj_string = ROOT.TObjString(pickled_hex_string)
