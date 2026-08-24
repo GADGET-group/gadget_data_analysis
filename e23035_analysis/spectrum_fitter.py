@@ -30,7 +30,7 @@ class spectrum_fitter:
         #parameter bounds as a function of energy. May be used to fix sigma, etc
         #These functions will be evaluated at loc_guess[0] if loc guess is a list of locations
         self.param_bound_functions = {}
-        self.fit_options = 'LS0QEI'
+        self.fit_options = 'LS0QEI'#defaults to log likelihood. Should change if fitting a bg subtracted spectrum.
         self.location_wiggle=3 #bounds +/- to apply to location guesses
         self.shared_sigma=True #currently only implemented for bg_shift_guass. Will fill out param bounds for each peak based on guess.
         self.max_implicit_cores = 100
@@ -391,7 +391,8 @@ class spectrum_fitter:
         '''
         Fit each peak from peak_loc_guesses, and store the results
         '''
-        if self.peak_model.lower() not in ['emg', 'bg_shift_emg', 'bg_shift_nemg']:
+        original_mt_state = ROOT.IsImplicitMTEnabled()
+        if not original_mt_state and self.peak_model.lower() not in ['emg', 'bg_shift_emg', 'bg_shift_nemg']:
             ROOT.EnableImplicitMT(self.max_implicit_cores)
         self.fit_results = []
         original_batch_state = ROOT.gROOT.IsBatch()
@@ -477,7 +478,8 @@ class spectrum_fitter:
             self.fit_results.append(res_dict)
             
         ROOT.gROOT.SetBatch(original_batch_state)
-        ROOT.DisableImplicitMT()
+        if not original_mt_state:
+            ROOT.DisableImplicitMT()
 
     def get_fit_param(self, param_name):
         '''
@@ -736,3 +738,233 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
     
     print("Load complete.")
     return fitter
+
+class multi_spectrum_fitter(spectrum_fitter):
+    '''
+    Class for simultaneously fitting multiple 1D spectra.
+    '''
+    def __init__(self, spectra:list, peak_model:str):
+        if not spectra:
+            raise ValueError("Must provide at least one spectrum")
+        self.spectra = spectra
+        # Initialize the base class with the first spectrum to reuse some base class logic
+        super().__init__(spectra[0], peak_model)
+        
+    def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0, fit_sig=0, spectrum_index=0):
+        '''
+        Finds peaks on a specific 1D spectrum.
+        '''
+        original_spectrum = self.spectrum
+        self.spectrum = self.spectra[spectrum_index]
+        res = super().find_peaks(reset_peaks, expected_peak_width, window_width, init_sig, fit_sig)
+        self.spectrum = original_spectrum
+        return res
+
+    def fit_peaks(self):
+        '''
+        Fit each peak simultaneously across all spectra using the 2D fitter.
+        '''
+        original_mt_state = ROOT.IsImplicitMTEnabled()
+        if not original_mt_state and self.peak_model.lower() not in ['emg', 'bg_shift_emg', 'bg_shift_nemg']:
+            ROOT.EnableImplicitMT(self.max_implicit_cores)
+        self.fit_results = []
+        original_batch_state = ROOT.gROOT.IsBatch()
+        ROOT.gROOT.SetBatch(True)
+        
+        for loc_guess, window_start, window_end in tqdm(self.peaks_to_fit):
+            try:
+                _ = iter(loc_guess)
+            except TypeError as te:
+                loc_guess = [loc_guess]
+            print(f'fitting peak/s simultaneously at:{loc_guess}')
+
+            fit_range = (window_start, window_end)
+            location_wiggle = self.location_wiggle
+
+            param_bounds = {}
+            if len(loc_guess) == 1:
+                if 'mu' in self.param_bound_functions:
+                    param_bounds['mu'] = self.param_bound_functions['mu'](loc_guess[0])
+                elif 'mu' not in self.param_bound_functions:
+                    param_bounds['mu'] = (loc_guess[0] - location_wiggle, loc_guess[0] + location_wiggle)
+            else:
+                for i, loc in enumerate(loc_guess):
+                    if 'mu' in self.param_bound_functions:
+                        param_bounds[f'mu_{i}'] = self.param_bound_functions['mu'](loc)
+                    elif f'mu_{i}' not in self.param_bound_functions:
+                        param_bounds[f'mu_{i}'] = (loc - location_wiggle, loc + location_wiggle)
+                        
+            for p in self.param_bound_functions:
+                if p == 'mu':
+                    continue
+                param_bounds[p] = self.param_bound_functions[p](loc_guess[0])
+
+            if self.peak_model.lower() == 'bg_shift_gaus':
+                if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
+                    del param_bounds['sigma']
+                    for i, loc in enumerate(loc_guess):
+                        param_bounds[f'sigma_{i}'] = self.param_bound_functions['sigma'](loc)
+                
+                res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
+                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
+                                    parameterizations=self.parameterizations)
+            elif self.peak_model.lower() == 'bg_shift_emg':
+                res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
+                                    param_bounds=param_bounds, fit_options=self.fit_options,
+                                    parameterizations=self.parameterizations)
+            else:
+                raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports bg_shift_gaus, bg_shift_emg): {self.peak_model}")
+
+            # fit_hist2d returns fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
+            res_dict = {
+                'fit_res': res[0],
+                'canvas_2d': res[1],
+                'sub_hist_2d': res[2],
+                'f_to_fit_2d': res[3],
+                'h_fit_2d': res[4],
+                'h_resid_2d': res[5],
+                'pm': res[6]
+            }
+            self.fit_results.append(res_dict)
+            
+        ROOT.gROOT.SetBatch(original_batch_state)
+        if not original_mt_state:
+            ROOT.DisableImplicitMT()
+
+    def show_fit_results(self, peak_index, show_fit_params=True):
+        ROOT.gROOT.SetBatch(False) 
+        if 0 <= peak_index < len(self.fit_results):
+            res = self.fit_results[peak_index]
+            fit_res = res['fit_res']
+            f_to_fit_2d = res['f_to_fit_2d']
+            pm = res['pm']
+            
+            # The user requested a color coded overlay of all spectra
+            new_canvas = ROOT.TCanvas(f"c_show_multi_{peak_index}_{id(self)}", f"Multi-spectrum Fit Result {peak_index}", 1000, 600)
+            
+            # 1. Main plot with ratio panel below
+            pad1 = ROOT.TPad(f"pad1_multi_{id(self)}", "pad1", 0, 0.3, 1, 1.0)
+            pad1.SetBottomMargin(0.02)
+            pad1.Draw()
+            
+            new_canvas.cd()
+            pad2 = ROOT.TPad(f"pad2_multi_{id(self)}", "pad2", 0, 0.0, 1, 0.3)
+            pad2.SetTopMargin(0.02)
+            pad2.SetBottomMargin(0.3)
+            pad2.Draw()
+
+            pad1.cd()
+            
+            colors = [ROOT.kBlack, ROOT.kBlue, ROOT.kRed, ROOT.kGreen+2, ROOT.kOrange, ROOT.kMagenta, ROOT.kCyan]
+            
+            # Collect components for drawing
+            e_low = f_to_fit_2d.GetXmin()
+            e_high = f_to_fit_2d.GetXmax()
+            
+            drawn_first = False
+            
+            # Reconstruct the 1D function for each spectrum
+            for j, spec in enumerate(self.spectra):
+                color = colors[j % len(colors)]
+                
+                # Draw the original data spectrum
+                spec_clone = spec.Clone(f"spec_clone_{j}_{id(self)}")
+                spec_clone.GetXaxis().SetRangeUser(e_low, e_high)
+                spec_clone.SetLineColor(color)
+                spec_clone.SetMarkerColor(color)
+                spec_clone.SetStats(0)
+                
+                if not drawn_first:
+                    spec_clone.Draw("E")
+                    drawn_first = True
+                else:
+                    spec_clone.Draw("E SAME")
+                    
+                # Create a 1D function bound to this specific y value
+                # Note: creating Python callable TF1 in a loop requires handling loop variable capture carefully
+                def make_eval(idx):
+                    return lambda x, p: f_to_fit_2d.Eval(x[0], idx)
+                
+                f1d = ROOT.TF1(f"f1d_{j}_{id(self)}", make_eval(j), e_low, e_high, 0)
+                f1d.SetLineColor(color)
+                f1d.SetLineWidth(2)
+                f1d.Draw("SAME")
+                
+                # We need to keep these references so they don't get garbage collected
+                if '1d_funcs' not in res:
+                    res['1d_funcs'] = []
+                res['1d_funcs'].append((spec_clone, f1d))
+                
+            if show_fit_params:
+                # Add stats box for shared params like P-value, sigma, tau
+                stats_box = ROOT.TPaveText(0.65, 0.45, 0.88, 0.88, "NDC")
+                stats_box.SetFillColor(ROOT.kWhite)
+                stats_box.SetBorderSize(1)
+                stats_box.SetTextAlign(12) 
+                
+                prob = fit_res.Prob()
+                chi2_ndf = fit_res.Chi2() / fit_res.Ndf() if fit_res.Ndf() > 0 else 0
+                stats_box.AddText(f"P-value: {prob:.4g}")
+                stats_box.AddText(f"#chi^{{2}}/ndf: {chi2_ndf:.2f}")
+                
+                for i in range(fit_res.NPar()):
+                    p_name = f_to_fit_2d.GetParName(i)
+                    # We might only want to show shared parameters (like mu, sigma, tau) rather than all 100 amplitudes
+                    if not p_name.startswith("amplitude") and not p_name.startswith("bg_const") and not p_name.startswith("bg_slope") and not p_name.startswith("bg_shift"):
+                        p_val = fit_res.Parameter(i)
+                        p_err = fit_res.ParError(i)
+                        stats_box.AddText(f"{p_name}: {p_val:.4g} #pm {p_err:.4g}")
+                        
+                stats_box.Draw("SAME")
+                res['multi_stats_box'] = stats_box
+
+            pad2.cd()
+            pad2.SetGridy()
+            
+            # Draw residuals for all spectra
+            for j, spec in enumerate(self.spectra):
+                color = colors[j % len(colors)]
+                
+                resid_graph = ROOT.TGraphErrors()
+                resid_graph.SetMarkerColor(color)
+                resid_graph.SetLineColor(color)
+                resid_graph.SetMarkerStyle(20)
+                resid_graph.SetMarkerSize(0.6)
+                
+                pt_idx = 0
+                bin_start = spec.FindBin(e_low)
+                bin_end = spec.FindBin(e_high)
+                for bin_i in range(bin_start, bin_end + 1):
+                    x_val = spec.GetBinCenter(bin_i)
+                    y_val = spec.GetBinContent(bin_i)
+                    y_err = spec.GetBinError(bin_i)
+                    
+                    fit_y = f_to_fit_2d.Eval(x_val, j)
+                    resid = y_val - fit_y
+                    
+                    resid_graph.SetPoint(pt_idx, x_val, resid)
+                    resid_graph.SetPointError(pt_idx, 0, y_err)
+                    pt_idx += 1
+                    
+                if j == 0:
+                    resid_graph.Draw("AP")
+                    resid_graph.GetXaxis().SetLabelSize(0.1)
+                    resid_graph.GetXaxis().SetTitleSize(0.12)
+                    resid_graph.GetYaxis().SetLabelSize(0.1)
+                    resid_graph.GetYaxis().SetTitleSize(0.1)
+                    resid_graph.GetYaxis().SetTitleOffset(0.4)
+                    resid_graph.GetYaxis().SetTitle("Data - Fit")
+                    resid_graph.GetYaxis().SetNdivisions(505)
+                else:
+                    resid_graph.Draw("P SAME")
+                    
+                if 'resid_graphs' not in res:
+                    res['resid_graphs'] = []
+                res['resid_graphs'].append(resid_graph)
+                
+            new_canvas.Update()
+            res['display_canvas_multi'] = new_canvas
+            res['pad1'] = pad1
+            res['pad2'] = pad2
+        else:
+            print(f"Invalid peak index: {peak_index}")

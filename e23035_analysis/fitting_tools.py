@@ -1781,3 +1781,305 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
     canvas._h_resid = h_resid
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
+
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, parameterizations=None):
+    if param_bounds is None:
+        param_bounds = {}
+    e_low, e_high = fit_window
+    n_spectra = len(spectra)
+    
+    if not isinstance(e_guess, list) and not isinstance(e_guess, tuple):
+        e_guess_list = [e_guess]
+    else:
+        e_guess_list = e_guess
+        
+    n_peaks = len(e_guess_list)
+    bin_width = spectra[0].GetBinWidth(1) 
+    
+    # Setup Parameters and Initial Guesses
+    if data_source is None:
+        sigma_guess = 1
+    else:
+        sigma_guess = get_sigma(data_source, e_guess_list[0])
+        
+    pm = ParamManager()
+    
+    # 1. Independent backgrounds for each spectrum
+    for j in range(n_spectra):
+        spectra[j].GetXaxis().SetRangeUser(*fit_window)
+        bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
+        spectra[j].GetXaxis().UnZoom()
+        
+        pm.add(f"bg_const_{j}", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
+        pm.add(f"bg_slope_{j}", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        
+    for j in range(n_spectra):
+        pm.add(f"bg_shift_{j}", 0.002, param_bounds.get('bg_shift', (0, 1.0)))
+
+    # 2. Shared sigma
+    if data_source is None:
+        sigma_bounds = (0.1, 100)
+    elif data_source == 'gamma_adc':
+        sigma_bounds = (1, 20)
+    else:
+        sigma_bounds = (0.1, 100)
+
+    for i in range(n_peaks):
+        if shared_sigma and i == 0:
+            pm.add("sigma", sigma_guess, param_bounds.get('sigma', sigma_bounds))
+        elif not shared_sigma:
+            pm.add(f"sigma_{i}", sigma_guess, param_bounds.get(f'sigma_{i}', sigma_bounds))
+
+    # 3. Peak parameters: shared mu, independent amplitudes
+    for i in range(n_peaks):
+        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
+        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+        pm.add(mu_name, e_guess_list[i], m_bnd)
+        
+        for j in range(n_spectra):
+            amp_name = f"amplitude_{i}_{j}"
+            spectra[j].GetXaxis().SetRangeUser(*fit_window)
+            bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
+            max_val = spectra[j].GetBinContent(spectra[j].GetMaximumBin())
+            spectra[j].GetXaxis().UnZoom()
+            
+            A_guess = max((max_val - bg_guess) * sigma_guess * 2.50662827 / bin_width, 1.0)
+            a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', (0, np.inf)))
+            pm.add(amp_name, A_guess, a_bnd)
+
+    import uuid
+    comp_id = uuid.uuid4().hex[:6]
+    
+    bg_const_idx = [pm.get_idx(f"bg_const_{j}") for j in range(n_spectra)]
+    bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
+    bg_shift_idx = [pm.get_idx(f"bg_shift_{j}") for j in range(n_spectra)]
+    mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
+    sigma_idx = [pm.get_idx("sigma" if shared_sigma else f"sigma_{i}") for i in range(n_peaks)]
+    amp_idx = [[pm.get_idx(f"amplitude_{i}_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
+    
+    bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
+    bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
+    bg_shift_cpp = "{" + ",".join(map(str, bg_shift_idx)) + "}"
+    mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
+    sigma_cpp = "{" + ",".join(map(str, sigma_idx)) + "}"
+    amp_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in amp_idx]) + "}"
+    
+    cpp_code = f"""
+    double eval_2d_gaus_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        int val_y = std::round(x[1]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        
+        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
+        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
+        int bg_shift_idx[{n_spectra}] = {bg_shift_cpp};
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int sigma_idx[{n_peaks}] = {sigma_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
+        
+        double bg_const = p[bg_const_idx[val_y]];
+        double bg_slope = p[bg_slope_idx[val_y]];
+        double bg_shift = p[bg_shift_idx[val_y]];
+        
+        double total = bg_const + bg_slope * val_x;
+        double bin_width = {bin_width};
+        
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double mu = p[mu_idx[i]];
+            double sigma = p[sigma_idx[i]];
+            double amp = p[amp_idx[i][val_y]];
+            
+            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            total += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
+        }}
+        return total;
+    }}
+    """
+    ROOT.gInterpreter.Declare(cpp_code)
+    eval_2d = getattr(ROOT, f"eval_2d_gaus_{comp_id}")
+
+    # Prepare 2D Histogram
+    bin_x_low = spectra[0].GetXaxis().FindBin(e_low)
+    bin_x_high = spectra[0].GetXaxis().FindBin(e_high)
+    x_low_snap = spectra[0].GetXaxis().GetBinLowEdge(bin_x_low)
+    x_high_snap = spectra[0].GetXaxis().GetBinUpEdge(bin_x_high)
+    n_bins_x = bin_x_high - bin_x_low + 1
+    n_bins_y = n_spectra
+
+    h2 = ROOT.TH2D(f"h2_{uuid.uuid4().hex[:6]}", "Data 2D", 
+                   n_bins_x, x_low_snap, x_high_snap, 
+                   n_bins_y, -0.5, n_spectra - 0.5)
+    
+    for i in range(1, n_bins_x + 1):
+        for j in range(n_spectra):
+            val = spectra[j].GetBinContent(bin_x_low + i - 1)
+            err = spectra[j].GetBinError(bin_x_low + i - 1)
+            h2.SetBinContent(i, j + 1, val)
+            h2.SetBinError(i, j + 1, err)
+
+    fit_range = ((e_low, e_high), (-0.5, n_spectra - 0.5))
+    
+    fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
+        h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options
+    )
+    
+    return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
+
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', parameterizations=None):
+    from scipy.special import erfcx, erfc
+    import math
+    if param_bounds is None:
+        param_bounds = {}
+    e_low, e_high = fit_window
+    n_spectra = len(spectra)
+    
+    if not isinstance(e_guess, list) and not isinstance(e_guess, tuple):
+        e_guess_list = [e_guess]
+    else:
+        e_guess_list = e_guess
+        
+    n_peaks = len(e_guess_list)
+    bin_width = spectra[0].GetBinWidth(1) 
+
+    # 1. First fit with Gaussian to get guesses
+    gaus_res = fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source, param_bounds)
+    gaus_params_obj = gaus_res[0]
+    pm_gaus = gaus_res[6]
+    
+    gaus_p_map = {}
+    if gaus_params_obj.IsValid() or True: 
+        for i in range(gaus_params_obj.NPar()):
+            gaus_p_map[gaus_res[3].GetParName(i)] = gaus_params_obj.Parameter(i)
+
+    pm = ParamManager()
+    
+    for j in range(n_spectra):
+        pm.add(f"bg_const_{j}", gaus_p_map.get(f"bg_const_{j}", 0), param_bounds.get('bg_const', (-np.inf, np.inf)))
+        pm.add(f"bg_slope_{j}", gaus_p_map.get(f"bg_slope_{j}", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        pm.add(f"bg_shift_{j}", gaus_p_map.get(f"bg_shift_{j}", 0.002), param_bounds.get('bg_shift', (0, 1.0)))
+
+    # Shared sigma and tau
+    if data_source is None:
+        sigma_bounds = (0.1, 100)
+        tau_bounds = (0.01, 100)
+    elif data_source == 'gamma_adc':
+        sigma_bounds = (1, 20)
+        tau_bounds = (0.01, 100)
+    else:
+        sigma_bounds = (0.1, 100)
+        tau_bounds = (0.01, 100)
+
+    pm.add("sigma", gaus_p_map.get("sigma", 1), param_bounds.get('sigma', sigma_bounds))
+    pm.add("tau", 0.1, param_bounds.get('tau', tau_bounds))
+
+    for i in range(n_peaks):
+        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
+        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+        pm.add(mu_name, gaus_p_map.get(mu_name, e_guess_list[i]), m_bnd)
+        
+        for j in range(n_spectra):
+            amp_name = f"amplitude_{i}_{j}"
+            a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', (0, np.inf)))
+            pm.add(amp_name, gaus_p_map.get(amp_name, 100), a_bnd)
+
+    import uuid
+    comp_id = uuid.uuid4().hex[:6]
+    
+    bg_const_idx = [pm.get_idx(f"bg_const_{j}") for j in range(n_spectra)]
+    bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
+    bg_shift_idx = [pm.get_idx(f"bg_shift_{j}") for j in range(n_spectra)]
+    mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
+    sigma_idx = pm.get_idx("sigma")
+    tau_idx = pm.get_idx("tau")
+    amp_idx = [[pm.get_idx(f"amplitude_{i}_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
+    
+    bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
+    bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
+    bg_shift_cpp = "{" + ",".join(map(str, bg_shift_idx)) + "}"
+    mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
+    amp_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in amp_idx]) + "}"
+    
+    cpp_code = f"""
+    #ifndef CXX_ERFCX_DEF_FOR_2D
+    #define CXX_ERFCX_DEF_FOR_2D
+    double cxx_erfcx_2d(double x) {{
+        if (x > 25.0) return 1.0 / (1.77245385 * x); // approximation for very large x
+        return std::exp(x * x) * TMath::Erfc(x);
+    }}
+    #endif
+
+    double eval_2d_emg_{comp_id}(double *x, double *p) {{
+        double val_x = x[0];
+        int val_y = std::round(x[1]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        
+        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
+        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
+        int bg_shift_idx[{n_spectra}] = {bg_shift_cpp};
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
+        
+        double bg_const = p[bg_const_idx[val_y]];
+        double bg_slope = p[bg_slope_idx[val_y]];
+        double bg_shift = p[bg_shift_idx[val_y]];
+        
+        double total = bg_const + bg_slope * val_x;
+        double bin_width = {bin_width};
+        
+        double sigma = p[{sigma_idx}];
+        double tau = p[{tau_idx}];
+        if (sigma <= 0 || tau <= 0) return 1e10;
+        
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double mu = p[mu_idx[i]];
+            double amp = p[amp_idx[i][val_y]];
+            
+            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            
+            double norm = amp * bin_width / (2.0 * tau);
+            double z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356;
+            
+            if (z_arg < -25.0) {{
+                double exp_arg = (sigma*sigma)/(2.0*tau*tau) + (val_x - mu)/tau;
+                if (exp_arg < 700.0) {{
+                    total += norm * std::exp(exp_arg) * TMath::Erfc(z_arg);
+                }}
+            }} else {{
+                double gaus_arg = (val_x - mu) / sigma;
+                double gaus_part = std::exp(-0.5 * gaus_arg * gaus_arg);
+                double erfcx_part = cxx_erfcx_2d(z_arg);
+                total += norm * gaus_part * erfcx_part;
+            }}
+        }}
+        return total;
+    }}
+    """
+    ROOT.gInterpreter.Declare(cpp_code)
+    eval_2d = getattr(ROOT, f"eval_2d_emg_{comp_id}")
+
+    # Prepare 2D Histogram
+    bin_x_low = spectra[0].GetXaxis().FindBin(e_low)
+    bin_x_high = spectra[0].GetXaxis().FindBin(e_high)
+    x_low_snap = spectra[0].GetXaxis().GetBinLowEdge(bin_x_low)
+    x_high_snap = spectra[0].GetXaxis().GetBinUpEdge(bin_x_high)
+    n_bins_x = bin_x_high - bin_x_low + 1
+    n_bins_y = n_spectra
+
+    h2 = ROOT.TH2D(f"h2_{uuid.uuid4().hex[:6]}", "Data 2D", 
+                   n_bins_x, x_low_snap, x_high_snap, 
+                   n_bins_y, -0.5, n_spectra - 0.5)
+    
+    for i in range(1, n_bins_x + 1):
+        for j in range(n_spectra):
+            val = spectra[j].GetBinContent(bin_x_low + i - 1)
+            err = spectra[j].GetBinError(bin_x_low + i - 1)
+            h2.SetBinContent(i, j + 1, val)
+            h2.SetBinError(i, j + 1, err)
+
+    fit_range = ((e_low, e_high), (-0.5, n_spectra - 0.5))
+    
+    fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
+        h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options
+    )
+    
+    return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
