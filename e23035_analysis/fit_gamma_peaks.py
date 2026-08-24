@@ -8,7 +8,8 @@ import ROOT
 from raw_viewer import ddas_interface
 from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
 from raw_viewer import degai
-from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file, final_gamma_ecal
+from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
+from e23035_analysis import final_gamma_ecal
 
 experiment = 'e23035'
 
@@ -18,7 +19,7 @@ upper_energy = 7000
 gamma_binning = (int((upper_energy-addback_ethresh)/gamma_bin_size),addback_ethresh,upper_energy) #was 1-12000 w/ 1 keV bins
 #run_candidates = e23035_runs.run_df['DDAS'][(e23035_runs.run_df['Run Type']=='60Ga')]
 fit_prefix = '60Ga'
-force_refit=True
+force_refit=False
 tpc_ini_file = 'smart2_rpr.csv'
 
 beam_on_selection = None
@@ -154,6 +155,15 @@ if True: #make plot comparing 60Ga to 59Zn runs
                                   nonlinearity_correction_name=nlc_name)
         unscaled_zn_ga_comparison = root_vis_tools.draw_overlaid_histograms({'60Ga':ga_gamma_hist, '59Zn':zn_gamma_hist},
                                                              x_label='gamma energy (keV)', y_label='counts/0.25 keV')
+
+        ga_gamma_hist_ab = degai.get_histogram(experiment, ga_runs, degai.get_adjacency_dict(30), 'gm_511and2614_1', gamma_binning, 'ga_gamma_hist_ab', '60Ga addback spectrum', 'addback_energy',
+                                 '', event_build_window, addback_ethresh, True,
+                                  nonlinearity_correction_name=nlc_name)
+        zn_gamma_hist_ab = degai.get_histogram(experiment, zn_runs, degai.get_adjacency_dict(30), 'gm_511and1301_1', gamma_binning, 'zn_gamma_hist_ab', '59Zn addback spectrum', 'addback_energy',
+                                 '', event_build_window, addback_ethresh, True,
+                                  nonlinearity_correction_name=nlc_name)
+        unscaled_zn_ga_comparison_ab = root_vis_tools.draw_overlaid_histograms({'60Ga':ga_gamma_hist_ab, '59Zn':zn_gamma_hist_ab},
+                                                             x_label='addback energy (keV)', y_label='counts/0.25 keV')
         
 
 fit_model = 'bg_shift_nemg'#'bg_shift_ngaus'#
@@ -241,6 +251,11 @@ coincidence_hist = degai.get_addback_coincidence_spectrum(experiment, runs, adj_
                                                 nonlinearity_correction_name=nlc_name)
 ab_coincidence_hist = degai.get_addback_coincidence_spectrum(experiment, runs, degai.get_adjacency_dict(30), cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                 nonlinearity_correction_name=nlc_name)
+
+ab_coincidence_hist_59Zn = degai.get_addback_coincidence_spectrum(experiment, zn_runs, degai.get_adjacency_dict(30), 'gm_511and1301_1', coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+                                                nonlinearity_correction_name=ga_runs)
+ab_coincidence_hist_60Ga = degai.get_addback_coincidence_spectrum(experiment, runs, degai.get_adjacency_dict(30), cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+                                                nonlinearity_correction_name=nlc_name)
 # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
 
 #make 2D histogram of time vs energy
@@ -309,7 +324,7 @@ def fit_decay_curve(Egate, tgate, Egate_bg=None, source=E_v_tsbo, nexp=1):
 
 
 f_all = fit_peaks(gamma_hist, all_peaks, 'all_gamma', False, True, manual_bounds=True, force_refit=force_refit)
-apply_energy_calibration_to_fit(f'{fit_prefix}_all_gamma', final_gamma_ecal.calibration)
+final_gamma_ecal.apply_energy_calibration_to_fit(f'{fit_prefix}_all_gamma', final_gamma_ecal.calibration)
 if gamma_beam_off_hist is not None:
     f_beam_off = fit_peaks(gamma_beam_off_hist, all_peaks, 'beam_off_gamma', False, True, manual_bounds=True, force_refit=force_refit)
 if gamma_beam_on_hist is not None:
@@ -366,7 +381,7 @@ if fit_prefix == '60Ga':
     h1413 = degai.get_bg_subtracted_projection(coincidence_hist, (1413, 1416), (1417, 1425))
     f1413 = fit_peaks(h1413, possible_coincidence_peaks,
             '1413keV_coincidence', True, False,force_refit=force_refit) 
-    h1413_ab = degai.get_bg_subtracted_projection(ab_coincidence_hist, (1413, 1416), (1417, 1425))
+    h1413_ab = degai.get_bg_subtracted_projection(ab_coincidence_hist_60Ga, (1413, 1416), (1417, 1425))
     f1413_ab = fit_peaks(h1413_ab, possible_coincidence_peaks,
             '1413keV_coincidence_ab', True, False,force_refit=force_refit)
 

@@ -58,13 +58,13 @@ gamma_gated_on_alpha = degai.get_histogram(experiment, runs, adj_dict, cal_name,
                 'addback_energy', 'tpc_particle_id==2 &&'+time_gate_str, event_build_window, addback_ethresh, True,
                  nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
 
-c1,c2 = ROOT.TCanvas(), ROOT.TCanvas()
-c1.cd()
-gammas.Draw()
-#ROOT.gPad.SetLogy(1)
-c2.cd()
-gamma_gated_on_proton.Draw()
-#ROOT.gPad.SetLogy(1)
+# c1,c2 = ROOT.TCanvas(), ROOT.TCanvas()
+# c1.cd()
+# gammas.Draw()
+# #ROOT.gPad.SetLogy(1)
+# c2.cd()
+# gamma_gated_on_proton.Draw()
+# #ROOT.gPad.SetLogy(1)
 
 protons_gated_on_491 = degai.get_histogram(experiment, runs,  adj_dict, cal_name, (3000, 0, 3000), 'protons_gated_on_491', 'proton energy (keV) gated on 491 keV gamma rays',
                                             'tpc_energy', 'tpc_particle_id==1 && (addback_energy>490) && (addback_energy<493)&&'+time_gate_str, event_build_window, addback_ethresh, True,
@@ -110,6 +110,22 @@ gammaE_v_protonE_bg_subtracted.SetName('gammaE_v_protonE_bg_subtracted')
 gammaE_v_protonE_bg_subtracted.SetTitle('gamma energy (keV) vs proton energy (keV) with accidental coincidences subtracted')
 gammaE_v_protonE_bg_subtracted.Add(gammaE_v_protonE_accidental, -(tstop-tstart)/(t_accidental_stop-t_accidental_start))
 
+gammaE_v_alphaE = degai.get_histogram(experiment, runs, adj_dict, cal_name, (450, 0, 9000, 7000-150, 150, 7000), "gamma_v_alpha_energy_time_gate", "gamma energy (keV) vs alpha energy (keV) w/ expected (mesh time - gamma time)",
+                                        "addback_energy:tpc_energy", 
+                                       selection='tpc_particle_id==2 &&'+time_gate_str,
+                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
+gammaE_v_alphaE_accidental = degai.get_histogram(experiment, runs, adj_dict, cal_name, (450, 0, 9000, 7000-150, 150, 7000), "gamma_v_alpha_energy_accidental_gate", 
+                                                  "gamma energy (keV) vs alpha energy (keV) for accidental coincidences",
+                                        "addback_energy:tpc_energy", 
+                                       selection='tpc_particle_id==2 &&'+accidental_time_gate_str,
+                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
+gammaE_v_alphaE.Sumw2()
+gammaE_v_alphaE_accidental.Sumw2()
+gammaE_v_alphaE_bg_subtracted = gammaE_v_alphaE.Clone()
+gammaE_v_alphaE_bg_subtracted.SetName('gammaE_v_alphaE_bg_subtracted')
+gammaE_v_alphaE_bg_subtracted.SetTitle('gamma energy (keV) vs alpha energy (keV) with accidental coincidences subtracted')
+gammaE_v_alphaE_bg_subtracted.Add(gammaE_v_alphaE_accidental, -(tstop-tstart)/(t_accidental_stop-t_accidental_start))
+
 #h491 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted,(488, 494), (471,486))
 h491 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted,(488, 494), (494, 501))
 h914 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (911, 917), (918,927))
@@ -117,6 +133,7 @@ h1398 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (1395
 h511 = degai.get_bg_subtracted_projection(gammaE_v_protonE_bg_subtracted, (508, 513), (518,529))
 
 overlay3 = root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h914,'1398 keV':h1398, '511 keV':h511})
+
 
 pscaled = protons.Clone('pscaled')
 pscaled.Scale(0.01)
