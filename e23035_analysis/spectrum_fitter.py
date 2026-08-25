@@ -489,10 +489,15 @@ class spectrum_fitter:
         vals = []
         errs = []
         for res in self.fit_results:
-            if res is None or 'fit_res' not in res or 'f_to_fit' not in res:
+            if res is None or 'fit_res' not in res:
+                continue
+            if 'f_to_fit' in res:
+                f_to_fit = res['f_to_fit']
+            elif 'f_to_fit_2d' in res:
+                f_to_fit = res['f_to_fit_2d']
+            else:
                 continue
             fit_res = res['fit_res']
-            f_to_fit = res['f_to_fit']
             for i in range(f_to_fit.GetNpar()):
                 par_name_i = f_to_fit.GetParName(i)
                 # Check if the parameter name is exactly the base name OR starts with the base name + '_'
@@ -523,11 +528,17 @@ class spectrum_fitter:
 
             # We found the fit, it's at index i, and it's the k-th peak in that fit.
             res_dict = self.fit_results[i]
-            if res_dict is None or 'fit_res' not in res_dict or 'f_to_fit' not in res_dict:
+            if res_dict is None or 'fit_res' not in res_dict:
                 continue
             
+            if 'f_to_fit' in res_dict:
+                f_to_fit = res_dict['f_to_fit']
+            elif 'f_to_fit_2d' in res_dict:
+                f_to_fit = res_dict['f_to_fit_2d']
+            else:
+                continue
+                
             fit_res = res_dict['fit_res']
-            f_to_fit = res_dict['f_to_fit']
 
             # Determine the parameter name to search for
             if len(loc_guesses) == 1:

@@ -11,7 +11,7 @@ from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vi
 experiment = 'e23035'
 tpc_config = 'smart2_rpr.csv'
 num_workers = 200
-force_refit=True
+force_refit=False
 
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end
@@ -111,3 +111,173 @@ f_proton_simultaneous.show_fit_results(4, False, True)
 
 
 zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
+
+def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, force_0_offset=False):
+    #use a TGraph to fit the peaks specified in the csv file.
+    #Return the slope, offset, and paramter covariances so fit uncertainty can be propataged.
+    x_vals = []
+    x_errs = []
+    y_vals = []
+    y_errs = []
+    
+    csv_path = os.path.join(fit_path, peaks_csv)
+    with open(csv_path, 'r') as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        for row in reader:
+            if not row or len(row) < 6:
+                continue
+            use_calib = row[5].strip().lower()
+            if use_calib in ['yes', 'true', '1', 'y']:
+                try:
+                    guess_E = float(row[1])
+                    known_E = float(row[3])
+                    known_E_err = float(row[4]) if row[4].strip() else 0.0
+                except ValueError:
+                    continue
+                
+                fitted_mu, fitted_mu_err = fitter.get_param_for_guess('mu', guess_E)
+                if fitted_mu is not None:
+                    x_vals.append(fitted_mu)
+                    x_errs.append(fitted_mu_err)
+                    y_vals.append(known_E)
+                    y_errs.append(known_E_err)
+                else:
+                    print(f"Warning: Could not find fitted mu for guess {guess_E}")
+
+    if len(x_vals) < 2:
+        raise ValueError("Not enough points for calibration")
+        
+    n = len(x_vals)
+    graph = ROOT.TGraphErrors(n, np.array(x_vals, dtype='float64'), np.array(y_vals, dtype='float64'),
+                              np.array(x_errs, dtype='float64'), np.array(y_errs, dtype='float64'))
+    graph.SetTitle(f"{fit_name} Energy Calibration")
+    graph.GetXaxis().SetTitle("Fitted #mu (raw)")
+    graph.GetYaxis().SetTitle("Known Energy (keV)")
+    graph.SetMarkerStyle(20)
+    
+    fit_func = ROOT.TF1(f"calib_fit_{fit_name}", "pol1", min(x_vals)*0.9, max(x_vals)*1.1)
+    if force_0_offset:
+        fit_func.FixParameter(0, 0)
+    fit_res = graph.Fit(fit_func, "SQ")
+    
+    offset = fit_func.GetParameter(0)
+    slope = fit_func.GetParameter(1)
+    
+    cov_matrix = fit_res.GetCovarianceMatrix()
+    cov = np.zeros((2,2))
+    if cov_matrix.GetNrows() == 2:
+        cov[0,0] = cov_matrix(0,0)
+        cov[0,1] = cov_matrix(0,1)
+        cov[1,0] = cov_matrix(1,0)
+        cov[1,1] = cov_matrix(1,1)
+    
+    if show_fit_result:
+        canvas = ROOT.TCanvas(f"c_calib_{fit_name}", f"{fit_name} Calibration", 800, 800)
+        
+        pad1 = ROOT.TPad("pad1", "pad1", 0, 0.3, 1, 1.0)
+        pad1.SetBottomMargin(0.02)
+        pad1.Draw()
+        pad1.cd()
+        
+        graph.GetXaxis().SetLabelSize(0)
+        graph.GetXaxis().SetTitleSize(0)
+        graph.Draw("AP")
+        
+        canvas.cd()
+        pad2 = ROOT.TPad("pad2", "pad2", 0, 0, 1, 0.3)
+        pad2.SetTopMargin(0.02)
+        pad2.SetBottomMargin(0.3)
+        pad2.Draw()
+        pad2.cd()
+        
+        res_vals = []
+        res_errs = []
+        for i in range(n):
+            expected_y = slope * x_vals[i] + offset
+            res_vals.append(y_vals[i] - expected_y)
+            err = np.sqrt(y_errs[i]**2 + (slope * x_errs[i])**2)
+            res_errs.append(err)
+            
+        res_graph = ROOT.TGraphErrors(n, np.array(x_vals, dtype='float64'), np.array(res_vals, dtype='float64'),
+                                      np.array(x_errs, dtype='float64'), np.array(res_errs, dtype='float64'))
+        res_graph.SetTitle("")
+        res_graph.GetXaxis().SetTitle("Fitted #mu (raw)")
+        res_graph.GetYaxis().SetTitle("Residual (keV)")
+        res_graph.SetMarkerStyle(20)
+        
+        res_graph.GetYaxis().SetTitleSize(0.1)
+        res_graph.GetYaxis().SetTitleOffset(0.5)
+        res_graph.GetYaxis().SetLabelSize(0.08)
+        res_graph.GetXaxis().SetTitleSize(0.12)
+        res_graph.GetXaxis().SetTitleOffset(0.9)
+        res_graph.GetXaxis().SetLabelSize(0.1)
+        
+        res_graph.Draw("AP")
+        
+        line = ROOT.TLine(min(x_vals)*0.9, 0, max(x_vals)*1.1, 0)
+        line.SetLineStyle(2)
+        line.Draw("SAME")
+        
+        canvas.Update()
+        ROOT.SetOwnership(canvas, False)
+        ROOT.SetOwnership(graph, False)
+        ROOT.SetOwnership(res_graph, False)
+        ROOT.SetOwnership(line, False)
+        ROOT.SetOwnership(pad1, False)
+        ROOT.SetOwnership(pad2, False)
+        
+    return slope, offset, cov
+
+def apply_fit_to_point(fit_to_apply, mu, mu_err=0.0):
+    slope, offset, cov = fit_to_apply
+    
+    calib_var = cov[0,0] + (mu**2) * cov[1,1] + 2 * mu * cov[0,1]
+    total_var = calib_var + (slope * mu_err)**2
+    
+    new_mu = slope * mu + offset
+    new_mu_err = np.sqrt(total_var) if total_var > 0 else 0.0
+    
+    return new_mu, new_mu_err
+
+def apply_fit_to_csv(fit_to_aply, apply_to, cal_name='calibrated'):
+    #make  a copy of the csv file, with the mu values scaled by the fit, and with uncertainties propaged to mu_err
+    
+    input_csv = os.path.join(fit_path, apply_to + '.csv')
+    output_csv = os.path.join(fit_path, apply_to + '_' + cal_name + '.csv')
+    
+    with open(input_csv, 'r') as infile, open(output_csv, 'w', newline='') as outfile:
+        reader = csv.reader(infile)
+        writer = csv.writer(outfile)
+        
+        header = next(reader)
+        writer.writerow(header)
+        
+        try:
+            mu_val_idx = header.index('mu_val')
+            mu_err_idx = header.index('mu_err')
+        except ValueError:
+            print(f"Error: 'mu_val' or 'mu_err' column not found in CSV {input_csv}.")
+            return
+            
+        for row in reader:
+            if not row:
+                writer.writerow(row)
+                continue
+                
+            try:
+                mu = float(row[mu_val_idx])
+                mu_err = float(row[mu_err_idx])
+                
+                new_mu, new_mu_err = apply_fit_to_point(fit_to_aply, mu, mu_err)
+                
+                row[mu_val_idx] = f"{new_mu:.6g}"
+                row[mu_err_idx] = f"{new_mu_err:.6g}"
+            except ValueError:
+                pass
+                
+            writer.writerow(row)
+
+ecal_simul = make_energy_calibration(f_proton_simultaneous, '60Ga_59Zn_simultaneous_protons', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+apply_fit_to_csv(ecal_simul, '60Ga_59Zn_simultaneous_protons', 'proton_cal')
+print(apply_fit_to_point(ecal_simul, 8522.04, 9.35))
