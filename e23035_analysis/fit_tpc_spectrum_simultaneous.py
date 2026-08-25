@@ -73,7 +73,7 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
             'formula': '[sigma_c] + [sigma_m]*({mu})',
             'params': ['sigma_c', 'sigma_m'],
             'guesses': [26, 0.01],
-            'bounds': [(4, 30), (0.0001, 0.03)]
+            'bounds': [(4, 40), (0.0001, 0.03)]
         }
     }
     for spec in f.spectra:
