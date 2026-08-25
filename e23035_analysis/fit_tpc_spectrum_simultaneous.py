@@ -11,7 +11,7 @@ from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vi
 experiment = 'e23035'
 tpc_config = 'smart2_rpr.csv'
 num_workers = 200
-force_refit=False
+force_refit=True
 
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end
@@ -68,14 +68,24 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
         return spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
 
     f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus')
-    f.parameterizations = {
-        'sigma': {
-            'formula': '[sigma_c] + [sigma_m]*({mu})',
-            'params': ['sigma_c', 'sigma_m'],
-            'guesses': [26, 0.01],
-            'bounds': [(4, 40), (0.0001, 0.03)]
+    if True: #linear energy dependence
+        f.parameterizations = {
+            'sigma': {
+                'formula': '[sigma_c] + [sigma_m]*({mu})',
+                'params': ['sigma_c', 'sigma_m'],
+                'guesses': [26, 0.01],
+                'bounds': [(-40, 40), (0.0001, 0.1)]
+            }
         }
-    }
+    else: #sqrt depenence
+        f.parameterizations = {
+            'sigma': {
+                'formula': 'std::sqrt([sigma_c] + [sigma_m]*({mu}))',
+                'params': ['sigma_c', 'sigma_m'],
+                'guesses': [26**2, 0.0],
+                'bounds': [(-100, 40**2), (0, 1)]
+            }
+        }
     for spec in f.spectra:
         spec.GetXaxis().UnZoom()
     f.peaks_to_fit = peaks
@@ -83,6 +93,8 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
     f.shared_sigma = False
     if zero_bg_shift:
         f.param_bound_functions['bg_shift'] = lambda E: (0, 0)
+    else:
+        f.shared_bg_shift = False
     for p in additional_param_bounds:
         f.param_bound_functions[p] = additional_param_bounds[p]
     if not likelihood:
@@ -102,12 +114,13 @@ f_proton_simultaneous = fit_multi_peaks(
     [pspec_all_energy_60Ga, pspec_59Zn], 
     proton_peak_guesses,
     save_path, force_refit=force_refit,
-    additional_param_bounds={'bg_slope':lambda E: (-1,1) if E < 1000 else (0,0), 'amplitude': lambda E:(1e-3, 1e6)}, 
+    additional_param_bounds={'bg_slope':lambda E: (-1,1), #if E < 1000 else (0,0),
+                             'amplitude': lambda E:(1e-3, 1e6)}, 
     loc_wiggle=10
 )
 ROOT.gROOT.SetBatch(False)
 # Display multi-spectrum fit for the first peak
-f_proton_simultaneous.show_fit_results(4, False, True)
+#f_proton_simultaneous.show_fit_results(4, False, True)
 
 
 zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
@@ -120,6 +133,11 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
     y_vals = []
     y_errs = []
     
+    x_vals_unused = []
+    x_errs_unused = []
+    y_vals_unused = []
+    y_errs_unused = []
+    
     csv_path = os.path.join(fit_path, peaks_csv)
     with open(csv_path, 'r') as f:
         reader = csv.reader(f)
@@ -128,22 +146,30 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
             if not row or len(row) < 6:
                 continue
             use_calib = row[5].strip().lower()
-            if use_calib in ['yes', 'true', '1', 'y']:
-                try:
-                    guess_E = float(row[1])
-                    known_E = float(row[3])
-                    known_E_err = float(row[4]) if row[4].strip() else 0.0
-                except ValueError:
+            try:
+                guess_E = float(row[1])
+                known_E_str = row[3].strip()
+                if not known_E_str:
                     continue
-                
-                fitted_mu, fitted_mu_err = fitter.get_param_for_guess('mu', guess_E)
-                if fitted_mu is not None:
+                known_E = float(known_E_str)
+                known_E_err = float(row[4]) if row[4].strip() else 0.0
+            except ValueError:
+                continue
+            
+            fitted_mu, fitted_mu_err = fitter.get_param_for_guess('mu', guess_E)
+            if fitted_mu is not None:
+                if use_calib in ['yes', 'true', '1', 'y']:
                     x_vals.append(fitted_mu)
                     x_errs.append(fitted_mu_err)
                     y_vals.append(known_E)
                     y_errs.append(known_E_err)
                 else:
-                    print(f"Warning: Could not find fitted mu for guess {guess_E}")
+                    x_vals_unused.append(fitted_mu)
+                    x_errs_unused.append(fitted_mu_err)
+                    y_vals_unused.append(known_E)
+                    y_errs_unused.append(known_E_err)
+            else:
+                print(f"Warning: Could not find fitted mu for guess {guess_E}")
 
     if len(x_vals) < 2:
         raise ValueError("Not enough points for calibration")
@@ -180,9 +206,21 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
         pad1.Draw()
         pad1.cd()
         
-        graph.GetXaxis().SetLabelSize(0)
-        graph.GetXaxis().SetTitleSize(0)
-        graph.Draw("AP")
+        mg = ROOT.TMultiGraph()
+        mg.SetTitle(f"{fit_name} Energy Calibration;Fitted #mu (raw);Known Energy (keV)")
+        mg.Add(graph)
+        
+        if len(x_vals_unused) > 0:
+            graph_unused = ROOT.TGraphErrors(len(x_vals_unused), np.array(x_vals_unused, dtype='float64'), np.array(y_vals_unused, dtype='float64'),
+                                      np.array(x_errs_unused, dtype='float64'), np.array(y_errs_unused, dtype='float64'))
+            graph_unused.SetMarkerStyle(24)
+            graph_unused.SetMarkerColor(ROOT.kRed)
+            graph_unused.SetLineColor(ROOT.kRed)
+            mg.Add(graph_unused)
+        
+        mg.Draw("AP")
+        mg.GetXaxis().SetLabelSize(0)
+        mg.GetXaxis().SetTitleSize(0)
         
         canvas.cd()
         pad2 = ROOT.TPad("pad2", "pad2", 0, 0, 1, 0.3)
@@ -201,21 +239,36 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
             
         res_graph = ROOT.TGraphErrors(n, np.array(x_vals, dtype='float64'), np.array(res_vals, dtype='float64'),
                                       np.array(x_errs, dtype='float64'), np.array(res_errs, dtype='float64'))
-        res_graph.SetTitle("")
-        res_graph.GetXaxis().SetTitle("Fitted #mu (raw)")
-        res_graph.GetYaxis().SetTitle("Residual (keV)")
         res_graph.SetMarkerStyle(20)
         
-        res_graph.GetYaxis().SetTitleSize(0.1)
-        res_graph.GetYaxis().SetTitleOffset(0.5)
-        res_graph.GetYaxis().SetLabelSize(0.08)
-        res_graph.GetXaxis().SetTitleSize(0.12)
-        res_graph.GetXaxis().SetTitleOffset(0.9)
-        res_graph.GetXaxis().SetLabelSize(0.1)
+        res_mg = ROOT.TMultiGraph()
+        res_mg.SetTitle(";Fitted #mu (raw);Residual (keV)")
+        res_mg.Add(res_graph)
         
-        res_graph.Draw("AP")
+        if len(x_vals_unused) > 0:
+            res_vals_unused = []
+            res_errs_unused = []
+            for i in range(len(x_vals_unused)):
+                expected_y = slope * x_vals_unused[i] + offset
+                res_vals_unused.append(y_vals_unused[i] - expected_y)
+                err = np.sqrt(y_errs_unused[i]**2 + (slope * x_errs_unused[i])**2)
+                res_errs_unused.append(err)
+            res_graph_unused = ROOT.TGraphErrors(len(x_vals_unused), np.array(x_vals_unused, dtype='float64'), np.array(res_vals_unused, dtype='float64'),
+                                      np.array(x_errs_unused, dtype='float64'), np.array(res_errs_unused, dtype='float64'))
+            res_graph_unused.SetMarkerStyle(24)
+            res_graph_unused.SetMarkerColor(ROOT.kRed)
+            res_graph_unused.SetLineColor(ROOT.kRed)
+            res_mg.Add(res_graph_unused)
+
+        res_mg.Draw("AP")
+        res_mg.GetYaxis().SetTitleSize(0.1)
+        res_mg.GetYaxis().SetTitleOffset(0.5)
+        res_mg.GetYaxis().SetLabelSize(0.08)
+        res_mg.GetXaxis().SetTitleSize(0.12)
+        res_mg.GetXaxis().SetTitleOffset(0.9)
+        res_mg.GetXaxis().SetLabelSize(0.1)
         
-        line = ROOT.TLine(min(x_vals)*0.9, 0, max(x_vals)*1.1, 0)
+        line = ROOT.TLine(mg.GetXaxis().GetXmin(), 0, mg.GetXaxis().GetXmax(), 0)
         line.SetLineStyle(2)
         line.Draw("SAME")
         
@@ -223,10 +276,15 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
         ROOT.SetOwnership(canvas, False)
         ROOT.SetOwnership(graph, False)
         ROOT.SetOwnership(res_graph, False)
+        ROOT.SetOwnership(mg, False)
+        ROOT.SetOwnership(res_mg, False)
         ROOT.SetOwnership(line, False)
         ROOT.SetOwnership(pad1, False)
         ROOT.SetOwnership(pad2, False)
-        
+        if len(x_vals_unused) > 0:
+            ROOT.SetOwnership(graph_unused, False)
+            ROOT.SetOwnership(res_graph_unused, False)
+            
     return slope, offset, cov
 
 def apply_fit_to_point(fit_to_apply, mu, mu_err=0.0):

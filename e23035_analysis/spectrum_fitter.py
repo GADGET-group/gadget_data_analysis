@@ -10,29 +10,86 @@ from tqdm import tqdm
 from e23035_analysis import fitting_tools
 
 class spectrum_fitter:
-    '''
-    Class for easilty fitting 1D spectra and assigning peaks.
-    '''
+    """
+    Class for easily fitting 1D spectra and assigning peaks.
+    
+    This class handles the orchestration of fitting multiple peaks across different regions of a spectrum.
+    It supports complex parameter bounding, parameter sharing across simultaneous multiplet fits, 
+    and arbitrary mathematical parameterizations.
+    """
     def __init__(self, spectrum:ROOT.TH1D, peak_model:str):
-        '''
-        peak_model: gaus for gaussian, or emg for exponentially modified gaussian, bg_shift_gaus for gaussian with different background to the left and right,
-        or bg_shift_emg
-        '''
+        """
+        Initialize the spectrum fitter.
+        
+        Args:
+            spectrum (ROOT.TH1D): The 1D spectrum histogram to fit.
+            peak_model (str): The functional form for the peaks. Supported models:
+                - 'gaus': Simple Gaussian
+                - 'emg': Exponentially Modified Gaussian
+                - 'bg_shift_gaus': Gaussian with a step-like background shift
+                - 'bg_shift_emg': EMG with a step-like background shift
+                - 'bg_shift_ngaus': Sum of N Gaussians with a background shift
+                - 'bg_shift_nemg': Sum of N EMGs with a background shift
+        
+        Key Attributes for Fitting Configuration:
+        
+            param_bound_functions (dict): 
+                A dictionary mapping parameter base names to callable functions that return (min, max) bounds.
+                The functions should take the peak's energy/location as the single argument.
+                Example: `fitter.param_bound_functions['sigma'] = lambda E: (0.1, 0.5)`
+                These bounds are applied to the generated parameters when the fit is initialized.
+                
+            parameterizations (dict):
+                A dictionary to define arbitrary mathematical formulas or python functions for parameters, 
+                often used to tie parameters together or enforce a functional form (like energy-dependent sigma).
+                Format for ROOT Formula (e.g., 'gaus'):
+                    fitter.parameterizations['sigma'] = {
+                        'params': ['a', 'b'],               # New free parameters to fit
+                        'guesses': [0.1, 0.001],            # Initial guesses for 'a' and 'b'
+                        'bounds': [(0, 1), (0, 0.1)],       # Bounds for 'a' and 'b'
+                        'formula': '[a] + [b]*{mu}'         # String formula (can reference '{mu}')
+                    }
+                Format for Python Callable (e.g., 'emg'):
+                    fitter.parameterizations['sigma'] = {
+                        'params': ['a', 'b'],
+                        'guesses': [0.1, 0.001],
+                        'bounds': [(0, 1), (0, 0.1)],
+                        'pass_mu': True,                    # If True, passes the peak's 'mu' as the first argument
+                        'formula': lambda mu, a, b: a + b * mu
+                    }
+                    
+            shared_sigma (bool):
+                Default is True. When fitting multiple peaks in a single window (a multiplet), 
+                if True, a single global 'sigma' parameter is fit for all peaks in the multiplet.
+                If False, independent 'sigma_0', 'sigma_1', etc. are instantiated for each peak.
+                
+            shared_bg_shift (bool):
+                Default is True. Similar to shared_sigma, if True, a single 'bg_shift' parameter 
+                is fit across the entire multiplet window. If False, independent background shift 
+                parameters ('bg_shift_0', 'bg_shift_1', ...) are instantiated for each peak.
+                
+            location_wiggle (float):
+                The +/- bounds applied around the initial 'mu' (location) guess for the peak.
+                Defaults to 3. (e.g. bounds = [guess - 3, guess + 3]).
+                
+            fit_options (str):
+                ROOT TH1::Fit options string. Defaults to 'LS0QEI' (Log-likelihood, silent, 
+                zero-bins included, quiet, minos errors, integral binning).
+        """
         self.spectrum = spectrum
-        #peak location guesses should contain a list of (peak location guess, lower window, upper window)
-        #The location guess may contain an list location guesses if more than one peak should be fit
+        
+        # peaks_to_fit contains tuples of: ( [loc_guesses_in_window], lower_window, upper_window )
         self.peaks_to_fit = []
         self.peak_model = peak_model
-
-         #list of dictionaries where each entry corresponds to a peak that was fit
+        
+        # list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
         
-        #parameter bounds as a function of energy. May be used to fix sigma, etc
-        #These functions will be evaluated at loc_guess[0] if loc guess is a list of locations
         self.param_bound_functions = {}
-        self.fit_options = 'LS0QEI'#defaults to log likelihood. Should change if fitting a bg subtracted spectrum.
-        self.location_wiggle=3 #bounds +/- to apply to location guesses
-        self.shared_sigma=True #currently only implemented for bg_shift_guass. Will fill out param bounds for each peak based on guess.
+        self.fit_options = 'LS0QEI'
+        self.location_wiggle = 3
+        self.shared_sigma = True
+        self.shared_bg_shift = True
         self.max_implicit_cores = 100
         self.parameterizations = {}
 
@@ -441,16 +498,29 @@ class spectrum_fitter:
                 )
             elif self.peak_model.lower() == 'bg_shift_gaus':
                 if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
-                    del param_bounds['sigma']
+                    if 'sigma' in param_bounds:
+                        del param_bounds['sigma']
                     for i, loc in enumerate(loc_guess):
                         param_bounds[f'sigma_{i}'] = self.param_bound_functions['sigma'](loc)
+
+                if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
+                    if 'bg_shift' in param_bounds:
+                        del param_bounds['bg_shift']
+                    for i, loc in enumerate(loc_guess):
+                        param_bounds[f'bg_shift_{i}'] = self.param_bound_functions['bg_shift'](loc)
                 
                 res = fitting_tools.fit_gaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
-                                    parameterizations=self.parameterizations)
+                                    shared_bg_shift=self.shared_bg_shift, parameterizations=self.parameterizations)
             elif self.peak_model.lower() == 'bg_shift_emg':
+                if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
+                    if 'bg_shift' in param_bounds:
+                        del param_bounds['bg_shift']
+                    for i, loc in enumerate(loc_guess):
+                        param_bounds[f'bg_shift_{i}'] = self.param_bound_functions['bg_shift'](loc)
+
                 res = fitting_tools.fit_emg_w_bg_shift(self.spectrum, loc_guess, fit_range, 
-                                    param_bounds=param_bounds, fit_options=self.fit_options,
+                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations)
             elif self.peak_model.lower() == 'bg_shift_ngaus':
                 res = fitting_tools.fit_ngaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, self.ngaus,
@@ -698,6 +768,7 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
             
         fitter = multi_spectrum_fitter(spectra, python_state['peak_model'])
         fitter.shared_sigma = python_state.get('shared_sigma', False)
+        fitter.shared_bg_shift = python_state.get('shared_bg_shift', True)
         fitter.location_wiggle = python_state.get('location_wiggle', 10)
     else:
         # 2. Extract Main Spectrum and detach it from the file
@@ -706,6 +777,8 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
             raise ValueError("Main spectrum missing from file.")
         main_spectrum.SetDirectory(0) 
         fitter = spectrum_fitter(main_spectrum, python_state['peak_model'])
+        fitter.shared_sigma = python_state.get('shared_sigma', False)
+        fitter.shared_bg_shift = python_state.get('shared_bg_shift', True)
 
     fitter.peaks_to_fit = python_state['peaks_to_fit']
     fitter.fit_options = python_state.get('fit_options', 'LS0QEI')
@@ -864,16 +937,29 @@ class multi_spectrum_fitter(spectrum_fitter):
 
             if self.peak_model.lower() == 'bg_shift_gaus':
                 if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
-                    del param_bounds['sigma']
+                    if 'sigma' in param_bounds:
+                        del param_bounds['sigma']
                     for i, loc in enumerate(loc_guess):
                         param_bounds[f'sigma_{i}'] = self.param_bound_functions['sigma'](loc)
+
+                if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
+                    if 'bg_shift' in param_bounds:
+                        del param_bounds['bg_shift']
+                    for i, loc in enumerate(loc_guess):
+                        param_bounds[f'bg_shift_{i}'] = self.param_bound_functions['bg_shift'](loc)
                 
                 res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
-                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
+                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations)
             elif self.peak_model.lower() == 'bg_shift_emg':
+                if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
+                    if 'bg_shift' in param_bounds:
+                        del param_bounds['bg_shift']
+                    for i, loc in enumerate(loc_guess):
+                        param_bounds[f'bg_shift_{i}'] = self.param_bound_functions['bg_shift'](loc)
+
                 res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
-                                    param_bounds=param_bounds, fit_options=self.fit_options,
+                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations)
             else:
                 raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports bg_shift_gaus, bg_shift_emg): {self.peak_model}")
@@ -924,7 +1010,19 @@ class multi_spectrum_fitter(spectrum_fitter):
             e_low = f_to_fit_2d.GetXmin()
             e_high = f_to_fit_2d.GetXmax()
             
+            # Calculate global maximum for Y axis across all spectra in this window
+            max_y = 0
+            for spec in self.spectra:
+                bin_start = spec.FindBin(e_low)
+                bin_end = spec.FindBin(e_high)
+                for bin_i in range(bin_start, bin_end + 1):
+                    max_y = max(max_y, spec.GetBinContent(bin_i) + spec.GetBinError(bin_i))
+            
             drawn_first = False
+            
+            res['1d_lambdas'] = []
+            res['1d_funcs'] = []
+            res['resid_graphs'] = []
             
             # Reconstruct the 1D function for each spectrum
             for j, spec in enumerate(self.spectra):
@@ -938,6 +1036,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 spec_clone.SetStats(0)
                 
                 if not drawn_first:
+                    spec_clone.SetMaximum(max_y * 1.1)
                     spec_clone.Draw("E")
                     drawn_first = True
                 else:
@@ -954,13 +1053,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 f1d.SetLineWidth(2)
                 f1d.Draw("SAME")
                 
-                if '1d_lambdas' not in res:
-                    res['1d_lambdas'] = []
                 res['1d_lambdas'].append(lam)
-                
-                # We need to keep these references so they don't get garbage collected
-                if '1d_funcs' not in res:
-                    res['1d_funcs'] = []
                 res['1d_funcs'].append((spec_clone, f1d))
                 
                 if show_components:
@@ -1062,16 +1155,18 @@ class multi_spectrum_fitter(spectrum_fitter):
                 else:
                     resid_graph.Draw("P SAME")
                     
-                if 'resid_graphs' not in res:
-                    res['resid_graphs'] = []
                 res['resid_graphs'].append(resid_graph)
                 
+            pad1.Modified()
+            pad2.Modified()
+            new_canvas.Modified()
             new_canvas.Draw()
             new_canvas.Update()
             ROOT.SetOwnership(new_canvas, False)
             res['display_canvas_multi'] = new_canvas
             res['pad1'] = pad1
             res['pad2'] = pad2
+            return new_canvas
         else:
             print(f"Invalid peak index: {peak_index}")
 
@@ -1209,6 +1304,7 @@ class multi_spectrum_fitter(spectrum_fitter):
             'num_fit_results': len(self.fit_results),
             'parameterizations': self.parameterizations,
             'shared_sigma': getattr(self, 'shared_sigma', False),
+            'shared_bg_shift': getattr(self, 'shared_bg_shift', True),
             'location_wiggle': getattr(self, 'location_wiggle', 10)
         }
         
