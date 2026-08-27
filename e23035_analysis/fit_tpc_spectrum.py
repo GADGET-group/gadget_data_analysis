@@ -218,7 +218,9 @@ def make_energy_calibration(fit_name, peaks_csv, show_fit_result=True, force_0_o
         for i in range(n):
             expected_y = slope * x_vals[i] + offset
             res_vals.append(y_vals[i] - expected_y)
-            err = np.sqrt(y_errs[i]**2 + (slope * x_errs[i])**2)
+            calib_var = cov[0,0] + (x_vals[i]**2) * cov[1,1] + 2 * x_vals[i] * cov[0,1]
+            total_var = y_errs[i]**2 + (slope * x_errs[i])**2 + calib_var
+            err = np.sqrt(total_var) if total_var > 0 else 0.0
             res_errs.append(err)
             
         res_graph = ROOT.TGraphErrors(n, np.array(x_vals, dtype='float64'), np.array(res_vals, dtype='float64'),

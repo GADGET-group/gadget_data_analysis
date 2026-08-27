@@ -100,6 +100,25 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
     if not likelihood:
         f.fit_options = f.fit_options.replace('L','')
     f.fit_peaks()
+    
+    failed_fits = []
+    for i, res in enumerate(f.fit_results):
+        if res is None or 'fit_res' not in res:
+            failed_fits.append((i, f.peaks_to_fit[i], "Missing result"))
+            continue
+        
+        fit_res = res['fit_res']
+        if not fit_res.IsValid():
+            status = int(fit_res)
+            failed_fits.append((i, f.peaks_to_fit[i], f"Status {status}"))
+            
+    if failed_fits:
+        print(f"Summary of {len(failed_fits)} failed fits:")
+        for i, peak_info, reason in failed_fits:
+            print(f"  Index {i}: Peaks {peak_info[0]} in window ({peak_info[1]:.1f}, {peak_info[2]:.1f}) -> {reason}")
+    else:
+        print(f"All {len(f.fit_results)} fits successful.")
+        
     if save_name:
         f.save(save_name) 
     return f
@@ -116,7 +135,7 @@ f_proton_simultaneous = fit_multi_peaks(
     save_path, force_refit=force_refit,
     additional_param_bounds={'bg_slope':lambda E: (-1,1), #if E < 1000 else (0,0),
                              'amplitude': lambda E:(1e-3, 1e6)}, 
-    loc_wiggle=10
+    loc_wiggle=15
 )
 ROOT.gROOT.SetBatch(False)
 # Display multi-spectrum fit for the first peak
@@ -234,15 +253,17 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
         for i in range(n):
             expected_y = slope * x_vals[i] + offset
             res_vals.append(y_vals[i] - expected_y)
-            err = np.sqrt(y_errs[i]**2 + (slope * x_errs[i])**2)
+            calib_var = cov[0,0] + (x_vals[i]**2) * cov[1,1] + 2 * x_vals[i] * cov[0,1]
+            total_var = y_errs[i]**2 + (slope * x_errs[i])**2 + calib_var
+            err = np.sqrt(total_var) if total_var > 0 else 0.0
             res_errs.append(err)
             
-        res_graph = ROOT.TGraphErrors(n, np.array(x_vals, dtype='float64'), np.array(res_vals, dtype='float64'),
-                                      np.array(x_errs, dtype='float64'), np.array(res_errs, dtype='float64'))
+        res_graph = ROOT.TGraphErrors(n, np.array(y_vals, dtype='float64'), np.array(res_vals, dtype='float64'),
+                                      np.array(y_errs, dtype='float64'), np.array(res_errs, dtype='float64'))
         res_graph.SetMarkerStyle(20)
         
         res_mg = ROOT.TMultiGraph()
-        res_mg.SetTitle(";Fitted #mu (raw);Residual (keV)")
+        res_mg.SetTitle(";Known Energy (keV);Residual (Known - Fit) (keV)")
         res_mg.Add(res_graph)
         
         if len(x_vals_unused) > 0:
@@ -251,10 +272,12 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
             for i in range(len(x_vals_unused)):
                 expected_y = slope * x_vals_unused[i] + offset
                 res_vals_unused.append(y_vals_unused[i] - expected_y)
-                err = np.sqrt(y_errs_unused[i]**2 + (slope * x_errs_unused[i])**2)
+                calib_var = cov[0,0] + (x_vals_unused[i]**2) * cov[1,1] + 2 * x_vals_unused[i] * cov[0,1]
+                total_var = y_errs_unused[i]**2 + (slope * x_errs_unused[i])**2 + calib_var
+                err = np.sqrt(total_var) if total_var > 0 else 0.0
                 res_errs_unused.append(err)
-            res_graph_unused = ROOT.TGraphErrors(len(x_vals_unused), np.array(x_vals_unused, dtype='float64'), np.array(res_vals_unused, dtype='float64'),
-                                      np.array(x_errs_unused, dtype='float64'), np.array(res_errs_unused, dtype='float64'))
+            res_graph_unused = ROOT.TGraphErrors(len(x_vals_unused), np.array(y_vals_unused, dtype='float64'), np.array(res_vals_unused, dtype='float64'),
+                                      np.array(y_errs_unused, dtype='float64'), np.array(res_errs_unused, dtype='float64'))
             res_graph_unused.SetMarkerStyle(24)
             res_graph_unused.SetMarkerColor(ROOT.kRed)
             res_graph_unused.SetLineColor(ROOT.kRed)
@@ -268,7 +291,7 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
         res_mg.GetXaxis().SetTitleOffset(0.9)
         res_mg.GetXaxis().SetLabelSize(0.1)
         
-        line = ROOT.TLine(mg.GetXaxis().GetXmin(), 0, mg.GetXaxis().GetXmax(), 0)
+        line = ROOT.TLine(res_mg.GetXaxis().GetXmin(), 0, res_mg.GetXaxis().GetXmax(), 0)
         line.SetLineStyle(2)
         line.Draw("SAME")
         
@@ -336,6 +359,93 @@ def apply_fit_to_csv(fit_to_aply, apply_to, cal_name='calibrated'):
                 
             writer.writerow(row)
 
+def show_detector_energy_resolution(fit_save_name):
+    #extract detector energy resolution each of the fit windows in the specified fit file.
+    #Make a plot where the y axis is energy resolutuion and the x axis is energy.
+    #Show the energy resolution over each fit window, and include a shaded 1 sigma uncertainty
+    #in energy resolution calculated from the covariance matrix for sigma_c and sigma_m
+    root_filepath = fit_save_name if fit_save_name.endswith('.root') else fit_save_name + '.root'
+    if not os.path.isabs(root_filepath):
+        root_filepath = os.path.join(fit_path, root_filepath)
+        
+    fitter = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
+    
+    canvas = ROOT.TCanvas(f"c_res_{fit_save_name}", f"Detector Energy Resolution", 800, 600)
+    mg = ROOT.TMultiGraph()
+    mg.SetTitle("Detector Energy Resolution;Energy (keV);Energy Resolution #sigma (keV)")
+    
+    graphs = []
+    
+    for i, res in enumerate(fitter.fit_results):
+        if res is None or 'fit_res' not in res:
+            continue
+            
+        fit_res = res['fit_res']
+        f_to_fit = res.get('f_to_fit') or res.get('f_to_fit_2d')
+        if not f_to_fit:
+            continue
+            
+        idx_c = f_to_fit.GetParNumber("sigma_c")
+        idx_m = f_to_fit.GetParNumber("sigma_m")
+        
+        if idx_c < 0 or idx_m < 0:
+            continue
+            
+        sigma_c = f_to_fit.GetParameter(idx_c)
+        sigma_m = f_to_fit.GetParameter(idx_m)
+        
+        cov_matrix = fit_res.GetCovarianceMatrix()
+        if not cov_matrix or cov_matrix.GetNrows() <= max(idx_c, idx_m):
+            continue
+            
+        var_c = cov_matrix(idx_c, idx_c)
+        var_m = cov_matrix(idx_m, idx_m)
+        cov_cm = cov_matrix(idx_c, idx_m)
+        
+        window_start = fitter.peaks_to_fit[i][1]
+        window_end = fitter.peaks_to_fit[i][2]
+        
+        n_pts = 100
+        e_vals = np.linspace(window_start, window_end, n_pts)
+        res_vals = np.zeros(n_pts)
+        res_errs = np.zeros(n_pts)
+        e_errs = np.zeros(n_pts)
+        
+        for j, E in enumerate(e_vals):
+            sigma = sigma_c + sigma_m * E
+            var_sigma = var_c + (E**2)*var_m + 2*E*cov_cm
+            
+            res_vals[j] = sigma
+            res_errs[j] = np.sqrt(max(0, var_sigma))
+            
+        gr = ROOT.TGraphErrors(n_pts, np.array(e_vals, dtype='float64'), np.array(res_vals, dtype='float64'), np.array(e_errs, dtype='float64'), np.array(res_errs, dtype='float64'))
+        
+        color = ROOT.kBlue + (i % 4)
+        gr.SetLineColor(color)
+        gr.SetFillColorAlpha(color, 0.3)
+        gr.SetFillStyle(1001)
+        
+        mg.Add(gr, "3") # shaded band
+        
+        gr_line = ROOT.TGraph(n_pts, np.array(e_vals, dtype='float64'), np.array(res_vals, dtype='float64'))
+        gr_line.SetLineColor(color)
+        gr_line.SetLineWidth(2)
+        mg.Add(gr_line, "L")
+        
+        graphs.extend([gr, gr_line])
+        
+    if len(graphs) > 0:
+        mg.Draw("A")
+        canvas.Update()
+        
+    ROOT.SetOwnership(canvas, False)
+    ROOT.SetOwnership(mg, False)
+    for gr in graphs:
+        ROOT.SetOwnership(gr, False)
+        
+    return canvas, mg, graphs
+
 ecal_simul = make_energy_calibration(f_proton_simultaneous, '60Ga_59Zn_simultaneous_protons', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
 apply_fit_to_csv(ecal_simul, '60Ga_59Zn_simultaneous_protons', 'proton_cal')
 print(apply_fit_to_point(ecal_simul, 8522.04, 9.35))
+show_detector_energy_resolution('60Ga_59Zn_simultaneous_protons')

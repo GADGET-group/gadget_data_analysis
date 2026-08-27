@@ -582,13 +582,22 @@ class spectrum_fitter:
     def get_param_for_guess(self, param_base_name, guess_value):
         """
         Finds the fitted value of a parameter for a specific initial peak guess.
+        If the peak is present in multiple fits, it returns the one from the best fit
+        (prioritizing valid fits and then minimizing the parameter error).
         Returns (value, error) or (None, None) if not found.
         """
-        for i, (loc_guesses, _, _) in enumerate(self.peaks_to_fit):
+        best_val = None
+        best_err = float('inf')
+        found_valid = False
+
+        for i, (loc_guesses, window_start, window_end) in enumerate(self.peaks_to_fit):
             # Ensure loc_guesses is a list
             if not isinstance(loc_guesses, (list, tuple, np.ndarray)):
                 loc_guesses = [loc_guesses]
             
+            if not (window_start <= guess_value <= window_end):
+                continue
+                
             try:
                 # Find the index of the guess value in the list of guesses for this fit
                 k = list(loc_guesses).index(guess_value)
@@ -609,6 +618,7 @@ class spectrum_fitter:
                 continue
                 
             fit_res = res_dict['fit_res']
+            is_valid = fit_res.IsValid()
 
             # Determine the parameter name to search for
             if len(loc_guesses) == 1:
@@ -618,10 +628,22 @@ class spectrum_fitter:
                 # For multi-peak fits, it's base_name + '_' + index
                 param_name_to_find = f'{param_base_name}_{k}'
 
-            # Find the parameter in the function and return its value and error
+            # Find the parameter in the function and check if it's the best
             for j in range(f_to_fit.GetNpar()):
                 if f_to_fit.GetParName(j) == param_name_to_find:
-                    return fit_res.Parameter(j), fit_res.ParError(j)
+                    val = fit_res.Parameter(j)
+                    err = fit_res.ParError(j)
+                    
+                    # Prioritize valid fits, then smallest error
+                    if (is_valid and not found_valid) or (is_valid == found_valid and err < best_err):
+                        best_val = val
+                        best_err = err
+                        found_valid = is_valid
+                        
+                    break # Break inner loop over parameters
+        
+        if best_val is not None:
+            return best_val, best_err
         
         return None, None
 
