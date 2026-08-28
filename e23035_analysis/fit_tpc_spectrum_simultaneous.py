@@ -529,22 +529,30 @@ def show_detector_energy_resolution(fitter_or_filename):
         if not f_to_fit:
             continue
             
-        idx_c = f_to_fit.GetParNumber("sigma_c")
-        idx_m = f_to_fit.GetParNumber("sigma_m")
-        
-        if idx_c < 0 or idx_m < 0:
+        if fitter.parameterizations and 'sigma' in fitter.parameterizations:
+            param_names = fitter.parameterizations['sigma']['params']
+            formula_str = fitter.parameterizations['sigma']['formula']
+        else:
+            param_names = ['sigma_c', 'sigma_m']
+            formula_str = ""
+            
+        p_indices = [f_to_fit.GetParNumber(n) for n in param_names]
+        if any(idx < 0 for idx in p_indices):
             continue
             
-        sigma_c = f_to_fit.GetParameter(idx_c)
-        sigma_m = f_to_fit.GetParameter(idx_m)
+        p_vals = [f_to_fit.GetParameter(idx) for idx in p_indices]
             
         cov_matrix = fit_res.GetCovarianceMatrix()
-        if not cov_matrix or cov_matrix.GetNrows() <= max(idx_c, idx_m):
+        if not cov_matrix or cov_matrix.GetNrows() <= max(p_indices):
             continue
             
-        var_c = cov_matrix(idx_c, idx_c)
-        var_m = cov_matrix(idx_m, idx_m)
-        cov_cm = cov_matrix(idx_c, idx_m)
+        cov_sub = np.zeros((len(param_names), len(param_names)))
+        for r in range(len(param_names)):
+            for c in range(len(param_names)):
+                cov_sub[r,c] = cov_matrix(p_indices[r], p_indices[c])
+                
+        e_low_global = fitter.spectra[0].GetXaxis().GetXmin()
+        e_high_global = fitter.spectra[0].GetXaxis().GetXmax()
         
         window_start = fitter.peaks_to_fit[i][1]
         window_end = fitter.peaks_to_fit[i][2]
@@ -556,8 +564,38 @@ def show_detector_energy_resolution(fitter_or_filename):
         e_errs = np.zeros(n_pts)
         
         for j, E in enumerate(e_vals):
-            sigma = sigma_c + sigma_m * E
-            var_sigma = var_c + (E**2)*var_m + 2*E*cov_cm
+            if param_names == ['sigma_c', 'sigma_m']:
+                if 'sqrt' in formula_str:
+                    inner = p_vals[0] + p_vals[1] * E
+                    sigma = np.sqrt(inner) if inner > 0 else 0
+                    if inner > 0:
+                        grad = np.array([1.0 / (2*sigma), E / (2*sigma)])
+                    else:
+                        grad = np.array([0.0, 0.0])
+                else:
+                    grad = np.array([1.0, E])
+                    sigma = p_vals[0] + p_vals[1] * E
+            elif param_names[0].startswith('sigma_p'):
+                X = 2.0 * (E - e_low_global) / (e_high_global - e_low_global) - 1.0
+                grad = np.zeros(len(param_names))
+                if len(param_names) > 0: grad[0] = 1.0
+                if len(param_names) > 1: grad[1] = X
+                for k in range(2, len(param_names)):
+                    grad[k] = 2.0 * X * grad[k-1] - grad[k-2]
+                sigma = np.dot(p_vals, grad)
+                
+                # Apply bounds if present in the formula
+                import re
+                if "max" in formula_str:
+                    match = re.search(r'max\(\(double\)([\d.]+),', formula_str)
+                    if match: sigma = max(float(match.group(1)), sigma)
+                if "min" in formula_str:
+                    match = re.search(r'min\(\(double\)([\d.]+),', formula_str)
+                    if match: sigma = min(float(match.group(1)), sigma)
+            else:
+                continue
+                
+            var_sigma = grad.T @ cov_sub @ grad
             
             res_vals[j] = sigma
             res_errs[j] = np.sqrt(max(0, var_sigma))
@@ -627,8 +665,9 @@ f_proton_simultaneous = fit_multi_peaks(
     save_path, force_refit=force_refit,
     additional_param_bounds={'bg_slope':lambda E: (-1,1), #if E < 1000 else (0,0),
                              'amplitude': lambda E:(1e-3, 1e6),
-                             'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
-    loc_wiggle=10
+                             'bg_shift': lambda E: (0, bg_shift_upper_bound),
+                             'sigma_c': lambda E: (0, 10) if E < 1000 else (0, 100)}, 
+    loc_wiggle=15
 )
 
 save_path_merged = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_merged_cheb')
@@ -642,7 +681,8 @@ f_proton_simultaneous_merged = make_merged_fit(
     sigma_poly_order=2, # You can change this order as needed
     sigma_min=10.0,
     sigma_max=200.0,
-    sigma_coef_bounds=(-1000, 1000)
+    sigma_coef_bounds=(-1000, 1000),
+    loc_wiggle=15
 )
 # Display multi-spectrum fit for the first peak
 #f_proton_simultaneous.show_fit_results(4, False, True)

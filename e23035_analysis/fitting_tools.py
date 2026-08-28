@@ -62,7 +62,7 @@ class ParamManager:
         """Returns the integer index for a given parameter name."""
         return self.idx_map.get(name, -1)
 
-def resolve_string_param(param_name, default_guess, default_bounds, parameterizations, pm, current_mu_idx=None):
+def resolve_string_param(param_name, default_guess, default_bounds, parameterizations, pm, current_mu_idx=None, param_bounds=None):
     """
     Resolves a parameter for ROOT string-based TF1 functions.
     
@@ -85,7 +85,10 @@ def resolve_string_param(param_name, default_guess, default_bounds, parameteriza
         # Register any new free parameters this formula introduces
         for j, pname in enumerate(p_dict.get('params', [])):
             if pm.get_idx(pname) == -1: # Add if not exists
-                pm.add(pname, p_dict['guesses'][j], p_dict['bounds'][j])
+                bnd = p_dict['bounds'][j]
+                if param_bounds and pname in param_bounds:
+                    bnd = param_bounds[pname]
+                pm.add(pname, p_dict['guesses'][j], bnd)
                 
         formula_str = p_dict['formula']
         
@@ -596,6 +599,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    bg_guess_end = spectrum.GetBinContent(spectrum.GetXaxis().GetLast())
     sigma_guess = get_sigma(data_source, e_guess)
     A_guess = (spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess) * sigma_guess / bin_width
     tau_guess = 3
@@ -618,6 +622,9 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
             p_guess = bg_guess if k == 0 else 0.0
+            if bg_order >= 1:
+                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
     else:
         bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
@@ -729,6 +736,7 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    bg_guess_end = spectrum.GetBinContent(spectrum.GetXaxis().GetLast())
     max_height = spectrum.GetBinContent(spectrum.GetMaximumBin()) - bg_guess
     A_guess = max_height * sigma_guess * 2.50662827 / bin_width
     A_guess = max(A_guess, 1.0)
@@ -749,6 +757,9 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
             p_guess = bg_guess if k == 0 else 0.0
+            if bg_order >= 1:
+                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
         bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
     else:
@@ -756,9 +767,9 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
         bg_p_names = ["bg_const"]
         bg_string = f"[{bg_const_idx}]"
 
-    amp_string, amp_idx = resolve_string_param("amplitude", A_guess, param_bounds.get('amplitude', A_bounds), parameterizations, pm)
-    mu_string, mu_idx = resolve_string_param("mu", e_guess, param_bounds.get('mu', (e_low, e_high)), parameterizations, pm)
-    sigma_string, sigma_idx = resolve_string_param("sigma", sigma_guess, param_bounds.get('sigma', sigma_bounds), parameterizations, pm, current_mu_idx=mu_idx)
+    amp_string, amp_idx = resolve_string_param("amplitude", A_guess, param_bounds.get('amplitude', A_bounds), parameterizations, pm, param_bounds=param_bounds)
+    mu_string, mu_idx = resolve_string_param("mu", e_guess, param_bounds.get('mu', (e_low, e_high)), parameterizations, pm, param_bounds=param_bounds)
+    sigma_string, sigma_idx = resolve_string_param("sigma", sigma_guess, param_bounds.get('sigma', sigma_bounds), parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
     
 
     gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
@@ -817,6 +828,7 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    bg_guess_end = spectrum.GetBinContent(spectrum.GetXaxis().GetLast())
     max_bin = spectrum.GetMaximumBin()
     min_bin = spectrum.GetMinimumBin()
     max_val = spectrum.GetBinContent(max_bin)
@@ -845,6 +857,9 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
             p_guess = bg_guess if k == 0 else 0.0
+            if bg_order >= 1:
+                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
         bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
     else:
@@ -880,19 +895,19 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
             local_max = max(local_max, spectrum.GetBinContent(peak_bin + offset))
         i_A_guess = max((local_max - bg_guess) * sigma_guess * 2.50662827 / bin_width, 1.0)
         
-        amp_string, amp_idx = resolve_string_param(amp_name, i_A_guess, a_bnd, parameterizations, pm)
-        mu_string, mu_idx = resolve_string_param(mu_name, e_guess_list[i], m_bnd, parameterizations, pm)
+        amp_string, amp_idx = resolve_string_param(amp_name, i_A_guess, a_bnd, parameterizations, pm, param_bounds=param_bounds)
+        mu_string, mu_idx = resolve_string_param(mu_name, e_guess_list[i], m_bnd, parameterizations, pm, param_bounds=param_bounds)
         
         if not shared_sigma and data_source is not None:
             i_sigma_guess = get_sigma(data_source, e_guess_list[i])
         else:
             i_sigma_guess = sigma_guess
             
-        sigma_string, sigma_idx = resolve_string_param(sig_name, i_sigma_guess, s_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+        sigma_string, sigma_idx = resolve_string_param(sig_name, i_sigma_guess, s_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
             
         b_name = "bg_shift" if shared_bg_shift or n_peaks == 1 else f"bg_shift_{i}"
         b_bnd = param_bounds.get(b_name, param_bounds.get('bg_shift', (0, bg_shift_limit)))
-        bg_shift_string, current_bg_shift_idx = resolve_string_param(b_name, 0.002, b_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+        bg_shift_string, current_bg_shift_idx = resolve_string_param(b_name, 0.002, b_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
 
         bg_string += f" + 0.5*{amp_string}*{bg_shift_string}*TMath::Erfc((x-{mu_string})/(1.41421356*{sigma_string}))"
         gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
@@ -1353,6 +1368,7 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
     
     spectrum.GetXaxis().SetRangeUser(*fit_window)
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
+    bg_guess_end = spectrum.GetBinContent(spectrum.GetXaxis().GetLast())
     max_bin = spectrum.GetMaximumBin()
     min_bin = spectrum.GetMinimumBin()
     max_val = spectrum.GetBinContent(max_bin)
@@ -1373,6 +1389,9 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
             p_guess = bg_guess if k == 0 else 0.0
+            if bg_order >= 1:
+                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
         bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
         bg_shift_idx = pm.add("bg_shift", 0.002, param_bounds.get('bg_shift', (0, 1.0)))
@@ -1955,12 +1974,16 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     for j in range(n_spectra):
         spectra[j].GetXaxis().SetRangeUser(*fit_window)
         bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
+        bg_guess_end = spectra[j].GetBinContent(spectra[j].GetXaxis().GetLast())
         spectra[j].GetXaxis().UnZoom()
         
         if bg_model == 'chebyshev' or bg_model == 'polynomial':
             for k in range(bg_order + 1):
                 p_name = f"bg_p{k}_{j}"
                 p_guess = bg_guess if k == 0 else 0.0
+                if bg_order >= 1:
+                    if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                    if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
                 pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, (-np.inf, np.inf))))
         else:
             pm.add(f"bg_const_{j}", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
@@ -1993,7 +2016,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         sig_name = "sigma" if shared_sigma else f"sigma_{i}"
         s_bnd = param_bounds.get(sig_name, param_bounds.get('sigma', sigma_bounds))
-        sig_str, sig_idx = resolve_string_param(sig_name, sigma_guess, s_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+        sig_str, sig_idx = resolve_string_param(sig_name, sigma_guess, s_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
         
         sig_cpp = sig_str.replace('[', 'p[').replace(']', ']')
         sigma_cpp_strings.append(sig_cpp)
@@ -2004,6 +2027,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             amp_name = f"amplitude_{i}_{j}"
             spectra[j].GetXaxis().SetRangeUser(*fit_window)
             bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
+            bg_guess_end = spectra[j].GetBinContent(spectra[j].GetXaxis().GetLast())
             spectra[j].GetXaxis().UnZoom()
             
             peak_bin = spectra[j].GetXaxis().FindBin(e_guess_list[i])
@@ -2233,11 +2257,11 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         
         s_bnd = param_bounds.get('sigma', sigma_bounds)
-        sig_str, _ = resolve_string_param("sigma", gaus_p_map.get("sigma", 1), s_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+        sig_str, _ = resolve_string_param("sigma", gaus_p_map.get("sigma", 1), s_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
         sigma_cpp_strings.append(sig_str.replace('[', 'p[').replace(']', ']'))
         
         t_bnd = param_bounds.get('tau', tau_bounds)
-        tau_str, _ = resolve_string_param("tau", 0.1, t_bnd, parameterizations, pm, current_mu_idx=mu_idx)
+        tau_str, _ = resolve_string_param("tau", 0.1, t_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
         tau_cpp_strings.append(tau_str.replace('[', 'p[').replace(']', ']'))
         
     # 3. Amplitudes (THIRD)
