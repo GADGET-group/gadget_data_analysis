@@ -51,7 +51,7 @@ class spectrum_fitter:
     It supports complex parameter bounding, parameter sharing across simultaneous multiplet fits, 
     and arbitrary mathematical parameterizations.
     """
-    def __init__(self, spectrum:ROOT.TH1D, peak_model:str):
+    def __init__(self, spectrum:ROOT.TH1D, peak_model:str, bg_model:str='linear', bg_order:int=1):
         """
         Initialize the spectrum fitter.
         
@@ -64,6 +64,8 @@ class spectrum_fitter:
                 - 'bg_shift_emg': EMG with a step-like background shift
                 - 'bg_shift_ngaus': Sum of N Gaussians with a background shift
                 - 'bg_shift_nemg': Sum of N EMGs with a background shift
+            bg_model (str): Background model ('linear' or 'chebyshev').
+            bg_order (int): Order of the background polynomial.
         
         Key Attributes for Fitting Configuration:
         
@@ -115,6 +117,9 @@ class spectrum_fitter:
         # peaks_to_fit contains tuples of: ( [loc_guesses_in_window], lower_window, upper_window )
         self.peaks_to_fit = []
         self.peak_model = peak_model
+        self.bg_model = bg_model
+        self.bg_order = bg_order
+
         
         # list of dictionaries where each entry corresponds to a peak that was fit
         self.fit_results = []
@@ -191,13 +196,13 @@ class spectrum_fitter:
                     if param_free:
                         name = f_to_fit.GetParName(j)
                         match = re.match(r'^(.*)_(\d+)$', name)
-                        if match:
+                        if match and not name.startswith('bg_p'):
                             free_base_params.add(match.group(1))
                         else:
                             free_base_params.add(name)
             
             sorted_params = sorted(list(free_base_params))
-            priorities = {'mu': 1, 'amplitude': 2, 'sigma': 3, 'bg_const': 4}
+            priorities = {'mu': 1, 'amplitude': 2, 'sigma': 3, 'bg_const': 4, 'bg_p0': 4}
             sorted_params.sort(key=lambda x: (priorities.get(x, 100), x))
             
             header = ['fit_index', 'loc_guess', 'p_value']
@@ -235,7 +240,7 @@ class spectrum_fitter:
                         if param_free:
                             name = f_to_fit.GetParName(j)
                             match = re.match(r'^(.*)_(\d+)$', name)
-                            if match:
+                            if match and not name.startswith('bg_p'):
                                 base_name = match.group(1)
                                 param_k = int(match.group(2))
                                 if param_k == k:
@@ -260,6 +265,8 @@ class spectrum_fitter:
         # 2. Package standard Python types into a state dictionary
         python_state = {
             'peak_model': self.peak_model,
+            'bg_model': self.bg_model,
+            'bg_order': self.bg_order,
             'peaks_to_fit': self.peaks_to_fit,
             'fit_options': self.fit_options,
             'num_fit_results': len(self.fit_results),
@@ -522,13 +529,13 @@ class spectrum_fitter:
 
             if self.peak_model.lower() == 'gaus':
                 res = fitting_tools.fit_gaussian_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options,
-                    parameterizations=self.parameterizations
+                    self.spectrum, 'gamma_adc', loc_guess[0], fit_range, param_bounds=param_bounds, fit_options=self.fit_options,
+                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order
                 )
             elif self.peak_model.lower() == 'emg':
                 res = fitting_tools.fit_emg_peak(
-                    self.spectrum, 'gamma_adc', loc_guess, fit_range, param_bounds=param_bounds, fit_options=self.fit_options,
-                    parameterizations=self.parameterizations
+                    self.spectrum, 'gamma_adc', loc_guess[0], fit_range, param_bounds=param_bounds, fit_options=self.fit_options,
+                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order
                 )
             elif self.peak_model.lower() == 'bg_shift_gaus':
                 if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
@@ -545,7 +552,8 @@ class spectrum_fitter:
                 
                 res = fitting_tools.fit_gaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
-                                    shared_bg_shift=self.shared_bg_shift, parameterizations=self.parameterizations)
+                                    shared_bg_shift=self.shared_bg_shift, parameterizations=self.parameterizations,
+                                    bg_model=self.bg_model, bg_order=self.bg_order)
             elif self.peak_model.lower() == 'bg_shift_emg':
                 if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
                     if 'bg_shift' in param_bounds:
@@ -555,16 +563,16 @@ class spectrum_fitter:
 
                 res = fitting_tools.fit_emg_w_bg_shift(self.spectrum, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
-                                    parameterizations=self.parameterizations)
+                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order)
             elif self.peak_model.lower() == 'bg_shift_ngaus':
                 res = fitting_tools.fit_ngaussian_w_bg_shift(self.spectrum, loc_guess, fit_range, self.ngaus,
-                                    param_bounds=param_bounds, fit_options=self.fit_options)
+                                    param_bounds=param_bounds, fit_options=self.fit_options, bg_model=self.bg_model, bg_order=self.bg_order)
             elif self.peak_model.lower() == 'bg_shift_voigt':
                 res = fitting_tools.fit_voigt_w_bg_shift(self.spectrum, loc_guess, fit_range,
-                                    param_bounds=param_bounds, fit_options=self.fit_options)
+                                    param_bounds=param_bounds, fit_options=self.fit_options, bg_model=self.bg_model, bg_order=self.bg_order)
             elif self.peak_model.lower() == 'bg_shift_nemg':
                 res = fitting_tools.fit_nemg_w_bg_shift(self.spectrum, loc_guess, fit_range, self.nemg,
-                                    param_bounds=param_bounds, fit_options=self.fit_options)
+                                    param_bounds=param_bounds, fit_options=self.fit_options, bg_model=self.bg_model, bg_order=self.bg_order)
             else:
                 raise ValueError(f"Unknown peak model: {self.peak_model}")
 
@@ -931,12 +939,14 @@ class multi_spectrum_fitter(spectrum_fitter):
     '''
     Class for simultaneously fitting multiple 1D spectra.
     '''
-    def __init__(self, spectra:list, peak_model:str):
+    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1):
         if not spectra:
             raise ValueError("Must provide at least one spectrum")
         self.spectra = spectra
         # Initialize the base class with the first spectrum to reuse some base class logic
-        super().__init__(spectra[0], peak_model)
+        super().__init__(spectra[0], peak_model, bg_model, bg_order)
+        self.bg_model = bg_model
+        self.bg_order = bg_order
         
         # For 2D multi-spectrum fits, we must NOT use the 'I' (Integral) option because the Y axis 
         # is discrete (spectrum index). ROOT's 2D integrator fails to converge on the step function.
@@ -1006,7 +1016,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 
                 res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma, shared_bg_shift=self.shared_bg_shift,
-                                    parameterizations=self.parameterizations)
+                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order)
             elif self.peak_model.lower() == 'bg_shift_emg':
                 if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
                     if 'bg_shift' in param_bounds:
@@ -1016,7 +1026,7 @@ class multi_spectrum_fitter(spectrum_fitter):
 
                 res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
-                                    parameterizations=self.parameterizations)
+                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order)
             else:
                 raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports bg_shift_gaus, bg_shift_emg): {self.peak_model}")
 
@@ -1282,7 +1292,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                             # could be mu_{peak} or bg_const_{spec}
                             # we treat bg_const as global, mu as peak-specific
                             base = m2.group(1)
-                            if base in ['bg_const', 'bg_slope', 'bg_shift']:
+                            if base in ['bg_const', 'bg_slope', 'bg_shift'] or base.startswith('bg_p'):
                                 free_base_params.add(name)
                             else:
                                 free_base_params.add(base)
@@ -1337,7 +1347,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                         if m2:
                             base = m2.group(1)
                             idx = int(m2.group(2))
-                            if base in ['bg_const', 'bg_slope', 'bg_shift']:
+                            if base in ['bg_const', 'bg_slope', 'bg_shift'] or base.startswith('bg_p'):
                                 row_dict[name + "_val"] = val
                                 row_dict[name + "_err"] = err
                             else:
@@ -1372,7 +1382,9 @@ class multi_spectrum_fitter(spectrum_fitter):
             'parameterizations': self.parameterizations,
             'shared_sigma': getattr(self, 'shared_sigma', False),
             'shared_bg_shift': getattr(self, 'shared_bg_shift', True),
-            'location_wiggle': getattr(self, 'location_wiggle', 10)
+            'location_wiggle': getattr(self, 'location_wiggle', 10),
+            'bg_model': getattr(self, 'bg_model', 'linear'),
+            'bg_order': getattr(self, 'bg_order', 1)
         }
         
         import inspect

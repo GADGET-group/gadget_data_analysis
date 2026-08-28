@@ -10,6 +10,24 @@ import ROOT
 import numpy as np
 import uuid
 
+def get_chebyshev_string(order, param_start_idx, e_low, e_high):
+    X = f"(2.0*(x - ({e_low}))/(({e_high}) - ({e_low})) - 1.0)"
+    if order == 0:
+        return f"[{param_start_idx}]"
+    elif order == 1:
+        return f"([{param_start_idx}] + [{param_start_idx+1}]*{X})"
+    
+    terms = [f"[{param_start_idx}]", f"[{param_start_idx+1}]*{X}"]
+    T_n2 = "1.0"
+    T_n1 = X
+    for i in range(2, order + 1):
+        T_n = f"(2.0*{X}*{T_n1} - {T_n2})"
+        terms.append(f"[{param_start_idx+i}]*{T_n}")
+        T_n2 = T_n1
+        T_n1 = T_n
+    return "(" + " + ".join(terms) + ")"
+
+
 class ParamManager:
     """
     Manages parameters for complex, dynamic ROOT TF1 fits.
@@ -27,7 +45,12 @@ class ParamManager:
     def add(self, name, guess, bound):
         """
         Adds a parameter if it doesn't exist, or returns the existing index if it does.
+        If bound is a 3-tuple (custom_guess, min, max), it overrides the default guess.
         """
+        if len(bound) == 3:
+            guess = bound[0]
+            bound = (bound[1], bound[2])
+
         if name not in self.idx_map:
             self.idx_map[name] = len(self.names)
             self.names.append(name)
@@ -434,10 +457,10 @@ def get_sigma(data_source, energy):
     return sigma
 
 
-def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, free_sigma=False, data_source='tpc', background_type='linear'): 
+def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, free_sigma=False, data_source='tpc', background_type='linear', bg_order=1): 
     '''
     
-    background_type = none, constant, or linear
+    background_type = none, constant, linear, or chebyshev
     '''
     # Extract the fit range
     e_low, e_high = energy_window[0], energy_window[1]
@@ -499,6 +522,12 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
         initial_values.extend([0.0, 0.0])
         bounds.extend([(-np.inf, np.inf), (-np.inf, np.inf)])
         names.extend(["bg_offset", "bg_slope"])
+    elif background_type == 'chebyshev' or background_type == 'polynomial':
+        background_string = get_chebyshev_string(bg_order, bg_idx_1, e_low, e_high)
+        for i in range(bg_order + 1):
+            initial_values.append(0.0)
+            bounds.append((-np.inf, np.inf))
+            names.append(f"bg_p{i}")
     elif background_type == 'constant':
         background_string = f'[{bg_idx_1}]'
         initial_values.extend([0])
@@ -526,13 +555,17 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
     comp_id = uuid.uuid4().hex[:6]
     fit_params = np.array(fit_res.Parameters())
     
-    # Background is always the last 2 parameters, regardless of sigma mode
+    # Background is always the last few parameters, regardless of sigma mode
     background = ROOT.TF1(f'bg_{comp_id}', background_string, e_low, e_high)
-    background.SetParameters(fit_params[-2:])
+    num_bg_params = len(names) - bg_idx_1
+    background.SetParameters(fit_params[-num_bg_params:])
     
-    # Peaks take all parameters EXCEPT the last 2
+    # Peaks take all parameters EXCEPT the background ones
     peaks = ROOT.TF1(f'peaks_{comp_id}', peaks_string, e_low, e_high)
-    peaks.SetParameters(fit_params[:-2])
+    if num_bg_params > 0:
+        peaks.SetParameters(fit_params[:-num_bg_params])
+    else:
+        peaks.SetParameters(fit_params)
     
     component_peak_funcs = []
     for i in range(n_peaks):
@@ -553,7 +586,7 @@ def fit_gaussian_peaks(spectrum, energy_guesses, energy_wiggle, energy_window, f
 
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI', parameterizations=None): 
+def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI', parameterizations=None, bg_model='linear', bg_order=1): 
     from scipy.special import erfcx, erfc
     if param_bounds is None:
         param_bounds = {}
@@ -579,7 +612,17 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     spectrum.GetXaxis().UnZoom()
 
     pm = ParamManager()
-    bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_names = []
+        for k in range(bg_order + 1):
+            p_name = f"bg_p{k}"
+            bg_p_names.append(p_name)
+            p_guess = bg_guess if k == 0 else 0.0
+            pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
+    else:
+        bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
+        bg_p_names = ["bg_const"]
+
     amp_idx = pm.add("amplitude", A_guess, param_bounds.get('amplitude', A_bounds))
     mu_idx = pm.add("mu", e_guess, param_bounds.get('mu', (e_low, e_high)))
     
@@ -597,7 +640,13 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     # Python evaluation function utilizing erfcx
     def emg_eval(x, p):
         val_x = x[0]
-        bg_const = p[pm.get_idx("bg_const")]
+        if bg_model == 'chebyshev' or bg_model == 'polynomial':
+            X = (2.0 * (val_x - e_low) / (e_high - e_low)) - 1.0
+            terms = [p[pm.get_idx(f"bg_p{i}")] for i in range(bg_order + 1)]
+            bg_val = np.polynomial.chebyshev.chebval(X, terms)
+        else:
+            bg_val = p[pm.get_idx("bg_const")]
+            
         amp = resolve_python_param("amplitude", p, pm, parameterizations)
         mu = resolve_python_param("mu", p, pm, parameterizations)
         sigma = resolve_python_param("sigma", p, pm, parameterizations, current_mu=mu)
@@ -622,7 +671,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
             erfcx_part = erfcx(z_arg)
             peak_val = norm * gaus_part * erfcx_part
             
-        return bg_const + peak_val
+        return bg_val + peak_val
 
     # Call fit engine (passing ONLY the python function)
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
@@ -640,7 +689,13 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     
     # Reconstruct individual TF1 components for visualization
     def bg_eval(x, p):
-        return p[pm.get_idx("bg_const")]
+        if bg_model == 'chebyshev' or bg_model == 'polynomial':
+            val_x = x[0]
+            X = (2.0 * (val_x - e_low) / (e_high - e_low)) - 1.0
+            terms = [p[pm.get_idx(f"bg_p{i}")] for i in range(bg_order + 1)]
+            return np.polynomial.chebyshev.chebval(X, terms)
+        else:
+            return p[pm.get_idx("bg_const")]
         
     background = ROOT.TF1(f'bg_{comp_id}', bg_eval, e_low, e_high, len(pm.names))
     background._pyfunc = bg_eval
@@ -649,7 +704,8 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     
     def peak_eval(x, p):
         p_copy = list(p)
-        p_copy[pm.get_idx("bg_const")] = 0
+        for p_name in bg_p_names:
+            p_copy[pm.get_idx(p_name)] = 0
         return emg_eval(x, p_copy)
 
     peaks = ROOT.TF1(f'emg_{comp_id}', peak_eval, e_low, e_high, len(pm.names))
@@ -660,7 +716,7 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
     component_peak_funcs = [peaks]
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI', parameterizations=None): 
+def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window, param_bounds=None, fit_options = 'LS0QEI', parameterizations=None, bg_model='linear', bg_order=1): 
     """
     Fits a standard Gaussian + constant background using the fit_func engine.
     """
@@ -687,13 +743,24 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     spectrum.GetXaxis().UnZoom()
 
     pm = ParamManager()
-    bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_names = []
+        for k in range(bg_order + 1):
+            p_name = f"bg_p{k}"
+            bg_p_names.append(p_name)
+            p_guess = bg_guess if k == 0 else 0.0
+            pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
+        bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
+    else:
+        bg_const_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
+        bg_p_names = ["bg_const"]
+        bg_string = f"[{bg_const_idx}]"
+
     amp_string, amp_idx = resolve_string_param("amplitude", A_guess, param_bounds.get('amplitude', A_bounds), parameterizations, pm)
     mu_string, mu_idx = resolve_string_param("mu", e_guess, param_bounds.get('mu', (e_low, e_high)), parameterizations, pm)
     sigma_string, sigma_idx = resolve_string_param("sigma", sigma_guess, param_bounds.get('sigma', sigma_bounds), parameterizations, pm, current_mu_idx=mu_idx)
     
-    bg_string = f"[{bg_idx}]"
-    
+
     gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
     function_string = f"{bg_string} + {gaus_string}"
 
@@ -712,19 +779,20 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     comp_id = uuid.uuid4().hex[:6]
     fit_params = np.array(fit_res.Parameters())
     
-    # Background component (just parameter 0)
+    # Background component
     background = ROOT.TF1(f'bg_{comp_id}', bg_string, e_low, e_high)
-    background.SetParameter(0, fit_params[0])
+    for i, p_name in enumerate(bg_p_names):
+        background.SetParameter(i, fit_params[pm.get_idx(p_name)])
     
-    # Gaussian Peak component (parameters 1 through 3)
+    # Gaussian Peak component (parameters after background)
     peaks = ROOT.TF1(f'gaus_{comp_id}', gaus_string, e_low, e_high)
-    for i in range(1, 4):
+    for i in range(len(bg_p_names), len(fit_params)):
         peaks.SetParameter(i, fit_params[i])
         
     component_peak_funcs = [peaks]
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None): 
+def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None,fit_options = 'LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1): 
     """
     Fits a standard Gaussian + a step-like background shift using the fit_func engine.
     data_source can be specified to get default guesses and values for sigma and A
@@ -771,8 +839,19 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
     spectrum.GetXaxis().UnZoom()
 
     pm = ParamManager()
-    bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
-    bgslope_idx = pm.add("bg_slope", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_names = []
+        for k in range(bg_order + 1):
+            p_name = f"bg_p{k}"
+            bg_p_names.append(p_name)
+            p_guess = bg_guess if k == 0 else 0.0
+            pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
+        bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
+    else:
+        bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
+        bgslope_idx = pm.add("bg_slope", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        bg_string = f"[{bg_idx}] + [{bgslope_idx}]*x"
+        bg_p_names = ["bg_const", "bg_slope"]
     
     # We defer adding bg_shift to pm until inside the loop so it can use resolve_string_param
     
@@ -782,7 +861,6 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
             for j, pname in enumerate(p_dict['params']):
                 pm.add(pname, p_dict['guesses'][j], p_dict['bounds'][j])
 
-    bg_string = f"[{bg_idx}] + [{bgslope_idx}]*x"
     gaus_strings = []
     
     for i in range(n_peaks):
@@ -857,7 +935,7 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None, fit_options = 'LS0QEI', shared_bg_shift=True, parameterizations=None): 
+def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None, fit_options = 'LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1): 
     from scipy.special import erfcx, erfc
     if param_bounds is None:
         param_bounds = {}
@@ -875,7 +953,7 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
     # the string-based gaussian engine cannot parse. The gaussian fit will just provide
     # standard independent guesses for Amplitude and Mu, and the global parameterizations
     # will fall back to their user-defined 'guesses' when initialized below.
-    gaus_res = fit_gaussian_w_bg_shift(spectrum, e_guess, fit_window, data_source, param_bounds, shared_bg_shift=shared_bg_shift)
+    gaus_res = fit_gaussian_w_bg_shift(spectrum, e_guess, fit_window, data_source, param_bounds, shared_bg_shift=shared_bg_shift, bg_model=bg_model, bg_order=bg_order)
     gaus_params_obj = gaus_res[0]
     gaus_res[5].Close()
 
@@ -903,8 +981,16 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         for i in range(gaus_params_obj.NPar()):
             gaus_p_map[gaus_res[7].GetParName(i)] = gaus_params_obj.Parameter(i)
             
-    pm.add("bg_const", gaus_p_map.get("bg_const", 0), param_bounds.get('bg_const', (-np.inf, np.inf)))
-    pm.add("bg_slope", gaus_p_map.get("bg_slope", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_names = []
+        for k in range(bg_order + 1):
+            p_name = f"bg_p{k}"
+            bg_p_names.append(p_name)
+            pm.add(p_name, gaus_p_map.get(p_name, 0.0), param_bounds.get(p_name, (-np.inf, np.inf)))
+    else:
+        pm.add("bg_const", gaus_p_map.get("bg_const", 0), param_bounds.get('bg_const', (-np.inf, np.inf)))
+        pm.add("bg_slope", gaus_p_map.get("bg_slope", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        bg_p_names = ["bg_const", "bg_slope"]
     
     for i in range(n_peaks):
         b_name = "bg_shift" if shared_bg_shift or n_peaks == 1 else f"bg_shift_{i}"
@@ -938,17 +1024,31 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         
     def emg_bg_shift_eval(x, p):
         val_x = x[0]
-        bg_const = p[pm.get_idx("bg_const")]
-        bg_slope = p[pm.get_idx("bg_slope")]
         
-        total = bg_const + bg_slope * val_x
+        if bg_model == 'chebyshev' or bg_model == 'polynomial':
+            x_norm = 2.0 * (val_x - e_low) / (e_high - e_low) - 1.0
+            total = p[pm.get_idx("bg_p0")]
+            if bg_order >= 1:
+                total += p[pm.get_idx("bg_p1")] * x_norm
+            t_n2 = 1.0
+            t_n1 = x_norm
+            for k in range(2, bg_order + 1):
+                t_n = 2.0 * x_norm * t_n1 - t_n2
+                total += p[pm.get_idx(f"bg_p{k}")] * t_n
+                t_n2 = t_n1
+                t_n1 = t_n
+        else:
+            bg_const = p[pm.get_idx("bg_const")]
+            bg_slope = p[pm.get_idx("bg_slope")]
+            total = bg_const + bg_slope * val_x
+        
         for i in range(n_peaks):
-            b_name = "bg_shift" if shared_bg_shift or n_peaks == 1 else f"bg_shift_{i}"
-            bg_shift = resolve_python_param(b_name, p, pm, parameterizations, current_mu=mu)
             amp_name = "amplitude" if n_peaks == 1 else f"amplitude_{i}"
             mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
             amp = resolve_python_param(amp_name, p, pm, parameterizations)
             mu = resolve_python_param(mu_name, p, pm, parameterizations)
+            b_name = "bg_shift" if shared_bg_shift or n_peaks == 1 else f"bg_shift_{i}"
+            bg_shift = resolve_python_param(b_name, p, pm, parameterizations, current_mu=mu)
             sigma = resolve_python_param("sigma", p, pm, parameterizations, current_mu=mu)
             tau = resolve_python_param("tau", p, pm, parameterizations, current_mu=mu)
             
@@ -995,8 +1095,8 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
     # Peak component
     def peak_eval(x, p):
         p_copy = list(p)
-        p_copy[pm.get_idx("bg_const")] = 0
-        p_copy[pm.get_idx("bg_slope")] = 0
+        for p_name in bg_p_names:
+            p_copy[pm.get_idx(p_name)] = 0
         p_copy[pm.get_idx("bg_shift")] = 0
         return emg_bg_shift_eval(x, p_copy)
         
@@ -1044,12 +1144,11 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
         peak_eval_i = make_eval(i)
         p = ROOT.TF1(f'emg_peak_{i}_{comp_id}', peak_eval_i, e_low, e_high, len(pm.names))
         p._pyfunc = peak_eval_i
-        for j in range(len(fit_params)):
-            p.SetParameter(j, fit_params[j])
+        for j in range(len(fit_params)): p.SetParameter(j, fit_params[j])
         component_peak_funcs.append(p)
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_gaussians:int, data_source=None, param_bounds=None, fit_options = 'LS0QEI'): 
+def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_gaussians:int, data_source=None, param_bounds=None, fit_options = 'LS0QEI', bg_model='linear', bg_order=1): 
     """
     Fits N Gaussians + a step-like background shift to each peak location.
     All peaks share the same set of N sigmas and N-1 fractions.
@@ -1071,26 +1170,39 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
     temp_spectrum = spectrum.Clone(f"{spectrum.GetName()}_temp_for_guess_{uuid.uuid4().hex[:6]}")
     temp_spectrum.SetDirectory(0) 
     
-    gaus_res = fit_gaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, data_source, param_bounds, fit_options=fit_options)
+    gaus_res = fit_gaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, data_source, param_bounds, fit_options=fit_options, bg_model=bg_model, bg_order=bg_order)
     if not gaus_res[0].IsValid():
         print(f"Warning: Initial single Gaussian fit failed. Guesses may be poor.")
-        gaus_params = np.ones(6 + 2*(n_peaks-1)) * 0.1 
+        n_bg_params = bg_order + 1 if bg_model in ['chebyshev', 'polynomial'] else 2
+        gaus_params = np.ones(n_bg_params + 4 + 2*(n_peaks-1)) * 0.1 
     else:
         gaus_params = np.array(gaus_res[0].Parameters())
         
     gaus_res[5].Close() 
 
     # 2. Construct the Mathematical Model
-    bg_const_idx = 0
-    bg_slope_idx = 1
-    bg_shift_idx = 2
-    sigma_start_idx = 3
-    frac_start_idx = 3 + num_gaussians
+    pm = ParamManager()
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_names = []
+        for k in range(bg_order + 1):
+            p_name = f"bg_p{k}"
+            bg_p_names.append(p_name)
+            pm.add(p_name, gaus_params[k], param_bounds.get(p_name, (-np.inf, np.inf)))
+        bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
+        bg_shift_idx = pm.add("bg_shift", gaus_params[bg_order + 1] if gaus_params.size > bg_order + 1 else 0.0, param_bounds.get('bg_shift', (0, 1.0)))
+    else:
+        bg_const_idx = pm.add("bg_const", gaus_params[0], param_bounds.get('bg_const', (-np.inf, np.inf)))
+        bg_slope_idx = pm.add("bg_slope", gaus_params[1], param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        bg_shift_idx = pm.add("bg_shift", gaus_params[5] if gaus_params.size > 5 else 0.0, param_bounds.get('bg_shift', (0, 1.0)))
+        bg_string = f"[{bg_const_idx}] + [{bg_slope_idx}]*x"
+        bg_p_names = ["bg_const", "bg_slope"]
+
+    # Sigmas start right after bg_shift
+    sigma_start_idx = bg_shift_idx + 1
+    frac_start_idx = sigma_start_idx + num_gaussians
     peak_params_start_idx = frac_start_idx + (num_gaussians - 1) if num_gaussians > 1 else frac_start_idx
     
     bin_width = spectrum.GetBinWidth(1) 
-    
-    bg_string = f"[{bg_const_idx}] + [{bg_slope_idx}]*x"
     all_gaus_strings = []
     
     # --- FIX 1: Generate stable recursive fraction weights ---
@@ -1125,10 +1237,10 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
     function_string = f"{bg_string} + {' + '.join(all_gaus_strings)}"
 
     # 2. Setup Parameters and Initial Guesses
-    bg_const_guess = gaus_params[0]
-    bg_slope_guess = gaus_params[1]
-    sigma_from_gaus = gaus_params[4] 
-    bg_shift_guess = gaus_params[5] if gaus_params.size > 5 else 0.0
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        sigma_from_gaus = gaus_params[bg_order + 4]
+    else:
+        sigma_from_gaus = gaus_params[4]
 
     if data_source is None:
         sigma_bounds_default = (0.1, 100)
@@ -1140,61 +1252,56 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
         sigma_bounds_default = (0.1, 100)
         A_bounds_default = (0, np.inf)
 
-    initial_values = [bg_const_guess, bg_slope_guess, bg_shift_guess]
-    bounds = [
-        param_bounds.get('bg_const', (-np.inf, np.inf)),
-        param_bounds.get('bg_slope', (-np.inf, np.inf)),
-        param_bounds.get('bg_shift', (0, 1.0))
-    ]
-    names = ["bg_const", "bg_slope", "bg_shift"]
-
     # Sigmas
     for j in range(num_gaussians):
         sigma_guess = sigma_from_gaus * (0.8 + 0.4 * j / max(1, num_gaussians - 1)) if num_gaussians > 1 else sigma_from_gaus
-        initial_values.append(sigma_guess)
-        bounds.append(param_bounds.get(f'sigma{j+1}', sigma_bounds_default))
-        names.append(f"sigma{j+1}")
+        pm.add(f"sigma{j+1}", sigma_guess, param_bounds.get(f'sigma{j+1}', sigma_bounds_default))
 
     # Fractions
     if num_gaussians > 1:
         for j in range(num_gaussians - 1):
-            initial_values.append(1.0 / num_gaussians)
-            bounds.append(param_bounds.get(f'frac{j+1}', (0.0, 1.0)))
-            names.append(f"frac{j+1}")
+            pm.add(f"frac{j+1}", 1.0 / num_gaussians, param_bounds.get(f'frac{j+1}', (0.0, 1.0)))
 
     # Peaks
     for i in range(n_peaks):
         if i == 0:
-            amp_guess = gaus_params[2]
-            mu_guess = gaus_params[3]
+            if bg_model == 'chebyshev' or bg_model == 'polynomial':
+                amp_guess = gaus_params[bg_order + 2]
+                mu_guess = gaus_params[bg_order + 3]
+            else:
+                amp_guess = gaus_params[2]
+                mu_guess = gaus_params[3]
             amp_name = "amplitude" if n_peaks == 1 else "amplitude_0"
             mu_name = "mu" if n_peaks == 1 else "mu_0"
         else:
-            amp_guess = gaus_params[4 + 2 * i]
-            mu_guess = gaus_params[5 + 2 * i]
+            if bg_model == 'chebyshev' or bg_model == 'polynomial':
+                amp_guess = gaus_params[bg_order + 4 + 2 * i]
+                mu_guess = gaus_params[bg_order + 5 + 2 * i]
+            else:
+                amp_guess = gaus_params[4 + 2 * i]
+                mu_guess = gaus_params[5 + 2 * i]
             amp_name = f"amplitude_{i}"
             mu_name = f"mu_{i}"
         
-        initial_values.extend([amp_guess, mu_guess])
-        bounds.extend([
-            param_bounds.get(amp_name, param_bounds.get('amplitude', A_bounds_default)),
-            param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
-        ])
-        names.extend([amp_name, mu_name])
+        pm.add(amp_name, amp_guess, param_bounds.get(amp_name, param_bounds.get('amplitude', A_bounds_default)))
+        pm.add(mu_name, mu_guess, param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high))))
 
     # 3. Call our generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
-        initial_values=initial_values, 
-        bounds=bounds, 
+        initial_values=pm.initial_values, 
+        bounds=pm.bounds, 
         fit_range=(e_low, e_high), 
-        names=names,
+        names=pm.names,
         fit_options = fit_options
     )
     
     # --- FIX 2: Fixed loop bounds so the first peak isn't excluded ---
-    reconstructed_bg_string = '[0]'
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        reconstructed_bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
+    else:
+        reconstructed_bg_string = f"[{bg_const_idx}] + [{bg_slope_idx}]*x"
     for i in range(n_peaks): 
         amp_idx = peak_params_start_idx + 2*i
         mu_idx = peak_params_start_idx + 2*i + 1
@@ -1223,7 +1330,7 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
         component_peak_funcs.append(p)
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None): 
+def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, data_source=None, param_bounds=None, bg_model='linear', bg_order=1): 
     """
     Fits a Voigt profile (Gaussian + Lorentzian convolution) + a step-like background shift.
     data_source can be specified to get default guesses and values for sigma and A.
@@ -1240,126 +1347,76 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
     n_peaks = len(e_guess_list)
 
     # 1. Construct the Mathematical Model
-    # [0]: Constant Background
-    # [1]: Slope Background
-    # [2]: Amplitude (Area) for peak 0
-    # [3]: Mean (mu) for peak 0
-    # [4]: Sigma (Gaussian width, shared across all peaks)
-    # [5]: shift in background (left - right) as fraction of peak area, shared for all peaks
-    # [6]: Gamma (Lorentzian width, shared across all peaks)
-    # If n_peaks > 1:
-    # [7]: Amplitude of peak 1
-    # [8]: Mean of peak 1
-    # ...
+    pm = ParamManager()
     
     bin_width = spectrum.GetBinWidth(1) 
     
-    bg_string = "[0] + [1]*x"
-    voigt_strings = []
-    
-    for i in range(n_peaks):
-        if i == 0:
-            amp_idx = 2
-            mu_idx = 3
-        else:
-            # Shifted by +1 compared to the Gaussian function because of the new Gamma parameter
-            amp_idx = 5 + 2 * i 
-            mu_idx = 6 + 2 * i
-            
-        # Background step function uses the Gaussian sigma [4] for the resolution smearing
-        bg_string += f" + 0.5*[{amp_idx}]*[5]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[4]))"
-        
-        # TMath::Voigt is normalized to 1. Multiply by Amplitude and bin_width.
-        voigt_string = f"[{amp_idx}] * {bin_width} * TMath::Voigt(x-[{mu_idx}], [4], [6])"
-        voigt_strings.append(voigt_string)
-
-    function_string = f"{bg_string} + {' + '.join(voigt_strings)}"
-
-    # 2. Setup Parameters and Initial Guesses
-    if data_source is None:
-        sigma_guess = 1.0
-    else:
-        sigma_guess = get_sigma(data_source, e_guess_list[0])
-        
-    # Lorentzian width guess. Often smaller than or roughly equal to Gaussian resolution.
-    gamma_guess = sigma_guess * 0.5 
-    
     spectrum.GetXaxis().SetRangeUser(*fit_window)
-
     bg_guess = spectrum.GetBinContent(spectrum.GetXaxis().GetFirst())
-    
     max_bin = spectrum.GetMaximumBin()
     min_bin = spectrum.GetMinimumBin()
     max_val = spectrum.GetBinContent(max_bin)
     min_val = spectrum.GetBinContent(min_bin)
-    
-    max_height = max_val - bg_guess
-    A_guess = max_height * sigma_guess * 2.50662827 / bin_width
-    A_guess = max(A_guess, 1.0) 
-    
-    bg_shift_limit = 1.0
+    spectrum.GetXaxis().UnZoom()
     
     if data_source is None:
-        sigma_bounds = (0.1, 100)
+        sigma_guess = 1.0
+    else:
+        sigma_guess = get_sigma(data_source, e_guess_list[0])
+    gamma_guess = sigma_guess * 0.5 
+    max_height = max_val - bg_guess
+    A_guess = max(max_height * sigma_guess * 2.50662827 / bin_width, 1.0) 
+
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_names = []
+        for k in range(bg_order + 1):
+            p_name = f"bg_p{k}"
+            bg_p_names.append(p_name)
+            p_guess = bg_guess if k == 0 else 0.0
+            pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
+        bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
+        bg_shift_idx = pm.add("bg_shift", 0.002, param_bounds.get('bg_shift', (0, 1.0)))
+    else:
+        bg_const_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
+        bg_slope_idx = pm.add("bg_slope", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        bg_shift_idx = pm.add("bg_shift", 0.002, param_bounds.get('bg_shift', (0, 1.0)))
+        bg_string = f"[{bg_const_idx}] + [{bg_slope_idx}]*x"
+        bg_p_names = ["bg_const", "bg_slope"]
+        
+    sigma_idx = pm.add("sigma", sigma_guess, param_bounds.get('sigma', (0.1, 100) if data_source is None else (1, 20) if data_source == 'gamma_adc' else (0.1, 100)))
+    gamma_idx = pm.add("gamma", gamma_guess, param_bounds.get('gamma', (0.001, 100.0)))
+
+    voigt_strings = []
+    
+    if data_source is None:
         A_bounds_default = (0, np.inf)
     elif data_source == 'gamma_adc':
-        sigma_bounds = (1, 20)
         A_bounds_default = (1, np.inf)
     else:
-        sigma_bounds = (0.1, 100)
         A_bounds_default = (0, np.inf)
 
-    spectrum.GetXaxis().UnZoom()
+    for i in range(n_peaks):
+        amp_name = "amplitude" if n_peaks == 1 else f"amplitude_{i}"
+        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
+        
+        amp_idx = pm.add(amp_name, A_guess, param_bounds.get(amp_name, param_bounds.get('amplitude', A_bounds_default)))
+        mu_idx = pm.add(mu_name, e_guess_list[i], param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high))))
+            
+        bg_string += f" + 0.5*[{amp_idx}]*[{bg_shift_idx}]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{sigma_idx}]))"
+        
+        voigt_string = f"[{amp_idx}] * {bin_width} * TMath::Voigt(x-[{mu_idx}], [{sigma_idx}], [{gamma_idx}])"
+        voigt_strings.append(voigt_string)
 
-    initial_values = [
-        bg_guess,        # p0: bg_const
-        0.0,             # p1: bg_slope
-        A_guess,         # p2: amplitude 0
-        e_guess_list[0], # p3: mu 0
-        sigma_guess,     # p4: sigma
-        0.002,           # p5: bg_shift
-        gamma_guess      # p6: gamma (Lorentzian width)
-    ]
-
-    bg_bounds = param_bounds.get('bg_const', (-np.inf, np.inf))
-    bg_slope_bounds = param_bounds.get('bg_slope', (-np.inf, np.inf))
-    A_bounds = param_bounds.get('amplitude_0', param_bounds.get('amplitude', A_bounds_default))
-    mu_bounds = param_bounds.get('mu_0', param_bounds.get('mu', (e_low, e_high)))
-    sigma_bounds = param_bounds.get('sigma', sigma_bounds)
-    bg_shift_bounds = param_bounds.get('bg_shift', (0, bg_shift_limit))
-    gamma_bounds = param_bounds.get('gamma', (0.001, 100.0))
-
-    bounds = [
-        bg_bounds,       # p0: bg_const
-        bg_slope_bounds, # p1: bg_slope
-        A_bounds,        # p2: amplitude 0
-        mu_bounds,       # p3: mu 0
-        sigma_bounds,    # p4: sigma 
-        bg_shift_bounds, # p5: bg_shift
-        gamma_bounds     # p6: gamma
-    ]
-
-    if n_peaks == 1:
-        names = ["bg_const", "bg_slope", "amplitude", "mu", "sigma", "bg_shift", "gamma"]
-    else:
-        names = ["bg_const", "bg_slope", "amplitude_0", "mu_0", "sigma", "bg_shift", "gamma"]
-
-    for i in range(1, n_peaks):
-        initial_values.extend([A_guess, e_guess_list[i]])
-        bounds.extend([
-            param_bounds.get(f'amplitude_{i}', param_bounds.get('amplitude', A_bounds_default)),
-            param_bounds.get(f'mu_{i}', param_bounds.get('mu', (e_low, e_high)))
-        ])
-        names.extend([f"amplitude_{i}", f"mu_{i}"])
+    function_string = f"{bg_string} + {' + '.join(voigt_strings)}"
 
     # 3. Call our generalized fit engine
     fit_res, rp, canvas, spectrum_to_plot, f_to_fit, h_fit = fit_hist(
         histogram=spectrum, 
         function_string=function_string, 
-        initial_values=initial_values, 
-        bounds=bounds, 
+        initial_values=pm.initial_values, 
+        bounds=pm.bounds, 
         fit_range=(e_low, e_high), 
-        names=names
+        names=pm.names
     )
 
     # 4. Reconstruct individual TF1 components for visualization/return
@@ -1367,7 +1424,16 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
     fit_params = np.array(fit_res.Parameters())
     
     # Background component
-    background = ROOT.TF1(f'bg_{comp_id}', bg_string, e_low, e_high)
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        reconstructed_bg_string = get_chebyshev_string(bg_order, pm.get_idx("bg_p0"), e_low, e_high)
+    else:
+        reconstructed_bg_string = f"[{pm.get_idx('bg_const')}] + [{pm.get_idx('bg_slope')}]*x"
+    for i in range(n_peaks): 
+        amp_idx = pm.get_idx("amplitude" if n_peaks == 1 else f"amplitude_{i}")
+        mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
+        reconstructed_bg_string += f" + 0.5*[{amp_idx}]*[{pm.get_idx('bg_shift')}]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{pm.get_idx('sigma')}]))"
+
+    background = ROOT.TF1(f'bg_{comp_id}', reconstructed_bg_string, e_low, e_high)
     for i in range(len(fit_params)):
         background.SetParameter(i, fit_params[i])
     
@@ -1386,7 +1452,7 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
 
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
-def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI'): 
+def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple, num_emgs:int, data_source=None, param_bounds=None, fit_options='LS0QEI', bg_model='linear', bg_order=1): 
     """
     Fits N Exponentially Modified Gaussians (EMGs) + a sum of N step-like background shifts.
     Uses ROOT's JIT C++ compiler to evaluate the complex tails, bypassing the Python GIL 
@@ -1412,11 +1478,12 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     temp_spectrum = spectrum.Clone(f"{spectrum.GetName()}_temp_for_guess_{uuid.uuid4().hex[:6]}")
     temp_spectrum.SetDirectory(0) 
     
-    gaus_res = fit_ngaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, num_emgs, data_source, param_bounds, fit_options=fit_options)
+    gaus_res = fit_ngaussian_w_bg_shift(temp_spectrum, e_guess, fit_window, num_emgs, data_source, param_bounds, fit_options=fit_options, bg_model=bg_model, bg_order=bg_order)
     
     if not gaus_res[0].IsValid():
         print(f"Warning: Initial N-Gaussian fit failed. Guesses may be poor.")
-        n_gaus_params = 3 + num_emgs + (num_emgs - 1 if num_emgs > 1 else 0) + 2 * n_peaks
+        n_bg_params = bg_order + 1 if bg_model in ['chebyshev', 'polynomial'] else 2
+        n_gaus_params = n_bg_params + 1 + num_emgs + (num_emgs - 1 if num_emgs > 1 else 0) + 2 * n_peaks
         base_params = np.ones(n_gaus_params) * 0.1 
     else:
         base_params = np.array(gaus_res[0].Parameters())
@@ -1424,16 +1491,43 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     gaus_res[5].Close() 
 
     # 2. Construct the Mathematical Indexing
-    bg_const_idx = 0
-    bg_slope_idx = 1
-    bg_shift_idx = 2
-    sigma_start_idx = 3
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_idx_cpp_str = ", ".join([str(i) for i in range(bg_order + 1)])
+        bg_shift_idx = bg_order + 1
+        bg_eval_cpp = f"""
+        double x_norm = 2.0 * (val_x - {e_low}) / ({e_high} - {e_low}) - 1.0;
+        int bg_p_idx[] = {{{bg_p_idx_cpp_str}}};
+        double bg_val = p[bg_p_idx[0]];
+        if ({bg_order} >= 1) bg_val += p[bg_p_idx[1]] * x_norm;
+        double t_n2 = 1.0;
+        double t_n1 = x_norm;
+        for (int k = 2; k <= {bg_order}; ++k) {{
+            double t_n = 2.0 * x_norm * t_n1 - t_n2;
+            bg_val += p[bg_p_idx[k]] * t_n;
+            t_n2 = t_n1;
+            t_n1 = t_n;
+        }}
+        double total = bg_val;
+        double bg_shift = p[{bg_shift_idx}];
+        """
+    else:
+        bg_const_idx = 0
+        bg_slope_idx = 1
+        bg_shift_idx = 2
+        bg_eval_cpp = f"""
+        double bg_const = p[{bg_const_idx}];
+        double bg_slope = p[{bg_slope_idx}];
+        double total = bg_const + bg_slope * val_x;
+        double bg_shift = p[{bg_shift_idx}];
+        """
+
+    sigma_start_idx = bg_shift_idx + 1
     tau_start_idx = sigma_start_idx + num_emgs
     frac_start_idx = tau_start_idx + num_emgs
     peak_params_start_idx = frac_start_idx + (num_emgs - 1 if num_emgs > 1 else 0)
     
-    gaus_sigma_start = 3
-    gaus_frac_start = 3 + num_emgs
+    gaus_sigma_start = bg_shift_idx + 1
+    gaus_frac_start = gaus_sigma_start + num_emgs
     gaus_peak_start = gaus_frac_start + (num_emgs - 1 if num_emgs > 1 else 0)
 
     bin_width = spectrum.GetBinWidth(1) 
@@ -1459,10 +1553,8 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     double nemg_eval_{comp_id}(double *x, double *p) {{
         double val_x = x[0];
-        double bg_const = p[{bg_const_idx}];
-        double bg_slope = p[{bg_slope_idx}];
-        double bg_shift = p[{bg_shift_idx}];
         double bin_width = {bin_width};
+        {bg_eval_cpp}
         
         std::vector<double> weights({num_emgs});
         if ({num_emgs} == 1) {{
@@ -1482,8 +1574,6 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
                 }}
             }}
         }}
-
-        double total = bg_const + bg_slope * val_x;
         for (int i = 0; i < {n_peaks}; ++i) {{
             double amp = p[{peak_params_start_idx} + 2 * i];
             double mu = p[{peak_params_start_idx} + 2 * i + 1];
@@ -1516,9 +1606,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     double nemg_bg_only_{comp_id}(double *x, double *p) {{
         double val_x = x[0];
-        double bg_const = p[{bg_const_idx}];
-        double bg_slope = p[{bg_slope_idx}];
-        double bg_shift = p[{bg_shift_idx}];
+        {bg_eval_cpp}
 
         std::vector<double> weights({num_emgs});
         if ({num_emgs} == 1) {{
@@ -1538,8 +1626,6 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
                 }}
             }}
         }}
-
-        double total = bg_const + bg_slope * val_x;
         for (int i = 0; i < {n_peaks}; ++i) {{
             double amp = p[{peak_params_start_idx} + 2 * i];
             double mu = p[{peak_params_start_idx} + 2 * i + 1];
@@ -1583,13 +1669,28 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
 
     bg_shift_limit = 1.0
 
-    initial_values = [base_params[0], base_params[1], base_params[2]]
-    bounds = [
-        param_bounds.get('bg_const', (-np.inf, np.inf)),
-        param_bounds.get('bg_slope', (-np.inf, np.inf)),
-        param_bounds.get('bg_shift', (0, bg_shift_limit))
-    ]
-    names = ["bg_const", "bg_slope", "bg_shift"]
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        initial_values = []
+        bounds = []
+        names = []
+        for k in range(bg_order + 1):
+            p_name = f"bg_p{k}"
+            names.append(p_name)
+            p_guess = base_params[k]
+            initial_values.append(p_guess)
+            bounds.append(param_bounds.get(p_name, (-np.inf, np.inf)))
+        
+        initial_values.append(base_params[bg_order + 1] if base_params.size > bg_order + 1 else 0.0)
+        bounds.append(param_bounds.get('bg_shift', (0, bg_shift_limit)))
+        names.append("bg_shift")
+    else:
+        initial_values = [base_params[0], base_params[1], base_params[2]]
+        bounds = [
+            param_bounds.get('bg_const', (-np.inf, np.inf)),
+            param_bounds.get('bg_slope', (-np.inf, np.inf)),
+            param_bounds.get('bg_shift', (0, bg_shift_limit))
+        ]
+        names = ["bg_const", "bg_slope", "bg_shift"]
 
     for j in range(num_emgs):
         sigma_guess = base_params[gaus_sigma_start + j]
@@ -1828,7 +1929,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1):
     if param_bounds is None:
         param_bounds = {}
     e_low, e_high = fit_window
@@ -1856,8 +1957,15 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
         spectra[j].GetXaxis().UnZoom()
         
-        pm.add(f"bg_const_{j}", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
-        pm.add(f"bg_slope_{j}", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        if bg_model == 'chebyshev' or bg_model == 'polynomial':
+            for k in range(bg_order + 1):
+                p_name = f"bg_p{k}_{j}"
+                p_guess = bg_guess if k == 0 else 0.0
+                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, (-np.inf, np.inf))))
+        else:
+            pm.add(f"bg_const_{j}", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
+            pm.add(f"bg_slope_{j}", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
+            
         if shared_bg_shift:
             pm.add(f"bg_shift_{j}", 0.002, param_bounds.get('bg_shift', (0, 1.0)))
         else:
@@ -1910,14 +2018,40 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     import uuid
     comp_id = uuid.uuid4().hex[:6]
     
-    bg_const_idx = [pm.get_idx(f"bg_const_{j}") for j in range(n_spectra)]
-    bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
+    if bg_model == 'chebyshev' or bg_model == 'polynomial':
+        bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
+        bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
+        bg_eval_cpp = f"""
+        int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};
+        double x_norm = 2.0 * (val_x - {e_low}) / ({e_high} - {e_low}) - 1.0;
+        double bg_val = p[bg_p_idx[0][val_y]];
+        if ({bg_order} >= 1) bg_val += p[bg_p_idx[1][val_y]] * x_norm;
+        double t_n2 = 1.0;
+        double t_n1 = x_norm;
+        for (int k = 2; k <= {bg_order}; ++k) {{
+            double t_n = 2.0 * x_norm * t_n1 - t_n2;
+            bg_val += p[bg_p_idx[k][val_y]] * t_n;
+            t_n2 = t_n1;
+            t_n1 = t_n;
+        }}
+        """
+    else:
+        bg_const_idx = [pm.get_idx(f"bg_const_{j}") for j in range(n_spectra)]
+        bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
+        bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
+        bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
+        bg_eval_cpp = f"""
+        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
+        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
+        double bg_const = p[bg_const_idx[val_y]];
+        double bg_slope = p[bg_slope_idx[val_y]];
+        double bg_val = bg_const + bg_slope * val_x;
+        """
+        
     bg_shift_idx = [[pm.get_idx(f"bg_shift_{i}_{j}" if not shared_bg_shift and n_peaks > 1 else f"bg_shift_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
     mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
     amp_idx = [[pm.get_idx(f"amplitude_{i}_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
     
-    bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
-    bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
     bg_shift_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_shift_idx]) + "}"
     mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
     amp_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in amp_idx]) + "}"
@@ -1930,16 +2064,11 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         
-        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
-        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
         int bg_shift_idx[{n_peaks}][{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
         int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
         
-        double bg_const = p[bg_const_idx[val_y]];
-        double bg_slope = p[bg_slope_idx[val_y]];
-        
-        double bg_val = bg_const + bg_slope * val_x;
+        {bg_eval_cpp}
         if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         double bin_width = {bin_width};
@@ -1964,14 +2093,10 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double val_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
-        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
-        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
         int bg_shift_idx[{n_peaks}][{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
         int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
-        double bg_const = p[bg_const_idx[val_y]];
-        double bg_slope = p[bg_slope_idx[val_y]];
-        double bg_val = bg_const + bg_slope * val_x;
+        {bg_eval_cpp}
         if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         double sigma_vals[{n_peaks}];
@@ -2039,7 +2164,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None):
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1):
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:
@@ -2056,7 +2181,7 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     bin_width = spectra[0].GetBinWidth(1) 
 
     # 1. First fit with Gaussian to get guesses
-    gaus_res = fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source, param_bounds, shared_bg_shift=shared_bg_shift)
+    gaus_res = fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source, param_bounds, shared_bg_shift=shared_bg_shift, bg_model=bg_model, bg_order=bg_order)
     gaus_params_obj = gaus_res[0]
     pm_gaus = gaus_res[6]
     
@@ -2068,8 +2193,15 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     pm = ParamManager()
     
     for j in range(n_spectra):
-        pm.add(f"bg_const_{j}", gaus_p_map.get(f"bg_const_{j}", 0), param_bounds.get('bg_const', (-np.inf, np.inf)))
-        pm.add(f"bg_slope_{j}", gaus_p_map.get(f"bg_slope_{j}", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
+        if bg_model == 'chebyshev' or bg_model == 'polynomial':
+            for k in range(bg_order + 1):
+                p_name = f"bg_p{k}_{j}"
+                p_guess = gaus_p_map.get(p_name, 0.0)
+                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, (-np.inf, np.inf))))
+        else:
+            pm.add(f"bg_const_{j}", gaus_p_map.get(f"bg_const_{j}", 0), param_bounds.get('bg_const', (-np.inf, np.inf)))
+            pm.add(f"bg_slope_{j}", gaus_p_map.get(f"bg_slope_{j}", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
+
         if shared_bg_shift:
             pm.add(f"bg_shift_{j}", gaus_p_map.get(f"bg_shift_{j}", 0.002), param_bounds.get('bg_shift', (0, 1.0)))
         else:
@@ -2139,14 +2271,9 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         
-        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
-        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
         int bg_shift_idx[{n_peaks}][{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
         int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
-        
-        double bg_const = p[bg_const_idx[val_y]];
-        double bg_slope = p[bg_slope_idx[val_y]];
         
         double bin_width = {bin_width};
         
@@ -2156,7 +2283,7 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         double tau_vals[{n_peaks}];
         {tau_eval_cpp}
         
-        double bg_val = bg_const + bg_slope * val_x;
+        {bg_eval_cpp}
         if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         
@@ -2191,17 +2318,13 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         double val_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
-        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
-        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
         int bg_shift_idx[{n_peaks}][{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
         int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
-        double bg_const = p[bg_const_idx[val_y]];
-        double bg_slope = p[bg_slope_idx[val_y]];
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
         
-        double bg_val = bg_const + bg_slope * val_x;
+        {bg_eval_cpp}
         if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         

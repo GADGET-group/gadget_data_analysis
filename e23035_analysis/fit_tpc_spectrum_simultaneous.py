@@ -8,29 +8,6 @@ import numpy as np
 from raw_viewer import ddas_interface, process_runs, degai
 from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vis_tools
 
-experiment = 'e23035'
-tpc_config = 'smart2_rpr.csv'
-num_workers = 200
-force_refit=True
-
-# efficiencies with 0.100000 s implant time and 0.100000 s decay time
-# Assumes 12 ms dead time at start of decay window + 2 ms at end
-# These efficiencies are defined in terms of fractions of implanted nuclie which decay during the measurement window
-# 61Ge efficiency =  0.3230255772737927
-Zn59_cycle_efficiency =  0.41616841590773374
-Ga60_cycle_efficiency =  0.37410064021102757
-
-proton_binning = (4000//5, 0, 4000)
-
-ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-
-proton_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo_60Ga", "60Ga proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-
-
-ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-
 fit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting')
 def load_peaks_from_csv(filename):
     all_peaks = []
@@ -61,16 +38,64 @@ def load_peaks_from_csv(filename):
 def get_save_path(save_name):
     return os.path.join(fit_path,save_name)
 
-def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=True, force_refit=False, additional_param_bounds={}, loc_wiggle=10):
+def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000)):
     root_filepath = save_name if save_name.endswith('.root') else save_name + '.root'
     loaded_from_file = False
     if os.path.exists(root_filepath) and not force_refit:
         print(f"Loading previous multi-spectrum fit from {root_filepath}")
         f = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
         loaded_from_file = True
+        for p in additional_param_bounds:
+            f.param_bound_functions[p] = additional_param_bounds[p]
     else:
-        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus')
-        if True: #linear energy dependence
+        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order)
+        if sigma_poly_order is not None:
+            e_low_global = spectra[0].GetXaxis().GetXmin()
+            e_high_global = spectra[0].GetXaxis().GetXmax()
+            X_str = f"(2.0*({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})) - 1.0)"
+            
+            param_names = [f"sigma_p{i}" for i in range(sigma_poly_order + 1)]
+            
+            p0 = 18.8 + 0.01 * 0.5 * (e_high_global + e_low_global)
+            p1 = 0.01 * 0.5 * (e_high_global - e_low_global)
+            
+            guesses = [p0]
+            if sigma_poly_order >= 1:
+                guesses.append(p1)
+            for i in range(2, sigma_poly_order + 1):
+                guesses.append(0.0)
+                
+            if sigma_poly_order == 0:
+                formula = f"[{param_names[0]}]"
+            elif sigma_poly_order == 1:
+                formula = f"([{param_names[0]}] + [{param_names[1]}]*{X_str})"
+            else:
+                terms = [f"[{param_names[0]}]", f"[{param_names[1]}]*{X_str}"]
+                T_n2 = "1.0"
+                T_n1 = X_str
+                for i in range(2, sigma_poly_order + 1):
+                    T_n = f"(2.0*{X_str}*{T_n1} - {T_n2})"
+                    terms.append(f"[{param_names[i]}]*{T_n}")
+                    T_n2 = T_n1
+                    T_n1 = T_n
+                formula = "(" + " + ".join(terms) + ")"
+                
+            if sigma_min is not None and sigma_max is not None:
+                formula = f"max((double){sigma_min}, min((double){sigma_max}, (double){formula}))"
+            elif sigma_min is not None:
+                formula = f"max((double){sigma_min}, (double){formula})"
+            elif sigma_max is not None:
+                formula = f"min((double){sigma_max}, (double){formula})"
+                
+            f.parameterizations = {
+                'sigma': {
+                    'formula': formula,
+                    'params': param_names,
+                    'guesses': guesses,
+                    'bounds': [sigma_coef_bounds] * len(param_names)
+                }
+            }
+        elif True: #linear energy dependence
             f.parameterizations = {
                 'sigma': {
                     'formula': '[sigma_c] + [sigma_m]*({mu})',
@@ -93,10 +118,6 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
         f.peaks_to_fit = peaks
         f.location_wiggle = loc_wiggle
         f.shared_sigma = False
-        if zero_bg_shift:
-            f.param_bound_functions['bg_shift'] = lambda E: (0, 0)
-        else:
-            f.shared_bg_shift = False
         for p in additional_param_bounds:
             f.param_bound_functions[p] = additional_param_bounds[p]
         if not likelihood:
@@ -156,6 +177,101 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
     if not loaded_from_file and save_name:
         f.save(save_name) 
     return f
+
+def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_include=None, bg_model='chebyshev', bg_order=4, sigma_poly_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000), loc_wiggle=10):
+    """
+    Creates a merged fit from multiple limited-window fits in the source_fitter.
+    
+    Args:
+        source_fitter: The multi_spectrum_fitter instance containing the limited window fits.
+        save_name: Base path to save the merged fit ROOT file.
+        force_refit: Whether to force refitting if the file already exists.
+        fit_windows_to_include: List of indices for the fit windows to merge. Defaults to all.
+        bg_model: The background model to use for the merged fit.
+        bg_order: The polynomial order for the background.
+        sigma_poly_order: Polynomial order for sigma.
+        sigma_min: Minimum value for sigma.
+        sigma_max: Maximum value for sigma.
+        sigma_coef_bounds: Bounds for sigma polynomial coefficients.
+        loc_wiggle: The window wiggle range for parameter peak locations.
+    """
+    merged_peaks = []
+    global_start = float('inf')
+    global_end = float('-inf')
+
+    fitted_mus = {}
+    fitted_amps = {}
+
+    if fit_windows_to_include is None:
+        fit_windows_to_include = list(range(len(source_fitter.peaks_to_fit)))
+
+    # Extract parameters from the previous limited window fits
+    for i in fit_windows_to_include:
+        res = source_fitter.fit_results[i]
+        if not res or 'fit_res' not in res:
+            continue
+        f_to_fit = res.get('f_to_fit_2d') or res.get('f_to_fit')
+        if not f_to_fit:
+            continue
+            
+        for j in range(f_to_fit.GetNpar()):
+            name = f_to_fit.GetParName(j)
+            val = f_to_fit.GetParameter(j)
+            if name.startswith('mu'):
+                idx = 0 if name == 'mu' else int(name.split('_')[1])
+                loc_guess = source_fitter.peaks_to_fit[i][0][idx]
+                fitted_mus[loc_guess] = val
+            elif name.startswith('amplitude'):
+                parts = name.split('_')
+                if len(parts) == 3: # amplitude_i_j
+                    peak_idx = int(parts[1])
+                    spec_idx = int(parts[2])
+                else: 
+                    peak_idx = 0 if len(parts) == 2 else int(parts[1])
+                    spec_idx = int(parts[-1])
+                
+                loc_guess = source_fitter.peaks_to_fit[i][0][peak_idx]
+                if loc_guess not in fitted_amps:
+                    fitted_amps[loc_guess] = {}
+                fitted_amps[loc_guess][spec_idx] = val
+
+        peaks, w_start, w_end = source_fitter.peaks_to_fit[i]
+        global_start = min(global_start, w_start)
+        global_end = max(global_end, w_end)
+        for p in peaks:
+            if p not in merged_peaks:
+                merged_peaks.append(p)
+                
+    merged_peaks.sort()
+    merged_proton_guesses = [(merged_peaks, global_start, global_end)]
+
+    # Inherit parameter bounds from the source fitter (like bg_shift, bg_slope)
+    merged_param_bounds = {}
+    for k, v in source_fitter.param_bound_functions.items():
+        if not k.startswith('mu') and not k.startswith('amplitude') and callable(v):
+            merged_param_bounds[k] = v
+
+    # Add back the initial guesses we extracted
+    for i, p in enumerate(merged_peaks):
+        if p in fitted_mus:
+            merged_param_bounds[f'mu_{i}'] = lambda E, p=p, val=fitted_mus[p], w=loc_wiggle: (val, p - w, p + w)
+        if p in fitted_amps:
+            for spec_idx, amp_val in fitted_amps[p].items():
+                merged_param_bounds[f'amplitude_{i}_{spec_idx}'] = lambda E, val=amp_val: (val, 1e-3, 1e6)
+
+    return fit_multi_peaks(
+        source_fitter.spectra, 
+        merged_proton_guesses,
+        save_name, force_refit=force_refit,
+        additional_param_bounds=merged_param_bounds, 
+        loc_wiggle=loc_wiggle,
+        bg_model=bg_model,
+        bg_order=bg_order,
+        sigma_poly_order=sigma_poly_order,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        sigma_coef_bounds=sigma_coef_bounds
+    )
 
 def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, force_0_offset=False):
     #use a TGraph to fit the peaks specified in the csv file.
@@ -473,6 +589,28 @@ def show_detector_energy_resolution(fitter_or_filename):
         
     return canvas, mg, graphs
 
+####################################################################
+experiment = 'e23035'
+tpc_config = 'smart2_rpr.csv'
+num_workers = 200
+
+# efficiencies with 0.100000 s implant time and 0.100000 s decay time
+# Assumes 12 ms dead time at start of decay window + 2 ms at end
+# These efficiencies are defined in terms of fractions of implanted nuclie which decay during the measurement window
+# 61Ge efficiency =  0.3230255772737927
+Zn59_cycle_efficiency =  0.41616841590773374
+Ga60_cycle_efficiency =  0.37410064021102757
+
+proton_binning = (4000//5, 0, 4000)
+
+ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
+
+proton_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo_60Ga", "60Ga proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
+
+
+ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
 
 zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
@@ -481,7 +619,8 @@ save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectr
 #w/ 5 keV bins, this would put 50%/(2000 keV / (5 keV/bin)) counts per bin wall effect
 #let's let it go up to 2X this in case my estimate is off
 proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
-bg_shift_upper_bound = 2*0.5/(2000/5) 
+bg_shift_upper_bound = 0#2*0.5/(2000/5) 
+force_refit=True
 f_proton_simultaneous = fit_multi_peaks(
     [pspec_all_energy_60Ga, pspec_59Zn], 
     proton_peak_guesses,
@@ -491,12 +630,25 @@ f_proton_simultaneous = fit_multi_peaks(
                              'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
     loc_wiggle=10
 )
-ROOT.gROOT.SetBatch(False)
+
+save_path_merged = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_merged_cheb')
+f_proton_simultaneous_merged = make_merged_fit(
+    source_fitter=f_proton_simultaneous,
+    save_name=save_path_merged,
+    force_refit=force_refit,
+    fit_windows_to_include=None, # defaults to all
+    bg_model='chebyshev',
+    bg_order=4,
+    sigma_poly_order=2, # You can change this order as needed
+    sigma_min=10.0,
+    sigma_max=200.0,
+    sigma_coef_bounds=(-1000, 1000)
+)
 # Display multi-spectrum fit for the first peak
 #f_proton_simultaneous.show_fit_results(4, False, True)
+ROOT.gROOT.SetBatch(False)
 
-
-ecal_simul = make_energy_calibration(f_proton_simultaneous, '60Ga_59Zn_simultaneous_protons', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-apply_fit_to_csv(ecal_simul, '60Ga_59Zn_simultaneous_protons', 'proton_cal')
+ecal_simul = make_energy_calibration(f_proton_simultaneous_merged, '60Ga_59Zn_simultaneous_protons_merged_cheb', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+apply_fit_to_csv(ecal_simul, '60Ga_59Zn_simultaneous_protons_merged_cheb', 'proton_cal')
 print(apply_fit_to_point(ecal_simul, 8522.04, 9.35))
-show_detector_energy_resolution(f_proton_simultaneous)
+show_detector_energy_resolution(f_proton_simultaneous_merged)
