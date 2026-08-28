@@ -9,6 +9,40 @@ from tqdm import tqdm
 
 from e23035_analysis import fitting_tools
 
+ROOT.gInterpreter.Declare("""
+#ifndef SYNC_AXES_MACRO
+#define SYNC_AXES_MACRO
+#include "TPad.h"
+#include "TCanvas.h"
+#include "TGraph.h"
+#include "TH1.h"
+
+void SyncAxes(TPad* source_pad, TPad* target_pad) {
+    if (!source_pad || !target_pad) return;
+    
+    double xmin = source_pad->GetUxmin();
+    double xmax = source_pad->GetUxmax();
+    
+    if (std::abs(target_pad->GetUxmin() - xmin) < 1e-6 && std::abs(target_pad->GetUxmax() - xmax) < 1e-6) return;
+    
+    TIter next(target_pad->GetListOfPrimitives());
+    TObject *obj;
+    while ((obj = next())) {
+        if (obj->InheritsFrom("TGraph")) {
+            ((TGraph*)obj)->GetXaxis()->SetLimits(xmin, xmax);
+        } else if (obj->InheritsFrom("TH1")) {
+            ((TH1*)obj)->GetXaxis()->SetRangeUser(xmin, xmax);
+        }
+    }
+    
+    TVirtualPad* saved_pad = gPad;
+    target_pad->Modified();
+    target_pad->Update();
+    if (saved_pad) saved_pad->cd();
+}
+#endif
+""")
+
 class spectrum_fitter:
     """
     Class for easily fitting 1D spectra and assigning peaks.
@@ -1012,18 +1046,20 @@ class multi_spectrum_fitter(spectrum_fitter):
             
             # The user requested a color coded overlay of all spectra
             new_canvas = ROOT.TCanvas(f"c_show_multi_{peak_index}_{id(self)}", f"Multi-spectrum Fit Result {peak_index}", 1000, 600)
+            new_canvas.cd()
             
             # 1. Main plot with ratio panel below
-            pad1 = ROOT.TPad(f"pad1_multi_{id(self)}", "pad1", 0, 0.3, 1, 1.0)
+            pad1_name = f"pad1_multi_{peak_index}_{id(self)}"
+            pad1 = ROOT.TPad(pad1_name, "pad1", 0, 0.3, 1, 1.0)
             pad1.SetBottomMargin(0.02)
             pad1.Draw()
             
-            new_canvas.cd()
-            pad2 = ROOT.TPad(f"pad2_multi_{id(self)}", "pad2", 0, 0.0, 1, 0.3)
+            pad2_name = f"pad2_multi_{peak_index}_{id(self)}"
+            pad2 = ROOT.TPad(pad2_name, "pad2", 0, 0.0, 1, 0.3)
             pad2.SetTopMargin(0.02)
             pad2.SetBottomMargin(0.3)
             pad2.Draw()
-
+            
             pad1.cd()
             
             colors = [ROOT.kBlack, ROOT.kBlue, ROOT.kRed, ROOT.kGreen+2, ROOT.kOrange, ROOT.kMagenta, ROOT.kCyan]
@@ -1178,6 +1214,17 @@ class multi_spectrum_fitter(spectrum_fitter):
                     resid_graph.Draw("P SAME")
                     
                 res['resid_graphs'].append(resid_graph)
+                
+            pad1.cd()
+            exec_pad1 = ROOT.TExec(f"exec_pad1_{peak_index}_{id(self)}", f'SyncAxes((TPad*)gPad, (TPad*)gPad->GetCanvas()->GetPrimitive("{pad2_name}"));')
+            exec_pad1.Draw()
+            
+            pad2.cd()
+            exec_pad2 = ROOT.TExec(f"exec_pad2_{peak_index}_{id(self)}", f'SyncAxes((TPad*)gPad, (TPad*)gPad->GetCanvas()->GetPrimitive("{pad1_name}"));')
+            exec_pad2.Draw()
+            
+            res['exec_pad1'] = exec_pad1
+            res['exec_pad2'] = exec_pad2
                 
             pad1.Modified()
             pad2.Modified()

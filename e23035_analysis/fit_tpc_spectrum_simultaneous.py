@@ -63,43 +63,45 @@ def get_save_path(save_name):
 
 def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=True, force_refit=False, additional_param_bounds={}, loc_wiggle=10):
     root_filepath = save_name if save_name.endswith('.root') else save_name + '.root'
+    loaded_from_file = False
     if os.path.exists(root_filepath) and not force_refit:
         print(f"Loading previous multi-spectrum fit from {root_filepath}")
-        return spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
-
-    f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus')
-    if True: #linear energy dependence
-        f.parameterizations = {
-            'sigma': {
-                'formula': '[sigma_c] + [sigma_m]*({mu})',
-                'params': ['sigma_c', 'sigma_m'],
-                'guesses': [26, 0.01],
-                'bounds': [(-40, 40), (0.0001, 0.1)]
-            }
-        }
-    else: #sqrt depenence
-        f.parameterizations = {
-            'sigma': {
-                'formula': 'std::sqrt([sigma_c] + [sigma_m]*({mu}))',
-                'params': ['sigma_c', 'sigma_m'],
-                'guesses': [26**2, 0.0],
-                'bounds': [(-100, 40**2), (0, 1)]
-            }
-        }
-    for spec in f.spectra:
-        spec.GetXaxis().UnZoom()
-    f.peaks_to_fit = peaks
-    f.location_wiggle = loc_wiggle
-    f.shared_sigma = False
-    if zero_bg_shift:
-        f.param_bound_functions['bg_shift'] = lambda E: (0, 0)
+        f = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
+        loaded_from_file = True
     else:
-        f.shared_bg_shift = False
-    for p in additional_param_bounds:
-        f.param_bound_functions[p] = additional_param_bounds[p]
-    if not likelihood:
-        f.fit_options = f.fit_options.replace('L','')
-    f.fit_peaks()
+        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus')
+        if True: #linear energy dependence
+            f.parameterizations = {
+                'sigma': {
+                    'formula': '[sigma_c] + [sigma_m]*({mu})',
+                    'params': ['sigma_c', 'sigma_m'],
+                    'guesses': [26, 0.01],
+                    'bounds': [(-40, 40), (0.0001, 0.1)]
+                }
+            }
+        else: #sqrt depenence
+            f.parameterizations = {
+                'sigma': {
+                    'formula': 'std::sqrt([sigma_c] + [sigma_m]*({mu}))',
+                    'params': ['sigma_c', 'sigma_m'],
+                    'guesses': [26**2, 0.0],
+                    'bounds': [(-100, 40**2), (0, 1)]
+                }
+            }
+        for spec in f.spectra:
+            spec.GetXaxis().UnZoom()
+        f.peaks_to_fit = peaks
+        f.location_wiggle = loc_wiggle
+        f.shared_sigma = False
+        if zero_bg_shift:
+            f.param_bound_functions['bg_shift'] = lambda E: (0, 0)
+        else:
+            f.shared_bg_shift = False
+        for p in additional_param_bounds:
+            f.param_bound_functions[p] = additional_param_bounds[p]
+        if not likelihood:
+            f.fit_options = f.fit_options.replace('L','')
+        f.fit_peaks()
     
     failed_fits = []
     for i, res in enumerate(f.fit_results):
@@ -111,6 +113,9 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
         if not fit_res.IsValid():
             status = int(fit_res)
             failed_fits.append((i, f.peaks_to_fit[i], f"Status {status}"))
+        elif fit_res.CovMatrixStatus() != 3:
+            cov_status = fit_res.CovMatrixStatus()
+            failed_fits.append((i, f.peaks_to_fit[i], f"Covariance Matrix Status {cov_status} (expected 3)"))
             
     if failed_fits:
         print(f"Summary of {len(failed_fits)} failed fits:")
@@ -119,30 +124,38 @@ def fit_multi_peaks(spectra, peaks, save_name, zero_bg_shift=False, likelihood=T
     else:
         print(f"All {len(f.fit_results)} fits successful.")
         
-    if save_name:
+    for i, res in enumerate(f.fit_results):
+        if res is None or 'fit_res' not in res:
+            continue
+        
+        f_to_fit = res.get('f_to_fit') or res.get('f_to_fit_2d')
+        if not f_to_fit:
+            continue
+            
+        for j in range(f_to_fit.GetNpar()):
+            val = f_to_fit.GetParameter(j)
+            name = f_to_fit.GetParName(j)
+            
+            try:
+                import ctypes
+                low = ctypes.c_double(0)
+                high = ctypes.c_double(0)
+                f_to_fit.GetParLimits(j, low, high)
+                low_val, high_val = low.value, high.value
+            except TypeError:
+                low = ROOT.Double(0)
+                high = ROOT.Double(0)
+                f_to_fit.GetParLimits(j, low, high)
+                low_val, high_val = float(low), float(high)
+                
+            if low_val < high_val:
+                range_width = high_val - low_val
+                if abs(val - low_val) < 1e-4 * range_width or abs(high_val - val) < 1e-4 * range_width:
+                    print(f"Warning (Fit index {i}): Parameter '{name}' is pinned at limit {val:.4g} (bounds: [{low_val:.4g}, {high_val:.4g}])")
+        
+    if not loaded_from_file and save_name:
         f.save(save_name) 
     return f
-
-proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
-
-# Simultaneous Fit!
-import os
-save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons')
-
-f_proton_simultaneous = fit_multi_peaks(
-    [pspec_all_energy_60Ga, pspec_59Zn], 
-    proton_peak_guesses,
-    save_path, force_refit=force_refit,
-    additional_param_bounds={'bg_slope':lambda E: (-1,1), #if E < 1000 else (0,0),
-                             'amplitude': lambda E:(1e-3, 1e6)}, 
-    loc_wiggle=15
-)
-ROOT.gROOT.SetBatch(False)
-# Display multi-spectrum fit for the first peak
-#f_proton_simultaneous.show_fit_results(4, False, True)
-
-
-zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
 
 def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, force_0_offset=False):
     #use a TGraph to fit the peaks specified in the csv file.
@@ -238,6 +251,17 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
             mg.Add(graph_unused)
         
         mg.Draw("AP")
+        
+        equation_text = ROOT.TLatex()
+        equation_text.SetNDC()
+        equation_text.SetTextSize(0.04)
+        equation_text.SetTextAlign(13)
+        slope_err = np.sqrt(cov[1,1]) if cov[1,1] > 0 else 0.0
+        offset_err = np.sqrt(cov[0,0]) if cov[0,0] > 0 else 0.0
+        equation_str = f"E = ({slope:.4g} #pm {slope_err:.4g}) #mu + ({offset:.4g} #pm {offset_err:.4g})"
+        equation_text.DrawLatex(0.15, 0.85, equation_str)
+        ROOT.SetOwnership(equation_text, False)
+        
         mg.GetXaxis().SetLabelSize(0)
         mg.GetXaxis().SetTitleSize(0)
         
@@ -359,18 +383,22 @@ def apply_fit_to_csv(fit_to_aply, apply_to, cal_name='calibrated'):
                 
             writer.writerow(row)
 
-def show_detector_energy_resolution(fit_save_name):
+def show_detector_energy_resolution(fitter_or_filename):
     #extract detector energy resolution each of the fit windows in the specified fit file.
     #Make a plot where the y axis is energy resolutuion and the x axis is energy.
     #Show the energy resolution over each fit window, and include a shaded 1 sigma uncertainty
     #in energy resolution calculated from the covariance matrix for sigma_c and sigma_m
-    root_filepath = fit_save_name if fit_save_name.endswith('.root') else fit_save_name + '.root'
-    if not os.path.isabs(root_filepath):
-        root_filepath = os.path.join(fit_path, root_filepath)
+    if isinstance(fitter_or_filename, str):
+        root_filepath = fitter_or_filename if fitter_or_filename.endswith('.root') else fitter_or_filename + '.root'
+        if not os.path.isabs(root_filepath):
+            root_filepath = os.path.join(fit_path, root_filepath)
+        fitter = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
+        name = fitter_or_filename
+    else:
+        fitter = fitter_or_filename
+        name = "simultaneous"
         
-    fitter = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
-    
-    canvas = ROOT.TCanvas(f"c_res_{fit_save_name}", f"Detector Energy Resolution", 800, 600)
+    canvas = ROOT.TCanvas(f"c_res_{name}", f"Detector Energy Resolution", 800, 600)
     mg = ROOT.TMultiGraph()
     mg.SetTitle("Detector Energy Resolution;Energy (keV);Energy Resolution #sigma (keV)")
     
@@ -393,7 +421,7 @@ def show_detector_energy_resolution(fit_save_name):
             
         sigma_c = f_to_fit.GetParameter(idx_c)
         sigma_m = f_to_fit.GetParameter(idx_m)
-        
+            
         cov_matrix = fit_res.GetCovarianceMatrix()
         if not cov_matrix or cov_matrix.GetNrows() <= max(idx_c, idx_m):
             continue
@@ -445,7 +473,30 @@ def show_detector_energy_resolution(fit_save_name):
         
     return canvas, mg, graphs
 
+
+
+zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
+save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons')
+#no more than 50% of events should be wall effect below 2 MeV b/c range <<200 mm
+#w/ 5 keV bins, this would put 50%/(2000 keV / (5 keV/bin)) counts per bin wall effect
+#let's let it go up to 2X this in case my estimate is off
+proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
+bg_shift_upper_bound = 2*0.5/(2000/5) 
+f_proton_simultaneous = fit_multi_peaks(
+    [pspec_all_energy_60Ga, pspec_59Zn], 
+    proton_peak_guesses,
+    save_path, force_refit=force_refit,
+    additional_param_bounds={'bg_slope':lambda E: (-1,1), #if E < 1000 else (0,0),
+                             'amplitude': lambda E:(1e-3, 1e6),
+                             'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
+    loc_wiggle=10
+)
+ROOT.gROOT.SetBatch(False)
+# Display multi-spectrum fit for the first peak
+#f_proton_simultaneous.show_fit_results(4, False, True)
+
+
 ecal_simul = make_energy_calibration(f_proton_simultaneous, '60Ga_59Zn_simultaneous_protons', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
 apply_fit_to_csv(ecal_simul, '60Ga_59Zn_simultaneous_protons', 'proton_cal')
 print(apply_fit_to_point(ecal_simul, 8522.04, 9.35))
-show_detector_energy_resolution('60Ga_59Zn_simultaneous_protons')
+show_detector_energy_resolution(f_proton_simultaneous)

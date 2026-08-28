@@ -1863,7 +1863,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         else:
             for i in range(n_peaks):
                 b_name = f"bg_shift_{i}_{j}" if n_peaks > 1 else f"bg_shift_{j}"
-                b_bnd = param_bounds.get(b_name, param_bounds.get('bg_shift', (0, 1.0)))
+                b_bnd = param_bounds.get(b_name, param_bounds.get(f'bg_shift_{i}', param_bounds.get('bg_shift', (0, 1.0))))
                 pm.add(b_name, 0.002, b_bnd)
 
     # 2. Peak parameters: shared mu (FIRST)
@@ -2075,7 +2075,7 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         else:
             for i in range(n_peaks):
                 b_name = f"bg_shift_{i}_{j}" if n_peaks > 1 else f"bg_shift_{j}"
-                b_bnd = param_bounds.get(b_name, param_bounds.get('bg_shift', (0, 1.0)))
+                b_bnd = param_bounds.get(b_name, param_bounds.get(f'bg_shift_{i}', param_bounds.get('bg_shift', (0, 1.0))))
                 pm.add(b_name, gaus_p_map.get(b_name, gaus_p_map.get(f"bg_shift_{j}", 0.002)), b_bnd)
 
     # 1. Peak parameters: mu (FIRST)
