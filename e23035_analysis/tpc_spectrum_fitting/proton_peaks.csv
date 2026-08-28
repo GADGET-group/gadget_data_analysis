@@ -10,22 +10,22 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 1030-1600,1060,59Zn,1062.909955,4.930210108,,
 ,1113,60Ga,,,,
 ,1155,60Ga,,,,
-,1204,60Ga,,,,
-,1230,59Zn?,,,,not previously observed
-,1258,59Zn,1264,10,,from previous 59Zn beta decay
-,1300,59Zn,,,,not previously observed
+,1184,60Ga,,,,
+,1210,59Zn?,,,,not previously observed
+,1254,59Zn,1264,10,,from previous 59Zn beta decay
+,1310,59Zn,,,,not previously observed
 ,1330,59Zn,1332.225035,2.974800503,,"1300-1580, also duplicated 1270"
-,1371,59Zn,1375.472712,4.930210108,,
-,1410,60Ga,,,,
-,1461,60Ga,,,,
+,1364,59Zn,1375.472712,4.930210108,,
+,1402,60Ga,,,,
+,1458,60Ga,,,,
 ,1519,60Ga,,,,
-,1640,,,,,
-1585-1900,1640,60Ga,,,,
-,1720,60Ga,,,,
+,1650,,,,,
+1585-1900,1630,60Ga,,,,
+,1728,60Ga,,,,
 ,1790,59Zn,,,,
 ,1834,59Zn,,,,
-,1874,59Zn,,,,
-1700-3500,1720,60Ga,,,,
+,1884,59Zn,,,,
+1700-3500,1728,60Ga,,,,
 ,1790,59Zn,1781.017975,0.7924407269,yes,
 ,1834,59Zn,1813.846894,3.951216144,,
 ,1874,59Zn,1857,5,,from 59Zn prev measurement

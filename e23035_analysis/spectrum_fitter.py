@@ -29,7 +29,7 @@ void SyncAxes(TPad* source_pad, TPad* target_pad) {
     TObject *obj;
     while ((obj = next())) {
         if (obj->InheritsFrom("TGraph")) {
-            ((TGraph*)obj)->GetXaxis()->SetLimits(xmin, xmax);
+            ((TGraph*)obj)->GetXaxis()->SetRangeUser(xmin, xmax);
         } else if (obj->InheritsFrom("TH1")) {
             ((TH1*)obj)->GetXaxis()->SetRangeUser(xmin, xmax);
         }
@@ -1100,18 +1100,14 @@ class multi_spectrum_fitter(spectrum_fitter):
                 else:
                     spec_clone.Draw("E SAME")
                     
-                # Create a 1D function bound to this specific y value
-                # We must keep a strong reference to the lambda to prevent PyROOT from segfaulting!
-                def make_eval(idx):
-                    return lambda x, p: f_to_fit_2d.Eval(x[0], idx)
-                
-                lam = make_eval(j)
-                f1d = ROOT.TF1(f"f1d_{j}_{id(self)}", lam, e_low, e_high, 0)
+                e_vals = np.linspace(e_low, e_high, 1000)
+                y_vals = np.array([f_to_fit_2d.Eval(x, j) for x in e_vals], dtype=np.float64)
+                f1d = ROOT.TGraph(1000, e_vals, y_vals)
+                f1d.SetName(f"f1d_{j}_{id(self)}")
                 f1d.SetLineColor(color)
                 f1d.SetLineWidth(2)
-                f1d.Draw("SAME")
+                f1d.Draw("L SAME")
                 
-                res['1d_lambdas'].append(lam)
                 res['1d_funcs'].append((spec_clone, f1d))
                 
                 if show_components:
@@ -1120,15 +1116,16 @@ class multi_spectrum_fitter(spectrum_fitter):
                         def make_bg_eval(idx):
                             bg_eval_func = getattr(ROOT, bg_func_name)
                             params = f_to_fit_2d.GetParameters()
-                            return lambda x, p: bg_eval_func(np.array([x[0], idx], dtype=np.float64), params)
+                            return lambda x: bg_eval_func(np.array([x, idx], dtype=np.float64), params)
                             
                         lam_bg = make_bg_eval(j)
-                        f1d_bg = ROOT.TF1(f"f1d_bg_{j}_{id(self)}", lam_bg, e_low, e_high, 0)
+                        bg_vals = np.array([lam_bg(x) for x in e_vals], dtype=np.float64)
+                        f1d_bg = ROOT.TGraph(1000, e_vals, bg_vals)
+                        f1d_bg.SetName(f"f1d_bg_{j}_{id(self)}")
                         f1d_bg.SetLineColor(color)
                         f1d_bg.SetLineStyle(2)
                         f1d_bg.SetLineWidth(1)
-                        f1d_bg.Draw("SAME")
-                        res['1d_lambdas'].append(lam_bg)
+                        f1d_bg.Draw("L SAME")
                         res['1d_funcs'].append((None, f1d_bg))
                         
                     peak_func_name = getattr(pm, 'peak_func_name', None)
@@ -1138,15 +1135,16 @@ class multi_spectrum_fitter(spectrum_fitter):
                             def make_peak_eval(idx, peak_i):
                                 peak_eval_func = getattr(ROOT, peak_func_name)
                                 params = f_to_fit_2d.GetParameters()
-                                return lambda x, p: peak_eval_func(np.array([x[0], idx, peak_i], dtype=np.float64), params)
+                                return lambda x: peak_eval_func(np.array([x, idx, peak_i], dtype=np.float64), params)
                                 
                             lam_peak = make_peak_eval(j, i)
-                            f1d_peak = ROOT.TF1(f"f1d_peak_{j}_{i}_{id(self)}", lam_peak, e_low, e_high, 0)
+                            peak_vals = np.array([lam_peak(x) for x in e_vals], dtype=np.float64)
+                            f1d_peak = ROOT.TGraph(1000, e_vals, peak_vals)
+                            f1d_peak.SetName(f"f1d_peak_{j}_{i}_{id(self)}")
                             f1d_peak.SetLineColor(color)
                             f1d_peak.SetLineStyle(3)
                             f1d_peak.SetLineWidth(1)
-                            f1d_peak.Draw("SAME")
-                            res['1d_lambdas'].append(lam_peak)
+                            f1d_peak.Draw("L SAME")
                             res['1d_funcs'].append((None, f1d_peak))
                 
             if show_fit_params:
