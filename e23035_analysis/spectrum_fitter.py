@@ -1103,6 +1103,10 @@ class multi_spectrum_fitter(spectrum_fitter):
                 spec_clone.SetMarkerColor(color)
                 spec_clone.SetStats(0)
                 
+                # Hide X-axis labels on the top pad to prevent overlap with the residuals pad
+                spec_clone.GetXaxis().SetLabelSize(0)
+                spec_clone.GetXaxis().SetTitleSize(0)
+                
                 if not drawn_first:
                     spec_clone.SetMaximum(max_y * 1.1)
                     spec_clone.Draw("E")

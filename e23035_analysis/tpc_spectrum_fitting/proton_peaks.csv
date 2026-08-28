@@ -1,5 +1,5 @@
 fit_window,peak energy,from decay of,known peak energy (keV),known peak energy uncertainty(keV),use for calibration?,notes
-550-985,677,,,,,
+550-985,677,60Ga?,,,,
 ,722,60Ga,,,,
 ,759,60Ga,,,,
 ,822,59Zn,,,,
@@ -9,7 +9,7 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 ,1113,60Ga,,,,
 ,1165,60Ga,,,,
 ,1184,60Ga,,,,
-,1210,59Zn?,,,,not previously observed
+,1204,60Ga,,,,not previously observed
 ,1254,59Zn,1264,10,,from previous 59Zn beta decay
 ,1310,59Zn,,,,not previously observed
 ,1330,59Zn,1332.225035,2.974800503,,"1300-1580, also duplicated 1270"

@@ -640,15 +640,14 @@ Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
 proton_binning = (4000//5, 0, 4000)
-
-ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-
-proton_energy_v_tsbo_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, (100, 0, 0.100, 400, 0, 4000), "proton_energy_v_tsbo_60Ga", "60Ga proton energy vs time since beam off", "tpc_energy:time_since_beam_off", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-
-
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
+
+#############################################################
+# Fit using just runs where all proton energies are valid 1 #
+#############################################################
+ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
 
 zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
@@ -692,3 +691,7 @@ ecal_simul = make_energy_calibration(f_proton_simultaneous_merged, '60Ga_59Zn_si
 apply_fit_to_csv(ecal_simul, '60Ga_59Zn_simultaneous_protons_merged_cheb', 'proton_cal')
 print(apply_fit_to_point(ecal_simul, 8522.04, 9.35))
 show_detector_energy_resolution(f_proton_simultaneous_merged)
+
+#############################################################################
+# Fit using runs where high energy protns are not valid. Limit to 1900 keV. #
+#############################################################################
