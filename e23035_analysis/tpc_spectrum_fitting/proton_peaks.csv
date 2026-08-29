@@ -18,7 +18,7 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 ,1458,60Ga,,,,
 ,1519,60Ga,,,,
 1585-1900,1630,60Ga,,,,
-,1720,60Ga,,,,
+,1705,60Ga,,,,
 ,1800,59Zn,,,,
 ,1834,59Zn,,,,
 ,1884,59Zn,,,,
@@ -26,7 +26,7 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 ,1790,59Zn,1781.017975,0.7924407269,yes,
 ,1824,59Zn,1813.846894,3.951216144,,
 ,1867,59Zn,1857,5,,from 59Zn prev measurement
-,1894,,,,,
+,1909,,,,,
 ,2035,,,,,
 ,2060,,,,,
 ,2140,,,,,
