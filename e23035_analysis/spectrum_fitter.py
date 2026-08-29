@@ -740,9 +740,19 @@ class spectrum_fitter:
             
             if upper_pad:
                 upper_pad.cd()
+                
+                npx = 1000
+                spec = self.fit_results[peak_index].get('spectrum_to_plot')
+                if spec:
+                    npx = max(1000, spec.GetNbinsX())
+                
+                if f_to_fit:
+                    f_to_fit.SetNpx(npx)
+                
                 if show_components:
                     bg_func = self.fit_results[peak_index].get('background_func')
                     if bg_func:
+                        bg_func.SetNpx(npx)
                         bg_func.SetLineColor(ROOT.kRed)
                         bg_func.SetLineStyle(2)
                         bg_func.Draw("SAME")
@@ -750,12 +760,14 @@ class spectrum_fitter:
                     component_funcs = self.fit_results[peak_index].get('component_peak_funcs')
                     if component_funcs:
                         for i, func in enumerate(component_funcs):
+                            func.SetNpx(npx)
                             func.SetLineStyle(3)
                             func.SetLineColor(ROOT.kRed)
                             func.Draw("SAME")
                     else:
                         peak_func = self.fit_results[peak_index].get('peak_func')
                         if peak_func:
+                            peak_func.SetNpx(npx)
                             peak_func.SetLineColor(ROOT.kRed)
                             peak_func.SetLineStyle(3)
                             peak_func.Draw("SAME")

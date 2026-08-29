@@ -178,7 +178,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         f.save(save_name) 
     return f
 
-def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_include=None, bg_model='chebyshev', bg_order=4, sigma_poly_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000), loc_wiggle=10):
+def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_include=None, bg_model='chebyshev', bg_order=4, sigma_poly_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000), loc_wiggle=10, additional_peaks=None):
     """
     Creates a merged fit from multiple limited-window fits in the source_fitter.
     
@@ -241,6 +241,13 @@ def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_
         for p in peaks:
             if p not in merged_peaks:
                 merged_peaks.append(p)
+                
+    if additional_peaks:
+        for p in additional_peaks:
+            if p not in merged_peaks:
+                merged_peaks.append(p)
+            global_start = min(global_start, p - 100)
+            global_end = max(global_end, p + 100)
                 
     merged_peaks.sort()
     merged_proton_guesses = [(merged_peaks, global_start, global_end)]
@@ -710,7 +717,6 @@ for group_peaks, w_start, w_end in proton_peak_guesses:
         proton_peak_guesses_low.append((valid_peaks, w_start, min(w_end, 1900.0)))
 save_path_low = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_low_energy')
 
-force_refit = True
 f_proton_simultaneous_low = fit_multi_peaks(
     [pspec_low_energy_60Ga, pspec_59Zn], 
     proton_peak_guesses_low,
@@ -741,3 +747,58 @@ ecal_simul_low = make_energy_calibration(f_proton_simultaneous_merged_low, '60Ga
 apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb', 'proton_cal_low_energy')
 print(apply_fit_to_point(ecal_simul_low, 8522.04, 9.35))
 show_detector_energy_resolution(f_proton_simultaneous_merged_low)
+
+#############################################################################
+# Fit using all datasets over the entire fit range (3 datasets)
+#############################################################################
+save_path_all = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_all_3')
+
+force_refit = False
+f_proton_simultaneous_all = fit_multi_peaks(
+    [pspec_all_energy_60Ga, pspec_low_energy_60Ga, pspec_59Zn], 
+    proton_peak_guesses,
+    save_path_all, force_refit=force_refit,
+    additional_param_bounds={'bg_slope':lambda E: (-1,1),
+                             'amplitude': lambda E:(1e-3, 1e6),
+                             'bg_shift': lambda E: (0, bg_shift_upper_bound),
+                             'sigma_c': lambda E: (0, 10) if E < 1000 else (0, 100)}, 
+    loc_wiggle=15
+)
+
+save_path_merged_all = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb')
+f_proton_simultaneous_merged_all = make_merged_fit(
+    source_fitter=f_proton_simultaneous_all,
+    save_name=save_path_merged_all,
+    force_refit=force_refit,
+    fit_windows_to_include=None,
+    bg_model='chebyshev',
+    bg_order=4,
+    sigma_poly_order=2,
+    sigma_min=10.0,
+    sigma_max=200.0,
+    sigma_coef_bounds=(-1000, 1000),
+    loc_wiggle=15
+)
+
+additional_peaks = [1000,1950]
+
+save_path_merged_all_additional = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb_additional')
+f_proton_simultaneous_merged_all_additional = make_merged_fit(
+    source_fitter=f_proton_simultaneous_merged_all,
+    save_name=save_path_merged_all_additional,
+    force_refit=force_refit,
+    fit_windows_to_include=None,
+    bg_model='chebyshev',
+    bg_order=4,
+    sigma_poly_order=2,
+    sigma_min=10.0,
+    sigma_max=200.0,
+    sigma_coef_bounds=(-1000, 1000),
+    loc_wiggle=15,
+    additional_peaks=additional_peaks
+)
+
+ecal_simul_all = make_energy_calibration(f_proton_simultaneous_merged_all_additional, '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb_additional', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+apply_fit_to_csv(ecal_simul_all, '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb_additional', 'proton_cal_all_3')
+print(apply_fit_to_point(ecal_simul_all, 8522.04, 9.35))
+show_detector_energy_resolution(f_proton_simultaneous_merged_all_additional)
