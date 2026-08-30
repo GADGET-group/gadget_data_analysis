@@ -2022,12 +2022,14 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         sigma_cpp_strings.append(sig_cpp)
         
     # 4. Amplitudes (THIRD)
+    amp_cpp_strings = []
     for i in range(n_peaks):
+        mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
+        amp_cpp_strings_for_peak = []
         for j in range(n_spectra):
             amp_name = f"amplitude_{i}_{j}"
             spectra[j].GetXaxis().SetRangeUser(*fit_window)
             bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
-            bg_guess_end = spectra[j].GetBinContent(spectra[j].GetXaxis().GetLast())
             spectra[j].GetXaxis().UnZoom()
             
             peak_bin = spectra[j].GetXaxis().FindBin(e_guess_list[i])
@@ -2037,7 +2039,11 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             
             A_guess = max((local_max - bg_guess) * sigma_guess * 2.50662827 / bin_width, 1.0)
             a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', (0, np.inf)))
-            pm.add(amp_name, A_guess, a_bnd)
+            
+            amp_str, amp_idx = resolve_string_param(amp_name, A_guess, a_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
+            amp_cpp = amp_str.replace('[', 'p[').replace(']', ']')
+            amp_cpp_strings_for_peak.append(amp_cpp)
+        amp_cpp_strings.append(amp_cpp_strings_for_peak)
 
     import uuid
     comp_id = uuid.uuid4().hex[:6]
@@ -2074,13 +2080,21 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         
     bg_shift_idx = [[pm.get_idx(f"bg_shift_{i}_{j}" if not shared_bg_shift and n_peaks > 1 else f"bg_shift_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
     mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
-    amp_idx = [[pm.get_idx(f"amplitude_{i}_{j}") for j in range(n_spectra)] for i in range(n_peaks)]
     
     bg_shift_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_shift_idx]) + "}"
     mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
-    amp_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in amp_idx]) + "}"
     
     sigma_eval_cpp = "\n        ".join([f"sigma_vals[{i}] = {sigma_cpp_strings[i]};" for i in range(n_peaks)])
+    
+    amp_eval_cases = []
+    for j in range(n_spectra):
+        case_str = f"if (val_y == {j}) {{\n"
+        for i in range(n_peaks):
+            case_str += f"            amp_vals[{i}] = {amp_cpp_strings[i][j]};\n"
+        case_str += "        }"
+        amp_eval_cases.append(case_str)
+    
+    amp_eval_cpp = " else ".join(amp_eval_cases)
     
     cpp_code = f"""
     double eval_2d_gaus_{comp_id}(double *x, double *p) {{
@@ -2090,7 +2104,6 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         
         int bg_shift_idx[{n_peaks}][{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
-        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
         
         {bg_eval_cpp}
         if (bg_val < 0) bg_val = 0.0;
@@ -2100,10 +2113,13 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
         
+        double amp_vals[{n_peaks}];
+        {amp_eval_cpp}
+        
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
             double sigma = sigma_vals[i];
-            double amp = p[amp_idx[i][val_y]];
+            double amp = amp_vals[i];
             double bg_shift = p[bg_shift_idx[i][val_y]];
             
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
@@ -2119,16 +2135,17 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         int bg_shift_idx[{n_peaks}][{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
-        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
         {bg_eval_cpp}
         if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
+        double amp_vals[{n_peaks}];
+        {amp_eval_cpp}
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
             double sigma = sigma_vals[i];
-            double amp = p[amp_idx[i][val_y]];
+            double amp = amp_vals[i];
             double bg_shift = p[bg_shift_idx[i][val_y]];
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
@@ -2143,13 +2160,14 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
         int mu_idx[{n_peaks}] = {mu_cpp};
-        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
         double bin_width = {bin_width};
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
+        double amp_vals[{n_peaks}];
+        {amp_eval_cpp}
         double mu = p[mu_idx[target_peak]];
         double sigma = sigma_vals[target_peak];
-        double amp = p[amp_idx[target_peak][val_y]];
+        double amp = amp_vals[target_peak];
         return (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
     }}
     """

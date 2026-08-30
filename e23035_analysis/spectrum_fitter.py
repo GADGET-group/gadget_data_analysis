@@ -129,7 +129,7 @@ class spectrum_fitter:
         self.location_wiggle = 3
         self.shared_sigma = True
         self.shared_bg_shift = True
-        self.max_implicit_cores = 100
+        self.max_implicit_cores = 200
         self.parameterizations = {}
 
     def add_peaks(self, peak_locations, window_size, sep_factor=1.25):

@@ -11,9 +11,11 @@ from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vi
 fit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting')
 def load_peaks_from_csv(filename):
     all_peaks = []
+    all_isotopes = []
     with open(os.path.join(fit_path, filename), 'r') as f:
         reader = csv.reader(f)
         current_group = []
+        current_iso_group = []
         fit_window=(0,0)
         for i, row in enumerate(reader):
             if i == 0 or not row:
@@ -24,21 +26,29 @@ def load_peaks_from_csv(filename):
                 if len(row[0]) > 0:
                     if len(current_group) > 0:
                         all_peaks.append((current_group, *fit_window))
+                        all_isotopes.append(current_iso_group)
                         current_group = []
+                        current_iso_group = []
                     start, stop = row[0].split('-')
                     fit_window = (float(start), float(stop))
                 current_group.append(float(row[1]))
+                current_iso_group.append(row[2].strip() if len(row) > 2 and row[2].strip() else 'unknown')
             except Exception as e:
-                print(f'failed to load peak from row {row}: {e}')
-        
+                print(f"Error parsing row: {row}, error: {e}")
+                
         if len(current_group) > 0:
             all_peaks.append((current_group, *fit_window))
-    return all_peaks
+            all_isotopes.append(current_iso_group)
+            
+    return all_peaks, all_isotopes
+
 
 def get_save_path(save_name):
     return os.path.join(fit_path,save_name)
 
-def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000)):
+def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
+                    loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
+                    sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, peak_isotopes=None):
     root_filepath = save_name if save_name.endswith('.root') else save_name + '.root'
     loaded_from_file = False
     if os.path.exists(root_filepath) and not force_refit:
@@ -49,7 +59,36 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
             f.param_bound_functions[p] = additional_param_bounds[p]
     else:
         f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order)
-        if sigma_poly_order is not None:
+        if sigma_bernstein_order is not None:
+            import math
+            e_low_global = spectra[0].GetXaxis().GetXmin()
+            e_high_global = spectra[0].GetXaxis().GetXmax()
+            X_str = f"(({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})))"
+            
+            param_names = [f"sigma_b{i}" for i in range(sigma_bernstein_order + 1)]
+            guesses = [20.0] * (sigma_bernstein_order + 1)
+            
+            terms = []
+            n = sigma_bernstein_order
+            for k in range(n + 1):
+                coef = math.comb(n, k)
+                term = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {n - k}))"
+                terms.append(f"[{param_names[k]}]*{term}")
+                
+            formula = "(" + " + ".join(terms) + ")"
+            
+            lower_bound = sigma_min if sigma_min is not None else sigma_coef_bounds[0]
+            upper_bound = sigma_max if sigma_max is not None else sigma_coef_bounds[1]
+            
+            f.parameterizations = {
+                'sigma': {
+                    'formula': formula,
+                    'params': param_names,
+                    'guesses': guesses,
+                    'bounds': [(lower_bound, upper_bound)] * len(param_names)
+                }
+            }
+        elif sigma_poly_order is not None:
             e_low_global = spectra[0].GetXaxis().GetXmin()
             e_high_global = spectra[0].GetXaxis().GetXmax()
             X_str = f"(2.0*({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})) - 1.0)"
@@ -113,6 +152,55 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     'bounds': [(-100, 40**2), (0, 1)]
                 }
             }
+            
+        if fraction_bernstein_order is not None and len(spectra) == 2:
+            import math
+            e_low_global = spectra[0].GetXaxis().GetXmin()
+            e_high_global = spectra[0].GetXaxis().GetXmax()
+            X_str = f"(({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})))"
+            
+            # Actually, to apply different formulas to different peaks, we must map peak_idx to iso
+            # But wait, peak_idx is the local index within a window. If different windows have different isotopes at the same peak_idx, this breaks!
+            # Let's check if there is only 1 window.
+            if len(peaks) > 1:
+                print("WARNING: fraction_bernstein_order with multiple isotopes per peak index across windows is not fully supported in this script. Assuming 1 window or consistent ordering.")
+                
+            # Let's map each peak_idx to its formula based on the FIRST window's isotopes
+            max_peaks = max(len(grp[0]) for grp in peaks) if peaks else 0
+            for peak_idx in range(max_peaks):
+                iso = peak_isotopes[0][peak_idx] if peak_isotopes and len(peak_isotopes[0]) > peak_idx else 'all'
+                iso_suffix = f"_{iso}" if iso != 'all' else ""
+                
+                if isinstance(fraction_bernstein_order, dict):
+                    order = fraction_bernstein_order.get(iso, fraction_bernstein_order.get('default', fraction_bernstein_order.get('all', 1)))
+                else:
+                    order = fraction_bernstein_order
+                
+                param_names = [f"amp_frac_b{i}{iso_suffix}" for i in range(order + 1)]
+                guesses = [0.5] * (order + 1)
+                
+                terms = []
+                n = order
+                for k in range(n + 1):
+                    coef = math.comb(n, k)
+                    term = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {n - k}))"
+                    terms.append(f"[{param_names[k]}]*{term}")
+                    
+                frac_str = "(" + " + ".join(terms) + ")"
+                
+                f.parameterizations[f'amplitude_{peak_idx}_0'] = {
+                    'formula': f"[total_amp_{peak_idx}]*{frac_str}",
+                    'params': [f"total_amp_{peak_idx}"] + param_names,
+                    'guesses': [200.0] + guesses,
+                    'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(param_names)
+                }
+                f.parameterizations[f'amplitude_{peak_idx}_1'] = {
+                    'formula': f"[total_amp_{peak_idx}]*(1.0 - {frac_str})",
+                    'params': [f"total_amp_{peak_idx}"] + param_names,
+                    'guesses': [200.0] + guesses,
+                    'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(param_names)
+                }
+
         for spec in f.spectra:
             spec.GetXaxis().UnZoom()
         f.peaks_to_fit = peaks
@@ -176,6 +264,191 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         
     if not loaded_from_file and save_name:
         f.save(save_name) 
+        
+        try:
+            import csv
+            import math
+            import re
+            
+            eval_csv_path = save_name + "_evaluated.csv"
+            if eval_csv_path.endswith('.root_evaluated.csv'):
+                eval_csv_path = eval_csv_path.replace('.root_evaluated.csv', '_evaluated.csv')
+                
+            with open(eval_csv_path, 'w', newline='') as f_csv:
+                writer = csv.writer(f_csv)
+                header = ['window_idx', 'peak_idx', 'mu', 'mu_err', 'sigma', 'sigma_err']
+                if len(spectra) == 2:
+                    header.extend(['total_amp', 'total_amp_err', 'amplitude_0', 'amplitude_0_err', 'amplitude_1', 'amplitude_1_err', 'amplitude_fraction_0'])
+                else:
+                    header.extend(['amplitude', 'amplitude_err'])
+                writer.writerow(header)
+                
+                e_low_global = spectra[0].GetXaxis().GetXmin()
+                e_high_global = spectra[0].GetXaxis().GetXmax()
+                
+                for i, res in enumerate(f.fit_results):
+                    if res is None or 'fit_res' not in res: continue
+                    f_to_fit = res.get('f_to_fit_2d') or res.get('f_to_fit')
+                    if not f_to_fit: continue
+                    
+                    mu_params = {}
+                    for j in range(f_to_fit.GetNpar()):
+                        name = f_to_fit.GetParName(j)
+                        if name.startswith('mu'):
+                            idx = 0 if name == 'mu' else int(name.split('_')[1])
+                            mu_params[idx] = (f_to_fit.GetParameter(j), f_to_fit.GetParError(j))
+                            
+                    for idx, (mu_val, mu_err) in mu_params.items():
+                        row = [str(i), str(idx), f"{mu_val:.6g}", f"{mu_err:.6g}"]
+                        
+                        # Evaluate sigma
+                        sigma = 0
+                        sigma_err = 0
+                        if hasattr(f, 'parameterizations') and 'sigma' in f.parameterizations:
+                            param_names = f.parameterizations['sigma']['params']
+                            formula_str = f.parameterizations['sigma']['formula']
+                            p_indices = [f_to_fit.GetParNumber(n) for n in param_names]
+                            if not any(pi < 0 for pi in p_indices):
+                                p_vals = [f_to_fit.GetParameter(pi) for pi in p_indices]
+                                E = mu_val
+                                import numpy as np
+                                grad = np.zeros(len(param_names))
+                                if param_names == ['sigma_c', 'sigma_m']:
+                                    if 'sqrt' in formula_str:
+                                        inner = p_vals[0] + p_vals[1] * E
+                                        sigma = np.sqrt(inner) if inner > 0 else 0
+                                        if inner > 0: grad = np.array([1.0 / (2*sigma), E / (2*sigma)])
+                                    else:
+                                        sigma = p_vals[0] + p_vals[1] * E
+                                        grad = np.array([1.0, E])
+                                elif param_names[0].startswith('sigma_p'):
+                                    X = 2.0 * (E - e_low_global) / (e_high_global - e_low_global) - 1.0
+                                    if len(param_names) > 0: grad[0] = 1.0
+                                    if len(param_names) > 1: grad[1] = X
+                                    for k in range(2, len(param_names)):
+                                        grad[k] = 2.0 * X * grad[k-1] - grad[k-2]
+                                    sigma = np.dot(p_vals, grad)
+                                elif param_names[0].startswith('sigma_b'):
+                                    import math
+                                    X = (E - e_low_global) / (e_high_global - e_low_global)
+                                    n = len(param_names) - 1
+                                    for k in range(n + 1):
+                                        grad[k] = math.comb(n, k) * (X**k) * ((1.0 - X)**(n - k))
+                                    sigma = np.dot(p_vals, grad)
+                                    
+                                cov_matrix = res['fit_res'].GetCovarianceMatrix()
+                                if cov_matrix and cov_matrix.GetNrows() > max(p_indices):
+                                    cov_sub = np.zeros((len(param_names), len(param_names)))
+                                    for r in range(len(param_names)):
+                                        for c in range(len(param_names)):
+                                            cov_sub[r,c] = cov_matrix(p_indices[r], p_indices[c])
+                                    var_sigma = grad.T @ cov_sub @ grad
+                                    sigma_err = np.sqrt(max(0, var_sigma))
+                                    
+                                import re
+                                if "max" in formula_str:
+                                    match = re.search(r'max\(\(double\)([\d.]+),', formula_str)
+                                    if match: sigma = max(float(match.group(1)), sigma)
+                                if "min" in formula_str:
+                                    match = re.search(r'min\(\(double\)([\d.]+),', formula_str)
+                                    if match: sigma = min(float(match.group(1)), sigma)
+                        else:
+                            sig_idx = f_to_fit.GetParNumber(f'sigma_{idx}' if f"sigma_{idx}" in [f_to_fit.GetParName(k) for k in range(f_to_fit.GetNpar())] else 'sigma')
+                            if sig_idx >= 0:
+                                sigma = f_to_fit.GetParameter(sig_idx)
+                                sigma_err = f_to_fit.GetParError(sig_idx)
+                                
+                        row.extend([f"{sigma:.6g}", f"{sigma_err:.6g}"])
+                        
+                        # Evaluate amplitudes
+                        if len(spectra) == 2:
+                            tot_idx = f_to_fit.GetParNumber(f"total_amp_{idx}")
+                            if tot_idx >= 0:
+                                tot_amp = f_to_fit.GetParameter(tot_idx)
+                                tot_amp_err = f_to_fit.GetParError(tot_idx)
+                                iso = peak_isotopes[0][idx] if peak_isotopes and len(peak_isotopes[0]) > idx else 'all'
+                                iso_suffix = f"_{iso}" if iso != 'all' else ""
+                                
+                                if isinstance(fraction_bernstein_order, dict):
+                                    order = fraction_bernstein_order.get(iso, fraction_bernstein_order.get('default', fraction_bernstein_order.get('all', 1)))
+                                else:
+                                    order = fraction_bernstein_order
+                                    
+                                frac_param_names = [f"amp_frac_b{k}{iso_suffix}" for k in range(order + 1)] if order is not None else []
+                                p_indices = [f_to_fit.GetParNumber(n) for n in frac_param_names]
+                                
+                                if len(p_indices) > 0 and not any(pi < 0 for pi in p_indices):
+                                    p_vals = [f_to_fit.GetParameter(pi) for pi in p_indices]
+                                    import math
+                                    X = (mu_val - e_low_global) / (e_high_global - e_low_global)
+                                    n = len(frac_param_names) - 1
+                                    frac = 0
+                                    frac_grad = np.zeros(len(frac_param_names))
+                                    for k in range(n + 1):
+                                        basis = math.comb(n, k) * (X**k) * ((1.0 - X)**(n - k))
+                                        frac += p_vals[k] * basis
+                                        frac_grad[k] = basis
+                                        
+                                    a0 = tot_amp * frac
+                                    a1 = tot_amp * (1.0 - frac)
+                                    
+                                    grad_a0 = np.zeros(1 + len(frac_param_names))
+                                    grad_a0[0] = frac
+                                    grad_a0[1:] = tot_amp * frac_grad
+                                    
+                                    grad_a1 = np.zeros(1 + len(frac_param_names))
+                                    grad_a1[0] = (1.0 - frac)
+                                    grad_a1[1:] = -tot_amp * frac_grad
+                                    
+                                    all_indices = [tot_idx] + p_indices
+                                    cov_matrix = res['fit_res'].GetCovarianceMatrix()
+                                    a0_err, a1_err = 0, 0
+                                    if cov_matrix and cov_matrix.GetNrows() > max(all_indices):
+                                        cov_sub = np.zeros((len(all_indices), len(all_indices)))
+                                        for r in range(len(all_indices)):
+                                            for c in range(len(all_indices)):
+                                                cov_sub[r,c] = cov_matrix(all_indices[r], all_indices[c])
+                                        var_a0 = grad_a0.T @ cov_sub @ grad_a0
+                                        var_a1 = grad_a1.T @ cov_sub @ grad_a1
+                                        a0_err = np.sqrt(max(0, var_a0))
+                                        a1_err = np.sqrt(max(0, var_a1))
+                                        
+                                    row.extend([f"{tot_amp:.6g}", f"{tot_amp_err:.6g}", f"{a0:.6g}", f"{a0_err:.6g}", f"{a1:.6g}", f"{a1_err:.6g}", f"{frac:.6g}"])
+                                else:
+                                    row.extend([f"{tot_amp:.6g}", f"{tot_amp_err:.6g}", "", "", "", "", ""])
+                            else:
+                                amp0_idx = f_to_fit.GetParNumber(f"amplitude_{idx}_0")
+                                amp1_idx = f_to_fit.GetParNumber(f"amplitude_{idx}_1")
+                                if amp0_idx >= 0 and amp1_idx >= 0:
+                                    a0 = f_to_fit.GetParameter(amp0_idx)
+                                    a0_err = f_to_fit.GetParError(amp0_idx)
+                                    a1 = f_to_fit.GetParameter(amp1_idx)
+                                    a1_err = f_to_fit.GetParError(amp1_idx)
+                                    tot = a0 + a1
+                                    
+                                    grad_tot = np.array([1.0, 1.0])
+                                    cov_matrix = res['fit_res'].GetCovarianceMatrix()
+                                    tot_err = 0
+                                    if cov_matrix and cov_matrix.GetNrows() > max(amp0_idx, amp1_idx):
+                                        cov_sub = np.array([[cov_matrix(amp0_idx, amp0_idx), cov_matrix(amp0_idx, amp1_idx)],
+                                                            [cov_matrix(amp1_idx, amp0_idx), cov_matrix(amp1_idx, amp1_idx)]])
+                                        tot_err = np.sqrt(max(0, grad_tot.T @ cov_sub @ grad_tot))
+                                        
+                                    frac = a0 / tot if tot > 0 else 0
+                                    row.extend([f"{tot:.6g}", f"{tot_err:.6g}", f"{a0:.6g}", f"{a0_err:.6g}", f"{a1:.6g}", f"{a1_err:.6g}", f"{frac:.6g}"])
+                                else:
+                                    row.extend(["", "", "", "", "", "", ""])
+                        else:
+                            amp_idx = f_to_fit.GetParNumber(f"amplitude_{idx}")
+                            if amp_idx >= 0:
+                                row.extend([f"{f_to_fit.GetParameter(amp_idx):.6g}", f"{f_to_fit.GetParError(amp_idx):.6g}"])
+                            else:
+                                row.extend(["", ""])
+                                
+                        writer.writerow(row)
+        except Exception as e:
+            print(f"Failed to generate evaluated csv: {e}")
+            
     return f
 
 def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_include=None, bg_model='chebyshev', bg_order=4, sigma_poly_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000), loc_wiggle=10, additional_peaks=None):
@@ -599,6 +872,23 @@ def show_detector_energy_resolution(fitter_or_filename):
                 if "min" in formula_str:
                     match = re.search(r'min\(\(double\)([\d.]+),', formula_str)
                     if match: sigma = min(float(match.group(1)), sigma)
+            elif param_names[0].startswith('sigma_b'):
+                import math
+                X = (E - e_low_global) / (e_high_global - e_low_global)
+                n = len(param_names) - 1
+                grad = np.zeros(len(param_names))
+                for k in range(n + 1):
+                    grad[k] = math.comb(n, k) * (X**k) * ((1.0 - X)**(n - k))
+                sigma = np.dot(p_vals, grad)
+                
+                # Apply bounds if present in the formula
+                import re
+                if "max" in formula_str:
+                    match = re.search(r'max\(\(double\)([\d.]+),', formula_str)
+                    if match: sigma = max(float(match.group(1)), sigma)
+                if "min" in formula_str:
+                    match = re.search(r'min\(\(double\)([\d.]+),', formula_str)
+                    if match: sigma = min(float(match.group(1)), sigma)
             else:
                 continue
                 
@@ -657,7 +947,7 @@ force_refit=True
 ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
-proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
+proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
 
 save_path_low = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_low_energy')
 bg_shift_upper_bound = 0
@@ -665,32 +955,43 @@ f_proton_simultaneous_low = fit_multi_peaks(
     [pspec_low_energy_60Ga, pspec_59Zn], 
     proton_peak_guesses,
     save_path_low, force_refit=force_refit,
-    additional_param_bounds={'bg_slope':lambda E: (-1,1),
-                            'amplitude': lambda E:(1e-3, 1e6),
-                            'bg_shift': lambda E: (0, bg_shift_upper_bound),
-                            'sigma_c': lambda E: (0, 10) if E < 1000 else (0, 100)}, 
-    loc_wiggle=15
-)
-
-save_path_merged_low = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb')
-f_proton_simultaneous_merged_low = make_merged_fit(
-    source_fitter=f_proton_simultaneous_low,
-    save_name=save_path_merged_low,
-    force_refit=force_refit,
-    fit_windows_to_include=None,
+    additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6),
+                            'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
+    loc_wiggle=10,
     bg_model='chebyshev',
     bg_order=4,
-    sigma_poly_order=2,
-    sigma_min=10.0,
-    sigma_max=200.0,
-    sigma_coef_bounds=(-1000, 1000),
-    loc_wiggle=15
+    fraction_bernstein_order={'61Ge': 1, 'default': 4},
+    sigma_bernstein_order=4,
+    sigma_min=10,
+    sigma_max=200,
+    peak_isotopes=peak_isotopes
 )
 ROOT.gROOT.SetBatch(False)
-ecal_simul_low = make_energy_calibration(f_proton_simultaneous_merged_low, '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb', 'proton_cal_low_energy')
+f_proton_simultaneous_low.show_fit_result(0, False, True)
+ecal_simul_low = make_energy_calibration(f_proton_simultaneous_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_cal_low_energy')
 print(apply_fit_to_point(ecal_simul_low, 8522.04, 9.35))
-show_detector_energy_resolution(f_proton_simultaneous_merged_low)
+show_detector_energy_resolution(f_proton_simultaneous_low)
+
+# save_path_merged_low = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb')
+# f_proton_simultaneous_merged_low = make_merged_fit(
+#     source_fitter=f_proton_simultaneous_low,
+#     save_name=save_path_merged_low,
+#     force_refit=force_refit,
+#     fit_windows_to_include=None,
+#     bg_model='chebyshev',
+#     bg_order=4,
+#     sigma_poly_order=2,
+#     sigma_min=10.0,
+#     sigma_max=200.0,
+#     sigma_coef_bounds=(-1000, 1000),
+#     loc_wiggle=15
+# )
+# ROOT.gROOT.SetBatch(False)
+# ecal_simul_low = make_energy_calibration(f_proton_simultaneous_merged_low, '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+# apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb', 'proton_cal_low_energy')
+# print(apply_fit_to_point(ecal_simul_low, 8522.04, 9.35))
+# show_detector_energy_resolution(f_proton_simultaneous_merged_low)
 
 if False:
     #############################################################
@@ -705,7 +1006,7 @@ if False:
     #no more than 50% of events should be wall effect below 2 MeV b/c range <<200 mm
     #w/ 5 keV bins, this would put 50%/(2000 keV / (5 keV/bin)) counts per bin wall effect
     #let's let it go up to 2X this in case my estimate is off
-    proton_peak_guesses = load_peaks_from_csv('proton_peaks.csv')
+    proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
     bg_shift_upper_bound = 0#2*0.5/(2000/5) 
     force_refit=False
     f_proton_simultaneous = fit_multi_peaks(
@@ -716,7 +1017,8 @@ if False:
                                 'amplitude': lambda E:(1e-3, 1e6),
                                 'bg_shift': lambda E: (0, bg_shift_upper_bound),
                                 'sigma_c': lambda E: (0, 10) if E < 1000 else (0, 100)}, 
-        loc_wiggle=15
+        loc_wiggle=15,
+        peak_isotopes=peak_isotopes
     )
 
     save_path_merged = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_merged_cheb')
@@ -756,7 +1058,8 @@ if False:
                                 'amplitude': lambda E:(1e-3, 1e6),
                                 'bg_shift': lambda E: (0, bg_shift_upper_bound),
                                 'sigma_c': lambda E: (0, 10) if E < 1000 else (0, 100)}, 
-        loc_wiggle=15
+        loc_wiggle=15,
+        peak_isotopes=peak_isotopes
     )
 
     save_path_merged_all = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb')
