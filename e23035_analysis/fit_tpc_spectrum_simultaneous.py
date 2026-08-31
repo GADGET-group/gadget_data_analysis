@@ -957,20 +957,21 @@ f_proton_simultaneous_low = fit_multi_peaks(
     save_path_low, force_refit=force_refit,
     additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6),
                             'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
-    loc_wiggle=10,
+    loc_wiggle=50,
     bg_model='chebyshev',
     bg_order=4,
     fraction_bernstein_order={'61Ge': 1, 'default': 4},
-    sigma_bernstein_order=4,
+    sigma_bernstein_order=2,
     sigma_min=10,
     sigma_max=200,
     peak_isotopes=peak_isotopes
 )
 ROOT.gROOT.SetBatch(False)
-f_proton_simultaneous_low.show_fit_result(0, False, True)
-ecal_simul_low = make_energy_calibration(f_proton_simultaneous_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_cal_low_energy')
-print(apply_fit_to_point(ecal_simul_low, 8522.04, 9.35))
+f_proton_simultaneous_low.show_fit_results(0, False, True)
+if False:
+    ecal_simul_low = make_energy_calibration(f_proton_simultaneous_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+    apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_cal_low_energy')
+    print(apply_fit_to_point(ecal_simul_low, 8522.04, 9.35))
 show_detector_energy_resolution(f_proton_simultaneous_low)
 
 # save_path_merged_low = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb')

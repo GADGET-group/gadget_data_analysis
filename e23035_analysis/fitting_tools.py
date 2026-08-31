@@ -2106,7 +2106,6 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         int mu_idx[{n_peaks}] = {mu_cpp};
         
         {bg_eval_cpp}
-        if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         double bin_width = {bin_width};
         
@@ -2136,7 +2135,6 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         int bg_shift_idx[{n_peaks}][{n_spectra}] = {bg_shift_cpp};
         int mu_idx[{n_peaks}] = {mu_cpp};
         {bg_eval_cpp}
-        if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
@@ -2326,7 +2324,6 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         {tau_eval_cpp}
         
         {bg_eval_cpp}
-        if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         
         for (int i = 0; i < {n_peaks}; ++i) {{
@@ -2367,7 +2364,6 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         {sigma_eval_cpp}
         
         {bg_eval_cpp}
-        if (bg_val < 0) bg_val = 0.0;
         double total = bg_val;
         
         for (int i = 0; i < {n_peaks}; ++i) {{
