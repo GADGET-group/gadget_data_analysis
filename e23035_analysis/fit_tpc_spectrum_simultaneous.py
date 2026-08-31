@@ -61,8 +61,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order)
         if sigma_bernstein_order is not None:
             import math
-            e_low_global = spectra[0].GetXaxis().GetXmin()
-            e_high_global = spectra[0].GetXaxis().GetXmax()
+            e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
+            e_high_global = max(p[2] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmax()
             X_str = f"(({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})))"
             
             param_names = [f"sigma_b{i}" for i in range(sigma_bernstein_order + 1)]
@@ -89,8 +89,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                 }
             }
         elif sigma_poly_order is not None:
-            e_low_global = spectra[0].GetXaxis().GetXmin()
-            e_high_global = spectra[0].GetXaxis().GetXmax()
+            e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
+            e_high_global = max(p[2] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmax()
             X_str = f"(2.0*({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})) - 1.0)"
             
             param_names = [f"sigma_p{i}" for i in range(sigma_poly_order + 1)]
@@ -155,8 +155,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
             
         if fraction_bernstein_order is not None and len(spectra) == 2:
             import math
-            e_low_global = spectra[0].GetXaxis().GetXmin()
-            e_high_global = spectra[0].GetXaxis().GetXmax()
+            e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
+            e_high_global = max(p[2] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmax()
             X_str = f"(({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})))"
             
             # Actually, to apply different formulas to different peaks, we must map peak_idx to iso
@@ -283,8 +283,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     header.extend(['amplitude', 'amplitude_err'])
                 writer.writerow(header)
                 
-                e_low_global = spectra[0].GetXaxis().GetXmin()
-                e_high_global = spectra[0].GetXaxis().GetXmax()
+                e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
+                e_high_global = max(p[2] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmax()
                 
                 for i, res in enumerate(f.fit_results):
                     if res is None or 'fit_res' not in res: continue
@@ -831,8 +831,8 @@ def show_detector_energy_resolution(fitter_or_filename):
             for c in range(len(param_names)):
                 cov_sub[r,c] = cov_matrix(p_indices[r], p_indices[c])
                 
-        e_low_global = fitter.spectra[0].GetXaxis().GetXmin()
-        e_high_global = fitter.spectra[0].GetXaxis().GetXmax()
+        e_low_global = min(p[1] for p in fitter.peaks_to_fit) if fitter.peaks_to_fit else fitter.spectra[0].GetXaxis().GetXmin()
+        e_high_global = max(p[2] for p in fitter.peaks_to_fit) if fitter.peaks_to_fit else fitter.spectra[0].GetXaxis().GetXmax()
         
         window_start = fitter.peaks_to_fit[i][1]
         window_end = fitter.peaks_to_fit[i][2]
