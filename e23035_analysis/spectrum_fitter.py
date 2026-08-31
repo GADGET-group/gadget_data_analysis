@@ -744,7 +744,7 @@ class spectrum_fitter:
                 npx = 1000
                 spec = self.fit_results[peak_index].get('spectrum_to_plot')
                 if spec:
-                    npx = max(1000, spec.GetNbinsX())
+                    npx = max(1000, spec.GetNbinsX() * 3)
                 
                 if f_to_fit:
                     f_to_fit.SetNpx(npx)
@@ -1011,7 +1011,8 @@ class multi_spectrum_fitter(spectrum_fitter):
             for p in self.param_bound_functions:
                 if p == 'mu':
                     continue
-                param_bounds[p] = self.param_bound_functions[p](loc_guess[0])
+                E_for_bounds = loc_guess[0] if len(loc_guess) > 0 else (window_start + window_end) / 2.0
+                param_bounds[p] = self.param_bound_functions[p](E_for_bounds)
 
             if self.peak_model.lower() == 'bg_shift_gaus':
                 if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
@@ -1126,9 +1127,13 @@ class multi_spectrum_fitter(spectrum_fitter):
                 else:
                     spec_clone.Draw("E SAME")
                     
-                e_vals = np.linspace(e_low, e_high, 1000)
+                bin_start = spec.FindBin(e_low)
+                bin_end = spec.FindBin(e_high)
+                n_points = max(1000, (bin_end - bin_start + 1) * 3)
+                
+                e_vals = np.linspace(e_low, e_high, n_points)
                 y_vals = np.array([f_to_fit_2d.Eval(x, j) for x in e_vals], dtype=np.float64)
-                f1d = ROOT.TGraph(1000, e_vals, y_vals)
+                f1d = ROOT.TGraph(n_points, e_vals, y_vals)
                 f1d.SetName(f"f1d_{j}_{id(self)}")
                 f1d.SetLineColor(color)
                 f1d.SetLineWidth(2)
@@ -1146,7 +1151,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                             
                         lam_bg = make_bg_eval(j)
                         bg_vals = np.array([lam_bg(x) for x in e_vals], dtype=np.float64)
-                        f1d_bg = ROOT.TGraph(1000, e_vals, bg_vals)
+                        f1d_bg = ROOT.TGraph(n_points, e_vals, bg_vals)
                         f1d_bg.SetName(f"f1d_bg_{j}_{id(self)}")
                         f1d_bg.SetLineColor(color)
                         f1d_bg.SetLineStyle(2)
@@ -1165,7 +1170,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                                 
                             lam_peak = make_peak_eval(j, i)
                             peak_vals = np.array([lam_peak(x) for x in e_vals], dtype=np.float64)
-                            f1d_peak = ROOT.TGraph(1000, e_vals, peak_vals)
+                            f1d_peak = ROOT.TGraph(n_points, e_vals, peak_vals)
                             f1d_peak.SetName(f"f1d_peak_{j}_{i}_{id(self)}")
                             f1d_peak.SetLineColor(color)
                             f1d_peak.SetLineStyle(3)
@@ -1272,6 +1277,9 @@ class multi_spectrum_fitter(spectrum_fitter):
             filepath += '.root'
         csv_filepath = filepath[:-5] + '.csv'
         print(f"Saving multi_spectrum_fitter CSV to {csv_filepath}...")
+        
+        import os
+        os.makedirs(os.path.dirname(os.path.abspath(csv_filepath)), exist_ok=True)
         
         with open(csv_filepath, 'w', newline='') as csvfile:
             csvwriter = csv.writer(csvfile)
