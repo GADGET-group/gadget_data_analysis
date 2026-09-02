@@ -6,6 +6,8 @@ import concurrent.futures
 import hashlib
 import sys
 
+BASE_DIR = Path(__file__).resolve().parent
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import ROOT
@@ -21,7 +23,7 @@ experiment = 'e23035'
 
 def get_calibration_directory(ddas_run, calibration_name, branch_name):
     ddas_run = int(ddas_run)
-    return f"e23035_analysis/calibrations/{ddas_run}/{calibration_name}/{branch_name}"
+    return str(BASE_DIR / "calibrations" / str(ddas_run) / calibration_name / branch_name)
 
 def get_calibration_result(ddas_run, calibration_name, branch_name):
     cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch_name))
@@ -32,7 +34,7 @@ def get_calibration_result(ddas_run, calibration_name, branch_name):
 
 def get_nonlinearity_correction_result(correction_name, branch_name):
     """Loads a non-linearity correction result from its pickle file."""
-    correction_dir = Path(f"e23035_analysis/nonlinearity_corrections/{correction_name}/{branch_name}")
+    correction_dir = BASE_DIR / "nonlinearity_corrections" / correction_name / branch_name
     pkl_path = correction_dir / f"{correction_name}.pkl"
     if not pkl_path.exists():
         raise FileNotFoundError(f"Non-linearity correction file not found at {pkl_path}")
@@ -693,7 +695,7 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
     valid_runs = set(run_list) if run_list is not None else None
     
     # Search specifically inside the known analysis directory structure
-    pkl_files = list(Path('.').rglob(f"e23035_analysis/calibrations/*/{cal_name}/*/{cal_name}.pkl"))
+    pkl_files = list(BASE_DIR.glob(f"calibrations/*/{cal_name}/*/{cal_name}.pkl"))
     
     # Fallback just in case the script is run from inside the calibrations folder itself
     if not pkl_files:
@@ -770,7 +772,7 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
                             flagged_issues.append(f"Run {run} [{branch}] - {peak_energy} keV Time-Indep p-value: {p_t:.2e}")
 
     # 3. Generate the PDF in the specified analysis directory
-    output_dir = Path("e23035_analysis/calibrations")
+    output_dir = BASE_DIR / "calibrations"
     output_dir.mkdir(parents=True, exist_ok=True)
     pdf_filename = output_dir / f"{cal_name}_summary.pdf"
     
@@ -889,7 +891,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
     ROOT.gROOT.SetBatch(True)
 
     # 1. Scope out all valid runs and branches from the file system
-    pkl_files = list(Path('.').rglob(f"e23035_analysis/calibrations/*/{cal_name}/*/{cal_name}.pkl"))
+    pkl_files = list(BASE_DIR.glob(f"calibrations/*/{cal_name}/*/{cal_name}.pkl"))
     if not pkl_files:
         pkl_files = list(Path('.').rglob(f"{cal_name}.pkl"))
         
@@ -995,7 +997,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
             run_data.append((run, p_val, h_run, h_sum_scaled))
 
         # 4. Create the PDF Document using ROOT's TPDF Engine
-        out_dir = Path(f"e23035_analysis/calibrations/{cal_name}")
+        out_dir = BASE_DIR / "calibrations" / cal_name
         out_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = str(out_dir / f"{ch}_stability.pdf")
         
@@ -1103,7 +1105,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
         c.Print(pdf_path + "]") 
         
     # 5. Save P-Value Matrix to CSV
-    out_dir = Path(f"e23035_analysis/calibrations/{cal_name}")
+    out_dir = BASE_DIR / "calibrations" / cal_name
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / f"stability_p_values.csv"
     df_pvals = pd.DataFrame(p_value_matrix)
@@ -1145,7 +1147,7 @@ def create_nonlinearity_correction(runs:int|list, calibration_name:str, correcti
     measured_energies, measured_energy_errors, true_energies, true_energy_errors = [], [], [], []
     all_peak_fit_params = {}
 
-    correction_dir = Path(f"e23035_analysis/nonlinearity_corrections/{correction_name}/{branch_name}")
+    correction_dir = BASE_DIR / "nonlinearity_corrections" / correction_name / branch_name
     correction_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = str(correction_dir / f'{correction_name}_peak_fits.pdf')
 

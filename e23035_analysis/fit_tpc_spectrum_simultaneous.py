@@ -49,6 +49,12 @@ def get_save_path(save_name):
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None):
+    
+    def _pow_str(base, exp):
+        if exp == 0: return "1.0"
+        if exp == 1: return f"({base})"
+        return "(" + "*".join([f"({base})"] * exp) + ")"
+
     root_filepath = save_name if save_name.endswith('.root') else save_name + '.root'
     loaded_from_file = False
     if os.path.exists(root_filepath) and not force_refit:
@@ -66,31 +72,26 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
             X_str = f"(({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})))"
             
             N = sigma_monotonic_bernstein_order
-            param_names = [f"sigma_mono_a0", f"sigma_mono_a1"] + [f"sigma_mono_p_{k}" for k in range(1, N)]
+            param_names = [f"sigma_mono_p_{k}" for k in range(N + 1)]
             
             lower_bound = float(sigma_min if sigma_min is not None else sigma_coef_bounds[0])
             upper_bound = float(sigma_max if sigma_max is not None else sigma_coef_bounds[1])
             
-            P_start = f"({lower_bound} + ({upper_bound} - {lower_bound})*[sigma_mono_a0])"
-            P_stop = f"({P_start} + ({upper_bound} - {P_start})*[sigma_mono_a1])"
-            
-            c_exprs = ["0.0"]
-            prod = "1.0"
-            for k in range(1, N):
-                prod += f"*(1.0 - [sigma_mono_p_{k}])"
-                c_exprs.append(f"(1.0 - {prod})")
-            c_exprs.append("1.0")
+            c_exprs = []
+            prod = f"({upper_bound} - {lower_bound})"
+            for k in range(N + 1):
+                prod = f"{prod}*(1.0 - [{param_names[k]}])"
+                c_exprs.append(f"({upper_bound} - {prod})")
             
             shape_terms = []
             for k in range(N + 1):
                 coef = math.comb(N, k)
-                basis = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {N - k}))"
+                basis = f"({coef} * {_pow_str(X_str, k)} * {_pow_str(f'1.0 - {X_str}', N - k)})"
                 shape_terms.append(f"({c_exprs[k]}) * {basis}")
                 
-            shape_formula = "(" + " + ".join(shape_terms) + ")"
-            formula = f"({P_start} + ({P_stop} - {P_start}) * {shape_formula})"
+            formula = "(" + " + ".join(shape_terms) + ")"
             
-            guesses = [0.1, 0.9] + [0.5] * (N - 1)
+            guesses = [0.5] * len(param_names)
             bounds = [(0.0, 1.0)] * len(param_names)
             
             f.parameterizations = {
@@ -114,7 +115,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
             n = sigma_bernstein_order
             for k in range(n + 1):
                 coef = math.comb(n, k)
-                term = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {n - k}))"
+                term = f"({coef} * {_pow_str(X_str, k)} * {_pow_str(f'1.0 - {X_str}', n - k)})"
                 terms.append(f"[{param_names[k]}]*{term}")
                 
             formula = "(" + " + ".join(terms) + ")"
@@ -225,7 +226,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                 n = order
                 for k in range(n + 1):
                     coef = math.comb(n, k)
-                    term = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {n - k}))"
+                    term = f"({coef} * {_pow_str(X_str, k)} * {_pow_str(f'1.0 - {X_str}', n - k)})"
                     terms.append(f"[{param_names[k]}]*{term}")
                     
                 frac_str = "(" + " + ".join(terms) + ")"
@@ -262,31 +263,26 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                         order = bg_shift_monotonic_bernstein_order
                         
                     N = order
-                    param_names = [f"bg_shift_mono_a0_{j}{iso_suffix}", f"bg_shift_mono_a1_{j}{iso_suffix}"] + [f"bg_shift_mono_p_{k}_{j}{iso_suffix}" for k in range(1, N)]
+                    param_names = [f"bg_shift_mono_p_{k}_{j}{iso_suffix}" for k in range(N + 1)]
                     
                     L = 0.0
                     U = float(bg_shift_upper_bound)
                     
-                    P_start = f"({L} + ({U} - {L})*[{param_names[0]}])"
-                    P_stop = f"({P_start} + ({U} - {P_start})*[{param_names[1]}])"
-                    
-                    c_exprs = ["0.0"]
-                    prod = "1.0"
-                    for k in range(1, N):
-                        prod += f"*(1.0 - [{param_names[k+1]}])"
-                        c_exprs.append(f"(1.0 - {prod})")
-                    c_exprs.append("1.0")
+                    c_exprs = []
+                    prod = f"({U} - {L})"
+                    for k in range(N + 1):
+                        prod = f"{prod}*(1.0 - [{param_names[k]}])"
+                        c_exprs.append(f"({U} - {prod})")
                     
                     shape_terms = []
                     for k in range(N + 1):
                         coef = math.comb(N, k)
-                        basis = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {N - k}))"
+                        basis = f"({coef} * {_pow_str(X_str, k)} * {_pow_str(f'1.0 - {X_str}', N - k)})"
                         shape_terms.append(f"({c_exprs[k]}) * {basis}")
                         
-                    shape_formula = "(" + " + ".join(shape_terms) + ")"
-                    formula = f"({P_start} + ({P_stop} - {P_start}) * {shape_formula})"
+                    formula = "(" + " + ".join(shape_terms) + ")"
                     
-                    guesses = [0.0, 0.1] + [0.5] * (N - 1)
+                    guesses = [0.5] * len(param_names)
                     bounds = [(0.0, 1.0)] * len(param_names)
                     
                     f.parameterizations[f'bg_shift_{peak_idx}_{j}'] = {
@@ -321,7 +317,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     n = order
                     for k in range(n + 1):
                         coef = math.comb(n, k)
-                        term = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {n - k}))"
+                        term = f"({coef} * {_pow_str(X_str, k)} * {_pow_str(f'1.0 - {X_str}', n - k)})"
                         terms.append(f"[{param_names[k]}]*{term}")
                         
                     formula = "(" + " + ".join(terms) + ")"
@@ -462,7 +458,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                                     for k in range(2, len(param_names)):
                                         grad[k] = 2.0 * X * grad[k-1] - grad[k-2]
                                     sigma = np.dot(p_vals, grad)
-                                elif param_names[0] == 'sigma_mono_a0':
+                                elif param_names[0] == 'sigma_mono_a0' or param_names[0].startswith('sigma_mono_p'):
                                     import math
                                     X = (E - e_low_global) / (e_high_global - e_low_global)
                                     N = len(param_names) - 1
@@ -473,18 +469,28 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                                     basis_vals = [math.comb(N, k) * (X**k) * ((1.0 - X)**(N - k)) for k in range(N + 1)]
                                     
                                     def eval_sigma(vals):
-                                        t_a0, t_a1 = vals[0], vals[1]
-                                        t_ps = vals[2:]
-                                        t_P_start = L_val + (U_val - L_val) * t_a0
-                                        t_P_stop = t_P_start + (U_val - t_P_start) * t_a1
-                                        t_c_vals = [0.0]
-                                        t_prod = 1.0
-                                        for p in t_ps:
-                                            t_prod *= (1.0 - p)
-                                            t_c_vals.append(1.0 - t_prod)
-                                        t_c_vals.append(1.0)
-                                        t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
-                                        return t_P_start + (t_P_stop - t_P_start) * t_shape
+                                        if param_names[0] == 'sigma_mono_a0':
+                                            t_a0, t_a1 = vals[0], vals[1]
+                                            t_ps = vals[2:]
+                                            t_P_start = L_val + (U_val - L_val) * t_a0
+                                            t_P_stop = t_P_start + (U_val - t_P_start) * t_a1
+                                            t_c_vals = [0.0]
+                                            t_prod = 1.0
+                                            for p in t_ps:
+                                                t_prod *= (1.0 - p)
+                                                t_c_vals.append(1.0 - t_prod)
+                                            t_c_vals.append(1.0)
+                                            t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
+                                            return t_P_start + (t_P_stop - t_P_start) * t_shape
+                                        else:
+                                            t_c_vals = []
+                                            t_c = L_val + (U_val - L_val) * vals[0]
+                                            t_c_vals.append(t_c)
+                                            for k in range(1, N + 1):
+                                                t_c = t_c + (U_val - t_c) * vals[k]
+                                                t_c_vals.append(t_c)
+                                            t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
+                                            return t_shape
                                         
                                     sigma = eval_sigma(p_vals)
                                     grad = np.zeros(len(param_names))
@@ -1062,34 +1068,47 @@ def show_detector_energy_resolution(fitter_or_filename):
                 if "min" in formula_str:
                     match = re.search(r'min\(\(double\)([\d.]+),', formula_str)
                     if match: sigma = min(float(match.group(1)), sigma)
-            elif param_names[0] == 'sigma_mono_a0':
+            elif param_names[0] == 'sigma_mono_a0' or param_names[0].startswith('sigma_mono_p'):
                 import math
                 X = (E - e_low_global) / (e_high_global - e_low_global)
                 N = len(param_names) - 1
                 L_val = 18.0
                 U_val = 200.0
                 import re
-                match = re.search(r'\(([\d.]+)\s*\+\s*\(([\d.]+)\s*\-\s*[\d.]+\)\*\[sigma_mono_a0\]\)', formula_str)
-                if match:
-                    L_val = float(match.group(1))
-                    U_val = float(match.group(2))
+                match_old = re.search(r'\(([\d.]+)\s*\+\s*\(([\d.]+)\s*\-\s*[\d.]+\)\*\[sigma_mono_[ap]', formula_str)
+                match_new = re.search(r'\(([\d.]+)\s*\-\s*\(\1\s*\-\s*([\d.]+)\)\*\(1\.0\s*\-\s*\[sigma_mono_p', formula_str)
+                if match_old:
+                    L_val = float(match_old.group(1))
+                    U_val = float(match_old.group(2))
+                elif match_new:
+                    U_val = float(match_new.group(1))
+                    L_val = float(match_new.group(2))
                 else:
-                    L_val = float(fitter.fit_multi_peaks_kwargs.get('sigma_min', fitter.fit_multi_peaks_kwargs.get('sigma_coef_bounds', [0,0])[0]) if hasattr(fitter, 'fit_multi_peaks_kwargs') and fitter.fit_multi_peaks_kwargs else 18.0)
-                    U_val = float(fitter.fit_multi_peaks_kwargs.get('sigma_max', fitter.fit_multi_peaks_kwargs.get('sigma_coef_bounds', [0,0])[1]) if hasattr(fitter, 'fit_multi_peaks_kwargs') and fitter.fit_multi_peaks_kwargs else 200.0)
+                    raise RuntimeError(f"Failed to parse sigma_mono bounds from formula: {formula_str}")
                 basis_vals = [math.comb(N, k) * (X**k) * ((1.0 - X)**(N - k)) for k in range(N + 1)]
                 def eval_sigma(vals):
-                    t_a0, t_a1 = vals[0], vals[1]
-                    t_ps = vals[2:]
-                    t_P_start = L_val + (U_val - L_val) * t_a0
-                    t_P_stop = t_P_start + (U_val - t_P_start) * t_a1
-                    t_c_vals = [0.0]
-                    t_prod = 1.0
-                    for p in t_ps:
-                        t_prod *= (1.0 - p)
-                        t_c_vals.append(1.0 - t_prod)
-                    t_c_vals.append(1.0)
-                    t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
-                    return t_P_start + (t_P_stop - t_P_start) * t_shape
+                    if param_names[0] == 'sigma_mono_a0':
+                        t_a0, t_a1 = vals[0], vals[1]
+                        t_ps = vals[2:]
+                        t_P_start = L_val + (U_val - L_val) * t_a0
+                        t_P_stop = t_P_start + (U_val - t_P_start) * t_a1
+                        t_c_vals = [0.0]
+                        t_prod = 1.0
+                        for p in t_ps:
+                            t_prod *= (1.0 - p)
+                            t_c_vals.append(1.0 - t_prod)
+                        t_c_vals.append(1.0)
+                        t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
+                        return t_P_start + (t_P_stop - t_P_start) * t_shape
+                    else:
+                        t_c_vals = []
+                        t_c = L_val + (U_val - L_val) * vals[0]
+                        t_c_vals.append(t_c)
+                        for k in range(1, N + 1):
+                            t_c = t_c + (U_val - t_c) * vals[k]
+                            t_c_vals.append(t_c)
+                        t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
+                        return t_shape
                 sigma = eval_sigma(p_vals)
                 grad = np.zeros(len(param_names))
                 eps = 1e-6
@@ -1373,33 +1392,47 @@ def show_bg_shifts(fitter_or_filename):
             e_errs = np.zeros(n_pts)
             
             for j, E in enumerate(e_vals):
-                if param_names[0].startswith('bg_shift_mono_a0'):
+                if param_names[0].startswith('bg_shift_mono_a0') or param_names[0].startswith('bg_shift_mono_p'):
                     import math
                     X = (E - e_low_global) / (e_high_global - e_low_global)
                     N = len(param_names) - 1
                     L_val = 0.0
                     U_val = 1.0
                     import re
-                    match = re.search(r'\(([\d.]+)\s*\+\s*\(([\d.]+)\s*\-\s*[\d.]+\)\*\[bg_shift_mono_a0', formula_str)
-                    if match:
-                        L_val = float(match.group(1))
-                        U_val = float(match.group(2))
+                    match_old = re.search(r'\(([\d.]+)\s*\+\s*\(([\d.]+)\s*\-\s*[\d.]+\)\*\[bg_shift_mono_[ap]', formula_str)
+                    match_new = re.search(r'\(([\d.]+)\s*\-\s*\(\1\s*\-\s*([\d.]+)\)\*\(1\.0\s*\-\s*\[bg_shift_mono_p', formula_str)
+                    if match_old:
+                        L_val = float(match_old.group(1))
+                        U_val = float(match_old.group(2))
+                    elif match_new:
+                        U_val = float(match_new.group(1))
+                        L_val = float(match_new.group(2))
                     else:
-                        U_val = float(fitter.fit_multi_peaks_kwargs.get('bg_shift_upper_bound', 1.0) if hasattr(fitter, 'fit_multi_peaks_kwargs') and fitter.fit_multi_peaks_kwargs else 1.0)
+                        raise RuntimeError(f"Failed to parse bg_shift_mono bounds from formula: {formula_str}")
                     basis_vals = [math.comb(N, k) * (X**k) * ((1.0 - X)**(N - k)) for k in range(N + 1)]
                     def eval_shift(vals):
-                        t_a0, t_a1 = vals[0], vals[1]
-                        t_ps = vals[2:]
-                        t_P_start = L_val + (U_val - L_val) * t_a0
-                        t_P_stop = t_P_start + (U_val - t_P_start) * t_a1
-                        t_c_vals = [0.0]
-                        t_prod = 1.0
-                        for p in t_ps:
-                            t_prod *= (1.0 - p)
-                            t_c_vals.append(1.0 - t_prod)
-                        t_c_vals.append(1.0)
-                        t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
-                        return t_P_start + (t_P_stop - t_P_start) * t_shape
+                        if param_names[0].startswith('bg_shift_mono_a0'):
+                            t_a0, t_a1 = vals[0], vals[1]
+                            t_ps = vals[2:]
+                            t_P_start = L_val + (U_val - L_val) * t_a0
+                            t_P_stop = t_P_start + (U_val - t_P_start) * t_a1
+                            t_c_vals = [0.0]
+                            t_prod = 1.0
+                            for p in t_ps:
+                                t_prod *= (1.0 - p)
+                                t_c_vals.append(1.0 - t_prod)
+                            t_c_vals.append(1.0)
+                            t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
+                            return t_P_start + (t_P_stop - t_P_start) * t_shape
+                        else:
+                            t_c_vals = []
+                            t_c = L_val + (U_val - L_val) * vals[0]
+                            t_c_vals.append(t_c)
+                            for k in range(1, N + 1):
+                                t_c = t_c + (U_val - t_c) * vals[k]
+                                t_c_vals.append(t_c)
+                            t_shape = sum(t_c_vals[k] * basis_vals[k] for k in range(N + 1))
+                            return t_shape
                     shift = eval_shift(p_vals)
                     grad = np.zeros(len(param_names))
                     eps = 1e-6

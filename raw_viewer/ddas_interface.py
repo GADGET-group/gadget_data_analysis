@@ -5,6 +5,9 @@ import os
 import pickle
 import gzip
 import subprocess
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 import concurrent.futures
 import tqdm
@@ -451,7 +454,7 @@ import tqdm
 import ROOT
 
 def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename=""):
-    cache_dir = os.path.join(f'{experiment}_analysis', 'hist_cache')
+    cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
     
     unique_string = str((run, tuple(binning), var_exp, selection, tpc_ini_filename)).encode('utf-8')
