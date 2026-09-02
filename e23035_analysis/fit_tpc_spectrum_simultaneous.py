@@ -997,7 +997,7 @@ def _extract_fitter_bounds(fitter):
             old_window_bounds[i][name] = (val, low_val, high_val)
     return old_window_bounds
 
-def _build_param_bounds(old_window_bounds, window_mapping, spectra, fix_params, fitter):
+def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter):
     merged_param_bounds = {}
     
     def make_peak_dependent_bound_func(base_name):
@@ -1029,13 +1029,25 @@ def _build_param_bounds(old_window_bounds, window_mapping, spectra, fix_params, 
                 
             if old_idx is None:
                 # It's a new peak
-                if base_name.startswith('mu'): return (E, E - fitter.location_wiggle, E + fitter.location_wiggle)
+                if base_name.startswith('mu'): 
+                    new_i = next((idx for idx, (locs, _, _) in enumerate(new_peaks) if abs(locs[0] - E) < 1e-2), None)
+                    if new_i is not None and new_idx < len(new_peaks[new_i][0]):
+                        actual_loc = new_peaks[new_i][0][new_idx]
+                    else:
+                        actual_loc = E
+                    return (actual_loc, actual_loc - fitter.location_wiggle, actual_loc + fitter.location_wiggle)
                 elif base_name.startswith('amplitude') or base_name.startswith('total_amp'): return (200, 1e-3, 1e6)
                 else: return (0, -1e6, 1e6)
                 
             bounds = old_window_bounds.get(old_i, {}).get(old_name)
             if bounds is None:
-                if base_name.startswith('mu'): return (E, E - fitter.location_wiggle, E + fitter.location_wiggle)
+                if base_name.startswith('mu'): 
+                    new_i = next((idx for idx, (locs, _, _) in enumerate(new_peaks) if abs(locs[0] - E) < 1e-2), None)
+                    if new_i is not None and new_idx < len(new_peaks[new_i][0]):
+                        actual_loc = new_peaks[new_i][0][new_idx]
+                    else:
+                        actual_loc = E
+                    return (actual_loc, actual_loc - fitter.location_wiggle, actual_loc + fitter.location_wiggle)
                 elif base_name.startswith('amplitude') or base_name.startswith('total_amp'): return (200, 1e-3, 1e6)
                 else: return (0, -1e6, 1e6)
             val, low, high = bounds
@@ -1063,13 +1075,13 @@ def _build_param_bounds(old_window_bounds, window_mapping, spectra, fix_params, 
             return (val, val, val) if fix_params else (val, low, high)
         return bound_func
 
-    max_peaks = max((len(old_to_new) + 2 for _, old_to_new in window_mapping.values()), default=10)
+    max_peaks = max((len(locs) for locs, _, _ in new_peaks), default=1)
     
     for i in range(max_peaks):
         merged_param_bounds['mu'] = make_peak_dependent_bound_func('mu')
         merged_param_bounds[f'mu_{i}'] = make_peak_dependent_bound_func(f'mu_{i}')
         merged_param_bounds[f'total_amp_{i}'] = make_peak_dependent_bound_func(f'total_amp_{i}')
-        for spec_idx in range(len(spectra)):
+        for spec_idx in range(len(fitter.spectra)):
             merged_param_bounds[f'amplitude_{i}_{spec_idx}'] = make_peak_dependent_bound_func(f'amplitude_{i}_{spec_idx}')
             
     global_names = set()
@@ -1083,9 +1095,24 @@ def _build_param_bounds(old_window_bounds, window_mapping, spectra, fix_params, 
         
     return merged_param_bounds
 
-def remove_peak_from_fit(fitter, peak_locs_to_remove, fix_params=False):
-    if not isinstance(peak_locs_to_remove, (list, tuple)):
-        peak_locs_to_remove = [peak_locs_to_remove]
+def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False):
+    '''
+    Removes one or more peaks from an existing fit.
+    
+    Parameters:
+    fitter : SpectrumFitter
+        The fitter object containing the existing fit to modify.
+    peaks_to_remove : tuple or list of tuples
+        Each tuple should be (window_index, peak_index) specifying which peak to remove.
+    fix_params : bool
+        Determines how the previously fitted parameters (peak locations, amplitudes, 
+        background coefficients, sigma parameters, etc.) are handled in the new fit.
+        If True, all previously fitted parameters are strictly fixed to their exact prior values.
+        If False, the previously fitted values are used as the starting initial guesses for 
+        the new fit, but are allowed to float and adjust.
+    '''
+    if isinstance(peaks_to_remove, tuple) and len(peaks_to_remove) == 2 and isinstance(peaks_to_remove[0], int):
+        peaks_to_remove = [peaks_to_remove]
         
     new_save_name = _get_fitter_iteration_name(fitter)
     old_window_bounds = _extract_fitter_bounds(fitter)
@@ -1101,7 +1128,7 @@ def remove_peak_from_fit(fitter, peak_locs_to_remove, fix_params=False):
         old_to_new_idx = {}
         new_idx = 0
         for j, loc in enumerate(locs):
-            if not any(abs(loc - loc_to_remove) < 1e-2 for loc_to_remove in peak_locs_to_remove):
+            if (i, j) not in peaks_to_remove:
                 old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
                 fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
                 new_locs.append(fitted_mu)
@@ -1116,7 +1143,7 @@ def remove_peak_from_fit(fitter, peak_locs_to_remove, fix_params=False):
                 new_isotopes.append(new_isos)
             window_mapping[new_locs[0]] = (i, old_to_new_idx)
 
-    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, fitter.spectra, fix_params, fitter)
+    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
 
     kwargs = getattr(fitter, 'fit_multi_peaks_kwargs', {}).copy()
     if new_isotopes:
@@ -1136,6 +1163,27 @@ def remove_peak_from_fit(fitter, peak_locs_to_remove, fix_params=False):
     return new_fitter
 
 def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=False):
+    '''
+    Adds one or more new peaks to an existing fit.
+    
+    Parameters:
+    fitter : SpectrumFitter
+        The fitter object containing the existing fit to modify.
+    new_peak_loc : float or list of floats
+        The initial guess location(s) (e.g., energy in keV) of the new peak(s) to add. 
+    new_peak_iso : str or list of strs, optional
+        The isotope label(s) for the new peak(s). Defaults to 'unknown'.
+    fix_params : bool, optional
+        Determines how the previously fitted parameters (peak locations, amplitudes, 
+        background coefficients, sigma parameters, etc.) are handled in the new fit.
+        If True, all previously fitted parameters are strictly fixed to their exact prior values.
+        If False, the previously fitted values are used as the starting initial guesses for 
+        the new fit, but are allowed to float and adjust.
+        
+    Returns:
+    SpectrumFitter
+        A new fitter object with the newly added peak(s) fit alongside the existing ones.
+    '''
     if not isinstance(new_peak_loc, (list, tuple)):
         new_peak_loc = [new_peak_loc]
     if not isinstance(new_peak_iso, (list, tuple)):
@@ -1203,7 +1251,7 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
                 new_isotopes.append(sorted_new_isos)
             window_mapping[sorted_new_locs[0]] = (i, old_to_new_idx)
 
-    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, fitter.spectra, fix_params, fitter)
+    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
 
     kwargs = getattr(fitter, 'fit_multi_peaks_kwargs', {}).copy()
     if new_isotopes:
@@ -1228,34 +1276,14 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
 force_refit=True
 ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-loc_wiggle = 10
+loc_wiggle = 15
 #initial fitter with no peaks, and a fit window of 600 to 2900 keV
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
 bg_shift_upper_bound = 0
 proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
-new_peak_guesses, new_peak_isotopes = [],[]
-loc_wiggle = 10
-#fill new peak guesses and isotopes with just those from 59Zn peaks
-#then add a 60Ga peak every 2*loc_wiggle between 600 and 2850 keV
-for peaks_group, iso_group in zip(proton_peak_guesses, peak_isotopes):
-    locations, window_start, window_end = peaks_group
-    
-    new_locations = [loc for loc, iso in zip(locations, iso_group) if iso == '59Zn']
-    new_isos = ['59Zn'] * len(new_locations)
-    
-    for loc in np.arange(600, 2850 + 1e-5, 1.5* loc_wiggle):
-        new_locations.append(float(loc))
-        new_isos.append('60Ga')
-        
-    sorted_pairs = sorted(zip(new_locations, new_isos))
-    new_locations = [p[0] for p in sorted_pairs]
-    new_isos = [p[1] for p in sorted_pairs]
-    
-    new_peak_guesses.append((new_locations, window_start, window_end))
-    new_peak_isotopes.append(new_isos)
 fs = [fit_multi_peaks(
         [pspec_low_energy_60Ga, pspec_59Zn], 
-        new_peak_guesses,
+        proton_peak_guesses,
         save_path_initial, force_refit=force_refit,
         additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6),
                                 'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
@@ -1266,12 +1294,32 @@ fs = [fit_multi_peaks(
         sigma_bernstein_order=2,
         sigma_min=10,
         sigma_max=200,
-        peak_isotopes=[[]]
+        peak_isotopes=peak_isotopes
     )]
 ROOT.gROOT.SetBatch(False)
 fs[0].show_fit_results(0, False, True)
+
+#added 2210, 2275, 2380, 2600
+# add peaks
+# peaks_to_add = [2211, 2273]
+# fs.append(add_peak_to_fit(fs[-1], peaks_to_add, len(peaks_to_add)*['60Ga']))
+# peaks_to_add = [2380]
+# fs.append(add_peak_to_fit(fs[-1], peaks_to_add, len(peaks_to_add)*['60Ga']))
+#fs[-1].show_fit_results(0, False, True)
+show_detector_energy_resolution(fs[-1])
+
+
 #fs.append(add_peak_to_fit(fs[0], 716, '60Ga')) 
 #show_detector_energy_resolution(f_proton_initial)
+
+
+
+
+
+
+#######################################################################
+#old code
+#######################################################################
 if False:
     proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
     new_peak_guesses, new_peak_isotopes = [],[]
