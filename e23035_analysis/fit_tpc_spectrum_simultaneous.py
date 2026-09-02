@@ -48,7 +48,7 @@ def get_save_path(save_name):
 
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
-                    sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, peak_isotopes=None):
+                    sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_upper_bound=1.0, peak_isotopes=None):
     root_filepath = save_name if save_name.endswith('.root') else save_name + '.root'
     loaded_from_file = False
     if os.path.exists(root_filepath) and not force_refit:
@@ -200,6 +200,43 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     'guesses': [200.0] + guesses,
                     'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(param_names)
                 }
+
+        if bg_shift_bernstein_order is not None:
+            f.shared_bg_shift = False
+            import math
+            e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
+            e_high_global = max(p[2] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmax()
+            X_str = f"(({{mu}} - ({e_low_global}))/(({e_high_global}) - ({e_low_global})))"
+            
+            max_peaks = max(len(grp[0]) for grp in peaks) if peaks else 0
+            for j in range(len(spectra)):
+                for peak_idx in range(max_peaks):
+                    iso = peak_isotopes[0][peak_idx] if peak_isotopes and len(peak_isotopes[0]) > peak_idx else 'all'
+                    iso_suffix = f"_{iso}" if iso != 'all' else ""
+                    
+                    if isinstance(bg_shift_bernstein_order, dict):
+                        order = bg_shift_bernstein_order.get(iso, bg_shift_bernstein_order.get('default', bg_shift_bernstein_order.get('all', 1)))
+                    else:
+                        order = bg_shift_bernstein_order
+                    
+                    param_names = [f"bg_shift_b{k}_{j}{iso_suffix}" for k in range(order + 1)]
+                    guesses = [0.002] * (order + 1)
+                    
+                    terms = []
+                    n = order
+                    for k in range(n + 1):
+                        coef = math.comb(n, k)
+                        term = f"({coef} * TMath::Power({X_str}, {k}) * TMath::Power(1.0 - {X_str}, {n - k}))"
+                        terms.append(f"[{param_names[k]}]*{term}")
+                        
+                    formula = "(" + " + ".join(terms) + ")"
+                    
+                    f.parameterizations[f'bg_shift_{peak_idx}_{j}'] = {
+                        'formula': formula,
+                        'params': param_names,
+                        'guesses': guesses,
+                        'bounds': [(0, bg_shift_upper_bound)] * len(param_names)
+                    }
 
         for spec in f.spectra:
             spec.GetXaxis().UnZoom()
@@ -1073,6 +1110,143 @@ def show_peak_fractions(fitter_or_filename):
     
     return canvas, mg, graphs, legend
 
+def show_bg_shifts(fitter_or_filename):
+    if isinstance(fitter_or_filename, str):
+        root_filepath = fitter_or_filename if fitter_or_filename.endswith('.root') else fitter_or_filename + '.root'
+        if not os.path.isabs(root_filepath):
+            root_filepath = os.path.join(fit_path, root_filepath)
+        fitter = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
+        name = fitter_or_filename
+    else:
+        fitter = fitter_or_filename
+        name = "simultaneous"
+
+    canvas = ROOT.TCanvas(f"c_bg_shift_{name}", "Background Shifts", 800, 600)
+    mg = ROOT.TMultiGraph()
+    mg.SetTitle("Background Shift;Energy (keV);Shift")
+    
+    graphs = []
+    
+    species_colors = {'61Ge': ROOT.kRed, '60Ga': ROOT.kBlue, 'default': ROOT.kBlack, 'all': ROOT.kBlack}
+    color_idx = 1
+    
+    import math
+    for i, res in enumerate(fitter.fit_results):
+        if res is None or 'fit_res' not in res:
+            continue
+            
+        fit_res = res['fit_res']
+        f_to_fit = res.get('f_to_fit_2d') or res.get('f_to_fit')
+        if not f_to_fit:
+            continue
+            
+        e_low_global = min(p[1] for p in fitter.peaks_to_fit) if fitter.peaks_to_fit else fitter.spectra[0].GetXaxis().GetXmin()
+        e_high_global = max(p[2] for p in fitter.peaks_to_fit) if fitter.peaks_to_fit else fitter.spectra[0].GetXaxis().GetXmax()
+        window_start = fitter.peaks_to_fit[i][1]
+        window_end = fitter.peaks_to_fit[i][2]
+        
+        loc_guesses = fitter.peaks_to_fit[i][0]
+        num_peaks_in_window = len(loc_guesses) if isinstance(loc_guesses, (list, tuple, np.ndarray)) else 1
+        
+        plotted_species_in_window = set()
+        
+        for peak_idx in range(num_peaks_in_window):
+            param_key = f'bg_shift_{peak_idx}_0'
+            if fitter.parameterizations and param_key in fitter.parameterizations:
+                param_names = fitter.parameterizations[param_key]['params'][1:]
+            else:
+                param_key = 'bg_shift_0'
+                if fitter.parameterizations and param_key in fitter.parameterizations:
+                    param_names = fitter.parameterizations[param_key]['params'][1:]
+                else:
+                    continue 
+                
+            p_indices = [f_to_fit.GetParNumber(n) for n in param_names]
+            if any(idx < 0 for idx in p_indices):
+                continue
+                
+            p_vals = [f_to_fit.GetParameter(idx) for idx in p_indices]
+            
+            cov_matrix = fit_res.GetCovarianceMatrix()
+            if not cov_matrix or cov_matrix.GetNrows() <= max(p_indices):
+                continue
+                
+            cov_sub = np.zeros((len(param_names), len(param_names)))
+            for r in range(len(param_names)):
+                for c in range(len(param_names)):
+                    cov_sub[r,c] = cov_matrix(p_indices[r], p_indices[c])
+            
+            species = 'default'
+            if '_' in param_names[0]:
+                parts = param_names[0].split('_')
+                if len(parts) > 2 and parts[-1] not in ['b0', 'b1', 'b2', 'b3', 'b4', 'b5']:
+                    species = parts[-1]
+            
+            if species in plotted_species_in_window:
+                continue
+            plotted_species_in_window.add(species)
+            
+            if species not in species_colors:
+                species_colors[species] = color_idx
+                color_idx += 1
+                
+            n_pts = 100
+            e_vals = np.linspace(window_start, window_end, n_pts)
+            shift_vals = np.zeros(n_pts)
+            shift_errs = np.zeros(n_pts)
+            e_errs = np.zeros(n_pts)
+            
+            for j, E in enumerate(e_vals):
+                X = (E - e_low_global) / (e_high_global - e_low_global)
+                n_b = len(param_names) - 1
+                grad = np.zeros(len(param_names))
+                for k in range(n_b + 1):
+                    grad[k] = math.comb(n_b, k) * (X**k) * ((1.0 - X)**(n_b - k))
+                shift = np.dot(p_vals, grad)
+                err = np.sqrt(max(0, np.dot(grad.T, np.dot(cov_sub, grad))))
+                
+                shift_vals[j] = shift
+                shift_errs[j] = err
+                
+            gr = ROOT.TGraphErrors(n_pts, np.array(e_vals, dtype='float64'), np.array(shift_vals, dtype='float64'), np.array(e_errs, dtype='float64'), np.array(shift_errs, dtype='float64'))
+            color = species_colors[species]
+            gr.SetLineColor(color)
+            gr.SetFillColorAlpha(color, 0.3)
+            gr.SetFillStyle(1001)
+            gr.SetTitle(species)
+            
+            mg.Add(gr, "3") # shaded band
+            
+            gr_line = ROOT.TGraph(n_pts, np.array(e_vals, dtype='float64'), np.array(shift_vals, dtype='float64'))
+            gr_line.SetLineColor(color)
+            gr_line.SetLineWidth(2)
+            gr_line.SetTitle(species)
+            mg.Add(gr_line, "L")
+            
+            graphs.extend([gr, gr_line])
+            
+    if len(graphs) > 0:
+        mg.Draw("A")
+        canvas.Update()
+    
+    legend = ROOT.TLegend(0.7, 0.7, 0.9, 0.9)
+    added_species = set()
+    for g in graphs:
+        if g.GetTitle() not in added_species:
+            legend.AddEntry(g, g.GetTitle(), "lf")
+            added_species.add(g.GetTitle())
+    legend.Draw()
+    
+    canvas.Update()
+    
+    ROOT.SetOwnership(canvas, False)
+    ROOT.SetOwnership(mg, False)
+    ROOT.SetOwnership(legend, False)
+    for gr in graphs:
+        ROOT.SetOwnership(gr, False)
+    
+    return canvas, mg, graphs, legend
+
 def show_backgrounds(fitter_or_filename):
     if isinstance(fitter_or_filename, str):
         root_filepath = fitter_or_filename if fitter_or_filename.endswith('.root') else fitter_or_filename + '.root'
@@ -1529,19 +1703,20 @@ pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_proto
 loc_wiggle = 15
 #initial fitter with no peaks, and a fit window of 600 to 2900 keV
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
-bg_shift_upper_bound = 0
+bg_shift_upper_bound = 2*0.5/(2000/5) 
 proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
 fs = [fit_multi_peaks(
         [pspec_low_energy_60Ga, pspec_59Zn], 
         proton_peak_guesses,
         save_path_initial, force_refit=force_refit,
-        additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6),
-                                'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
+        additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6)}, 
         loc_wiggle=loc_wiggle,
         bg_model='chebyshev',
-        bg_order=5,
-        fraction_bernstein_order={'61Ge': 1, 'default': 2},
-        sigma_bernstein_order=2,
+        bg_order=7,
+        fraction_bernstein_order={'61Ge': 1, 'default': 3},
+        sigma_bernstein_order=3,
+        bg_shift_bernstein_order=3,
+        bg_shift_upper_bound=bg_shift_upper_bound,
         sigma_min=10,
         sigma_max=200,
         peak_isotopes=peak_isotopes
@@ -1558,6 +1733,7 @@ fs[0].show_fit_results(0, False, True)
 #fs[-1].show_fit_results(0, False, True)
 show_detector_energy_resolution(fs[-1])
 show_peak_fractions(fs[-1])
+show_bg_shifts(fs[-1])
 show_backgrounds(fs[-1])
 
 
