@@ -940,6 +940,256 @@ def show_detector_energy_resolution(fitter_or_filename):
         
     return canvas, mg, graphs
 
+def show_peak_fractions(fitter_or_filename):
+    if isinstance(fitter_or_filename, str):
+        root_filepath = fitter_or_filename if fitter_or_filename.endswith('.root') else fitter_or_filename + '.root'
+        if not os.path.isabs(root_filepath):
+            root_filepath = os.path.join(fit_path, root_filepath)
+        fitter = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
+        name = fitter_or_filename
+    else:
+        fitter = fitter_or_filename
+        name = "simultaneous"
+
+    canvas = ROOT.TCanvas(f"c_frac_{name}", "Peak Fractions", 800, 600)
+    mg = ROOT.TMultiGraph()
+    mg.SetTitle("Peak Fraction;Energy (keV);Fraction")
+    
+    graphs = []
+    
+    species_colors = {'61Ge': ROOT.kRed, '60Ga': ROOT.kBlue, 'default': ROOT.kBlack, 'all': ROOT.kBlack}
+    color_idx = 1
+    
+    import math
+    for i, res in enumerate(fitter.fit_results):
+        if res is None or 'fit_res' not in res:
+            continue
+            
+        fit_res = res['fit_res']
+        f_to_fit = res.get('f_to_fit_2d') or res.get('f_to_fit')
+        if not f_to_fit:
+            continue
+            
+        e_low_global = min(p[1] for p in fitter.peaks_to_fit) if fitter.peaks_to_fit else fitter.spectra[0].GetXaxis().GetXmin()
+        e_high_global = max(p[2] for p in fitter.peaks_to_fit) if fitter.peaks_to_fit else fitter.spectra[0].GetXaxis().GetXmax()
+        window_start = fitter.peaks_to_fit[i][1]
+        window_end = fitter.peaks_to_fit[i][2]
+        
+        loc_guesses = fitter.peaks_to_fit[i][0]
+        num_peaks_in_window = len(loc_guesses) if isinstance(loc_guesses, (list, tuple, np.ndarray)) else 1
+        
+        plotted_species_in_window = set()
+        
+        for peak_idx in range(num_peaks_in_window):
+            param_key = f'amplitude_{peak_idx}_0'
+            if fitter.parameterizations and param_key in fitter.parameterizations:
+                param_names = fitter.parameterizations[param_key]['params'][1:]
+            else:
+                continue 
+                
+            p_indices = [f_to_fit.GetParNumber(n) for n in param_names]
+            if any(idx < 0 for idx in p_indices):
+                continue
+                
+            p_vals = [f_to_fit.GetParameter(idx) for idx in p_indices]
+            
+            cov_matrix = fit_res.GetCovarianceMatrix()
+            if not cov_matrix or cov_matrix.GetNrows() <= max(p_indices):
+                continue
+                
+            cov_sub = np.zeros((len(param_names), len(param_names)))
+            for r in range(len(param_names)):
+                for c in range(len(param_names)):
+                    cov_sub[r,c] = cov_matrix(p_indices[r], p_indices[c])
+            
+            species = 'default'
+            if '_' in param_names[0]:
+                parts = param_names[0].split('_')
+                if len(parts) > 2 and parts[-1] not in ['b0', 'b1', 'b2', 'b3', 'b4', 'b5']:
+                    species = parts[-1]
+            
+            if species in plotted_species_in_window:
+                continue
+            plotted_species_in_window.add(species)
+            
+            if species not in species_colors:
+                species_colors[species] = color_idx
+                color_idx += 1
+                
+            n_pts = 100
+            e_vals = np.linspace(window_start, window_end, n_pts)
+            frac_vals = np.zeros(n_pts)
+            frac_errs = np.zeros(n_pts)
+            e_errs = np.zeros(n_pts)
+            
+            for j, E in enumerate(e_vals):
+                X = (E - e_low_global) / (e_high_global - e_low_global)
+                n_b = len(param_names) - 1
+                grad = np.zeros(len(param_names))
+                for k in range(n_b + 1):
+                    grad[k] = math.comb(n_b, k) * (X**k) * ((1.0 - X)**(n_b - k))
+                frac = np.dot(p_vals, grad)
+                err = np.sqrt(max(0, np.dot(grad.T, np.dot(cov_sub, grad))))
+                
+                frac_vals[j] = frac
+                frac_errs[j] = err
+                
+            gr = ROOT.TGraphErrors(n_pts, np.array(e_vals, dtype='float64'), np.array(frac_vals, dtype='float64'), np.array(e_errs, dtype='float64'), np.array(frac_errs, dtype='float64'))
+            color = species_colors[species]
+            gr.SetLineColor(color)
+            gr.SetFillColorAlpha(color, 0.3)
+            gr.SetFillStyle(1001)
+            gr.SetTitle(species)
+            
+            mg.Add(gr, "3") # shaded band
+            
+            gr_line = ROOT.TGraph(n_pts, np.array(e_vals, dtype='float64'), np.array(frac_vals, dtype='float64'))
+            gr_line.SetLineColor(color)
+            gr_line.SetLineWidth(2)
+            gr_line.SetTitle(species)
+            mg.Add(gr_line, "L")
+            
+            graphs.extend([gr, gr_line])
+            
+    if len(graphs) > 0:
+        mg.Draw("A")
+        canvas.Update()
+    
+    legend = ROOT.TLegend(0.7, 0.7, 0.9, 0.9)
+    added_species = set()
+    for g in graphs:
+        if g.GetTitle() not in added_species:
+            legend.AddEntry(g, g.GetTitle(), "lf")
+            added_species.add(g.GetTitle())
+    legend.Draw()
+    
+    canvas.Update()
+    
+    ROOT.SetOwnership(canvas, False)
+    ROOT.SetOwnership(mg, False)
+    ROOT.SetOwnership(legend, False)
+    for gr in graphs:
+        ROOT.SetOwnership(gr, False)
+    
+    return canvas, mg, graphs, legend
+
+def show_backgrounds(fitter_or_filename):
+    if isinstance(fitter_or_filename, str):
+        root_filepath = fitter_or_filename if fitter_or_filename.endswith('.root') else fitter_or_filename + '.root'
+        if not os.path.isabs(root_filepath):
+            root_filepath = os.path.join(fit_path, root_filepath)
+        fitter = spectrum_fitter.load_spectrum_fitter_from_file(root_filepath)
+        name = fitter_or_filename
+    else:
+        fitter = fitter_or_filename
+        name = "simultaneous"
+
+    canvas = ROOT.TCanvas(f"c_bg_{name}", "Backgrounds", 800, 600)
+    mg = ROOT.TMultiGraph()
+    mg.SetTitle("Backgrounds;Energy (keV);Counts")
+    
+    graphs = []
+    colors = [ROOT.kBlack, ROOT.kBlue, ROOT.kRed, ROOT.kGreen+2, ROOT.kOrange, ROOT.kMagenta, ROOT.kCyan]
+    
+    for i, res in enumerate(fitter.fit_results):
+        if res is None or 'fit_res' not in res:
+            continue
+            
+        fit_res = res['fit_res']
+        f_to_fit = res.get('f_to_fit_2d') or res.get('f_to_fit')
+        pm = res.get('pm')
+        if not f_to_fit or not pm:
+            continue
+            
+        bg_func_name = getattr(pm, 'bg_func_name', None)
+        if not bg_func_name:
+            continue
+            
+        bg_eval_func = getattr(ROOT, bg_func_name, None)
+        if not bg_eval_func:
+            continue
+
+        window_start = fitter.peaks_to_fit[i][1]
+        window_end = fitter.peaks_to_fit[i][2]
+        
+        n_params = f_to_fit.GetNpar()
+        params = np.array([f_to_fit.GetParameter(idx) for idx in range(n_params)], dtype=np.float64)
+        
+        cov_matrix = fit_res.GetCovarianceMatrix()
+        if not cov_matrix or cov_matrix.GetNrows() <= max(range(n_params)):
+            continue
+            
+        n_spectra = len(fitter.spectra) if hasattr(fitter, 'spectra') else 1
+        
+        for j in range(n_spectra):
+            n_pts = 100
+            e_vals = np.linspace(window_start, window_end, n_pts)
+            bg_vals = np.zeros(n_pts)
+            bg_errs = np.zeros(n_pts)
+            e_errs = np.zeros(n_pts)
+            
+            eps = 1e-5
+            for pt_idx, E in enumerate(e_vals):
+                x_arr = np.array([E, j], dtype=np.float64)
+                val = bg_eval_func(x_arr, params)
+                
+                grad = np.zeros(n_params)
+                for k in range(n_params):
+                    if cov_matrix(k, k) == 0:
+                        continue
+                    p_plus = np.copy(params)
+                    p_plus[k] += eps
+                    p_minus = np.copy(params)
+                    p_minus[k] -= eps
+                    grad[k] = (bg_eval_func(x_arr, p_plus) - bg_eval_func(x_arr, p_minus)) / (2 * eps)
+                    
+                var = 0.0
+                for r in range(n_params):
+                    for c in range(n_params):
+                        if grad[r] != 0 and grad[c] != 0:
+                            var += grad[r] * grad[c] * cov_matrix(r, c)
+                            
+                bg_vals[pt_idx] = val
+                bg_errs[pt_idx] = np.sqrt(max(0, var))
+                
+            gr = ROOT.TGraphErrors(n_pts, np.array(e_vals, dtype='float64'), np.array(bg_vals, dtype='float64'), np.array(e_errs, dtype='float64'), np.array(bg_errs, dtype='float64'))
+            color = colors[j % len(colors)]
+            gr.SetLineColor(color)
+            gr.SetFillColorAlpha(color, 0.3)
+            gr.SetFillStyle(1001)
+            gr.SetTitle(f"Spectrum {j}")
+            mg.Add(gr, "3")
+            
+            gr_line = ROOT.TGraph(n_pts, np.array(e_vals, dtype='float64'), np.array(bg_vals, dtype='float64'))
+            gr_line.SetLineColor(color)
+            gr_line.SetLineWidth(2)
+            gr_line.SetTitle(f"Spectrum {j}")
+            mg.Add(gr_line, "L")
+            
+            graphs.extend([gr, gr_line])
+            
+    if len(graphs) > 0:
+        mg.Draw("A")
+        canvas.Update()
+    
+    legend = ROOT.TLegend(0.7, 0.7, 0.9, 0.9)
+    added_species = set()
+    for g in graphs:
+        if g.GetTitle() not in added_species:
+            legend.AddEntry(g, g.GetTitle(), "lf")
+            added_species.add(g.GetTitle())
+    legend.Draw()
+    
+    canvas.Update()
+    
+    ROOT.SetOwnership(canvas, False)
+    ROOT.SetOwnership(mg, False)
+    ROOT.SetOwnership(legend, False)
+    for gr in graphs:
+        ROOT.SetOwnership(gr, False)
+    
+    return canvas, mg, graphs, legend
+
 ####################################################################
 experiment = 'e23035'
 tpc_config = 'smart2_rpr.csv'
@@ -1307,6 +1557,8 @@ fs[0].show_fit_results(0, False, True)
 # fs.append(add_peak_to_fit(fs[-1], peaks_to_add, len(peaks_to_add)*['60Ga']))
 #fs[-1].show_fit_results(0, False, True)
 show_detector_energy_resolution(fs[-1])
+show_peak_fractions(fs[-1])
+show_backgrounds(fs[-1])
 
 
 #fs.append(add_peak_to_fit(fs[0], 716, '60Ga')) 
