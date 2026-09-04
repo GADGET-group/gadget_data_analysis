@@ -43,9 +43,51 @@ def load_peaks_from_csv(filename):
 def get_save_path(save_name):
     return os.path.join(fit_path,save_name)
 
+def find_de_guesses(spectra, fit_window, isotopes_list, save_csv_name, **kwargs):
+    """
+    Runs Differential Evolution to find optimal starting locations for the peaks,
+    then saves the results in the CSV format expected by load_peaks_from_csv.
+    """
+    window_start, window_end = fit_window
+    n_peaks = len(isotopes_list)
+    
+    # Generate evenly spaced dummy locations across the window
+    spacing = (window_end - window_start) / (n_peaks + 1)
+    dummy_guesses = [window_start + (i + 1) * spacing for i in range(n_peaks)]
+    
+    peaks_arg = [(dummy_guesses, window_start, window_end)]
+    peak_isotopes = [isotopes_list]
+    
+    # We pass de_only=True so it stops before the Minuit fit and returns the f_to_fit populated with DE results
+    workers = kwargs.pop('workers', 1)
+    fs = fit_multi_peaks(spectra, peaks_arg, save_name=save_csv_name.replace('.csv', ''), 
+                         peak_isotopes=peak_isotopes, use_de=True, de_only=True, force_refit=True, workers=workers, **kwargs)
+    
+    # Extract the optimized mu values from the fit results
+    # For a single window fit, fs.fit_results[0] holds the results dictionary
+    f_to_fit = fs.fit_results[0]['f_to_fit_2d']
+    
+    csv_path = get_save_path(save_csv_name)
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Window', 'Location', 'Isotope'])
+        for i in range(n_peaks):
+            par_name = f"mu_{i}" if n_peaks > 1 else "mu"
+            par_idx = f_to_fit.GetParNumber(par_name)
+            mu_val = f_to_fit.GetParameter(par_idx)
+            iso = isotopes_list[i]
+            if i == 0:
+                writer.writerow([f"{window_start}-{window_end}", f"{mu_val:.3f}", iso])
+            else:
+                writer.writerow(["", f"{mu_val:.3f}", iso])
+                
+    print(f"DE guesses successfully saved to {csv_path}")
+    return csv_path
+
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
-                    sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None):
+                    sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
+                    use_de=False, de_only=False, workers=1):
     
     def _pow_str(base, exp):
         if exp == 0: return "1.0"
@@ -61,7 +103,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         for p in additional_param_bounds:
             f.param_bound_functions[p] = additional_param_bounds[p]
     else:
-        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order)
+        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order, use_de=use_de, de_only=de_only, workers=workers)
         if sigma_monotonic_bernstein_order is not None:
             import math
             e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
@@ -336,6 +378,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         if not likelihood:
             f.fit_options = f.fit_options.replace('L','')
         f.fit_peaks()
+        if de_only:
+            return f
     
     failed_fits = []
     for i, res in enumerate(f.fit_results):
@@ -1607,20 +1651,6 @@ def show_backgrounds(fitter_or_filename):
     return canvas, mg, graphs, legend
 
 ####################################################################
-experiment = 'e23035'
-tpc_config = 'smart2_rpr.csv'
-num_workers = 200
-
-# efficiencies with 0.100000 s implant time and 0.100000 s decay time
-# Assumes 12 ms dead time at start of decay window + 2 ms at end
-# These efficiencies are defined in terms of fractions of implanted nuclie which decay during the measurement window
-# 61Ge efficiency =  0.3230255772737927
-Zn59_cycle_efficiency =  0.41616841590773374
-Ga60_cycle_efficiency =  0.37410064021102757
-
-proton_binning = (4000//5, 0, 4000)
-ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
 #############################################################################
 # Fit helper functions to add/remove peaks and fix previous parameters
@@ -1939,6 +1969,21 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
 #############################################################################
 # Fit including runs where high energy protons may not be recorded correctly.
 #############################################################################
+experiment = 'e23035'
+tpc_config = 'smart2_rpr.csv'
+num_workers = 200
+
+# efficiencies with 0.100000 s implant time and 0.100000 s decay time
+# Assumes 12 ms dead time at start of decay window + 2 ms at end
+# These efficiencies are defined in terms of fractions of implanted nuclie which decay during the measurement window
+# 61Ge efficiency =  0.3230255772737927
+Zn59_cycle_efficiency =  0.41616841590773374
+Ga60_cycle_efficiency =  0.37410064021102757
+
+proton_binning = (4000//5, 0, 4000)
+ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
+
 force_refit=True
 ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
@@ -1946,7 +1991,31 @@ loc_wiggle = 15
 #initial fitter with no peaks, and a fit window of 600 to 2900 keV
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
 bg_shift_upper_bound = 10*0.5/(2000/5) 
-proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
+isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
+
+# 1. Run Differential Evolution to find starting locations and save to CSV
+find_de_guesses(
+    [pspec_low_energy_60Ga, pspec_59Zn], 
+    fit_window=(600.0, 2900.0), 
+    isotopes_list=isotopes_list,
+    save_csv_name='de_proton_peaks.csv',
+    additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6)}, 
+    loc_wiggle=loc_wiggle,
+    bg_model='chebyshev',
+    bg_order=5,
+    fraction_bernstein_order={'61Ge': 1, 'default': 2},
+    sigma_monotonic_bernstein_order=4,
+    bg_shift_monotonic_bernstein_order=4,
+    bg_shift_upper_bound=bg_shift_upper_bound,
+    sigma_min=10,
+    sigma_max=200,
+    workers=num_workers
+)
+
+# 2. Load the perfectly optimized DE guesses
+proton_peak_guesses, peak_isotopes = load_peaks_from_csv('de_proton_peaks.csv')
+
+# 3. Run the final Minuit fit
 fs = [fit_multi_peaks(
         [pspec_low_energy_60Ga, pspec_59Zn], 
         proton_peak_guesses,
@@ -1963,7 +2032,8 @@ fs = [fit_multi_peaks(
         bg_shift_upper_bound=bg_shift_upper_bound,
         sigma_min=10,
         sigma_max=200,
-        peak_isotopes=peak_isotopes
+        peak_isotopes=peak_isotopes,
+        use_de=False
     )]
 ROOT.gROOT.SetBatch(False)
 fs[0].show_fit_results(0, False, True)

@@ -1912,7 +1912,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 
-def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options='LS0QEI'): 
+def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options='LS0QEI', use_de=False, de_loc_wiggle=None, de_only=False, workers=1): 
     """
     Fits a function to a 2D histogram.
     fit_range should be ((x_low, x_high), (y_low, y_high))
@@ -1987,9 +1987,228 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
             f_to_fit.SetParName(i, names[i])
         else:
             f_to_fit.SetParName(i, f'p{i}')
-
-    f_to_fit.SetNpx(100)
+        f_to_fit.SetNpx(100)
     f_to_fit.SetNpy(100)
+
+    # 3.5 Differential Evolution (Optional)
+    cpp_func_name = getattr(function_string, "__name__", None)
+    
+    if use_de:
+        from scipy.optimize import differential_evolution
+        
+        obj_comp_id = uuid.uuid4().hex[:6]
+        use_nll = 'L' in fit_options
+        
+        if cpp_func_name and cpp_func_name.startswith("eval_2d_gaus_"):
+            # If we have a pure C++ function for the evaluation, we can vectorize and parallelize it in C++!
+            vec_func_name = f"calc_obj_vec_{obj_comp_id}"
+            cpp_obj_code = f"""
+            #include <ROOT/TThreadExecutor.hxx>
+            #include <ROOT/TSeq.hxx>
+            #include <cmath>
+            
+            void {vec_func_name}(TH2D* h2, int S, int N, double* p_arr, bool use_nll, double* obj_arr, int n_workers) {{
+                if (n_workers > 1) ROOT::EnableImplicitMT(n_workers);
+                ROOT::TThreadExecutor pool(n_workers > 1 ? n_workers : 1);
+                
+                auto func = [&](int k) -> int {{
+                    double* p = p_arr + k*N;
+                    double obj = 0;
+                    double x[2];
+                    for (int i=1; i<=h2->GetNbinsX(); ++i) {{
+                        for(int j=1; j<=h2->GetNbinsY(); ++j) {{
+                            double val = h2->GetBinContent(i, j);
+                            double err = h2->GetBinError(i, j);
+                            x[0] = h2->GetXaxis()->GetBinCenter(i);
+                            x[1] = h2->GetYaxis()->GetBinCenter(j);
+                            
+                            double fval = {cpp_func_name}(x, p);
+                            
+                            if (use_nll) {{
+                                if (fval > 0) {{
+                                    obj += fval - val * std::log(fval);
+                                }} else {{
+                                    obj += 1e9; // penalty for non-positive values in likelihood
+                                }}
+                            }} else {{
+                                if (err == 0) err = 1.0;
+                                obj += std::pow((val - fval)/err, 2);
+                            }}
+                        }}
+                    }}
+                    obj_arr[k] = obj;
+                    return 0;
+                }};
+                
+                if (n_workers > 1) {{
+                    pool.Map(func, ROOT::TSeqI(S));
+                }} else {{
+                    for (int k = 0; k < S; ++k) func(k);
+                }}
+            }}
+            """
+            ROOT.gInterpreter.Declare(cpp_obj_code)
+            calc_obj_vec = getattr(ROOT, vec_func_name)
+            
+            def objective(p_array):
+                if p_array.ndim == 1:
+                    p_cpp = np.array(p_array, dtype=np.float64)
+                    obj_arr = np.zeros(1, dtype=np.float64)
+                    calc_obj_vec(sub_hist, 1, len(p_cpp), p_cpp, use_nll, obj_arr, workers)
+                    return obj_arr[0]
+                else:
+                    # SciPy passes p_array with shape (N, S) where N is number of parameters
+                    p_transposed = p_array.T
+                    S, N = p_transposed.shape
+                    p_cpp = np.ascontiguousarray(p_transposed, dtype=np.float64).ravel()
+                    obj_arr = np.zeros(S, dtype=np.float64)
+                    calc_obj_vec(sub_hist, S, N, p_cpp, use_nll, obj_arr, workers)
+                    return obj_arr
+        else:
+            # Fallback to single-evaluation via TF2
+            cpp_obj_code = f"""
+            double calc_obj_{obj_comp_id}(TH2D* h2, TF2* f2, double* p, bool use_nll) {{
+                f2->SetParameters(p);
+                double obj = 0;
+                double x[2];
+                for (int i=1; i<=h2->GetNbinsX(); ++i) {{
+                    for(int j=1; j<=h2->GetNbinsY(); ++j) {{
+                        double val = h2->GetBinContent(i, j);
+                        double err = h2->GetBinError(i, j);
+                        x[0] = h2->GetXaxis()->GetBinCenter(i);
+                        x[1] = h2->GetYaxis()->GetBinCenter(j);
+                        double fval = f2->EvalPar(x, p);
+                        if (use_nll) {{
+                            if (fval > 0) {{
+                                obj += fval - val * std::log(fval);
+                            }} else {{
+                                obj += 1e9; // penalty for non-positive values in likelihood
+                            }}
+                        }} else {{
+                            if (err == 0) err = 1.0;
+                            obj += std::pow((val - fval)/err, 2);
+                        }}
+                    }}
+                }}
+                return obj;
+            }}
+            """
+            ROOT.gInterpreter.Declare(cpp_obj_code)
+            calc_obj = getattr(ROOT, f"calc_obj_{obj_comp_id}")
+            
+            def objective(p):
+                if p.ndim == 1:
+                    p_cpp = np.array(p, dtype=np.float64)
+                    return calc_obj(sub_hist, f_to_fit, p_cpp, use_nll)
+                else:
+                    # If vectorized=True is passed but we are in fallback, we must loop in Python
+                    return np.array([calc_obj(sub_hist, f_to_fit, np.array(row, dtype=np.float64), use_nll) for row in p])
+        
+        de_bounds = []
+        for i in range(n_params):
+            low, high = bounds[i]
+            if low >= high:
+                de_bounds.append((low, low + 1e-9))
+            elif low == -np.inf or high == np.inf:
+                val = initial_values[i]
+                width = abs(val) if val != 0 else 1.0
+                b_l = low if low != -np.inf else val - 100*width
+                b_h = high if high != np.inf else val + 100*width
+                if b_l >= b_h:
+                    b_h = b_l + 1.0
+                de_bounds.append((b_l, b_h))
+            else:
+                de_bounds.append((low, high))
+                
+
+        print(f"Running Differential Evolution for starting guesses (workers={workers})...")
+        
+        # State for early stopping
+        early_stop_state = {'best_xk': None, 'no_improve_count': 0}
+
+        def de_callback(xk, convergence=None):
+            import inspect
+            std_energy = None
+            try:
+                # Scipy >= 1.12 passes OptimizeResult to the callback directly
+                if hasattr(xk, 'population_energies'):
+                    std_energy = np.std(xk.population_energies)
+                else:
+                    # For older Scipy versions, the convergence parameter is calculated purely 
+                    # using `tol`. If `tol=0`, convergence is always exactly 0.0. 
+                    # We can grab the exact population energies directly from the solver in the call stack!
+                    frame = inspect.currentframe().f_back
+                    while frame:
+                        if 'self' in frame.f_locals and hasattr(frame.f_locals['self'], 'population_energies'):
+                            std_energy = np.std(frame.f_locals['self'].population_energies)
+                            break
+                        frame = frame.f_back
+            except Exception:
+                pass
+
+            if std_energy is not None:
+                print(f"  -> Population Energy Std Dev: {std_energy:.4f} (Target: <= 100)")
+            elif convergence is not None:
+                print(f"  -> Fractional convergence: {convergence:.4e} (stops at 1.0)")
+                
+            # Early stopping check
+            if early_stop_state['best_xk'] is not None and np.array_equal(xk, early_stop_state['best_xk']):
+                early_stop_state['no_improve_count'] += 1
+                print('no improvement in %d steps'%early_stop_state['no_improve_count'])
+            else:
+                early_stop_state['best_xk'] = np.copy(xk)
+                early_stop_state['no_improve_count'] = 0
+                
+            if early_stop_state['no_improve_count'] >= 10000:
+                print(f"  -> Terminating early: No improvement in best vector for 1000 steps.")
+                return True # Returning True from callback halts differential_evolution
+
+        # Since this objective is a log-likelihood or chi2, its absolute mean can be 
+        # huge (e.g. millions). Using a relative `tol` like 0.01 would evaluate to 
+        # 10,000+ and terminate instantly. 
+        # Instead, we rely purely on `atol`. Since this DE is just finding a starting 
+        # guess for Minuit, we don't need perfect convergence (std=1). 
+        # atol=100 is often a good sweet spot to find the right valley without over-optimizing.
+        res = differential_evolution(
+            objective, 
+            de_bounds, 
+            strategy='rand1bin',
+            disp=True, 
+            atol=100, 
+            tol=0, 
+            vectorized=True, 
+            maxiter=1000000,
+            callback=de_callback
+        )
+        print(f"DE finished with status: {res.success}, message: {res.message}")
+        
+        if de_only:
+            # Re-apply bounds just to set the parameters in f_to_fit to the optimum
+            for i in range(n_params):
+                f_to_fit.SetParameter(i, res.x[i])
+            return None, canvas, sub_hist, f_to_fit, None, None
+        
+        # Set the optimized values back into initial_values
+        for i in range(n_params):
+            initial_values[i] = res.x[i]
+            
+        # Update bounds if de_loc_wiggle is provided
+        if de_loc_wiggle is not None and names is not None:
+            for i in range(n_params):
+                if names[i].startswith('mu'):
+                    opt_mu = res.x[i]
+                    bounds[i] = (opt_mu - de_loc_wiggle, opt_mu + de_loc_wiggle)
+                    
+        # Re-apply bounds to f_to_fit for Minuit
+        for i in range(n_params):
+            if bounds[i][0] == bounds[i][1]:
+                f_to_fit.FixParameter(i, bounds[i][0])
+            elif bounds[i][0] == -np.inf and bounds[i][1] == np.inf:
+                f_to_fit.SetParameter(i, initial_values[i])
+                f_to_fit.SetParLimits(i, 0, 0)
+            else:
+                f_to_fit.SetParameter(i, initial_values[i])
+                f_to_fit.SetParLimits(i, bounds[i][0], bounds[i][1])
 
     # 4. Perform Fit
     fit_res = sub_hist.Fit(f_to_fit, fit_options)
@@ -2042,7 +2261,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_de=False, de_loc_wiggle=None, de_only=False, workers=1):
     if param_bounds is None:
         param_bounds = {}
     e_low, e_high = fit_window
@@ -2313,12 +2532,13 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     fit_range = ((e_low, e_high), (-0.5, n_spectra - 0.5))
     
     fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
-        h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options
+        h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options,
+        use_de=use_de, de_loc_wiggle=de_loc_wiggle, de_only=de_only, workers=workers
     )
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1):
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_de=False, de_loc_wiggle=None, de_only=False, workers=1):
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:
@@ -2565,7 +2785,8 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     fit_range = ((e_low, e_high), (-0.5, n_spectra - 0.5))
     
     fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
-        h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options
+        h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options,
+        use_de=use_de, de_loc_wiggle=de_loc_wiggle, de_only=de_only, workers=workers
     )
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
