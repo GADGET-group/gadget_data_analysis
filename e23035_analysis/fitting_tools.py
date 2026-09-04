@@ -650,10 +650,13 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
         for k in range(bg_order + 1):
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
-            p_guess = bg_guess if k == 0 else 0.0
-            if bg_order >= 1:
-                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
-                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
+            if bg_model == 'bernstein':
+                p_guess = (bg_guess_end + bg_guess) / 2.0
+            else:
+                p_guess = bg_guess if k == 0 else 0.0
+                if bg_order >= 1:
+                    if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                    if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
     else:
         bg_idx = pm.add("bg_const", bg_guess, param_bounds.get('bg_const', (0, np.inf)))
@@ -688,6 +691,12 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
                 bg_val = np.polynomial.chebyshev.chebval(X, terms)
         else:
             bg_val = p[pm.get_idx("bg_const")]
+            
+        import math
+        # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+        # Prevents vanishing gradients (local minima) if background evaluates < 0, 
+        # while preserving exact physical meaning (linear step height) for > 0
+        bg_val = math.sqrt(bg_val**2 + 1e-4)
             
         amp = resolve_python_param("amplitude", p, pm, parameterizations)
         mu = resolve_python_param("mu", p, pm, parameterizations)
@@ -803,10 +812,13 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
         for k in range(bg_order + 1):
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
-            p_guess = bg_guess if k == 0 else 0.0
-            if bg_order >= 1:
-                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
-                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
+            if bg_model == 'bernstein':
+                p_guess = (bg_guess_end + bg_guess) / 2.0
+            else:
+                p_guess = bg_guess if k == 0 else 0.0
+                if bg_order >= 1:
+                    if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                    if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
         bg_string = get_bg_string(bg_model, bg_order, pm.get_idx("bg_p0"), e_low, e_high)
     else:
@@ -820,6 +832,9 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     
 
     gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
+    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+    # Avoids vanishing gradients if bg_string goes negative, preserves linear meaning for > 0
+    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
     function_string = f"{bg_string} + {gaus_string}"
 
     # 3. Call our generalized fit engine
@@ -909,10 +924,13 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         for k in range(bg_order + 1):
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
-            p_guess = bg_guess if k == 0 else 0.0
-            if bg_order >= 1:
-                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
-                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
+            if bg_model == 'bernstein':
+                p_guess = (bg_guess_end + bg_guess) / 2.0
+            else:
+                p_guess = bg_guess if k == 0 else 0.0
+                if bg_order >= 1:
+                    if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                    if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
         bg_string = get_bg_string(bg_model, bg_order, pm.get_idx("bg_p0"), e_low, e_high)
     else:
@@ -966,6 +984,9 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
         gaus_strings.append(gaus_string)
 
+    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+    # Avoids vanishing gradients if bg_string goes negative, preserves linear meaning for > 0
+    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
     function_string = f"{bg_string} + {' + '.join(gaus_strings)}"
 
     # 3. Call our generalized fit engine
@@ -1124,14 +1145,29 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
             b_name = "bg_shift" if shared_bg_shift or n_peaks == 1 else f"bg_shift_{i}"
             bg_shift = resolve_python_param(b_name, p, pm, parameterizations, current_mu=mu)
             sigma = resolve_python_param("sigma", p, pm, parameterizations, current_mu=mu)
-            tau = resolve_python_param("tau", p, pm, parameterizations, current_mu=mu)
             
-            if sigma <= 0 or tau <= 0:
+            if sigma <= 0:
                 return 1e10
             
             # Background Step Component
             total += 0.5 * amp * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
             
+        import math
+        # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+        # Avoids vanishing gradients if total goes negative, preserves linear meaning for > 0
+        total = math.sqrt(total**2 + 1e-4)
+        
+        for i in range(n_peaks):
+            amp_name = "amplitude" if n_peaks == 1 else f"amplitude_{i}"
+            mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
+            amp = resolve_python_param(amp_name, p, pm, parameterizations)
+            mu = resolve_python_param(mu_name, p, pm, parameterizations)
+            sigma = resolve_python_param("sigma", p, pm, parameterizations, current_mu=mu)
+            tau = resolve_python_param("tau", p, pm, parameterizations, current_mu=mu)
+            
+            if tau <= 0:
+                return 1e10
+
             # EMG Component
             norm = amp * bin_width / (2.0 * tau)
             z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356
@@ -1314,6 +1350,9 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
             gaus_string = f"([{amp_idx}]*({weight_str}) * {bin_width} / ([{sigma_idx}] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[{sigma_idx}]) * ((x-[{mu_idx}])/[{sigma_idx}]))"
             all_gaus_strings.append(gaus_string)
 
+    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+    # Avoids vanishing gradients if bg_string goes negative, preserves linear meaning for > 0
+    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
     function_string = f"{bg_string} + {' + '.join(all_gaus_strings)}"
 
     # 2. Setup Parameters and Initial Guesses
@@ -1387,6 +1426,9 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
         mu_idx = peak_params_start_idx + 2*i + 1
         reconstructed_bg_string += f" + 0.5*[{amp_idx}]*[{bg_shift_idx}]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{sigma_start_idx}]))"
 
+    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+    reconstructed_bg_string = f"TMath::Sqrt(({reconstructed_bg_string})*({reconstructed_bg_string}) + 1e-4)"
+
     comp_id = uuid.uuid4().hex[:6]
     fit_params = np.array([f_to_fit.GetParameter(i) for i in range(f_to_fit.GetNpar())])
 
@@ -1459,10 +1501,13 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         for k in range(bg_order + 1):
             p_name = f"bg_p{k}"
             bg_p_names.append(p_name)
-            p_guess = bg_guess if k == 0 else 0.0
-            if bg_order >= 1:
-                if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
-                if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
+            if bg_model == 'bernstein':
+                p_guess = (bg_guess_end + bg_guess) / 2.0
+            else:
+                p_guess = bg_guess if k == 0 else 0.0
+                if bg_order >= 1:
+                    if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                    if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
             pm.add(p_name, p_guess, param_bounds.get(p_name, (-np.inf, np.inf)))
         bg_string = get_bg_string(bg_model, bg_order, pm.get_idx("bg_p0"), e_low, e_high)
         bg_shift_idx = pm.add("bg_shift", 0.002, param_bounds.get('bg_shift', (0, 1.0)))
@@ -1497,6 +1542,8 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         voigt_string = f"[{amp_idx}] * {bin_width} * TMath::Voigt(x-[{mu_idx}], [{sigma_idx}], [{gamma_idx}])"
         voigt_strings.append(voigt_string)
 
+    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
     function_string = f"{bg_string} + {' + '.join(voigt_strings)}"
 
     # 3. Call our generalized fit engine
@@ -1522,7 +1569,9 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         amp_idx = pm.get_idx("amplitude" if n_peaks == 1 else f"amplitude_{i}")
         mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         reconstructed_bg_string += f" + 0.5*[{amp_idx}]*[{pm.get_idx('bg_shift')}]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{pm.get_idx('sigma')}]))"
-
+        
+    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
+    reconstructed_bg_string = f"TMath::Sqrt(({reconstructed_bg_string})*({reconstructed_bg_string}) + 1e-4)"
     background = ROOT.TF1(f'bg_{comp_id}', reconstructed_bg_string, e_low, e_high)
     for i in range(len(fit_params)):
         background.SetParameter(i, fit_params[i])
@@ -1681,7 +1730,9 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
                 total += 0.5 * (amp * weight) * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
             }}
         }}
-        if (total < 1e-9) total = 1e-9;
+        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+        // Avoids vanishing gradients if total < 0, preserves linear meaning for > 0
+        total = std::sqrt(total * total + 1e-4);
 
         for (int i = 0; i < {n_peaks}; ++i) {{
             double amp = p[{peak_params_start_idx} + 2 * i];
@@ -2293,10 +2344,13 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         if bg_model in ['chebyshev', 'polynomial', 'bernstein']:
             for k in range(bg_order + 1):
                 p_name = f"bg_p{k}_{j}"
-                p_guess = bg_guess if k == 0 else 0.0
-                if bg_order >= 1:
-                    if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
-                    if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
+                if bg_model == 'bernstein':
+                    p_guess = (bg_guess_end + bg_guess) / 2.0
+                else:
+                    p_guess = bg_guess if k == 0 else 0.0
+                    if bg_order >= 1:
+                        if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
+                        if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
                 pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, (-np.inf, np.inf))))
         else:
             pm.add(f"bg_const_{j}", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
@@ -2448,7 +2502,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
-        if (total < 1e-9) total = 1e-9;
+        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+        total = std::sqrt(total * total + 1e-4);
         
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
@@ -2480,7 +2535,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             double bg_shift = bg_shift_vals[i];
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
-        if (total < 1e-9) return 1e-9;
+        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+        total = std::sqrt(total * total + 1e-4);
         return total;
     }}
     
@@ -2678,7 +2734,8 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
-        if (total < 1e-9) total = 1e-9;
+        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+        total = std::sqrt(total * total + 1e-4);
         
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
@@ -2725,7 +2782,8 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             double bg_shift = bg_shift_vals[i];
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
-        if (total < 1e-9) return 1e-9;
+        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+        total = std::sqrt(total * total + 1e-4);
         return total;
     }}
     
