@@ -22,19 +22,16 @@ def load_peaks_from_csv(filename):
                 continue
             if row[0]=='STOP':
                 break
-            try:
-                if len(row[0]) > 0:
-                    if len(current_group) > 0:
-                        all_peaks.append((current_group, *fit_window))
-                        all_isotopes.append(current_iso_group)
-                        current_group = []
-                        current_iso_group = []
-                    start, stop = row[0].split('-')
-                    fit_window = (float(start), float(stop))
-                current_group.append(float(row[1]))
-                current_iso_group.append(row[2].strip() if len(row) > 2 and row[2].strip() else 'unknown')
-            except Exception as e:
-                print(f"Error parsing row: {row}, error: {e}")
+            if len(row[0]) > 0:
+                if len(current_group) > 0:
+                    all_peaks.append((current_group, *fit_window))
+                    all_isotopes.append(current_iso_group)
+                    current_group = []
+                    current_iso_group = []
+                start, stop = row[0].split('-')
+                fit_window = (float(start), float(stop))
+            current_group.append(float(row[1]))
+            current_iso_group.append(row[2].strip() if len(row) > 2 and row[2].strip() else 'unknown')
                 
         if len(current_group) > 0:
             all_peaks.append((current_group, *fit_window))
@@ -393,7 +390,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
     if not loaded_from_file and save_name:
         f.save(save_name) 
         
-        try:
+        if True: # Removed try/except to prevent silent failures
             import csv
             import math
             import re
@@ -619,8 +616,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                                 row.extend(["", ""])
                                 
                         writer.writerow(row)
-        except Exception as e:
-            print(f"Failed to generate evaluated csv: {e}")
+        # Removed except Exception block to prevent silent failures
             
     f.save_name = save_name
     f.fit_multi_peaks_kwargs = {
@@ -1949,7 +1945,7 @@ pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_proto
 loc_wiggle = 15
 #initial fitter with no peaks, and a fit window of 600 to 2900 keV
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
-bg_shift_upper_bound = 2*0.5/(2000/5) 
+bg_shift_upper_bound = 10*0.5/(2000/5) 
 proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
 fs = [fit_multi_peaks(
         [pspec_low_energy_60Ga, pspec_59Zn], 
@@ -1958,12 +1954,12 @@ fs = [fit_multi_peaks(
         additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6)}, 
         loc_wiggle=loc_wiggle,
         bg_model='chebyshev',
-        bg_order=7,
+        bg_order=5,
         fraction_bernstein_order={'61Ge': 1, 'default': 2},
         # sigma_bernstein_order=2,
         # bg_shift_bernstein_order=2,
-        sigma_monotonic_bernstein_order=3,
-        bg_shift_monotonic_bernstein_order=3,
+        sigma_monotonic_bernstein_order=4,
+        bg_shift_monotonic_bernstein_order=4,
         bg_shift_upper_bound=bg_shift_upper_bound,
         sigma_min=10,
         sigma_max=200,

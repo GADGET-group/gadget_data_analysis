@@ -1676,10 +1676,21 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
             
             for (int j = 0; j < {num_emgs}; ++j) {{
                 double sigma = p[{sigma_start_idx} + j];
-                double tau = p[{tau_start_idx} + j];
                 double weight = weights[j];
                 
                 total += 0.5 * (amp * weight) * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            }}
+        }}
+        if (total < 1e-9) total = 1e-9;
+
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double amp = p[{peak_params_start_idx} + 2 * i];
+            double mu = p[{peak_params_start_idx} + 2 * i + 1];
+            
+            for (int j = 0; j < {num_emgs}; ++j) {{
+                double sigma = p[{sigma_start_idx} + j];
+                double tau = p[{tau_start_idx} + j];
+                double weight = weights[j];
                 
                 double norm = amp * weight * bin_width / (2.0 * tau);
                 double z_arg = ((val_x - mu) / sigma + sigma / tau) / 1.41421356;
@@ -2217,9 +2228,16 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             double bg_shift = bg_shift_vals[i];
             
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+        }}
+        if (total < 1e-9) total = 1e-9;
+        
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double mu = p[mu_idx[i]];
+            double sigma = sigma_vals[i];
+            double amp = amp_vals[i];
+            
             total += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
         }}
-        if (total < 1e-9) return 1e-9;
         return total;
     }}
     
@@ -2436,10 +2454,17 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             double mu = p[mu_idx[i]];
             double amp = p[amp_idx[i][val_y]];
             double sigma = sigma_vals[i];
-            double tau = tau_vals[i];
             double bg_shift = bg_shift_vals[i];
             
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+        }}
+        if (total < 1e-9) total = 1e-9;
+        
+        for (int i = 0; i < {n_peaks}; ++i) {{
+            double mu = p[mu_idx[i]];
+            double amp = p[amp_idx[i][val_y]];
+            double sigma = sigma_vals[i];
+            double tau = tau_vals[i];
             
             double u = (val_x - mu) / sigma;
             double v = sigma / tau;
@@ -2455,7 +2480,6 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             }}
             total += term;
         }}
-        if (total < 1e-9) return 1e-9;
         return total;
     }}
     

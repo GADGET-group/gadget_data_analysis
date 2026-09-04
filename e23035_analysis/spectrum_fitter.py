@@ -190,13 +190,13 @@ class spectrum_fitter:
                             param_free = not fit_res.IsParameterFixed(j)
                         else:
                             param_free = (fit_res.ParError(j) != 0.0)
-                    except Exception:
+                    except AttributeError:
                         param_free = (fit_res.ParError(j) != 0.0)
                     
                     if param_free:
                         name = f_to_fit.GetParName(j)
                         match = re.match(r'^(.*)_(\d+)$', name)
-                        if match and not name.startswith('bg_p'):
+                        if match and not name.startswith('bg_p') and '_mono_' not in name:
                             free_base_params.add(match.group(1))
                         else:
                             free_base_params.add(name)
@@ -234,13 +234,13 @@ class spectrum_fitter:
                                 param_free = not fit_res.IsParameterFixed(j)
                             else:
                                 param_free = (fit_res.ParError(j) != 0.0)
-                        except Exception:
+                        except AttributeError:
                             param_free = (fit_res.ParError(j) != 0.0)
                             
                         if param_free:
                             name = f_to_fit.GetParName(j)
                             match = re.match(r'^(.*)_(\d+)$', name)
-                            if match and not name.startswith('bg_p'):
+                            if match and not name.startswith('bg_p') and '_mono_' not in name:
                                 base_name = match.group(1)
                                 param_k = int(match.group(2))
                                 if param_k == k:
@@ -280,8 +280,8 @@ class spectrum_fitter:
         for k, v in self.param_bound_functions.items():
             try:
                 source_dict[k] = inspect.getsource(v).strip()
-            except Exception:
-                source_dict[k] = str(v)
+            except Exception as e:
+                raise RuntimeError(f"Failed to serialize parameter bound function: {v}. Error: {e}")
         python_state['param_bound_functions'] = source_dict
 
         # 3. Iterate through fit results and save ROOT objects
@@ -1300,19 +1300,19 @@ class multi_spectrum_fitter(spectrum_fitter):
                             param_free = not fit_res.IsParameterFixed(j)
                         else:
                             param_free = (fit_res.ParError(j) != 0.0)
-                    except Exception:
+                    except AttributeError:
                         param_free = (fit_res.ParError(j) != 0.0)
                     
                     if param_free:
                         name = f_to_fit.GetParName(j)
                         # amplitude_{peak}_{spec}
                         m3 = re.match(r'^(.*)_(\d+)_(\d+)$', name)
-                        if m3:
+                        if m3 and '_mono_' not in name:
                             free_base_params.add(m3.group(1) + "_" + m3.group(3))
                             continue
                         
                         m2 = re.match(r'^(.*)_(\d+)$', name)
-                        if m2:
+                        if m2 and '_mono_' not in name:
                             # could be mu_{peak} or bg_const_{spec}
                             # we treat bg_const as global, mu as peak-specific
                             base = m2.group(1)
@@ -1358,7 +1358,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                         err = p_errs[name]
                         
                         m3 = re.match(r'^(.*)_(\d+)_(\d+)$', name)
-                        if m3:
+                        if m3 and '_mono_' not in name:
                             base = m3.group(1)
                             pk_idx = int(m3.group(2))
                             spec_idx = m3.group(3)
@@ -1368,7 +1368,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                             continue
                             
                         m2 = re.match(r'^(.*)_(\d+)$', name)
-                        if m2:
+                        if m2 and '_mono_' not in name:
                             base = m2.group(1)
                             idx = int(m2.group(2))
                             if base in ['bg_const', 'bg_slope', 'bg_shift'] or base.startswith('bg_p'):
@@ -1417,8 +1417,8 @@ class multi_spectrum_fitter(spectrum_fitter):
         for k, v in self.param_bound_functions.items():
             try:
                 source_dict[k] = inspect.getsource(v).strip()
-            except Exception:
-                source_dict[k] = str(v)
+            except Exception as e:
+                raise RuntimeError(f"Failed to serialize parameter bound function: {v}. Error: {e}")
         python_state['param_bound_functions'] = source_dict
         
         for i, res in enumerate(self.fit_results):
