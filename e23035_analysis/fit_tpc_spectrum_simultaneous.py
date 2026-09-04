@@ -1993,29 +1993,30 @@ save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tp
 bg_shift_upper_bound = 10*0.5/(2000/5) 
 isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
 
-# 1. Run Differential Evolution to find starting locations and save to CSV
-find_de_guesses(
-    [pspec_low_energy_60Ga, pspec_59Zn], 
-    fit_window=(600.0, 2900.0), 
-    isotopes_list=isotopes_list,
-    save_csv_name='de_proton_peaks.csv',
-    additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6)}, 
-    loc_wiggle=loc_wiggle,
-    bg_model='chebyshev',
-    bg_order=5,
-    fraction_bernstein_order={'61Ge': 1, 'default': 2},
-    sigma_monotonic_bernstein_order=4,
-    bg_shift_monotonic_bernstein_order=4,
-    bg_shift_upper_bound=bg_shift_upper_bound,
-    sigma_min=10,
-    sigma_max=200,
-    workers=num_workers
-)
+# # 1. Run Differential Evolution to find starting locations and save to CSV
+# find_de_guesses(
+#     [pspec_low_energy_60Ga, pspec_59Zn], 
+#     fit_window=(600.0, 2900.0), 
+#     isotopes_list=isotopes_list,
+#     save_csv_name='de_proton_peaks.csv',
+#     additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6)}, 
+#     loc_wiggle=loc_wiggle,
+#     bg_model='chebyshev',
+#     bg_order=5,
+#     fraction_bernstein_order={'61Ge': 1, 'default': 2},
+#     sigma_monotonic_bernstein_order=4,
+#     bg_shift_monotonic_bernstein_order=4,
+#     bg_shift_upper_bound=bg_shift_upper_bound,
+#     sigma_min=10,
+#     sigma_max=200,
+#     workers=num_workers
+# )
 
 # 2. Load the perfectly optimized DE guesses
-proton_peak_guesses, peak_isotopes = load_peaks_from_csv('de_proton_peaks.csv')
+# proton_peak_guesses, peak_isotopes = load_peaks_from_csv('de_proton_peaks.csv')
 
 # 3. Run the final Minuit fit
+proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
 fs = [fit_multi_peaks(
         [pspec_low_energy_60Ga, pspec_59Zn], 
         proton_peak_guesses,

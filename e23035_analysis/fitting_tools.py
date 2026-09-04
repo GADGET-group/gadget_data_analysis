@@ -2172,7 +2172,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
         res = differential_evolution(
             objective, 
             de_bounds, 
-            strategy='rand1bin',
+            #strategy='rand1bin',
             disp=True, 
             atol=100, 
             tol=0, 
