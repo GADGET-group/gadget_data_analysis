@@ -1,5 +1,7 @@
 import os
 import csv
+import json
+import hashlib
 from pathlib import Path
 
 import ROOT
@@ -1966,6 +1968,7 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
     new_fitter.fit_multi_peaks_kwargs = kwargs
     return new_fitter
 
+
 #############################################################################
 # Fit including runs where high energy protons may not be recorded correctly.
 #############################################################################
@@ -1984,13 +1987,76 @@ proton_binning = (4000//5, 0, 4000)
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
-force_refit=True
+force_refit=False
 ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 loc_wiggle = 15
+
+
+def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_name='protons_le', 
+            ga_spec=pspec_low_energy_60Ga, zn_spec=pspec_59Zn):
+    '''
+    Always reload the csv file so I can change it easily when iterating on fits, and then call the function
+    again in the interactive interpreter. Save the results in tpc_spectrum_fitting/folder_name.
+    Generate a hash based on peak guesses, histograms passed in, and arguments passed to multipeak fit for 
+    bg model, sigma, etc.
+
+    Return: hash string, spectrum fitter object
+    '''
+    peaks, isotopes = load_peaks_from_csv(peak_guesses_csv)
+    
+    # Hash configuration
+    hist_info = []
+    for h in [ga_spec, zn_spec]:
+        if h:
+            hist_info.append((h.GetName(), h.GetTitle(), h.GetEntries()))
+            
+    hash_dict = {
+        'args': args_for_multipeak_fit,
+        'peaks': peaks,
+        'isotopes': isotopes,
+        'histograms': hist_info
+    }
+    
+    # Serialize to JSON, converting non-serializable elements to string if needed
+    try:
+        hash_str_repr = json.dumps(hash_dict, sort_keys=True).encode('utf-8')
+    except TypeError:
+        # Fallback to string repr if dict contains non-serializable objects (like functions)
+        hash_str_repr = repr(hash_dict).encode('utf-8')
+        
+    hash_str = hashlib.md5(hash_str_repr).hexdigest()[:8]
+    
+    save_dir = os.path.join(fit_path, folder_name)
+    os.makedirs(save_dir, exist_ok=True)
+    save_name = os.path.join(save_dir, f'fit_{hash_str}')
+    
+    # Save the config info
+    info_path = save_name + "_info.json"
+    with open(info_path, 'w') as f:
+        try:
+            json.dump(hash_dict, f, indent=4)
+        except TypeError:
+            json.dump({k: str(v) for k, v in hash_dict.items()}, f, indent=4)
+            
+    spectra = [s for s in [ga_spec, zn_spec] if s is not None]
+    fitter = fit_multi_peaks(spectra, peaks, save_name=save_name, peak_isotopes=isotopes, **args_for_multipeak_fit)
+    
+    return hash_str, fitter
+
+
+def load_fit(hash_str, folder_name='protons_le'):
+    '''
+    Return spectrum fitter associated with the hash string
+    '''
+    save_name = os.path.join(fit_path, folder_name, f'fit_{hash_str}.root')
+    if not os.path.exists(save_name):
+        raise FileNotFoundError(f"Could not find fit file at {save_name}")
+        
+    return spectrum_fitter.load_spectrum_fitter_from_file(save_name)
 #initial fitter with no peaks, and a fit window of 600 to 2900 keV
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
-bg_shift_upper_bound = 10*0.5/(2000/5) 
+bg_shift_upper_bound = 2*0.5/(2000/5) 
 isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
 
 # # 1. Run Differential Evolution to find starting locations and save to CSV
@@ -2016,28 +2082,29 @@ isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
 # proton_peak_guesses, peak_isotopes = load_peaks_from_csv('de_proton_peaks.csv')
 
 # 3. Run the final Minuit fit
-proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
-fs = [fit_multi_peaks(
-        [pspec_low_energy_60Ga, pspec_59Zn], 
-        proton_peak_guesses,
-        save_path_initial, force_refit=force_refit,
-        additional_param_bounds={}, 
-        loc_wiggle=loc_wiggle,
-        bg_model='chebyshev',
-        bg_order=5,
-        fraction_bernstein_order={'61Ge': 1, 'default': 3},
-        # sigma_bernstein_order=2,
-        # bg_shift_bernstein_order=2,
-        sigma_monotonic_bernstein_order=4,
-        bg_shift_monotonic_bernstein_order=4,
-        bg_shift_upper_bound=bg_shift_upper_bound,
-        sigma_min=10,
-        sigma_max=200,
-        peak_isotopes=peak_isotopes,
-        use_de=False
-    )]
+fs = []
+for bg_order in range(2, 6):
+    for sigma_order in range(4):
+        for frac_order in range(4):
+            args_for_multipeak_fit = {
+                'force_refit': force_refit,
+                'additional_param_bounds': {},
+                'loc_wiggle': loc_wiggle,
+                'bg_model': 'chebyshev',
+                'bg_order': bg_order,
+                'fraction_bernstein_order': frac_order,
+                'sigma_monotonic_bernstein_order': sigma_order,
+                'bg_shift_monotonic_bernstein_order': 2,
+                'bg_shift_upper_bound': bg_shift_upper_bound,
+                'sigma_min': 10,
+                'sigma_max': 200,
+                'use_de': False
+            }
+            hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
+            print(f"Fit with bg_order={bg_order}, sigma_order={sigma_order}, frac_order={frac_order} -> hash {hash_str}")
+            fs.append(f)
 ROOT.gROOT.SetBatch(False)
-fs[0].show_fit_results(0, False, True)
+# f.show_fit_results(0, False, True)
 
 #added 2210, 2275, 2380, 2600
 # add peaks
