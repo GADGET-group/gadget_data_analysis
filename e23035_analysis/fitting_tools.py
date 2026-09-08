@@ -1963,7 +1963,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 
-def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options='LS0QEI', use_de=False, de_loc_wiggle=None, de_only=False, workers=1): 
+def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options='LS0QEI', use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1): 
     """
     Fits a function to a 2D histogram.
     fit_range should be ((x_low, x_high), (y_low, y_high))
@@ -1989,12 +1989,20 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
     
     bin_x_low = x_axis.FindBin(x_low)
     bin_x_high = x_axis.FindBin(x_high)
+    # If the requested high edge matches exactly the lower edge of the found bin, 
+    # we stepped one bin too far into the next region.
+    if abs(x_axis.GetBinLowEdge(bin_x_high) - x_high) < 1e-9:
+        bin_x_high -= 1
+    
     x_low_snap = x_axis.GetBinLowEdge(bin_x_low)
     x_high_snap = x_axis.GetBinUpEdge(bin_x_high)
     n_bins_x = bin_x_high - bin_x_low + 1
     
     bin_y_low = y_axis.FindBin(y_low)
     bin_y_high = y_axis.FindBin(y_high)
+    if abs(y_axis.GetBinLowEdge(bin_y_high) - y_high) < 1e-9:
+        bin_y_high -= 1
+        
     y_low_snap = y_axis.GetBinLowEdge(bin_y_low)
     y_high_snap = y_axis.GetBinUpEdge(bin_y_high)
     n_bins_y = bin_y_high - bin_y_low + 1
@@ -2041,11 +2049,11 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
         f_to_fit.SetNpx(100)
     f_to_fit.SetNpy(100)
 
-    # 3.5 Differential Evolution (Optional)
+    # 3.5 CMA-ES (Optional)
     cpp_func_name = getattr(function_string, "__name__", None)
     
-    if use_de:
-        from scipy.optimize import differential_evolution
+    if use_cmaes:
+        import cma
         
         obj_comp_id = uuid.uuid4().hex[:6]
         use_nll = 'L' in fit_options
@@ -2077,7 +2085,11 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                             
                             if (use_nll) {{
                                 if (fval > 0) {{
-                                    obj += fval - val * std::log(fval);
+                                    if (val > 0) {{
+                                        obj += 2.0 * (fval - val + val * std::log(val / fval));
+                                    }} else {{
+                                        obj += 2.0 * fval;
+                                    }}
                                 }} else {{
                                     obj += 1e9; // penalty for non-positive values in likelihood
                                 }}
@@ -2108,10 +2120,9 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                     calc_obj_vec(sub_hist, 1, len(p_cpp), p_cpp, use_nll, obj_arr, workers)
                     return obj_arr[0]
                 else:
-                    # SciPy passes p_array with shape (N, S) where N is number of parameters
-                    p_transposed = p_array.T
-                    S, N = p_transposed.shape
-                    p_cpp = np.ascontiguousarray(p_transposed, dtype=np.float64).ravel()
+                    # CMA-ES passes p_array with shape (S, N) where N is number of parameters
+                    S, N = p_array.shape
+                    p_cpp = np.ascontiguousarray(p_array, dtype=np.float64).ravel()
                     obj_arr = np.zeros(S, dtype=np.float64)
                     calc_obj_vec(sub_hist, S, N, p_cpp, use_nll, obj_arr, workers)
                     return obj_arr
@@ -2131,7 +2142,11 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                         double fval = f2->EvalPar(x, p);
                         if (use_nll) {{
                             if (fval > 0) {{
-                                obj += fval - val * std::log(fval);
+                                if (val > 0) {{
+                                    obj += 2.0 * (fval - val + val * std::log(val / fval));
+                                }} else {{
+                                    obj += 2.0 * fval;
+                                }}
                             }} else {{
                                 obj += 1e9; // penalty for non-positive values in likelihood
                             }}
@@ -2152,14 +2167,13 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                     p_cpp = np.array(p, dtype=np.float64)
                     return calc_obj(sub_hist, f_to_fit, p_cpp, use_nll)
                 else:
-                    # If vectorized=True is passed but we are in fallback, we must loop in Python
                     return np.array([calc_obj(sub_hist, f_to_fit, np.array(row, dtype=np.float64), use_nll) for row in p])
         
-        de_bounds = []
+        cma_bounds = []
         for i in range(n_params):
             low, high = bounds[i]
             if low >= high:
-                de_bounds.append((low, low + 1e-9))
+                cma_bounds.append((low, low + 1e-9))
             elif low == -np.inf or high == np.inf:
                 val = initial_values[i]
                 width = abs(val) if val != 0 else 1.0
@@ -2167,88 +2181,88 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                 b_h = high if high != np.inf else val + 100*width
                 if b_l >= b_h:
                     b_h = b_l + 1.0
-                de_bounds.append((b_l, b_h))
+                cma_bounds.append((b_l, b_h))
             else:
-                de_bounds.append((low, high))
+                cma_bounds.append((low, high))
                 
 
-        print(f"Running Differential Evolution for starting guesses (workers={workers})...")
+        print(f"Running CMA-ES for starting guesses (workers={workers})...")
         
-        # State for early stopping
-        early_stop_state = {'best_xk': None, 'no_improve_count': 0}
-
-        def de_callback(xk, convergence=None):
-            import inspect
-            std_energy = None
-            try:
-                # Scipy >= 1.12 passes OptimizeResult to the callback directly
-                if hasattr(xk, 'population_energies'):
-                    std_energy = np.std(xk.population_energies)
-                else:
-                    # For older Scipy versions, the convergence parameter is calculated purely 
-                    # using `tol`. If `tol=0`, convergence is always exactly 0.0. 
-                    # We can grab the exact population energies directly from the solver in the call stack!
-                    frame = inspect.currentframe().f_back
-                    while frame:
-                        if 'self' in frame.f_locals and hasattr(frame.f_locals['self'], 'population_energies'):
-                            std_energy = np.std(frame.f_locals['self'].population_energies)
-                            break
-                        frame = frame.f_back
-            except Exception:
-                pass
-
-            if std_energy is not None:
-                print(f"  -> Population Energy Std Dev: {std_energy:.4f} (Target: <= 100)")
-            elif convergence is not None:
-                print(f"  -> Fractional convergence: {convergence:.4e} (stops at 1.0)")
+        # CMA-ES setup — start from the provided initial_values (which may come from a prior fit)
+        # Use CMA_stds to scale the search spread separately for each parameter based on its bound width.
+        stds = [(b[1] - b[0]) for b in cma_bounds]
+        sigma0 = 0.1 # 10% of the bound width for each parameter
+        x0 = list(initial_values)
+        
+        opts = {
+            'bounds': [[b[0] for b in cma_bounds], [b[1] for b in cma_bounds]],
+            'CMA_stds': stds,
+            'verbose': -9,
+            'maxiter': 100000,
+            # We only need CMA-ES to find the valley containing the global minimum; Minuit
+            # refines from there. The objective is an NLL, so a spread of 1 across the
+            # population (and across the recent best-of-generation history) is converged
+            # enough to hand off. The pycma default of 1e-11 is absolute and therefore
+            # unreachable at this objective scale.
+#            'tolfun': 1.0,
+        }
+        
+        es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
+        early_stop_state = {'best_obj': np.inf, 'no_improve_count': 0}
+        
+        while not es.stop():
+            solutions = es.ask()
+            
+            # Explicitly evaluate the initial guess in the first generation 
+            # so the best objective starts at least as good as the prior fit!
+            if es.countiter == 1:
+                solutions[0] = np.array(x0)
                 
+            fitnesses = objective(np.array(solutions))
+            es.tell(solutions, fitnesses)
+            
+            if es.countiter % 50 == 0:
+                print(f"  -> Iteration {es.countiter:4d}: Best Objective = {es.result.fbest:.4e} (No improvement for {early_stop_state['no_improve_count']} steps)")
+            
             # Early stopping check
-            if early_stop_state['best_xk'] is not None and np.array_equal(xk, early_stop_state['best_xk']):
+            best_obj = es.result.fbest
+            if best_obj >= early_stop_state['best_obj']:
                 early_stop_state['no_improve_count'] += 1
-                print('no improvement in %d steps'%early_stop_state['no_improve_count'])
             else:
-                early_stop_state['best_xk'] = np.copy(xk)
+                early_stop_state['best_obj'] = best_obj
                 early_stop_state['no_improve_count'] = 0
                 
-            if early_stop_state['no_improve_count'] >= 10000:
-                print(f"  -> Terminating early: No improvement in best vector for 1000 steps.")
-                return True # Returning True from callback halts differential_evolution
+            if early_stop_state['no_improve_count'] >= 1000:
+                print(f"  -> Terminating early: No improvement in best obj for 1000 steps.")
+                break
 
-        # Since this objective is a log-likelihood or chi2, its absolute mean can be 
-        # huge (e.g. millions). Using a relative `tol` like 0.01 would evaluate to 
-        # 10,000+ and terminate instantly. 
-        # Instead, we rely purely on `atol`. Since this DE is just finding a starting 
-        # guess for Minuit, we don't need perfect convergence (std=1). 
-        # atol=100 is often a good sweet spot to find the right valley without over-optimizing.
-        res = differential_evolution(
-            objective, 
-            de_bounds, 
-            #strategy='rand1bin',
-            disp=True, 
-            atol=100, 
-            tol=0, 
-            vectorized=True, 
-            maxiter=1000000,
-            callback=de_callback
-        )
-        print(f"DE finished with status: {res.success}, message: {res.message}")
+        res_x = es.result.xbest
+        # `verbose: -9` silences pycma, so report which criterion actually ended the run.
+        stop_reason = dict(es.stop()) or {'no_improvement_1000_generations': True}
+        print(f"CMA-ES finished after {es.countiter} generations. Best objective: {es.result.fbest}")
+        print(f"  -> Stop reason: {stop_reason}")
         
-        if de_only:
+        if cmaes_only:
             # Re-apply bounds just to set the parameters in f_to_fit to the optimum
             for i in range(n_params):
-                f_to_fit.SetParameter(i, res.x[i])
+                f_to_fit.SetParameter(i, res_x[i])
             return None, canvas, sub_hist, f_to_fit, None, None
         
         # Set the optimized values back into initial_values
         for i in range(n_params):
-            initial_values[i] = res.x[i]
+            initial_values[i] = res_x[i]
             
-        # Update bounds if de_loc_wiggle is provided
-        if de_loc_wiggle is not None and names is not None:
+        # Narrow the mu bounds around the CMA-ES optimum so Minuit refines locally. An infinite
+        # wiggle means mu was deliberately left free across the fit window, so leave it alone.
+        # The narrowed range is intersected with the incoming bounds: those already encode the
+        # wiggle around the original guess (or the fit window), and re-centering on the CMA-ES
+        # optimum must not widen the search past them.
+        if cmaes_loc_wiggle is not None and not np.isinf(cmaes_loc_wiggle) and names is not None:
             for i in range(n_params):
                 if names[i].startswith('mu'):
-                    opt_mu = res.x[i]
-                    bounds[i] = (opt_mu - de_loc_wiggle, opt_mu + de_loc_wiggle)
+                    opt_mu = res_x[i]
+                    low, high = bounds[i]
+                    bounds[i] = (max(low, opt_mu - cmaes_loc_wiggle), min(high, opt_mu + cmaes_loc_wiggle))
                     
         # Re-apply bounds to f_to_fit for Minuit
         for i in range(n_params):
@@ -2312,7 +2326,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_de=False, de_loc_wiggle=None, de_only=False, workers=1):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None):
     if param_bounds is None:
         param_bounds = {}
     e_low, e_high = fit_window
@@ -2587,14 +2601,26 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
 
     fit_range = ((e_low, e_high), (-0.5, n_spectra - 0.5))
     
+    if custom_initial_values:
+        missing_params = []
+        for i, name in enumerate(pm.names):
+            if name in custom_initial_values:
+                pm.initial_values[i] = custom_initial_values[name]
+            else:
+                missing_params.append(name)
+        if missing_params:
+            print(f"DEBUG: custom_initial_values was missing parameters: {missing_params}")
+        else:
+            print("DEBUG: All parameters successfully loaded from custom_initial_values!")
+                
     fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
         h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options,
-        use_de=use_de, de_loc_wiggle=de_loc_wiggle, de_only=de_only, workers=workers
+        use_cmaes=use_cmaes, cmaes_loc_wiggle=cmaes_loc_wiggle, cmaes_only=cmaes_only, workers=workers
     )
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_de=False, de_loc_wiggle=None, de_only=False, workers=1):
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None):
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:
@@ -2842,9 +2868,14 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
 
     fit_range = ((e_low, e_high), (-0.5, n_spectra - 0.5))
     
+    if custom_initial_values:
+        for i, name in enumerate(pm.names):
+            if name in custom_initial_values:
+                pm.initial_values[i] = custom_initial_values[name]
+
     fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
         h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options,
-        use_de=use_de, de_loc_wiggle=de_loc_wiggle, de_only=de_only, workers=workers
+        use_cmaes=use_cmaes, cmaes_loc_wiggle=cmaes_loc_wiggle, cmaes_only=cmaes_only, workers=workers
     )
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm

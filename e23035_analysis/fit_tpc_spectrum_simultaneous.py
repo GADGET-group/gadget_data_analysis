@@ -45,31 +45,143 @@ def load_peaks_from_csv(filename):
 def get_save_path(save_name):
     return os.path.join(fit_path,save_name)
 
-def find_de_guesses(spectra, fit_window, isotopes_list, save_csv_name, **kwargs):
+# Peak locations round-trip through the guess CSVs, so build them at the same precision the
+# CSV is written with: the bound functions from _build_param_bounds are keyed by peak
+# location, and a location that changed in the 4th decimal on the way back in would miss.
+_LOC_PRECISION = 3
+
+
+def _round_peak_loc(loc):
+    return float(f'{loc:.{_LOC_PRECISION}f}')
+
+
+def _write_peaks_csv(peaks, isotopes, csv_path):
+    '''
+    Inverse of load_peaks_from_csv: write peaks/isotopes back out in the format it expects,
+    so a peak list built in memory (e.g. by add_peak_to_fit) can be fit -- and hashed --
+    by try_fit like any hand-written guess CSV.
+    '''
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Window', 'Location', 'Isotope'])
+        for i, (locs, w_start, w_end) in enumerate(peaks):
+            isos = isotopes[i] if isotopes and i < len(isotopes) else []
+            for j, loc in enumerate(locs):
+                window = f'{w_start:.{_LOC_PRECISION}f}-{w_end:.{_LOC_PRECISION}f}' if j == 0 else ''
+                iso = isos[j] if j < len(isos) else 'unknown'
+                writer.writerow([window, f'{loc:.{_LOC_PRECISION}f}', iso])
+    return csv_path
+
+
+def _json_safe(obj):
+    '''
+    Convert obj into something json.dumps can serialize the same way every run.
+
+    try_fit hashes its configuration, so anything json cannot handle -- above all the
+    parameter-bound closures built by _build_param_bounds -- has to be replaced by a stable
+    name rather than by repr(), whose memory addresses would change the hash on every run.
+    Anything json already handles is passed through unchanged so previously computed hashes
+    stay valid.
+    '''
+    if obj is None or isinstance(obj, (str, bool, int, float)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return [_json_safe(v) for v in obj.tolist()]
+    if callable(obj):
+        return getattr(obj, '__qualname__', getattr(obj, '__name__', type(obj).__name__))
+    return f'<{type(obj).__name__}>'
+
+def find_cmaes_guesses(spectra, fit_window=None, isotopes_list=None, save_csv_name='cmaes_proton_peaks.csv', initial_fitter=None, folder_name=None, **kwargs):
     """
-    Runs Differential Evolution to find optimal starting locations for the peaks,
+    Runs CMA-ES to find optimal starting locations for the peaks,
     then saves the results in the CSV format expected by load_peaks_from_csv.
     """
-    window_start, window_end = fit_window
-    n_peaks = len(isotopes_list)
+    # This is a location *search*, so by default mu is free across the whole fit window
+    # (np.inf wiggle). A caller starting from real guesses may still pass a finite loc_wiggle.
+    kwargs.setdefault('loc_wiggle', np.inf)
+
+    if initial_fitter is not None:
+        res = initial_fitter.fit_results[0]
+        f_to_fit = res.get('f_to_fit_2d') or res.get('f_to_fit')
+        
+        peaks_info = initial_fitter.peaks_to_fit[0]
+        window_start, window_end = peaks_info[1], peaks_info[2]
+        
+        fitted_guesses = []
+        n_peaks = len(peaks_info[0])
+        for i in range(n_peaks):
+            par_name = f"mu_{i}" if n_peaks > 1 else "mu"
+            par_idx = f_to_fit.GetParNumber(par_name)
+            if par_idx >= 0:
+                fitted_guesses.append(f_to_fit.GetParameter(par_idx))
+            else:
+                fitted_guesses.append(peaks_info[0][i])
+                
+        peaks_arg = [(fitted_guesses, window_start, window_end)]
+        
+        # Extract all optimized parameters to seed CMA-ES perfectly
+        custom_initial_values = {}
+        for i in range(f_to_fit.GetNpar()):
+            custom_initial_values[f_to_fit.GetParName(i)] = f_to_fit.GetParameter(i)
+        kwargs['custom_initial_values'] = custom_initial_values
+        
+        peak_isotopes = kwargs.get('peak_isotopes')
+        if not peak_isotopes:
+            peak_isotopes = initial_fitter.fit_multi_peaks_kwargs.get('peak_isotopes')
+            if peak_isotopes is not None:
+                kwargs['peak_isotopes'] = peak_isotopes
+            
+        if not peak_isotopes:
+             raise ValueError("peak_isotopes must be provided in kwargs or exist in initial_fitter")
+             
+        isotopes_list = peak_isotopes[0]
+    else:
+        if fit_window is None:
+            raise ValueError("fit_window=(start, stop) is required when initial_fitter is not given")
+        if not isotopes_list:
+            raise ValueError("isotopes_list is required when initial_fitter is not given")
+        window_start, window_end = fit_window
+        n_peaks = len(isotopes_list)
+        
+        # Generate evenly spaced dummy locations across the window. These carry no location
+        # information, so mu must be free to roam regardless of what the caller asked for.
+        kwargs['loc_wiggle'] = np.inf
+        spacing = (window_end - window_start) / (n_peaks + 1)
+        dummy_guesses = [window_start + (i + 1) * spacing for i in range(n_peaks)]
+        
+        peaks_arg = [(dummy_guesses, window_start, window_end)]
+        peak_isotopes = [isotopes_list]
+        kwargs['peak_isotopes'] = peak_isotopes
     
-    # Generate evenly spaced dummy locations across the window
-    spacing = (window_end - window_start) / (n_peaks + 1)
-    dummy_guesses = [window_start + (i + 1) * spacing for i in range(n_peaks)]
-    
-    peaks_arg = [(dummy_guesses, window_start, window_end)]
-    peak_isotopes = [isotopes_list]
-    
-    # We pass de_only=True so it stops before the Minuit fit and returns the f_to_fit populated with DE results
+    # We pass cmaes_only=True so it stops before the Minuit fit and returns the f_to_fit populated with CMA-ES results
     workers = kwargs.pop('workers', 1)
-    fs = fit_multi_peaks(spectra, peaks_arg, save_name=save_csv_name.replace('.csv', ''), 
-                         peak_isotopes=peak_isotopes, use_de=True, de_only=True, force_refit=True, workers=workers, **kwargs)
+    kwargs.pop('use_cmaes', None)
+    kwargs.pop('cmaes_only', None)
+    kwargs.pop('force_refit', None)
+    
+    if folder_name:
+        csv_path = os.path.join(fit_path, folder_name, save_csv_name)
+        root_save_name = os.path.join(fit_path, folder_name, save_csv_name.replace('.csv', ''))
+    else:
+        csv_path = get_save_path(save_csv_name)
+        root_save_name = save_csv_name.replace('.csv', '')
+        
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    
+    fs = fit_multi_peaks(spectra, peaks_arg, save_name=root_save_name, 
+                         use_cmaes=True, cmaes_only=True, force_refit=True, workers=workers, **kwargs)
     
     # Extract the optimized mu values from the fit results
     # For a single window fit, fs.fit_results[0] holds the results dictionary
     f_to_fit = fs.fit_results[0]['f_to_fit_2d']
     
-    csv_path = get_save_path(save_csv_name)
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Window', 'Location', 'Isotope'])
@@ -83,13 +195,47 @@ def find_de_guesses(spectra, fit_window, isotopes_list, save_csv_name, **kwargs)
             else:
                 writer.writerow(["", f"{mu_val:.3f}", iso])
                 
-    print(f"DE guesses successfully saved to {csv_path}")
+    # The CSV only carries the peak locations, but CMA-ES also optimized the background,
+    # sigma, amplitude and bg_shift models. Dump the full parameter vector so the follow-up
+    # Minuit fit can be seeded with it via `custom_initial_values` -- otherwise those
+    # parameters get reset to their canned guesses and Minuit can slide out of the valley
+    # CMA-ES just found. See load_cmaes_params().
+    params_path = csv_path.replace('.csv', '_params.json')
+    cmaes_params = {f_to_fit.GetParName(i): f_to_fit.GetParameter(i)
+                    for i in range(f_to_fit.GetNpar())}
+    with open(params_path, 'w') as pf:
+        json.dump(cmaes_params, pf, indent=4)
+
+    print(f"CMA-ES guesses successfully saved to {csv_path}")
+    print(f"CMA-ES full parameter vector ({len(cmaes_params)} params) saved to {params_path}")
     return csv_path
+
+
+def load_cmaes_params(save_csv_name, folder_name=None):
+    '''
+    Load the full parameter vector written by find_cmaes_guesses, for use as
+    `custom_initial_values` in the follow-up Minuit fit.
+
+    Pass the same save_csv_name/folder_name that were given to find_cmaes_guesses.
+    '''
+    if folder_name:
+        csv_path = os.path.join(fit_path, folder_name, save_csv_name)
+    else:
+        csv_path = get_save_path(save_csv_name)
+
+    params_path = csv_path.replace('.csv', '_params.json')
+    if not os.path.exists(params_path):
+        raise FileNotFoundError(
+            f"No CMA-ES parameter dump at {params_path}. Re-run find_cmaes_guesses to generate it."
+        )
+
+    with open(params_path, 'r') as pf:
+        return json.load(pf)
 
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
-                    use_de=False, de_only=False, workers=1):
+                    custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1):
     
     def _pow_str(base, exp):
         if exp == 0: return "1.0"
@@ -105,7 +251,11 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         for p in additional_param_bounds:
             f.param_bound_functions[p] = additional_param_bounds[p]
     else:
-        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order, use_de=use_de, de_only=de_only, workers=workers)
+        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order, 
+                                                  use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers)
+        if custom_initial_values:
+            f.custom_initial_values = custom_initial_values
+        
         if sigma_monotonic_bernstein_order is not None:
             import math
             e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
@@ -380,7 +530,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         if not likelihood:
             f.fit_options = f.fit_options.replace('L','')
         f.fit_peaks()
-        if de_only:
+        if cmaes_only:
             return f
     
     failed_fits = []
@@ -766,7 +916,10 @@ def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_
     # Add back the initial guesses we extracted
     for i, p in enumerate(merged_peaks):
         if p in fitted_mus:
-            merged_param_bounds[f'mu_{i}'] = lambda E, p=p, val=fitted_mus[p], w=loc_wiggle: (val, p - w, p + w)
+            if np.isinf(loc_wiggle):
+                merged_param_bounds[f'mu_{i}'] = lambda E, val=fitted_mus[p], lo=global_start, hi=global_end: (val, lo, hi)
+            else:
+                merged_param_bounds[f'mu_{i}'] = lambda E, p=p, val=fitted_mus[p], w=loc_wiggle: (val, p - w, p + w)
         if p in fitted_amps:
             for spec_idx, amp_val in fitted_amps[p].items():
                 merged_param_bounds[f'amplitude_{i}_{spec_idx}'] = lambda E, val=amp_val: (val, 1e-3, 1e6)
@@ -1657,19 +1810,87 @@ def show_backgrounds(fitter_or_filename):
 #############################################################################
 # Fit helper functions to add/remove peaks and fix previous parameters
 #############################################################################
-def _get_fitter_iteration_name(fitter):
-    import re
-    save_name = getattr(fitter, 'save_name', 'modified_fit')
+def _get_fitter_parent_info(fitter):
+    '''
+    Locate the fit being modified: the folder its files live in (relative to fit_path, the way
+    try_fit wants it) and the try_fit hash that produced it. The hash is what ties a modified
+    fit back to the one it came from; a fitter that did not come from try_fit gets 'manual'.
+    '''
+    save_name = getattr(fitter, 'save_name', '') or ''
     if not save_name:
-        save_name = 'modified_fit'
-    match = re.search(r'_(\d+)$', save_name)
-    if match:
-        base_name = save_name[:match.start()]
-        iteration = int(match.group(1)) + 1
-    else:
-        base_name = save_name
-        iteration = 1
-    return f"{base_name}_{iteration}"
+        return 'protons_le', 'manual'
+
+    folder_name = os.path.relpath(os.path.dirname(os.path.abspath(save_name)), fit_path)
+    if folder_name == '.':
+        folder_name = ''
+
+    base = os.path.basename(save_name)
+    parent_hash = base[len('fit_'):] if base.startswith('fit_') else (base or 'manual')
+    return folder_name, parent_hash
+
+
+def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+                          operation, details, fix_params, refit):
+    '''
+    Turn a modified peak list into a try_fit call: write the peaks out as a guess CSV next to
+    the parent fit and assemble the keyword arguments that refit them with the parent's fitted
+    values seeded in through merged_param_bounds.
+
+    Going through try_fit (rather than calling fit_multi_peaks directly) is what gives the
+    modified fit a hash, an _info.json recording where it came from, and a load_fit() handle.
+
+    Returns (hash string, new fitter) if refit, otherwise the try_fit(**kwargs) dict to run later.
+    '''
+    folder_name, parent_hash = _get_fitter_parent_info(fitter)
+
+    kwargs = getattr(fitter, 'fit_multi_peaks_kwargs', {}).copy()
+    # try_fit passes the isotopes it loads from the CSV, so it must not also get them here.
+    kwargs.pop('peak_isotopes', None)
+    # Adding or removing a peak renumbers the peak-indexed parameters, so initial values
+    # inherited from the parent would seed mu_i/amplitude_i from a different peak -- possibly
+    # outside the bounds built below. The global (background/sigma/bg_shift) seeds still line
+    # up by name, so keep only those.
+    custom_initial_values = kwargs.get('custom_initial_values')
+    if custom_initial_values:
+        kwargs['custom_initial_values'] = {
+            name: value for name, value in custom_initial_values.items()
+            if not name.startswith(('mu', 'amplitude', 'total_amp'))
+        }
+    kwargs['additional_param_bounds'] = merged_param_bounds
+    kwargs['loc_wiggle'] = fitter.location_wiggle
+    kwargs['force_refit'] = True
+
+    provenance = {
+        'operation': operation,
+        'parent_hash': parent_hash,
+        'fix_params': fix_params,
+        # merged_param_bounds are closures over the parent's fitted parameters, and closures
+        # hash to nothing useful. Hash the values they close over instead, so two fits that
+        # differ only in what they were seeded with get different hashes.
+        'seed_params': old_window_bounds,
+    }
+    provenance.update(details)
+
+    peaks_digest = hashlib.md5(
+        json.dumps(_json_safe([new_peaks, new_isotopes]), sort_keys=True).encode('utf-8')
+    ).hexdigest()[:8]
+    csv_name = os.path.join(folder_name, f'peaks_{parent_hash}_{operation}_{peaks_digest}.csv')
+    _write_peaks_csv(new_peaks, new_isotopes, os.path.join(fit_path, csv_name))
+
+    try_fit_kwargs = {
+        'args_for_multipeak_fit': kwargs,
+        'peak_guesses_csv': csv_name,
+        'folder_name': folder_name,
+        'spectra': fitter.spectra,
+        'extra_hash_info': provenance,
+    }
+
+    if not refit:
+        print(f"Wrote modified peak list to {os.path.join(fit_path, csv_name)}. "
+              f"Not refitting (refit=False); run try_fit(**returned_kwargs) when ready.")
+        return try_fit_kwargs
+
+    return try_fit(**try_fit_kwargs)
 
 def _extract_fitter_bounds(fitter):
     import ctypes
@@ -1793,7 +2014,7 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
         
     return merged_param_bounds
 
-def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False):
+def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True):
     '''
     Removes one or more peaks from an existing fit.
     
@@ -1808,11 +2029,19 @@ def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False):
         If True, all previously fitted parameters are strictly fixed to their exact prior values.
         If False, the previously fitted values are used as the starting initial guesses for 
         the new fit, but are allowed to float and adjust.
+    refit : bool
+        If True (the default), immediately refit through try_fit and return (hash string, new
+        fitter). If False, only write the modified peak CSV and assemble the arguments; nothing
+        is fit and the try_fit keyword arguments are returned so the fit can be run later with
+        try_fit(**returned_kwargs).
+
+    Returns:
+    (str, SpectrumFitter) if refit, else dict
+        The hash and fitter from try_fit, or the try_fit keyword arguments to run later.
     '''
     if isinstance(peaks_to_remove, tuple) and len(peaks_to_remove) == 2 and isinstance(peaks_to_remove[0], int):
         peaks_to_remove = [peaks_to_remove]
         
-    new_save_name = _get_fitter_iteration_name(fitter)
     old_window_bounds = _extract_fitter_bounds(fitter)
     
     new_peaks = []
@@ -1829,38 +2058,27 @@ def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False):
             if (i, j) not in peaks_to_remove:
                 old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
                 fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-                new_locs.append(fitted_mu)
+                new_locs.append(_round_peak_loc(fitted_mu))
                 if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
                     new_isos.append(original_isotopes[i][j])
                 old_to_new_idx[j] = new_idx
                 new_idx += 1
                 
         if new_locs:
-            new_peaks.append((new_locs, w_start, w_end))
+            new_peaks.append((new_locs, _round_peak_loc(w_start), _round_peak_loc(w_end)))
             if new_isos:
                 new_isotopes.append(new_isos)
             window_mapping[new_locs[0]] = (i, old_to_new_idx)
 
     merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
 
-    kwargs = getattr(fitter, 'fit_multi_peaks_kwargs', {}).copy()
-    if new_isotopes:
-        kwargs['peak_isotopes'] = new_isotopes
-        
-    new_fitter = fit_multi_peaks(
-        fitter.spectra, 
-        new_peaks,
-        new_save_name,
-        force_refit=True,
-        additional_param_bounds=merged_param_bounds,
-        loc_wiggle=fitter.location_wiggle,
-        **kwargs
+    return _prepare_modified_fit(
+        fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+        'rm', {'peaks_removed': sorted([list(peak) for peak in peaks_to_remove])},
+        fix_params, refit
     )
-    new_fitter.save_name = new_save_name
-    new_fitter.fit_multi_peaks_kwargs = kwargs
-    return new_fitter
 
-def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=False):
+def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=False, refit=True):
     '''
     Adds one or more new peaks to an existing fit.
     
@@ -1877,17 +2095,23 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
         If True, all previously fitted parameters are strictly fixed to their exact prior values.
         If False, the previously fitted values are used as the starting initial guesses for 
         the new fit, but are allowed to float and adjust.
+    refit : bool, optional
+        If True (the default), immediately refit through try_fit and return (hash string, new
+        fitter). If False, only write the modified peak CSV and assemble the arguments; nothing
+        is fit and the try_fit keyword arguments are returned so the fit can be run later with
+        try_fit(**returned_kwargs).
         
     Returns:
-    SpectrumFitter
-        A new fitter object with the newly added peak(s) fit alongside the existing ones.
+    (str, SpectrumFitter) if refit, else dict
+        The hash and the new fitter with the added peak(s) fit alongside the existing ones,
+        or the try_fit keyword arguments to run later.
     '''
     if not isinstance(new_peak_loc, (list, tuple)):
         new_peak_loc = [new_peak_loc]
     if not isinstance(new_peak_iso, (list, tuple)):
         new_peak_iso = [new_peak_iso] * len(new_peak_loc)
         
-    new_save_name = _get_fitter_iteration_name(fitter)
+    new_peak_loc = [_round_peak_loc(loc) for loc in new_peak_loc]
     old_window_bounds = _extract_fitter_bounds(fitter)
     
     new_peaks = []
@@ -1917,7 +2141,7 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
         for j, loc in enumerate(locs):
             old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
             fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-            new_locs.append(fitted_mu)
+            new_locs.append(_round_peak_loc(fitted_mu))
             source_idx.append(j)
             if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
                 new_isos.append(original_isotopes[i][j])
@@ -1944,29 +2168,18 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
                     w_start = min(w_start, p_loc - 100)
                     w_end = max(w_end, p_loc + 100)
                     
-            new_peaks.append((sorted_new_locs, w_start, w_end))
+            new_peaks.append((sorted_new_locs, _round_peak_loc(w_start), _round_peak_loc(w_end)))
             if sorted_new_isos:
                 new_isotopes.append(sorted_new_isos)
             window_mapping[sorted_new_locs[0]] = (i, old_to_new_idx)
 
     merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
 
-    kwargs = getattr(fitter, 'fit_multi_peaks_kwargs', {}).copy()
-    if new_isotopes:
-        kwargs['peak_isotopes'] = new_isotopes
-        
-    new_fitter = fit_multi_peaks(
-        fitter.spectra, 
-        new_peaks,
-        new_save_name,
-        force_refit=True,
-        additional_param_bounds=merged_param_bounds,
-        loc_wiggle=fitter.location_wiggle,
-        **kwargs
+    return _prepare_modified_fit(
+        fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+        'add', {'peaks_added': sorted(zip(new_peak_loc, new_peak_iso))},
+        fix_params, refit
     )
-    new_fitter.save_name = new_save_name
-    new_fitter.fit_multi_peaks_kwargs = kwargs
-    return new_fitter
 
 
 #############################################################################
@@ -1990,24 +2203,36 @@ pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, pr
 force_refit=False
 ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-loc_wiggle = 15
+#loc_wiggle = 15
 
 
 def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_name='protons_le', 
-            ga_spec=pspec_low_energy_60Ga, zn_spec=pspec_59Zn):
+            ga_spec=pspec_low_energy_60Ga, zn_spec=pspec_59Zn, spectra=None, extra_hash_info=None):
     '''
     Always reload the csv file so I can change it easily when iterating on fits, and then call the function
     again in the interactive interpreter. Save the results in tpc_spectrum_fitting/folder_name.
     Generate a hash based on peak guesses, histograms passed in, and arguments passed to multipeak fit for 
     bg model, sigma, etc.
 
+    spectra : list of histograms, optional
+        Fit these instead of [ga_spec, zn_spec]. Used by add/remove_peak_from_fit to refit the
+        same spectra the parent fitter used.
+    extra_hash_info : dict, optional
+        Extra json-serializable configuration to fold into the hash and the saved info file.
+        add/remove_peak_from_fit pass the provenance of the modified fit (parent hash, which
+        peaks moved, and the parent's fitted parameters that seed the bounds) so that fits
+        differing only in those seeds get different hashes.
+
     Return: hash string, spectrum fitter object
     '''
     peaks, isotopes = load_peaks_from_csv(peak_guesses_csv)
     
+    if spectra is None:
+        spectra = [s for s in [ga_spec, zn_spec] if s is not None]
+
     # Hash configuration
     hist_info = []
-    for h in [ga_spec, zn_spec]:
+    for h in spectra:
         if h:
             hist_info.append((h.GetName(), h.GetTitle(), h.GetEntries()))
             
@@ -2017,14 +2242,14 @@ def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_
         'isotopes': isotopes,
         'histograms': hist_info
     }
+    if extra_hash_info is not None:
+        hash_dict['provenance'] = extra_hash_info
     
-    # Serialize to JSON, converting non-serializable elements to string if needed
-    try:
-        hash_str_repr = json.dumps(hash_dict, sort_keys=True).encode('utf-8')
-    except TypeError:
-        # Fallback to string repr if dict contains non-serializable objects (like functions)
-        hash_str_repr = repr(hash_dict).encode('utf-8')
-        
+    # Serialize to JSON. _json_safe stands in for anything json can't take (parameter bound
+    # functions, numpy scalars) with a stable name, so the hash of a given configuration is
+    # the same in every interpreter session -- repr() of a lambda would not be.
+    hash_dict = _json_safe(hash_dict)
+    hash_str_repr = json.dumps(hash_dict, sort_keys=True).encode('utf-8')
     hash_str = hashlib.md5(hash_str_repr).hexdigest()[:8]
     
     save_dir = os.path.join(fit_path, folder_name)
@@ -2034,12 +2259,8 @@ def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_
     # Save the config info
     info_path = save_name + "_info.json"
     with open(info_path, 'w') as f:
-        try:
-            json.dump(hash_dict, f, indent=4)
-        except TypeError:
-            json.dump({k: str(v) for k, v in hash_dict.items()}, f, indent=4)
+        json.dump(hash_dict, f, indent=4)
             
-    spectra = [s for s in [ga_spec, zn_spec] if s is not None]
     fitter = fit_multi_peaks(spectra, peaks, save_name=save_name, peak_isotopes=isotopes, **args_for_multipeak_fit)
     
     return hash_str, fitter
@@ -2049,15 +2270,29 @@ def load_fit(hash_str, folder_name='protons_le'):
     '''
     Return spectrum fitter associated with the hash string
     '''
-    save_name = os.path.join(fit_path, folder_name, f'fit_{hash_str}.root')
-    if not os.path.exists(save_name):
-        raise FileNotFoundError(f"Could not find fit file at {save_name}")
+    save_dir = os.path.join(fit_path, folder_name)
+    save_name = os.path.join(save_dir, f'fit_{hash_str}')
+    root_path = save_name + '.root'
+    if not os.path.exists(root_path):
+        raise FileNotFoundError(f"Could not find fit file at {root_path}")
         
-    return spectrum_fitter.load_spectrum_fitter_from_file(save_name)
+    f = spectrum_fitter.load_spectrum_fitter_from_file(root_path)
+    f.save_name = save_name
+    
+    json_path = save_name + '_info.json'
+    if os.path.exists(json_path):
+        import json
+        with open(json_path, 'r') as jf:
+            info = json.load(jf)
+            f.fit_multi_peaks_kwargs = info.get('args', {})
+            f.fit_multi_peaks_kwargs['peak_isotopes'] = info.get('isotopes')
+            f.peaks_to_fit = info.get('peaks')
+            
+    return f
 #initial fitter with no peaks, and a fit window of 600 to 2900 keV
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
 bg_shift_upper_bound = 2*0.5/(2000/5) 
-isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
+# isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
 
 # # 1. Run Differential Evolution to find starting locations and save to CSV
 # find_de_guesses(
@@ -2082,229 +2317,77 @@ isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
 # proton_peak_guesses, peak_isotopes = load_peaks_from_csv('de_proton_peaks.csv')
 
 # 3. Run the final Minuit fit
-fs = []
-for bg_order in range(2, 6):
-    for sigma_order in range(4):
-        for frac_order in range(4):
-            args_for_multipeak_fit = {
-                'force_refit': force_refit,
-                'additional_param_bounds': {},
-                'loc_wiggle': loc_wiggle,
-                'bg_model': 'chebyshev',
-                'bg_order': bg_order,
-                'fraction_bernstein_order': frac_order,
-                'sigma_monotonic_bernstein_order': sigma_order,
-                'bg_shift_monotonic_bernstein_order': 2,
-                'bg_shift_upper_bound': bg_shift_upper_bound,
-                'sigma_min': 10,
-                'sigma_max': 200,
-                'use_de': False
-            }
-            hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
-            print(f"Fit with bg_order={bg_order}, sigma_order={sigma_order}, frac_order={frac_order} -> hash {hash_str}")
-            fs.append(f)
-ROOT.gROOT.SetBatch(False)
-# f.show_fit_results(0, False, True)
+# fs = []
+# for bg_order in range(2, 6):
+#     for sigma_order in range(4):
+#         for frac_order in range(4):
+#             args_for_multipeak_fit = {
+#                 'force_refit': force_refit,
+#                 'additional_param_bounds': {},
+#                 'loc_wiggle': loc_wiggle,
+#                 'bg_model': 'chebyshev',
+#                 'bg_order': bg_order,
+#                 'fraction_bernstein_order': frac_order,
+#                 'sigma_monotonic_bernstein_order': sigma_order,
+#                 'bg_shift_monotonic_bernstein_order': 2,
+#                 'bg_shift_upper_bound': bg_shift_upper_bound,
+#                 'sigma_min': 10,
+#                 'sigma_max': 200,
+#                 'use_de': False
+#             }
+#             hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
+#             print(f"Fit with bg_order={bg_order}, sigma_order={sigma_order}, frac_order={frac_order} -> hash {hash_str}")
+#             fs.append(f)
+args_for_multipeak_fit = {
+    'force_refit': force_refit,
+    'additional_param_bounds': {},
+    'loc_wiggle': 15,
+    'bg_model': 'chebyshev',
+    'bg_order': 2,
+    'fraction_bernstein_order': 2,
+    'sigma_monotonic_bernstein_order': 2,
+    'bg_shift_monotonic_bernstein_order': 2,
+    'bg_shift_upper_bound': bg_shift_upper_bound,
+    'sigma_min': 10,
+    'sigma_max': 200,
+    'use_cmaes': False,
+    'workers': num_workers
+}
 
-#added 2210, 2275, 2380, 2600
-# add peaks
-# peaks_to_add = [2211, 2273]
-# fs.append(add_peak_to_fit(fs[-1], peaks_to_add, len(peaks_to_add)*['60Ga']))
-# peaks_to_add = [2380]
-# fs.append(add_peak_to_fit(fs[-1], peaks_to_add, len(peaks_to_add)*['60Ga']))
-#fs[-1].show_fit_results(0, False, True)
-show_detector_energy_resolution(fs[-1])
-show_peak_fractions(fs[-1])
-show_bg_shifts(fs[-1])
-show_backgrounds(fs[-1])
-
-
-#fs.append(add_peak_to_fit(fs[0], 716, '60Ga')) 
-#show_detector_energy_resolution(f_proton_initial)
-
-
-
-
-
-
-#######################################################################
-#old code
-#######################################################################
+hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
 if False:
-    proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
-    new_peak_guesses, new_peak_isotopes = [],[]
-    loc_wiggle = 10
-    #fill new peak guesses and isotopes with just those from 59Zn peaks
-    #then add a 60Ga peak every 2*loc_wiggle between 600 and 2850 keV
-    for peaks_group, iso_group in zip(proton_peak_guesses, peak_isotopes):
-        locations, window_start, window_end = peaks_group
-        
-        new_locations = [loc for loc, iso in zip(locations, iso_group) if iso == '59Zn']
-        new_isos = ['59Zn'] * len(new_locations)
-        
-        for loc in np.arange(600, 2850 + 1e-5, 2 * loc_wiggle):
-            new_locations.append(float(loc))
-            new_isos.append('60Ga')
-            
-        sorted_pairs = sorted(zip(new_locations, new_isos))
-        new_locations = [p[0] for p in sorted_pairs]
-        new_isos = [p[1] for p in sorted_pairs]
-        
-        new_peak_guesses.append((new_locations, window_start, window_end))
-        new_peak_isotopes.append(new_isos)
+    hash_str = 'd760583a'
+    f = load_fit(hash_str, folder_name='protons_le')
+    print('hash: ', hash_str)
+    isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
+    cmaes_csv_name = f'cmaes_{hash_str}.csv'
+    find_cmaes_guesses([pspec_low_energy_60Ga, pspec_59Zn], 
+                    save_csv_name=cmaes_csv_name, 
+                    #initial_fitter=f, 
+                    fit_window=(550.0, 2900.0),
+                    isotopes_list=isotopes_list,
+                    folder_name='protons_le',
+                    **args_for_multipeak_fit)
 
-    save_path_low = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_low_energy')
-    bg_shift_upper_bound = 0
-    f_proton_simultaneous_low = fit_multi_peaks(
-        [pspec_low_energy_60Ga, pspec_59Zn], 
-        new_peak_guesses,
-        save_path_low, force_refit=force_refit,
-        additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6),
-                                'bg_shift': lambda E: (0, bg_shift_upper_bound)}, 
-        loc_wiggle=loc_wiggle,
-        bg_model='chebyshev',
-        bg_order=5,
-        fraction_bernstein_order={'61Ge': 1, 'default': 2},
-        # sigma_bernstein_order=2,
-        sigma_monotonic_bernstein_order=2,
-        sigma_min=10,
-        sigma_max=200,
-        peak_isotopes=new_peak_isotopes
-    )
+    # Seed Minuit with the whole CMA-ES optimum, not just the peak locations: the CSV only
+    # carries mu, so without this the bg/sigma/amplitude/bg_shift models would be reset to
+    # their canned guesses and the fit would start well outside the valley CMA-ES found.
+    args_after_cmaes = dict(args_for_multipeak_fit)
+    args_after_cmaes['custom_initial_values'] = load_cmaes_params(cmaes_csv_name, folder_name='protons_le')
+
+    hash_str_2, f2 = try_fit(args_after_cmaes, peak_guesses_csv=f'protons_le/{cmaes_csv_name}', folder_name='protons_le')
+    print('hash after cmaes: ', hash_str_2)
+
     ROOT.gROOT.SetBatch(False)
-    f_proton_simultaneous_low.show_fit_results(0, False, True)
-    if False:
-        ecal_simul_low = make_energy_calibration(f_proton_simultaneous_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-        apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy', 'proton_cal_low_energy')
-        print(apply_fit_to_point(ecal_simul_low, 8522.04, 9.35))
-    show_detector_energy_resolution(f_proton_simultaneous_low)
+    # f.show_fit_results(0, False, True)
 
-
-
-# save_path_merged_low = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb')
-# f_proton_simultaneous_merged_low = make_merged_fit(
-#     source_fitter=f_proton_simultaneous_low,
-#     save_name=save_path_merged_low,
-#     force_refit=force_refit,
-#     fit_windows_to_include=None,
-#     bg_model='chebyshev',
-#     bg_order=4,
-#     sigma_poly_order=2,
-#     sigma_min=10.0,
-#     sigma_max=200.0,
-#     sigma_coef_bounds=(-1000, 1000),
-#     loc_wiggle=15
-# )
-# ROOT.gROOT.SetBatch(False)
-# ecal_simul_low = make_energy_calibration(f_proton_simultaneous_merged_low, '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-# apply_fit_to_csv(ecal_simul_low, '60Ga_59Zn_simultaneous_protons_low_energy_merged_cheb', 'proton_cal_low_energy')
-# print(apply_fit_to_point(ecal_simul_low, 8522.04, 9.35))
-# show_detector_energy_resolution(f_proton_simultaneous_merged_low)
-
-if False:
-    #############################################################
-    # Fit using just runs where all proton energies are valid 1 #
-    #############################################################
-    ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-    pspec_all_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_60Ga", "60Ga proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-
-
-    zn_ga_comparison_overlay = root_vis_tools.draw_overlaid_histograms({'60Ga':pspec_all_energy_60Ga, '59Zn':pspec_59Zn}, 'proton spectra')
-    save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons')
-    #no more than 50% of events should be wall effect below 2 MeV b/c range <<200 mm
-    #w/ 5 keV bins, this would put 50%/(2000 keV / (5 keV/bin)) counts per bin wall effect
-    #let's let it go up to 2X this in case my estimate is off
-    proton_peak_guesses, peak_isotopes = load_peaks_from_csv('proton_peaks.csv')
-    bg_shift_upper_bound = 0#2*0.5/(2000/5) 
-    force_refit=False
-    f_proton_simultaneous = fit_multi_peaks(
-        [pspec_all_energy_60Ga, pspec_59Zn], 
-        proton_peak_guesses,
-        save_path, force_refit=force_refit,
-        additional_param_bounds={'bg_slope':lambda E: (-1,1), #if E < 1000 else (0,0),
-                                'amplitude': lambda E:(1e-3, 1e6),
-                                'bg_shift': lambda E: (0, bg_shift_upper_bound),
-                                'sigma_c': lambda E: (0, 10) if E < 1000 else (0, 100)}, 
-        loc_wiggle=15,
-        peak_isotopes=peak_isotopes
-    )
-
-    save_path_merged = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_merged_cheb')
-    f_proton_simultaneous_merged = make_merged_fit(
-        source_fitter=f_proton_simultaneous,
-        save_name=save_path_merged,
-        force_refit=force_refit,
-        fit_windows_to_include=None, # defaults to all
-        bg_model='chebyshev',
-        bg_order=4,
-        sigma_poly_order=2, # You can change this order as needed
-        sigma_min=10.0,
-        sigma_max=200.0,
-        sigma_coef_bounds=(-1000, 1000),
-        loc_wiggle=15
-    )
-    # Display multi-spectrum fit for the first peak
-    #f_proton_simultaneous.show_fit_results(4, False, True)
-    ROOT.gROOT.SetBatch(False)
-
-    ecal_simul = make_energy_calibration(f_proton_simultaneous_merged, '60Ga_59Zn_simultaneous_protons_merged_cheb', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-    apply_fit_to_csv(ecal_simul, '60Ga_59Zn_simultaneous_protons_merged_cheb', 'proton_cal')
-    print(apply_fit_to_point(ecal_simul, 8522.04, 9.35))
-    show_detector_energy_resolution(f_proton_simultaneous_merged)
-
-    #############################################################################
-    # Fit using all datasets over the entire fit range (3 datasets)
-    #############################################################################
-    save_path_all = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_all_3')
-
-    force_refit = False
-    f_proton_simultaneous_all = fit_multi_peaks(
-        [pspec_all_energy_60Ga, pspec_low_energy_60Ga, pspec_59Zn], 
-        proton_peak_guesses,
-        save_path_all, force_refit=force_refit,
-        additional_param_bounds={'bg_slope':lambda E: (-1,1),
-                                'amplitude': lambda E:(1e-3, 1e6),
-                                'bg_shift': lambda E: (0, bg_shift_upper_bound),
-                                'sigma_c': lambda E: (0, 10) if E < 1000 else (0, 100)}, 
-        loc_wiggle=15,
-        peak_isotopes=peak_isotopes
-    )
-
-    save_path_merged_all = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb')
-    f_proton_simultaneous_merged_all = make_merged_fit(
-        source_fitter=f_proton_simultaneous_all,
-        save_name=save_path_merged_all,
-        force_refit=force_refit,
-        fit_windows_to_include=None,
-        bg_model='chebyshev',
-        bg_order=4,
-        sigma_poly_order=2,
-        sigma_min=10.0,
-        sigma_max=200.0,
-        sigma_coef_bounds=(-1000, 1000),
-        loc_wiggle=15
-    )
-
-    additional_peaks = [1000,1950]
-
-    save_path_merged_all_additional = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting', '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb_additional')
-    f_proton_simultaneous_merged_all_additional = make_merged_fit(
-        source_fitter=f_proton_simultaneous_merged_all,
-        save_name=save_path_merged_all_additional,
-        force_refit=force_refit,
-        fit_windows_to_include=None,
-        bg_model='chebyshev',
-        bg_order=4,
-        sigma_poly_order=2,
-        sigma_min=10.0,
-        sigma_max=200.0,
-        sigma_coef_bounds=(-1000, 1000),
-        loc_wiggle=15,
-        additional_peaks=additional_peaks
-    )
-
-    ecal_simul_all = make_energy_calibration(f_proton_simultaneous_merged_all_additional, '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb_additional', 'proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-    apply_fit_to_csv(ecal_simul_all, '60Ga_59Zn_simultaneous_protons_all_3_merged_cheb_additional', 'proton_cal_all_3')
-    print(apply_fit_to_point(ecal_simul_all, 8522.04, 9.35))
-    show_detector_energy_resolution(f_proton_simultaneous_merged_all_additional)
+    #added 2210, 2275, 2380, 2600
+    # add peaks
+    # peaks_to_add = [2211, 2273]
+    # add_hash, f3 = add_peak_to_fit(f2, peaks_to_add, len(peaks_to_add)*['60Ga'])
+    f2.show_fit_results(0, False, True)
+    show_detector_energy_resolution(f2)
+    show_peak_fractions(f2)
+    show_bg_shifts(f2)
+    show_backgrounds(f2)
 

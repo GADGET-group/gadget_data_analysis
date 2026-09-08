@@ -508,19 +508,25 @@ class spectrum_fitter:
             fit_range = (window_start, window_end)
             location_wiggle = self.location_wiggle#(window_end - window_start) / 2.0
 
+            # An infinite location_wiggle means "no wiggle constraint": mu roams the fit window.
+            def mu_bounds(loc):
+                if np.isinf(location_wiggle):
+                    return (window_start, window_end)
+                return (loc - location_wiggle, loc + location_wiggle)
+
             param_bounds = {}
             
             if len(loc_guess) == 1:
                 if 'mu' in self.param_bound_functions:
                     param_bounds['mu'] = self.param_bound_functions['mu'](loc_guess[0])
-                elif 'mu' not in self.param_bound_functions:
-                    param_bounds['mu'] = (loc_guess[0] - location_wiggle, loc_guess[0] + location_wiggle)
+                else:
+                    param_bounds['mu'] = mu_bounds(loc_guess[0])
             else:
                 for i, loc in enumerate(loc_guess):
                     if 'mu' in self.param_bound_functions:
                         param_bounds[f'mu_{i}'] = self.param_bound_functions['mu'](loc)
                     elif f'mu_{i}' not in self.param_bound_functions:
-                        param_bounds[f'mu_{i}'] = (loc - location_wiggle, loc + location_wiggle)
+                        param_bounds[f'mu_{i}'] = mu_bounds(loc)
                         
             for p in self.param_bound_functions:
                 if p == 'mu':
@@ -951,7 +957,7 @@ class multi_spectrum_fitter(spectrum_fitter):
     '''
     Class for simultaneously fitting multiple 1D spectra.
     '''
-    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, use_de:bool=False, de_only:bool=False, workers:int=1):
+    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1):
         if not spectra:
             raise ValueError("Must provide at least one spectrum")
         self.spectra = spectra
@@ -963,8 +969,8 @@ class multi_spectrum_fitter(spectrum_fitter):
         # For 2D multi-spectrum fits, we must NOT use the 'I' (Integral) option because the Y axis 
         # is discrete (spectrum index). ROOT's 2D integrator fails to converge on the step function.
         self.fit_options = self.fit_options.replace('I', '')
-        self.use_de = use_de
-        self.de_only = de_only
+        self.use_cmaes = use_cmaes
+        self.cmaes_only = cmaes_only
         self.workers = workers
         
     def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0, fit_sig=0, spectrum_index=0):
@@ -998,24 +1004,26 @@ class multi_spectrum_fitter(spectrum_fitter):
             fit_range = (window_start, window_end)
             location_wiggle = self.location_wiggle
 
+            # An infinite location_wiggle means "no wiggle constraint": let mu roam the whole
+            # fit window. Otherwise mu is held within location_wiggle of its guess, whether or
+            # not CMA-ES is seeding the fit.
+            def mu_bounds(loc):
+                if np.isinf(location_wiggle):
+                    return (window_start, window_end)
+                return (loc - location_wiggle, loc + location_wiggle)
+
             param_bounds = {}
             if len(loc_guess) == 1:
                 if 'mu' in self.param_bound_functions:
                     param_bounds['mu'] = self.param_bound_functions['mu'](loc_guess[0])
-                elif 'mu' not in self.param_bound_functions:
-                    if getattr(self, 'use_de', False):
-                        param_bounds['mu'] = (window_start, window_end)
-                    else:
-                        param_bounds['mu'] = (loc_guess[0] - location_wiggle, loc_guess[0] + location_wiggle)
+                else:
+                    param_bounds['mu'] = mu_bounds(loc_guess[0])
             else:
                 for i, loc in enumerate(loc_guess):
                     if 'mu' in self.param_bound_functions:
                         param_bounds[f'mu_{i}'] = self.param_bound_functions['mu'](loc)
                     elif f'mu_{i}' not in self.param_bound_functions:
-                        if getattr(self, 'use_de', False):
-                            param_bounds[f'mu_{i}'] = (window_start, window_end)
-                        else:
-                            param_bounds[f'mu_{i}'] = (loc - location_wiggle, loc + location_wiggle)
+                        param_bounds[f'mu_{i}'] = mu_bounds(loc)
                         
             for p in self.param_bound_functions:
                 if p == 'mu':
@@ -1039,7 +1047,8 @@ class multi_spectrum_fitter(spectrum_fitter):
                 res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
-                                    use_de=getattr(self, 'use_de', False), de_loc_wiggle=location_wiggle, de_only=getattr(self, 'de_only', False), workers=getattr(self, 'workers', 1))
+                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
+                                    custom_initial_values=getattr(self, 'custom_initial_values', None))
             elif self.peak_model.lower() == 'bg_shift_emg':
                 if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
                     if 'bg_shift' in param_bounds:
@@ -1050,7 +1059,8 @@ class multi_spectrum_fitter(spectrum_fitter):
                 res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
-                                    use_de=getattr(self, 'use_de', False), de_loc_wiggle=location_wiggle, de_only=getattr(self, 'de_only', False))
+                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
+                                    custom_initial_values=getattr(self, 'custom_initial_values', None))
             else:
                 raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports bg_shift_gaus, bg_shift_emg): {self.peak_model}")
 
