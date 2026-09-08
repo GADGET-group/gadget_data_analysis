@@ -2014,6 +2014,64 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
         
     return merged_param_bounds
 
+def _iter_mu_params(window_params):
+    '''
+    Yield (peak_index, param_name, (value, low, high)) for the mu parameters of one window.
+    A single-peak window calls its parameter 'mu', a multi-peak window 'mu_0', 'mu_1', ...
+    '''
+    for name, bounds in window_params.items():
+        if name == 'mu':
+            yield 0, name, bounds
+        elif name.startswith('mu_'):
+            yield int(name.split('_')[1]), name, bounds
+
+
+def _find_pinned_peaks(old_window_bounds, tolerance=1e-3):
+    '''
+    Find the peaks whose fitted mu came back sitting on one of its bounds -- the sign that the
+    fit wanted to push the peak further than it was allowed to go, so the value it reports is
+    the edge of the search window rather than a minimum.
+
+    tolerance is a fraction of the width of the mu bounds. Parameters that were fixed or left
+    unbounded are skipped: there is no bound for them to be pinned against.
+    '''
+    pinned = []
+    for i, params in old_window_bounds.items():
+        for j, name, (val, low, high) in _iter_mu_params(params):
+            if high <= low:
+                continue
+            edge = tolerance * (high - low)
+            if abs(val - low) <= edge or abs(val - high) <= edge:
+                pinned.append((i, j))
+    return sorted(pinned)
+
+
+def _recenter_mu_bounds(merged_param_bounds, window_mapping, peaks_to_recenter, wiggle):
+    '''
+    Wrap the mu bound functions of the selected peaks so their bounds become +/- wiggle around
+    the value they are seeded at (the parent fit's mu) instead of whatever bounds that fit used.
+    Every other parameter, and every other peak, keeps the bounds _build_param_bounds gave it.
+    '''
+    targets = {tuple(peak) for peak in peaks_to_recenter}
+
+    def make_recentered_bound_func(peak_idx, inner_bound_func):
+        def bound_func(E):
+            val, low, high = inner_bound_func(E)
+            window_idx = window_mapping.get(E, (None, None))[0]
+            if (window_idx, peak_idx) not in targets:
+                return (val, low, high)
+            return (val, val - wiggle, val + wiggle)
+        return bound_func
+
+    recentered = dict(merged_param_bounds)
+    for name, bound_func in merged_param_bounds.items():
+        if name == 'mu':
+            recentered[name] = make_recentered_bound_func(0, bound_func)
+        elif name.startswith('mu_'):
+            recentered[name] = make_recentered_bound_func(int(name.split('_')[1]), bound_func)
+    return recentered
+
+
 def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True):
     '''
     Removes one or more peaks from an existing fit.
@@ -2182,6 +2240,101 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
     )
 
 
+def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params=False,
+                         pinned_tolerance=1e-3, refit=True):
+    '''
+    Re-centers the mu bounds of one or more peaks on their currently fitted value and refits.
+
+    Use this when a peak comes back pinned against a mu bound: the fit was still pushing the
+    peak when it ran out of room, so the value it reports is the edge of the allowed range
+    rather than a minimum. Re-centering opens a fresh symmetric window around where the fit
+    ended up and lets it keep going. The peak list itself is unchanged -- no peaks are added
+    or removed -- and every peak keeps its fitted location as the starting guess.
+
+    Parameters:
+    fitter : SpectrumFitter
+        The fitter object containing the existing fit to modify.
+    peaks_to_recenter : tuple or list of tuples, optional
+        Each tuple should be (window_index, peak_index) specifying which peak to re-center,
+        the same indexing remove_peak_from_fit uses. Defaults to None, which re-centers every
+        peak currently pinned against a mu bound.
+    wiggle : float, optional
+        Half-width of the new mu bounds, i.e. mu is allowed to move within
+        (fitted mu -+ wiggle). Defaults to the fitter's location_wiggle, which keeps the
+        search window the same size and just slides it onto the fitted value. Pass a larger
+        number to also give the peak more room.
+    fix_params : bool, optional
+        Determines how the previously fitted parameters (peak locations, amplitudes,
+        background coefficients, sigma parameters, etc.) are handled in the new fit.
+        If True, all previously fitted parameters are strictly fixed to their exact prior
+        values -- except the re-centered peaks, which are always free to move within their
+        new bounds, since pinning them again would defeat the point.
+        If False, the previously fitted values are used as the starting initial guesses for
+        the new fit, but are allowed to float and adjust.
+    pinned_tolerance : float, optional
+        How close to a bound (as a fraction of the width of that bound) a fitted mu has to be
+        to count as pinned. Only used when peaks_to_recenter is None.
+    refit : bool, optional
+        If True (the default), immediately refit through try_fit and return (hash string, new
+        fitter). If False, only write the peak CSV and assemble the arguments; nothing is fit
+        and the try_fit keyword arguments are returned so the fit can be run later with
+        try_fit(**returned_kwargs).
+
+    Returns:
+    (str, SpectrumFitter) if refit, else dict
+        The hash and fitter from try_fit, or the try_fit keyword arguments to run later.
+    '''
+    if isinstance(peaks_to_recenter, tuple) and len(peaks_to_recenter) == 2 and isinstance(peaks_to_recenter[0], int):
+        peaks_to_recenter = [peaks_to_recenter]
+
+    old_window_bounds = _extract_fitter_bounds(fitter)
+
+    if peaks_to_recenter is None:
+        peaks_to_recenter = _find_pinned_peaks(old_window_bounds, tolerance=pinned_tolerance)
+        if not peaks_to_recenter:
+            raise ValueError(
+                "No peaks are pinned against their mu bounds, so there is nothing to re-center. "
+                "Pass peaks_to_recenter=[(window_index, peak_index), ...] to re-center anyway, "
+                "or raise pinned_tolerance to catch peaks that stopped just short of a bound."
+            )
+        print(f"Re-centering peaks pinned at their mu bounds: {peaks_to_recenter}")
+
+    peaks_to_recenter = sorted({tuple(peak) for peak in peaks_to_recenter})
+    if wiggle is None:
+        wiggle = fitter.location_wiggle
+
+    new_peaks = []
+    new_isotopes = []
+    original_isotopes = getattr(fitter, 'peak_isotopes', getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_isotopes'))
+    window_mapping = {}
+
+    for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
+        new_locs = []
+        new_isos = []
+        for j, loc in enumerate(locs):
+            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
+            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
+            new_locs.append(_round_peak_loc(fitted_mu))
+            if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
+                new_isos.append(original_isotopes[i][j])
+
+        if new_locs:
+            new_peaks.append((new_locs, _round_peak_loc(w_start), _round_peak_loc(w_end)))
+            if new_isos:
+                new_isotopes.append(new_isos)
+            # Nothing is added or removed, so the peak indices carry over unchanged.
+            window_mapping[new_locs[0]] = (i, {j: j for j in range(len(new_locs))})
+
+    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
+    merged_param_bounds = _recenter_mu_bounds(merged_param_bounds, window_mapping, peaks_to_recenter, wiggle)
+
+    return _prepare_modified_fit(
+        fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+        'recenter', {'peaks_recentered': [list(peak) for peak in peaks_to_recenter], 'wiggle': wiggle},
+        fix_params, refit
+    )
+
+
 #############################################################################
 # Fit including runs where high energy protons may not be recorded correctly.
 #############################################################################
@@ -2338,12 +2491,13 @@ bg_shift_upper_bound = 2*0.5/(2000/5)
 #             hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
 #             print(f"Fit with bg_order={bg_order}, sigma_order={sigma_order}, frac_order={frac_order} -> hash {hash_str}")
 #             fs.append(f)
+bg_order=4
 args_for_multipeak_fit = {
     'force_refit': force_refit,
-    'additional_param_bounds': {},
+    #'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000) for i in range(bg_order+1)},
     'loc_wiggle': 15,
     'bg_model': 'chebyshev',
-    'bg_order': 2,
+    'bg_order': bg_order,
     'fraction_bernstein_order': 2,
     'sigma_monotonic_bernstein_order': 2,
     'bg_shift_monotonic_bernstein_order': 2,
@@ -2354,40 +2508,5 @@ args_for_multipeak_fit = {
     'workers': num_workers
 }
 
-hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
-if False:
-    hash_str = 'd760583a'
-    f = load_fit(hash_str, folder_name='protons_le')
-    print('hash: ', hash_str)
-    isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
-    cmaes_csv_name = f'cmaes_{hash_str}.csv'
-    find_cmaes_guesses([pspec_low_energy_60Ga, pspec_59Zn], 
-                    save_csv_name=cmaes_csv_name, 
-                    #initial_fitter=f, 
-                    fit_window=(550.0, 2900.0),
-                    isotopes_list=isotopes_list,
-                    folder_name='protons_le',
-                    **args_for_multipeak_fit)
-
-    # Seed Minuit with the whole CMA-ES optimum, not just the peak locations: the CSV only
-    # carries mu, so without this the bg/sigma/amplitude/bg_shift models would be reset to
-    # their canned guesses and the fit would start well outside the valley CMA-ES found.
-    args_after_cmaes = dict(args_for_multipeak_fit)
-    args_after_cmaes['custom_initial_values'] = load_cmaes_params(cmaes_csv_name, folder_name='protons_le')
-
-    hash_str_2, f2 = try_fit(args_after_cmaes, peak_guesses_csv=f'protons_le/{cmaes_csv_name}', folder_name='protons_le')
-    print('hash after cmaes: ', hash_str_2)
-
-    ROOT.gROOT.SetBatch(False)
-    # f.show_fit_results(0, False, True)
-
-    #added 2210, 2275, 2380, 2600
-    # add peaks
-    # peaks_to_add = [2211, 2273]
-    # add_hash, f3 = add_peak_to_fit(f2, peaks_to_add, len(peaks_to_add)*['60Ga'])
-    f2.show_fit_results(0, False, True)
-    show_detector_energy_resolution(f2)
-    show_peak_fractions(f2)
-    show_bg_shifts(f2)
-    show_backgrounds(f2)
+res = [try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')]
 
