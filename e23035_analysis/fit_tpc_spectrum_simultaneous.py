@@ -2353,7 +2353,6 @@ proton_binning = (4000//5, 0, 4000)
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
-force_refit=False
 ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 #loc_wiggle = 15
@@ -2390,7 +2389,7 @@ def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_
             hist_info.append((h.GetName(), h.GetTitle(), h.GetEntries()))
             
     hash_dict = {
-        'args': args_for_multipeak_fit,
+        'args': {k: v for k, v in args_for_multipeak_fit.items() if k not in ['force_refit', 'workers']},
         'peaks': peaks,
         'isotopes': isotopes,
         'histograms': hist_info
@@ -2442,65 +2441,22 @@ def load_fit(hash_str, folder_name='protons_le'):
             f.peaks_to_fit = info.get('peaks')
             
     return f
-#initial fitter with no peaks, and a fit window of 600 to 2900 keV
+
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
-bg_shift_upper_bound = 2*0.5/(2000/5) 
-# isotopes_list = ['60Ga'] * 35 + ['59Zn'] * 20
-
-# # 1. Run Differential Evolution to find starting locations and save to CSV
-# find_de_guesses(
-#     [pspec_low_energy_60Ga, pspec_59Zn], 
-#     fit_window=(600.0, 2900.0), 
-#     isotopes_list=isotopes_list,
-#     save_csv_name='de_proton_peaks.csv',
-#     additional_param_bounds={'total_amp': lambda E:(1e-3, 1e6)}, 
-#     loc_wiggle=loc_wiggle,
-#     bg_model='chebyshev',
-#     bg_order=5,
-#     fraction_bernstein_order={'61Ge': 1, 'default': 2},
-#     sigma_monotonic_bernstein_order=4,
-#     bg_shift_monotonic_bernstein_order=4,
-#     bg_shift_upper_bound=bg_shift_upper_bound,
-#     sigma_min=10,
-#     sigma_max=200,
-#     workers=num_workers
-# )
-
-# 2. Load the perfectly optimized DE guesses
-# proton_peak_guesses, peak_isotopes = load_peaks_from_csv('de_proton_peaks.csv')
-
-# 3. Run the final Minuit fit
-# fs = []
-# for bg_order in range(2, 6):
-#     for sigma_order in range(4):
-#         for frac_order in range(4):
-#             args_for_multipeak_fit = {
-#                 'force_refit': force_refit,
-#                 'additional_param_bounds': {},
-#                 'loc_wiggle': loc_wiggle,
-#                 'bg_model': 'chebyshev',
-#                 'bg_order': bg_order,
-#                 'fraction_bernstein_order': frac_order,
-#                 'sigma_monotonic_bernstein_order': sigma_order,
-#                 'bg_shift_monotonic_bernstein_order': 2,
-#                 'bg_shift_upper_bound': bg_shift_upper_bound,
-#                 'sigma_min': 10,
-#                 'sigma_max': 200,
-#                 'use_de': False
-#             }
-#             hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
-#             print(f"Fit with bg_order={bg_order}, sigma_order={sigma_order}, frac_order={frac_order} -> hash {hash_str}")
-#             fs.append(f)
+bg_shift_upper_bound = 0# 0.5/(2000/5) 
 bg_order=4
+force_refit=True
 args_for_multipeak_fit = {
     'force_refit': force_refit,
-    #'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000) for i in range(bg_order+1)},
+    'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000) for i in range(bg_order+1)},
     'loc_wiggle': 15,
-    'bg_model': 'chebyshev',
+    #'bg_model': 'chebyshev',
+    'bg_model': 'bernstein',
     'bg_order': bg_order,
     'fraction_bernstein_order': 2,
     'sigma_monotonic_bernstein_order': 2,
-    'bg_shift_monotonic_bernstein_order': 2,
+    #'bg_shift_monotonic_bernstein_order': 2,
+    'bg_shift_bernstein_order': 0,
     'bg_shift_upper_bound': bg_shift_upper_bound,
     'sigma_min': 10,
     'sigma_max': 200,
@@ -2508,5 +2464,12 @@ args_for_multipeak_fit = {
     'workers': num_workers
 }
 
-res = [try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')]
-
+hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
+# res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
+print('hash: ', hash_str)
+print('p-value: ', f.fit_results[0]['fit_res'].Prob())
+f.show_fit_results(0, False, True)
+show_backgrounds(f)
+show_bg_shifts(f)
+show_detector_energy_resolution(f)
+show_peak_fractions(f)

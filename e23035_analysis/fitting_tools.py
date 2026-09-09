@@ -1732,7 +1732,7 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
         }}
         // Symmetric hyperbolic smoothing (Smooth Absolute Value)
         // Avoids vanishing gradients if total < 0, preserves linear meaning for > 0
-        total = std::sqrt(total * total + 1e-4);
+        total = std::sqrt(total * total + 0.5);
 
         for (int i = 0; i < {n_peaks}; ++i) {{
             double amp = p[{peak_params_start_idx} + 2 * i];
@@ -2189,22 +2189,13 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
         print(f"Running CMA-ES for starting guesses (workers={workers})...")
         
         # CMA-ES setup — start from the provided initial_values (which may come from a prior fit)
-        # Use CMA_stds to scale the search spread separately for each parameter based on its bound width.
-        stds = [(b[1] - b[0]) for b in cma_bounds]
-        sigma0 = 0.1 # 10% of the bound width for each parameter
+        sigma0 = max([(b[1] - b[0]) for b in cma_bounds]) / 4.0
         x0 = list(initial_values)
         
         opts = {
             'bounds': [[b[0] for b in cma_bounds], [b[1] for b in cma_bounds]],
-            'CMA_stds': stds,
             'verbose': -9,
             'maxiter': 100000,
-            # We only need CMA-ES to find the valley containing the global minimum; Minuit
-            # refines from there. The objective is an NLL, so a spread of 1 across the
-            # population (and across the recent best-of-generation history) is converged
-            # enough to hand off. The pycma default of 1e-11 is absolute and therefore
-            # unreachable at this objective scale.
-#            'tolfun': 1.0,
         }
         
         es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
@@ -2212,12 +2203,6 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
         
         while not es.stop():
             solutions = es.ask()
-            
-            # Explicitly evaluate the initial guess in the first generation 
-            # so the best objective starts at least as good as the prior fit!
-            if es.countiter == 1:
-                solutions[0] = np.array(x0)
-                
             fitnesses = objective(np.array(solutions))
             es.tell(solutions, fitnesses)
             
@@ -2237,10 +2222,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                 break
 
         res_x = es.result.xbest
-        # `verbose: -9` silences pycma, so report which criterion actually ended the run.
-        stop_reason = dict(es.stop()) or {'no_improvement_1000_generations': True}
-        print(f"CMA-ES finished after {es.countiter} generations. Best objective: {es.result.fbest}")
-        print(f"  -> Stop reason: {stop_reason}")
+        print(f"CMA-ES finished. Best objective: {es.result.fbest}")
         
         if cmaes_only:
             # Re-apply bounds just to set the parameters in f_to_fit to the optimum
@@ -2252,17 +2234,12 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
         for i in range(n_params):
             initial_values[i] = res_x[i]
             
-        # Narrow the mu bounds around the CMA-ES optimum so Minuit refines locally. An infinite
-        # wiggle means mu was deliberately left free across the fit window, so leave it alone.
-        # The narrowed range is intersected with the incoming bounds: those already encode the
-        # wiggle around the original guess (or the fit window), and re-centering on the CMA-ES
-        # optimum must not widen the search past them.
-        if cmaes_loc_wiggle is not None and not np.isinf(cmaes_loc_wiggle) and names is not None:
+        # Update bounds if cmaes_loc_wiggle is provided
+        if cmaes_loc_wiggle is not None and names is not None:
             for i in range(n_params):
                 if names[i].startswith('mu'):
                     opt_mu = res_x[i]
-                    low, high = bounds[i]
-                    bounds[i] = (max(low, opt_mu - cmaes_loc_wiggle), min(high, opt_mu + cmaes_loc_wiggle))
+                    bounds[i] = (opt_mu - cmaes_loc_wiggle, opt_mu + cmaes_loc_wiggle)
                     
         # Re-apply bounds to f_to_fit for Minuit
         for i in range(n_params):
@@ -2426,7 +2403,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         bg_shift_cpp_strings_for_peak = []
         for j in range(n_spectra):
-            b_name = f"bg_shift_{i}_{j}" if not shared_bg_shift and n_peaks > 1 else f"bg_shift_{j}"
+            b_name = f"bg_shift_{i}_{j}" if not shared_bg_shift else f"bg_shift_0_{j}"
             b_bnd = param_bounds.get(b_name, param_bounds.get(f'bg_shift_{i}', param_bounds.get('bg_shift', (0, 1.0))))
             bg_str, bg_idx = resolve_string_param(b_name, 0.002, b_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
             bg_cpp = bg_str.replace('[', 'p[').replace(']', ']')
@@ -2436,7 +2413,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     import uuid
     comp_id = uuid.uuid4().hex[:6]
     
-    if bg_model in ['chebyshev', 'polynomial', 'bernstein']:
+    if bg_model in ['chebyshev', 'polynomial']:
         bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
         bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
         bg_eval_cpp = f"""
@@ -2452,6 +2429,22 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             t_n2 = t_n1;
             t_n1 = t_n;
         }}
+        """
+    elif bg_model == 'bernstein':
+        import math
+        bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
+        bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
+        terms = []
+        for k in range(bg_order + 1):
+            coef = math.comb(bg_order, k)
+            p_x = "1.0" if k == 0 else (f"x_norm" if k == 1 else f"TMath::Power(x_norm, {k})")
+            p_1x = "1.0" if (bg_order - k) == 0 else (f"(1.0 - x_norm)" if (bg_order - k) == 1 else f"TMath::Power(1.0 - x_norm, {bg_order - k})")
+            terms.append(f"{coef} * p[bg_p_idx[{k}][val_y]] * {p_x} * {p_1x}")
+        eval_terms = " + ".join(terms)
+        bg_eval_cpp = f"""
+        int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};
+        double x_norm = (val_x - {e_low}) / ({e_high} - {e_low});
+        double bg_val = {eval_terms};
         """
     else:
         bg_const_idx = [pm.get_idx(f"bg_const_{j}") for j in range(n_spectra)]
@@ -2517,7 +2510,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
         // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 1e-4);
+        total = std::sqrt(total * total + 0.5);
         
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
@@ -2550,7 +2543,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
         // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 1e-4);
+        total = std::sqrt(total * total + 0.5);
         return total;
     }}
     
@@ -2701,9 +2694,9 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
         mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         bg_shift_cpp_strings_for_peak = []
         for j in range(n_spectra):
-            b_name = f"bg_shift_{i}_{j}" if not shared_bg_shift and n_peaks > 1 else f"bg_shift_{j}"
+            b_name = f"bg_shift_{i}_{j}" if not shared_bg_shift else f"bg_shift_0_{j}"
             b_bnd = param_bounds.get(b_name, param_bounds.get(f'bg_shift_{i}', param_bounds.get('bg_shift', (0, 1.0))))
-            bg_str, bg_idx = resolve_string_param(b_name, gaus_p_map.get(b_name, gaus_p_map.get(f"bg_shift_{j}", 0.002)), b_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
+            bg_str, bg_idx = resolve_string_param(b_name, gaus_p_map.get(b_name, gaus_p_map.get(f"bg_shift_0_{j}", 0.002)), b_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
             bg_cpp = bg_str.replace('[', 'p[').replace(']', ']')
             bg_shift_cpp_strings_for_peak.append(bg_cpp)
         bg_shift_cpp_strings.append(bg_shift_cpp_strings_for_peak)
@@ -2711,10 +2704,52 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     import uuid
     comp_id = uuid.uuid4().hex[:6]
     
-    bg_const_idx = [pm.get_idx(f"bg_const_{j}") for j in range(n_spectra)]
-    bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
-    bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
-    bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
+    if bg_model in ['chebyshev', 'polynomial']:
+        bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
+        bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
+        bg_eval_cpp = f"""
+        int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};
+        double x_norm = 2.0 * (val_x - {e_low}) / ({e_high} - {e_low}) - 1.0;
+        double bg_val = p[bg_p_idx[0][val_y]];
+        if ({bg_order} >= 1) bg_val += p[bg_p_idx[1][val_y]] * x_norm;
+        double t_n2 = 1.0;
+        double t_n1 = x_norm;
+        for (int k = 2; k <= {bg_order}; ++k) {{
+            double t_n = 2.0 * x_norm * t_n1 - t_n2;
+            bg_val += p[bg_p_idx[k][val_y]] * t_n;
+            t_n2 = t_n1;
+            t_n1 = t_n;
+        }}
+        """
+    elif bg_model == 'bernstein':
+        import math
+        bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
+        bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
+        terms = []
+        for k in range(bg_order + 1):
+            coef = math.comb(bg_order, k)
+            p_x = "1.0" if k == 0 else (f"x_norm" if k == 1 else f"TMath::Power(x_norm, {k})")
+            p_1x = "1.0" if (bg_order - k) == 0 else (f"(1.0 - x_norm)" if (bg_order - k) == 1 else f"TMath::Power(1.0 - x_norm, {bg_order - k})")
+            terms.append(f"{coef} * p[bg_p_idx[{k}][val_y]] * {p_x} * {p_1x}")
+        eval_terms = " + ".join(terms)
+        bg_eval_cpp = f"""
+        int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};
+        double x_norm = (val_x - {e_low}) / ({e_high} - {e_low});
+        double bg_val = {eval_terms};
+        """
+    else:
+        bg_const_idx = [pm.get_idx(f"bg_const_{j}") for j in range(n_spectra)]
+        bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
+        bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
+        bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
+        bg_eval_cpp = f"""
+        int bg_const_idx[{n_spectra}] = {bg_const_cpp};
+        int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
+        double bg_const = p[bg_const_idx[val_y]];
+        double bg_slope = p[bg_slope_idx[val_y]];
+        double bg_val = bg_const + bg_slope * val_x;
+        """
+
     mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
     amp_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in amp_idx]) + "}"
 
@@ -2761,7 +2796,7 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
         // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 1e-4);
+        total = std::sqrt(total * total + 0.5);
         
         for (int i = 0; i < {n_peaks}; ++i) {{
             double mu = p[mu_idx[i]];
@@ -2809,7 +2844,7 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
         }}
         // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 1e-4);
+        total = std::sqrt(total * total + 0.5);
         return total;
     }}
     
