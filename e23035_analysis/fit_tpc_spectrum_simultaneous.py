@@ -2453,23 +2453,26 @@ args_for_multipeak_fit = {
     #'bg_model': 'chebyshev',
     'bg_model': 'bernstein',
     'bg_order': bg_order,
-    'fraction_bernstein_order': 2,
-    'sigma_monotonic_bernstein_order': 2,
+    'fraction_bernstein_order': 5,
+    #'sigma_monotonic_bernstein_order': 5,
+    'sigma_bernstein_order': 5,
     #'bg_shift_monotonic_bernstein_order': 2,
     'bg_shift_bernstein_order': 0,
     'bg_shift_upper_bound': bg_shift_upper_bound,
     'sigma_min': 10,
-    'sigma_max': 200,
+    'sigma_max': 20/720*2900, #energy resolution at top of band as a percent of energy shouldn't be worse than it is at the bottom
     'use_cmaes': False,
     'workers': num_workers
 }
 
+ROOT.Math.MinimizerOptions.SetDefaultStrategy(2)
 hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
 # res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
 print('hash: ', hash_str)
 print('p-value: ', f.fit_results[0]['fit_res'].Prob())
-f.show_fit_results(0, False, True)
-show_backgrounds(f)
-show_bg_shifts(f)
-show_detector_energy_resolution(f)
-show_peak_fractions(f)
+f.show_fit_results(peak_index=0, show_fit_params=False, show_components=True)
+show_backgrounds(fitter_or_filename=f)
+#show_bg_shifts(fitter_or_filename=f)
+show_detector_energy_resolution(fitter_or_filename=f)
+show_peak_fractions(fitter_or_filename=f)
+slope, offset, cov = make_energy_calibration(fitter=f, fit_name='test', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
