@@ -962,16 +962,16 @@ def make_energy_calibration(fitter, fit_name, peaks_csv, show_fit_result=True, f
         reader = csv.reader(f)
         header = next(reader)
         for row in reader:
-            if not row or len(row) < 6:
+            if not row or len(row) < 4:
                 continue
-            use_calib = row[5].strip().lower()
             try:
                 guess_E = float(row[1])
                 known_E_str = row[3].strip()
                 if not known_E_str:
                     continue
                 known_E = float(known_E_str)
-                known_E_err = float(row[4]) if row[4].strip() else 0.0
+                known_E_err = float(row[4]) if (len(row) > 4 and row[4].strip()) else 0.0
+                use_calib = row[5].strip().lower() if len(row) > 5 else ''
             except ValueError:
                 continue
             
@@ -2445,7 +2445,7 @@ def load_fit(hash_str, folder_name='protons_le'):
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
 bg_shift_upper_bound = 0# 0.5/(2000/5) 
 bg_order=4
-force_refit=True
+force_refit=False
 args_for_multipeak_fit = {
     'force_refit': force_refit,
     'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000) for i in range(bg_order+1)},
