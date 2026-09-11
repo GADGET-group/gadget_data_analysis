@@ -1122,6 +1122,22 @@ class multi_spectrum_fitter(spectrum_fitter):
             
             drawn_first = False
             
+            # Create a helper function to evaluate the total fit reliably,
+            # bypassing the potentially blocky TF2 interpolation for loaded fits.
+            bg_func_name = getattr(pm, 'bg_func_name', None)
+            total_eval_lam = None
+            if bg_func_name:
+                full_func_name = bg_func_name.replace("_bg", "")
+                if hasattr(ROOT, full_func_name):
+                    full_func_cpp = getattr(ROOT, full_func_name)
+                    params = f_to_fit_2d.GetParameters()
+                    total_eval_lam = lambda x, y_idx: full_func_cpp(np.array([x, y_idx], dtype=np.float64), params)
+
+            def eval_total_fit(x, y_idx):
+                if total_eval_lam:
+                    return total_eval_lam(x, y_idx)
+                return f_to_fit_2d.Eval(x, y_idx)
+
             res['1d_lambdas'] = []
             res['1d_funcs'] = []
             res['resid_graphs'] = []
@@ -1153,7 +1169,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 n_points = max(1000, (bin_end - bin_start + 1) * 3)
                 
                 e_vals = np.linspace(e_low, e_high, n_points)
-                y_vals = np.array([f_to_fit_2d.Eval(x, j) for x in e_vals], dtype=np.float64)
+                y_vals = np.array([eval_total_fit(x, j) for x in e_vals], dtype=np.float64)
                 f1d = ROOT.TGraph(n_points, e_vals, y_vals)
                 f1d.SetName(f"f1d_{j}_{id(self)}")
                 f1d.SetLineColor(color)
@@ -1243,7 +1259,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                     y_val = spec.GetBinContent(bin_i)
                     y_err = spec.GetBinError(bin_i)
                     
-                    fit_y = f_to_fit_2d.Eval(x_val, j)
+                    fit_y = eval_total_fit(x_val, j)
                     resid = y_val - fit_y
                     
                     resid_graph.SetPoint(pt_idx, x_val, resid)

@@ -1146,10 +1146,10 @@ def apply_fit_to_csv(fit_to_aply, apply_to, cal_name='calibrated'):
         writer.writerow(header)
         
         try:
-            mu_val_idx = header.index('mu_val')
+            mu_val_idx = header.index('mu_val') if 'mu_val' in header else header.index('mu')
             mu_err_idx = header.index('mu_err')
         except ValueError:
-            print(f"Error: 'mu_val' or 'mu_err' column not found in CSV {input_csv}.")
+            print(f"Error: 'mu_val' or 'mu' or 'mu_err' column not found in CSV {input_csv}.")
             return
             
         for row in reader:
@@ -2453,9 +2453,9 @@ args_for_multipeak_fit = {
     #'bg_model': 'chebyshev',
     'bg_model': 'bernstein',
     'bg_order': bg_order,
-    'fraction_bernstein_order': 5,
+    'fraction_bernstein_order': 3,
     #'sigma_monotonic_bernstein_order': 5,
-    'sigma_bernstein_order': 5,
+    'sigma_bernstein_order': 3,
     #'bg_shift_monotonic_bernstein_order': 2,
     'bg_shift_bernstein_order': 0,
     'bg_shift_upper_bound': bg_shift_upper_bound,
@@ -2466,7 +2466,11 @@ args_for_multipeak_fit = {
 }
 
 ROOT.Math.MinimizerOptions.SetDefaultStrategy(2)
-hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
+if True:
+    hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv')
+else:
+    hash_str = '5bd3336c'
+    f = load_fit(hash_str)
 # res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
 print('hash: ', hash_str)
 print('p-value: ', f.fit_results[0]['fit_res'].Prob())
@@ -2475,4 +2479,5 @@ show_backgrounds(fitter_or_filename=f)
 #show_bg_shifts(fitter_or_filename=f)
 show_detector_energy_resolution(fitter_or_filename=f)
 show_peak_fractions(fitter_or_filename=f)
-slope, offset, cov = make_energy_calibration(fitter=f, fit_name='test', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+slope, offset, cov = make_energy_calibration(fitter=f, fit_name='59Zn_pcal', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+apply_fit_to_csv((slope, offset, cov), f'protons_le/fit_{hash_str}_evaluated')

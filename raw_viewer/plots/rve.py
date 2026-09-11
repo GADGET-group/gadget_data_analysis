@@ -22,7 +22,7 @@ max_workers=len(GPUs_to_use*2)
 tpc_config = 'smart2_rpr.csv'
  
 if experiment == 'e23035':
-    if True:
+    if False:
         run_range = e23035_runs.run_df['GET'][(e23035_runs.run_df['Run Type']=='60Ga')  & (e23035_runs.run_df['final beam settings?'] == 'yes')] 
         #run_range = range(225, 230)
         #run_range = [170, 171, 172, 173]
