@@ -2403,6 +2403,7 @@ def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_
     hash_dict = _json_safe(hash_dict)
     hash_str_repr = json.dumps(hash_dict, sort_keys=True).encode('utf-8')
     hash_str = hashlib.md5(hash_str_repr).hexdigest()[:8]
+    print('fitting hash: ', hash_str)
     
     save_dir = os.path.join(fit_path, folder_name)
     os.makedirs(save_dir, exist_ok=True)
