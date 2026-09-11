@@ -29,7 +29,7 @@ def get_save_path(experiment):
         elif experiment == 'e25058_20Mg':
             save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
         else:
-            save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_new_pkl'%experiment
+            save_path = '/egr/research-tpc/shared/proc_runs/%s/new_h5'%experiment
         return save_path
     elif 'gadget' in socket.gethostname().lower():
         if experiment == 'e23035_prep_vault':
@@ -55,7 +55,7 @@ def get_h5_path(experiment, run_number):
     elif experiment == 'e23035_prep_vault':
         return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
     else:
-        return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
+        return'%s/%s/newh5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
 def get_h5_file(experiment, run_number):
     raw_h5_path = get_h5_path(experiment, run_number)
@@ -113,6 +113,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
     Only redoes processing if a ROOT version of this information isn't available.
     '''
     #save_path = os.path.dirname(os.path.abspath(__file__))
+
     fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run_number}.root')
     
     if force_reprocess:
@@ -254,6 +255,8 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
         metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff]}
         print('saving to ROOT file')
         with uproot.recreate(fname) as file:
+            file['metadata'] = metadata
+            print('metadata written successfully')
             lengths = [len(v) for v in events_data.values()]
             if not lengths or min(lengths) == 0:
                 file['events'] = events_data
@@ -269,7 +272,9 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
                         file['events'] = chunk
                     else:
                         file['events'].extend(chunk)
-            file['metadata'] = metadata
+            print('all event data written successfully')
+        print('ROOT file closed successfully')
+
 
 def get_quantity(qname, experiment, runs):
     to_return = []
