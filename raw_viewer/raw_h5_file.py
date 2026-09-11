@@ -1,7 +1,6 @@
 import os
 import pickle
 
-
 import numpy as np
 import scipy.spatial.distance
 import scipy.optimize as opt
@@ -24,7 +23,6 @@ except:
     import scipy.special as cpspecial
     cp.asnumpy = lambda x: x
     USE_GPU = False
-
 
 import skimage.measure
 
@@ -131,10 +129,35 @@ class raw_h5_file:
         self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
         self.cached_data = None
         self.cached_xyte = self.cached_xyze = None
+        
+        # Cache for fast lookup of new bucketed group structure
+        self._batch_existence_cache = {}
 
         #look at first event and figure out number of time bins
-        first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
+        first_event = self.get_event_num_bounds()[0]
+        first_event_data = self._get_event_dataset(first_event, kind='data')
         self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
+
+    def _get_event_dataset(self, event_number, kind='data'):
+        """
+        Helper method to retrieve the dataset for a given event, supporting 
+        both the new bucketed ('batch_XXXX') structure and the legacy flat structure.
+        """
+        dataset_name = "evt%d_%s" % (event_number, kind)
+        batch_index = int(event_number // 5000)
+        batch_name = "batch_%04d" % batch_index
+        
+        get_group = self.h5_file['get']
+        
+        # Check cache to avoid repeatedly querying HDF5 metadata 
+        if batch_name not in self._batch_existence_cache:
+            self._batch_existence_cache[batch_name] = batch_name in get_group
+            
+        # Return nested bucketed path, or fallback to root flat path
+        if self._batch_existence_cache[batch_name]:
+            return get_group[batch_name][dataset_name]
+        else:
+            return get_group[dataset_name]
 
     def get_pad_from_xy(self, xy):
         '''
@@ -155,7 +178,7 @@ class raw_h5_file:
         Returns timestamp in seconds.
         '''
         #timestamps are stored in units of 10ns
-        return self.h5_file['get']['evt%d_header'%event_number][1]/1e8 
+        return self._get_event_dataset(event_number, kind='header')[1]/1e8 
 
     def get_timestamps_array(self):
         '''
@@ -172,7 +195,7 @@ class raw_h5_file:
         '''
         Returns a list of pads which railed in the current event
         '''
-        data = self.h5_file['get']['evt%d_data'%event_number]
+        data = self._get_event_dataset(event_number, kind='data')
         traces = data[:,FIRST_DATA_BIN:]
         which_ones_railed = np.logical_not(np.all(traces<4095, axis=1))
         ch_info = data[which_ones_railed,0:4]
@@ -196,7 +219,7 @@ class raw_h5_file:
         if self.cache_enable and event_number == self.cached_event:
             return np.array(self.cached_data, copy=True)
 
-        data = self.h5_file['get']['evt%d_data'%event_number]
+        data = self._get_event_dataset(event_number, kind='data')
 
         
         if self.asads != 'all' or self.cobos != 'all' or self.pads != 'all':
@@ -327,8 +350,8 @@ class raw_h5_file:
             xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                            np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
             ys = trace[xs]
-            #slope, offset = np.polyfit(xs, ys, 1)
-            offset = np.mean(ys)
+            slope, offset = np.polyfit(xs, ys, 1)
+            #offset = np.mean(ys)
             #baseline will be the trace except in the peak region,
             #so that everything away from the peak is zero'd out
             baseline = np.array(trace, copy=True)
@@ -336,7 +359,7 @@ class raw_h5_file:
             #     baseline[i] = slope*i + offset
             #baseline[np.arange(peak_start, peak_end+1)] = offset
             x_peak = np.arange(peak_start, peak_end)
-            baseline[x_peak] = offset# + slope*x_peak
+            baseline[x_peak] = offset + slope*x_peak
             return baseline
         elif self.background_subtract_mode == 'smart2':
             '''
@@ -775,27 +798,11 @@ class raw_h5_file:
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
-        
+        ax.set_xlim3d(-200, 200)
+        ax.set_ylim3d(-200, 200)
+        ax.set_zlim3d(0, 400)
 
         xs, ys, zs, es = self.get_xyze(event_num, threshold=threshold)
-
-        if len(xs) > 0:
-            # Find the center of the track
-            x_c, y_c, z_c = np.mean(xs), np.mean(ys), np.mean(zs)
-            
-            # Find the max spread to keep the box cubic
-            max_spread = max(np.ptp(xs), np.ptp(ys), np.ptp(zs)) / 2.0
-            buffer = 10 
-            limit_range = max_spread + buffer
-
-            ax.set_xlim3d(x_c - limit_range, x_c + limit_range)
-            ax.set_ylim3d(y_c - limit_range, y_c + limit_range)
-            ax.set_zlim3d(z_c - limit_range, z_c + limit_range)
-        else:
-            # Fallback if the event is totally empty
-            ax.set_xlim3d(-200, 200)
-            ax.set_ylim3d(-200, 200)
-            ax.set_zlim3d(0, 400)
 
         #TODO: make generic, these are P10 values
         calib_point_1 = (0.806, 156745)
@@ -805,18 +812,14 @@ class raw_h5_file:
         energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
         energy_offset = energy_1 - energy_scale_factor * channel_1
 
-        # 1. Apply the calibration to the pad energies (for the color mapping)
-        #calibrated_es = (es * energy_scale_factor) + energy_offset
-
         ax.view_init(elev=45, azim=45)
         ax.scatter(xs, ys, zs, c=es, cmap=self.cmap)
         cbar = fig.colorbar(ax.get_children()[0])
         max_veto_counts, dxy, dz, energy, angle, pads_railed = self.process_event(event_num)
-        #total_calibrated_energy = (raw_total_counts * energy_scale_factor) + energy_offset
         length = np.sqrt(dxy**2 + dz**2)
-        plt.title('Event %d, Total Counts=%d \n Length=%f mm, Angle=%f deg\n # Pads Railed=%d'%(event_num, energy, 
-                                                                                               length,
-                                                                                               np.degrees(angle), len(pads_railed)))
+        plt.title('event %d, total counts=%d \n length=%f mm, angle=%f deg\n # pads railed=%d'%(event_num, energy, 
+                                                                                                length,
+                                                                                                np.degrees(angle), len(pads_railed)))
         plt.show(block=block)
     
     def get_2d_image(self, data):
@@ -952,4 +955,3 @@ class raw_h5_file:
         self.data_select_mode = old_mode
         plt.legend(loc='upper right')
         plt.show(block=block)
-
