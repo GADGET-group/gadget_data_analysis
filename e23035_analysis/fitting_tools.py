@@ -2169,12 +2169,13 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                 else:
                     return np.array([calc_obj(sub_hist, f_to_fit, np.array(row, dtype=np.float64), use_nll) for row in p])
         
+        fixed_indices = [i for i in range(n_params) if bounds[i][0] == bounds[i][1]]
+        free_indices = [i for i in range(n_params) if bounds[i][0] != bounds[i][1]]
+        
         cma_bounds = []
-        for i in range(n_params):
+        for i in free_indices:
             low, high = bounds[i]
-            if low >= high:
-                cma_bounds.append((low, low + 1e-9))
-            elif low == -np.inf or high == np.inf:
+            if low == -np.inf or high == np.inf:
                 val = initial_values[i]
                 width = abs(val) if val != 0 else 1.0
                 b_l = low if low != -np.inf else val - 100*width
@@ -2185,44 +2186,68 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
             else:
                 cma_bounds.append((low, high))
                 
-
-        print(f"Running CMA-ES for starting guesses (workers={workers})...")
-        
-        # CMA-ES setup — start from the provided initial_values (which may come from a prior fit)
-        sigma0 = max([(b[1] - b[0]) for b in cma_bounds]) / 4.0
-        x0 = list(initial_values)
-        
-        opts = {
-            'bounds': [[b[0] for b in cma_bounds], [b[1] for b in cma_bounds]],
-            'verbose': -9,
-            'maxiter': 100000,
-        }
-        
-        es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
-        early_stop_state = {'best_obj': np.inf, 'no_improve_count': 0}
-        
-        while not es.stop():
-            solutions = es.ask()
-            fitnesses = objective(np.array(solutions))
-            es.tell(solutions, fitnesses)
+        if len(free_indices) == 0:
+            print("All parameters are fixed. Skipping CMA-ES.")
+            res_x = [bounds[i][0] for i in range(n_params)]
+        else:
+            print(f"Running CMA-ES for starting guesses on {len(free_indices)}/{n_params} free parameters (workers={workers})...")
             
-            if es.countiter % 50 == 0:
-                print(f"  -> Iteration {es.countiter:4d}: Best Objective = {es.result.fbest:.4e} (No improvement for {early_stop_state['no_improve_count']} steps)")
+            # CMA-ES setup — start from the provided initial_values (which may come from a prior fit)
+            sigma0 = max([(b[1] - b[0]) for b in cma_bounds]) / 4.0
+            x0 = []
+            for j, i in enumerate(free_indices):
+                val = initial_values[i]
+                low, high = cma_bounds[j]
+                # CMA-ES phenotype transformation requires initial values to be strictly within bounds
+                clipped_val = max(low + 1e-8 * (high - low), min(val, high - 1e-8 * (high - low)))
+                x0.append(clipped_val)
             
-            # Early stopping check
-            best_obj = es.result.fbest
-            if best_obj >= early_stop_state['best_obj']:
-                early_stop_state['no_improve_count'] += 1
-            else:
-                early_stop_state['best_obj'] = best_obj
-                early_stop_state['no_improve_count'] = 0
+            default_popsize = 4 + int(3 * np.log(len(free_indices)))
+            popsize = max(default_popsize, workers)
+            
+            opts = {
+                'bounds': [[b[0] for b in cma_bounds], [b[1] for b in cma_bounds]],
+                'verbose': -9,
+                'maxiter': 100000,
+                'popsize': popsize,
+            }
+            
+            es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
+            early_stop_state = {'best_obj': np.inf, 'no_improve_count': 0}
+            
+            while not es.stop():
+                solutions = es.ask()
                 
-            if early_stop_state['no_improve_count'] >= 1000:
-                print(f"  -> Terminating early: No improvement in best obj for 1000 steps.")
-                break
-
-        res_x = es.result.xbest
-        print(f"CMA-ES finished. Best objective: {es.result.fbest}")
+                # Expand solutions to full parameters
+                full_solutions = np.zeros((len(solutions), n_params), dtype=np.float64)
+                if len(free_indices) > 0:
+                    full_solutions[:, free_indices] = solutions
+                if len(fixed_indices) > 0:
+                    full_solutions[:, fixed_indices] = [bounds[i][0] for i in fixed_indices]
+                    
+                fitnesses = objective(full_solutions)
+                es.tell(solutions, fitnesses)
+                
+                if es.countiter % 50 == 0:
+                    print(f"  -> Iteration {es.countiter:4d}: Best Objective = {es.result.fbest:.4e} (No improvement for {early_stop_state['no_improve_count']} steps)")
+                
+                if es.result.fbest < early_stop_state['best_obj']:
+                    early_stop_state['best_obj'] = es.result.fbest
+                    early_stop_state['no_improve_count'] = 0
+                else:
+                    early_stop_state['no_improve_count'] += 1
+                    
+                if early_stop_state['no_improve_count'] > 300:
+                    print(f"  -> Stopping early: No improvement for 300 iterations.")
+                    break
+                    
+            print(f"CMA-ES finished in {es.countiter} iterations. Best obj = {es.result.fbest:.4e}")
+            
+            # Reconstruct the full parameter array from the best CMA-ES solution
+            res_x = np.zeros(n_params, dtype=np.float64)
+            res_x[free_indices] = es.result.xbest
+            res_x[fixed_indices] = [bounds[i][0] for i in fixed_indices]
+            print(f"CMA-ES finished. Best objective: {es.result.fbest}")
         
         if cmaes_only:
             # Re-apply bounds just to set the parameters in f_to_fit to the optimum
