@@ -426,11 +426,12 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
         tree_get_run_id = np.array([0], dtype=np.int32)
         out_tree.Branch('get_run_id', tree_get_run_id, 'get_run_id/I')
 
-        # Find the DDAS events with an accepted GET trigger, in entry order, and match them with GET events
+        # Find the DDAS events with an accepted GET trigger, in entry order, and match them with GET events.
+        # Events where the trigger channel fired more than once are included: in e23035 run 182 each of these matched a single GET event.
         matched_get_indexes = np.full(in_tree.GetEntries(), -1, dtype=np.int64)
         if len(get_timestamps) > 0:
             in_tree.SetEstimate(in_tree.GetEntries() + 1)
-            num_triggers = in_tree.Draw('Entry$:get_trig_accepted_t', 'get_trig_accepted_m==1', 'goff')
+            num_triggers = in_tree.Draw('Entry$:get_trig_accepted_t', 'get_trig_accepted_m>=1', 'goff')
             trigger_entries = np.array([int(in_tree.GetV1()[k]) for k in range(num_triggers)], dtype=np.int64)
             trigger_times = np.array([in_tree.GetV2()[k] for k in range(num_triggers)])
             matched_get_indexes[trigger_entries] = match_get_to_ddas(trigger_times, get_timestamps, get_run_ids, log_file)
