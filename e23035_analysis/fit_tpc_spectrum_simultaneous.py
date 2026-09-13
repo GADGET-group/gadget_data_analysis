@@ -2444,7 +2444,8 @@ def load_fit(hash_str, folder_name='protons_le'):
             
     return f
 
-save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', 'protons_le')
+folder_name = 'protons_le'
+save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', folder_name)
 bg_shift_upper_bound = 0# 0.5/(2000/5) 
 bg_order=4
 force_refit=False
@@ -2469,7 +2470,6 @@ args_for_multipeak_fit = {
 }
 
 ROOT.Math.MinimizerOptions.SetDefaultStrategy(2)
-folder_name = 'protons_le_20keV_bins'
 if True:
     hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
 else:
