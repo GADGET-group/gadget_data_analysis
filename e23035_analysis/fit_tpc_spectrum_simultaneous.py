@@ -2349,7 +2349,7 @@ num_workers = 200
 Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
-bin_width = 5
+bin_width = 5 
 proton_binning = (4000//bin_width, 0, 4000)
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)

@@ -196,7 +196,8 @@ def make_ddas_root_file(experiment, ddas_run):
         log_path += '_alex'
     output_path = get_ddas_root_file_path(experiment, ddas_run)
     # Write to a temporary path and rename once the merge finishes, so a failed merge doesn't leave a file at output_path
-    partial_output_path = output_path + '.partial'
+    # The temporary path is unique to this process, so two processes making the same file don't write to or rename each other's output
+    partial_output_path = f'{output_path}.{os.getpid()}.partial'
     with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(partial_output_path, "RECREATE") as output_file:
         # Run git in the repository rather than the current working directory, which may be outside it
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, cwd=BASE_DIR).stdout
@@ -277,6 +278,95 @@ def make_ddas_root_file(experiment, ddas_run):
         output_file.WriteObject(out_tree, "merged_data")
     os.replace(partial_output_path, output_path)
 
+GET_DDAS_TIME_MATCH_THRESHOLD = 10e-6 # seconds
+GET_DDAS_MAX_CLOCK_DRIFT = 1e-4 # fractional difference in the rates of the GET and DDAS clocks. This was 45 ppm in e23035 run 277
+GET_DDAS_ANCHOR_GAPS = 5 # number of time gaps from the starting point which have to agree to line up the start of a GET run
+GET_DDAS_ANCHOR_WINDOW = 10 # number of events after the starting point searched for these gaps
+GET_DDAS_MAX_SKIPPED_GET_EVENTS = 20 # max GET events skipped in a row before searching for a new starting point
+GET_DDAS_MAX_SKIPPED_DDAS_TRIGGERS = 1000 # max DDAS triggers skipped in a row before searching for a new starting point
+
+def match_get_to_ddas(ddas_trigger_times, get_timestamps, get_run_ids, log_file):
+    '''
+    Pair GET events with DDAS events that have an accepted GET trigger, using the time between consecutive events
+    to find triggers that were only recorded by one of the two systems.
+
+    GET timestamps don't carry over from one GET run to the next, so the time between the last event of one GET run
+    and the first event of the next can't be compared with DDAS. Instead, the first event of each GET run is lined up by
+    searching forward from where the previous GET run left off for a starting point where at least GET_DDAS_ANCHOR_GAPS
+    of the time gaps to the next few GET events agree with gaps to the next few DDAS triggers.
+
+    Returns an array with the index of the matched GET event for each DDAS trigger, or -1 if it has no GET event.
+    '''
+    ddas_trigger_times, get_timestamps = np.asarray(ddas_trigger_times, dtype=float), np.asarray(get_timestamps, dtype=float)
+    get_run_ids = np.asarray(get_run_ids)
+    matches = np.full(len(ddas_trigger_times), -1, dtype=np.int64)
+
+    def gaps_agree(ddas_gap, get_gap):
+        return np.abs(ddas_gap - get_gap) <= GET_DDAS_TIME_MATCH_THRESHOLD + GET_DDAS_MAX_CLOCK_DRIFT*np.abs(ddas_gap)
+
+    def find_starting_point(ddas_index, get_index, get_end):
+        # Prefer the starting point which skips the fewest DDAS triggers, then the fewest GET events
+        for ddas_skip in range(min(GET_DDAS_MAX_SKIPPED_DDAS_TRIGGERS, len(ddas_trigger_times) - ddas_index)):
+            for get_skip in range(min(GET_DDAS_MAX_SKIPPED_GET_EVENTS, get_end - get_index)):
+                i, j = ddas_index + ddas_skip, get_index + get_skip
+                # Look a few events past GET_DDAS_ANCHOR_GAPS, so that an extra event on either side right after
+                # the true starting point doesn't cause it to be skipped
+                ddas_gaps = ddas_trigger_times[i+1:i+1+GET_DDAS_ANCHOR_WINDOW] - ddas_trigger_times[i]
+                get_gaps = get_timestamps[j+1:min(j+1+GET_DDAS_ANCHOR_WINDOW, get_end)] - get_timestamps[j]
+                if len(ddas_gaps) == 0 or len(get_gaps) == 0:
+                    continue
+                num_agreeing = np.sum(np.any(gaps_agree(ddas_gaps[np.newaxis, :], get_gaps[:, np.newaxis]), axis=1))
+                if num_agreeing >= min(GET_DDAS_ANCHOR_GAPS, len(get_gaps)):
+                    return i, j
+        return None
+
+    run_starts = np.flatnonzero(np.diff(get_run_ids) != 0) + 1
+    ddas_index = 0 # first DDAS trigger which hasn't been matched or skipped
+    for get_start, get_end in zip([0, *run_starts], [*run_starts, len(get_timestamps)]):
+        run = int(get_run_ids[get_start])
+        get_index = get_start
+        last_match = None
+        num_matched = 0
+        while get_index < get_end and ddas_index < len(ddas_trigger_times):
+            if last_match is None:
+                start = find_starting_point(ddas_index, get_index, get_end)
+                if start is None:
+                    log_file.write(f'GET run {run}: could not line up GET events starting at index {get_index} with DDAS triggers starting at index {ddas_index}\n')
+                    break
+                if start != (ddas_index, get_index):
+                    log_file.write(f'GET run {run}: lined up GET event index {start[1]} with DDAS trigger index {start[0]}, skipping {start[1] - get_index} GET events and {start[0] - ddas_index} DDAS triggers\n')
+                ddas_index, get_index = start
+            else:
+                ddas_gap = ddas_trigger_times[ddas_index] - ddas_trigger_times[last_match[0]]
+                get_gap = get_timestamps[get_index] - get_timestamps[last_match[1]]
+                if not gaps_agree(ddas_gap, get_gap):
+                    # The gaps are measured from the last matched pair, so whichever side has the smaller gap has an extra event
+                    if ddas_gap < get_gap:
+                        log_file.write(f'GET run {run}: DDAS trigger index {ddas_index} has no GET event\n')
+                        ddas_index += 1
+                    else:
+                        log_file.write(f'GET run {run}: GET event index {get_index} has no DDAS trigger\n')
+                        get_index += 1
+                    if ddas_index - last_match[0] > GET_DDAS_MAX_SKIPPED_DDAS_TRIGGERS or get_index - last_match[1] > GET_DDAS_MAX_SKIPPED_GET_EVENTS:
+                        log_file.write(f'GET run {run}: lost track of matching events after GET event index {last_match[1]}, searching for a new starting point\n')
+                        ddas_index, get_index = last_match[0] + 1, last_match[1] + 1
+                        last_match = None
+                    continue
+            matches[ddas_index] = get_index
+            last_match = (ddas_index, get_index)
+            num_matched += 1
+            ddas_index += 1
+            get_index += 1
+        # Unmatched DDAS triggers after the last match may belong to the next GET run
+        if last_match is not None:
+            ddas_index = last_match[0] + 1
+        num_events = get_end - get_start
+        log_file.write(f'GET run {run}: matched {num_matched} of {num_events} GET events\n')
+        if num_matched < 0.99*num_events:
+            print(f'WARNING: only matched {num_matched} of {num_events} events in GET run {run} with DDAS triggers', file=sys.stderr)
+    log_file.write(f'{np.sum(matches < 0)} of {len(matches)} DDAS triggers have no GET event\n')
+    return matches
+
 def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
     merged_path = get_ddas_root_file_path(experiment, ddas_run)
     if not os.path.exists(merged_path):
@@ -336,38 +426,18 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
         tree_get_run_id = np.array([0], dtype=np.int32)
         out_tree.Branch('get_run_id', tree_get_run_id, 'get_run_id/I')
 
-        # We need the ddas timestamp of get_trig_accepted to align
-        get_trig_accepted_m = np.array([0], dtype=np.int32)
-        get_trig_accepted_t = np.array([0.], dtype=np.float64)
-        in_tree.SetBranchAddress("get_trig_accepted_m", get_trig_accepted_m)
-        in_tree.SetBranchAddress("get_trig_accepted_t", get_trig_accepted_t)
-
-        get_evt_index = 0
-        last_ddas_time, last_get_time = np.nan, np.nan
-        GET_DDAS_TIME_MATCH_TRHESHOLD = 10e-6
+        # Find the DDAS events with an accepted GET trigger, in entry order, and match them with GET events
+        matched_get_indexes = np.full(in_tree.GetEntries(), -1, dtype=np.int64)
+        if len(get_timestamps) > 0:
+            in_tree.SetEstimate(in_tree.GetEntries() + 1)
+            num_triggers = in_tree.Draw('Entry$:get_trig_accepted_t', 'get_trig_accepted_m==1', 'goff')
+            trigger_entries = np.array([int(in_tree.GetV1()[k]) for k in range(num_triggers)], dtype=np.int64)
+            trigger_times = np.array([in_tree.GetV2()[k] for k in range(num_triggers)])
+            matched_get_indexes[trigger_entries] = match_get_to_ddas(trigger_times, get_timestamps, get_run_ids, log_file)
 
         for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
-            in_tree.GetEntry(ddas_index)
-            
-            record_get_event = False
-            if get_trig_accepted_m[0] == 1:
-                if get_evt_index < len(get_timestamps):
-                    get_time = get_timestamps[get_evt_index] - last_get_time
-                    ddas_time = get_trig_accepted_t[0]
-                    if last_get_time == np.nan: #first trigger
-                        record_get_event = True
-                    else: #check that delta between timestamps matches
-                        if (get_time - last_get_time) - (ddas_time - last_ddas_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
-                            log_file.write('GET event index %d doesn\'t match with next DDAS event with a valid trigger; trigger likely not recorded in GET.\n'%get_evt_index)
-                        elif (ddas_time - last_ddas_time)>(get_time - last_get_time) > GET_DDAS_TIME_MATCH_TRHESHOLD:
-                            log_file.write('WARNING: GET event index %d not coppied into ROOT tree. No corresponding DDAS event!.\n'%get_evt_index)
-                            get_evt_index += 1
-                        else:
-                            record_get_event = True
-                else:
-                    log_file.write('detected GET trigger in DDAS data stream, but no remaining GET events to read\n')
-            
-            if record_get_event:
+            get_evt_index = matched_get_indexes[ddas_index]
+            if get_evt_index >= 0:
                 tree_tpc_energy[0] = tpc_energy_MeV[get_evt_index]*1000
                 tree_track_length[0] = track_lengths[get_evt_index]
                 tree_ptype[0] = 0
@@ -376,18 +446,14 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
                 if alpha_mask[get_evt_index]:
                     tree_ptype[0] = 2
                 tree_should_veto[0] = not veto_mask[get_evt_index]
-                tree_get_timestamp[0] = get_time
+                tree_get_timestamp[0] = get_timestamps[get_evt_index]
                 tree_track_angle[0] = track_angles[get_evt_index]
-                
+
                 tree_track_centroid[0] = track_centroids[get_evt_index][0]
                 tree_track_centroid[1] = track_centroids[get_evt_index][1]
                 tree_track_centroid[2] = track_centroids[get_evt_index][2]
                 tree_get_event_id[0] = int(get_event_ids[get_evt_index])
                 tree_get_run_id[0] = int(get_run_ids[get_evt_index])
-                
-                last_get_time = get_time
-                last_ddas_time = ddas_time            
-                get_evt_index += 1
             else: #no corresponding TPC event; set TPC quantities to NaN
                 tree_get_timestamp[0] = tree_tpc_energy[0] = tree_track_length[0] = tree_track_angle[0] = np.nan
                 tree_ptype[0] = -1
@@ -598,7 +664,8 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
     # --- MULTIPLE RUNS LOGIC ---
     if is_iterable_runs(ddas_run):
         sum_hist = None
-        run_list = list(ddas_run) 
+        # Drop repeated runs so they aren't added to the sum twice
+        run_list = list(dict.fromkeys(ddas_run))
         
         if num_workers > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:

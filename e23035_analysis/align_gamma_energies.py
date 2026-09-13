@@ -42,6 +42,8 @@ for run in run_candidates:
     if np.isnan(run):
         print(f'run {run} is nan, skipping')
         continue
+    if run in runs:
+        continue #a DDAS run can appear on several rows when it spans multiple GET runs
    # t0, tf = ddas_interface.get_first_and_last_ddas_time(run)
 
     if os.path.exists(ddas_interface.get_ddas_root_file_path(experiment, run)):
