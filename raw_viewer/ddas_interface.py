@@ -195,16 +195,19 @@ def make_ddas_root_file(experiment, ddas_run):
     if experiment == 'e25058':
         log_path += '_alex'
     output_path = get_ddas_root_file_path(experiment, ddas_run)
-    with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
-        git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True).stdout
-        git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True).stdout
-        git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True).stdout
+    # Write to a temporary path and rename once the merge finishes, so a failed merge doesn't leave a file at output_path
+    partial_output_path = output_path + '.partial'
+    with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(partial_output_path, "RECREATE") as output_file:
+        # Run git in the repository rather than the current working directory, which may be outside it
+        git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, cwd=BASE_DIR).stdout
+        git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True, cwd=BASE_DIR).stdout
+        git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True, cwd=BASE_DIR).stdout
         log_file.write('preparing to process ddas run %d \n'%ddas_run)
         log_file.write('git commit %s\n'%git_version)
         log_file.write('git status: %s\n'%git_status)
         log_file.write('git diff: %s\n'%git_diff)
 
-        ddas_ch_map_path = f'{experiment}_analysis/channel_map.csv'
+        ddas_ch_map_path = os.path.join(BASE_DIR, f'{experiment}_analysis', 'channel_map.csv')
         log_file.write('loading DDAS channel map from %s\n'%ddas_ch_map_path)
         chmap = np.genfromtxt(ddas_ch_map_path,delimiter=', ', dtype=str, skip_header=1)
         ch_indexes = np.array(chmap[:,0], dtype=int)
@@ -272,6 +275,7 @@ def make_ddas_root_file(experiment, ddas_run):
             out_tree.Fill()
 
         output_file.WriteObject(out_tree, "merged_data")
+    os.replace(partial_output_path, output_path)
 
 def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
     merged_path = get_ddas_root_file_path(experiment, ddas_run)
