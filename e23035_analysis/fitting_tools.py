@@ -2328,7 +2328,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1):
     if param_bounds is None:
         param_bounds = {}
     e_low, e_high = fit_window
@@ -2507,87 +2507,120 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     
     cpp_code = f"""
     double eval_2d_gaus_{comp_id}(double *x, double *p) {{
-        double val_x = x[0];
+        double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         
         int mu_idx[{n_peaks}] = {mu_cpp};
-        
-        {bg_eval_cpp}
-        double total = bg_val;
         double bin_width = {bin_width};
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
         
-        double sigma_vals[{n_peaks}];
-        {sigma_eval_cpp}
-        
-        double amp_vals[{n_peaks}];
-        {amp_eval_cpp}
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
+            
+            {bg_eval_cpp}
+            double total = bg_val;
+            
+            double sigma_vals[{n_peaks}];
+            {sigma_eval_cpp}
+            
+            double amp_vals[{n_peaks}];
+            {amp_eval_cpp}
 
-        double bg_shift_vals[{n_peaks}];
-        {bg_shift_eval_cpp}
-        
-        for (int i = 0; i < {n_peaks}; ++i) {{
-            double mu = p[mu_idx[i]];
-            double sigma = sigma_vals[i];
-            double amp = amp_vals[i];
-            double bg_shift = bg_shift_vals[i];
+            double bg_shift_vals[{n_peaks}];
+            {bg_shift_eval_cpp}
             
-            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
-        }}
-        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 0.5);
-        
-        for (int i = 0; i < {n_peaks}; ++i) {{
-            double mu = p[mu_idx[i]];
-            double sigma = sigma_vals[i];
-            double amp = amp_vals[i];
+            for (int i = 0; i < {n_peaks}; ++i) {{
+                double mu = p[mu_idx[i]];
+                double sigma = sigma_vals[i];
+                double amp = amp_vals[i];
+                double bg_shift = bg_shift_vals[i];
+                
+                total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            }}
+            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+            total = std::sqrt(total * total + 0.5);
             
-            total += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
+            for (int i = 0; i < {n_peaks}; ++i) {{
+                double mu = p[mu_idx[i]];
+                double sigma = sigma_vals[i];
+                double amp = amp_vals[i];
+                
+                total += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
+            }}
+            total_sum += total;
         }}
-        return total;
+        return total_sum / points_per_bin;
     }}
     
     double eval_2d_gaus_bg_{comp_id}(double *x, double *p) {{
-        double val_x = x[0];
+        double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         int mu_idx[{n_peaks}] = {mu_cpp};
-        {bg_eval_cpp}
-        double total = bg_val;
-        double sigma_vals[{n_peaks}];
-        {sigma_eval_cpp}
-        double amp_vals[{n_peaks}];
-        {amp_eval_cpp}
-        double bg_shift_vals[{n_peaks}];
-        {bg_shift_eval_cpp}
-        for (int i = 0; i < {n_peaks}; ++i) {{
-            double mu = p[mu_idx[i]];
-            double sigma = sigma_vals[i];
-            double amp = amp_vals[i];
-            double bg_shift = bg_shift_vals[i];
-            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+        double bin_width = {bin_width};
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
+        
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
+            
+            {bg_eval_cpp}
+            double total = bg_val;
+            double sigma_vals[{n_peaks}];
+            {sigma_eval_cpp}
+            double amp_vals[{n_peaks}];
+            {amp_eval_cpp}
+            double bg_shift_vals[{n_peaks}];
+            {bg_shift_eval_cpp}
+            for (int i = 0; i < {n_peaks}; ++i) {{
+                double mu = p[mu_idx[i]];
+                double sigma = sigma_vals[i];
+                double amp = amp_vals[i];
+                double bg_shift = bg_shift_vals[i];
+                total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            }}
+            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+            total = std::sqrt(total * total + 0.5);
+            total_sum += total;
         }}
-        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 0.5);
-        return total;
+        return total_sum / points_per_bin;
     }}
     
     double eval_2d_gaus_peak_{comp_id}(double *x, double *p) {{
-        double val_x = x[0];
+        double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         int target_peak = std::round(x[2]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
         int mu_idx[{n_peaks}] = {mu_cpp};
         double bin_width = {bin_width};
-        double sigma_vals[{n_peaks}];
-        {sigma_eval_cpp}
-        double amp_vals[{n_peaks}];
-        {amp_eval_cpp}
-        double mu = p[mu_idx[target_peak]];
-        double sigma = sigma_vals[target_peak];
-        double amp = amp_vals[target_peak];
-        return (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
+        
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
+            
+            double sigma_vals[{n_peaks}];
+            {sigma_eval_cpp}
+            double amp_vals[{n_peaks}];
+            {amp_eval_cpp}
+            double mu = p[mu_idx[target_peak]];
+            double sigma = sigma_vals[target_peak];
+            double amp = amp_vals[target_peak];
+            total_sum += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
+        }}
+        return total_sum / points_per_bin;
     }}
     """
     ROOT.gInterpreter.Declare(cpp_code)
@@ -2638,7 +2671,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None):
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1):
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:
@@ -2792,42 +2825,137 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
 
     cpp_code = f"""
     double eval_2d_emg_{comp_id}(double *x, double *p) {{
-        double val_x = x[0];
+        double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         int mu_idx[{n_peaks}] = {mu_cpp};
         int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
         
         double bin_width = {bin_width};
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
         
-        double sigma_vals[{n_peaks}];
-        {sigma_eval_cpp}
-        
-        double tau_vals[{n_peaks}];
-        {tau_eval_cpp}
-        
-        double bg_shift_vals[{n_peaks}];
-        {bg_shift_eval_cpp}
-        
-        {bg_eval_cpp}
-        double total = bg_val;
-        
-        for (int i = 0; i < {n_peaks}; ++i) {{
-            double mu = p[mu_idx[i]];
-            double amp = p[amp_idx[i][val_y]];
-            double sigma = sigma_vals[i];
-            double bg_shift = bg_shift_vals[i];
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
             
-            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            double sigma_vals[{n_peaks}];
+            {sigma_eval_cpp}
+            
+            double tau_vals[{n_peaks}];
+            {tau_eval_cpp}
+            
+            double bg_shift_vals[{n_peaks}];
+            {bg_shift_eval_cpp}
+            
+            {bg_eval_cpp}
+            double total = bg_val;
+            
+            for (int i = 0; i < {n_peaks}; ++i) {{
+                double mu = p[mu_idx[i]];
+                double amp = p[amp_idx[i][val_y]];
+                double sigma = sigma_vals[i];
+                double bg_shift = bg_shift_vals[i];
+                
+                total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            }}
+            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+            total = std::sqrt(total * total + 0.5);
+            
+            for (int i = 0; i < {n_peaks}; ++i) {{
+                double mu = p[mu_idx[i]];
+                double amp = p[amp_idx[i][val_y]];
+                double sigma = sigma_vals[i];
+                double tau = tau_vals[i];
+                
+                double u = (val_x - mu) / sigma;
+                double v = sigma / tau;
+                double z = (u - v) / 1.41421356;
+                
+                double term;
+                if (z > 26.0) {{
+                    term = 0.0;
+                }} else if (z < -26.0) {{
+                    term = (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * 2.0;
+                }} else {{
+                    term = (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * TMath::Erfc(z);
+                }}
+                total += term;
+            }}
+            total_sum += total;
         }}
-        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 0.5);
+        return total_sum / points_per_bin;
+    }}
+    
+    double eval_2d_emg_bg_{comp_id}(double *x, double *p) {{
+        double bin_center_x = x[0];
+        int val_y = std::round(x[1]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
         
-        for (int i = 0; i < {n_peaks}; ++i) {{
-            double mu = p[mu_idx[i]];
-            double amp = p[amp_idx[i][val_y]];
-            double sigma = sigma_vals[i];
-            double tau = tau_vals[i];
+        double bin_width = {bin_width};
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
+        
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
+            
+            double sigma_vals[{n_peaks}];
+            {sigma_eval_cpp}
+            
+            double bg_shift_vals[{n_peaks}];
+            {bg_shift_eval_cpp}
+            
+            {bg_eval_cpp}
+            double total = bg_val;
+            
+            for (int i = 0; i < {n_peaks}; ++i) {{
+                double mu = p[mu_idx[i]];
+                double sigma = sigma_vals[i];
+                double amp = p[amp_idx[i][val_y]];
+                double bg_shift = bg_shift_vals[i];
+                total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
+            }}
+            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+            total = std::sqrt(total * total + 0.5);
+            total_sum += total;
+        }}
+        return total_sum / points_per_bin;
+    }}
+    
+    double eval_2d_emg_peak_{comp_id}(double *x, double *p) {{
+        double bin_center_x = x[0];
+        int val_y = std::round(x[1]);
+        int target_peak = std::round(x[2]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
+        double bin_width = {bin_width};
+        
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
+        
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
+            
+            double sigma_vals[{n_peaks}];
+            {sigma_eval_cpp}
+            double tau_vals[{n_peaks}];
+            {tau_eval_cpp}
+            double mu = p[mu_idx[target_peak]];
+            double amp = p[amp_idx[target_peak][val_y]];
+            double sigma = sigma_vals[target_peak];
+            double tau = tau_vals[target_peak];
             
             double u = (val_x - mu) / sigma;
             double v = sigma / tau;
@@ -2841,62 +2969,9 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             }} else {{
                 term = (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * TMath::Erfc(z);
             }}
-            total += term;
+            total_sum += term;
         }}
-        return total;
-    }}
-    
-    double eval_2d_emg_bg_{comp_id}(double *x, double *p) {{
-        double val_x = x[0];
-        int val_y = std::round(x[1]);
-        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
-        int mu_idx[{n_peaks}] = {mu_cpp};
-        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
-        double sigma_vals[{n_peaks}];
-        {sigma_eval_cpp}
-        
-        double bg_shift_vals[{n_peaks}];
-        {bg_shift_eval_cpp}
-        
-        {bg_eval_cpp}
-        double total = bg_val;
-        
-        for (int i = 0; i < {n_peaks}; ++i) {{
-            double mu = p[mu_idx[i]];
-            double sigma = sigma_vals[i];
-            double amp = p[amp_idx[i][val_y]];
-            double bg_shift = bg_shift_vals[i];
-            total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
-        }}
-        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        total = std::sqrt(total * total + 0.5);
-        return total;
-    }}
-    
-    double eval_2d_emg_peak_{comp_id}(double *x, double *p) {{
-        double val_x = x[0];
-        int val_y = std::round(x[1]);
-        int target_peak = std::round(x[2]);
-        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
-        if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
-        int mu_idx[{n_peaks}] = {mu_cpp};
-        int amp_idx[{n_peaks}][{n_spectra}] = {amp_cpp};
-        double bin_width = {bin_width};
-        double sigma_vals[{n_peaks}];
-        {sigma_eval_cpp}
-        double tau_vals[{n_peaks}];
-        {tau_eval_cpp}
-        double mu = p[mu_idx[target_peak]];
-        double amp = p[amp_idx[target_peak][val_y]];
-        double sigma = sigma_vals[target_peak];
-        double tau = tau_vals[target_peak];
-        
-        double u = (val_x - mu) / sigma;
-        double v = sigma / tau;
-        double z = (u - v) / 1.41421356;
-        if (z > 26.0) return 0.0;
-        if (z < -26.0) return (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * 2.0;
-        return (amp * bin_width / (2.0 * tau)) * std::exp(0.5 * std::pow(sigma/tau, 2) - (val_x - mu)/tau) * TMath::Erfc(z);
+        return total_sum / points_per_bin;
     }}
     """
     ROOT.gInterpreter.Declare(cpp_code)

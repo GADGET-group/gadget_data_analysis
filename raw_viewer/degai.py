@@ -434,7 +434,21 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     # SINGLE RUN PROCESSING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
-    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + tpc_ini_filename + "v5").encode()).hexdigest()
+
+    # The input files have to exist before the cache key is made, since the key records which version of them was used
+    merged_file_path = ddas_interface.get_ddas_root_file_path(experiment, ddas_run)
+    input_files = [merged_file_path]
+    needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
+    if needs_tpc:
+        if not tpc_ini_filename:
+            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+        tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
+        if not os.path.exists(tpc_friend_path):
+            ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)
+        input_files.append(tpc_friend_path)
+    input_fingerprints = str([ddas_interface.get_file_fingerprint(path) for path in input_files])
+
+    hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + tpc_ini_filename + input_fingerprints + "v5").encode()).hexdigest()
     cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'clarion_cache', 'histograms_flex')
     os.makedirs(cache_dir, exist_ok=True)
     
@@ -463,22 +477,16 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
 
     add_back_tree = get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns=dt_window_ns, e_thresh=e_thresh, sliding_scale=sliding_scale, nonlinearity_correction_name=nonlinearity_correction_name, time_alignment_ns=time_alignment_ns)
     
-    merged_file = ROOT.TFile.Open(ddas_interface.get_ddas_root_file_path(experiment, ddas_run), 'READ')
+    merged_file = ROOT.TFile.Open(merged_file_path, 'READ')
     if not merged_file or merged_file.IsZombie():
-        raise FileNotFoundError(f"Could not open ROOT data file: {ddas_interface.get_ddas_root_file_path(experiment, ddas_run)}")
+        raise FileNotFoundError(f"Could not open ROOT data file: {merged_file_path}")
     merged_tree = merged_file.Get('merged_data')
     if not merged_tree:
         raise ValueError(f"Could not find 'merged_data' tree in file")
     merged_tree.AddFriend(add_back_tree)
-    
+
     tpc_friend_file = None
-    needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
     if needs_tpc:
-        if not tpc_ini_filename:
-            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
-        tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
-        if not os.path.exists(tpc_friend_path):
-            ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)
         tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
         if not tpc_friend_file or tpc_friend_file.IsZombie():
             raise FileNotFoundError(f"Could not open TPC friend file: {tpc_friend_path}")
@@ -486,6 +494,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
         if not tpc_tree:
             raise ValueError(f"Could not find 'tpc_data' tree in file {tpc_friend_path}")
         merged_tree.AddFriend(tpc_tree)
+        ddas_interface.check_friend_shadowing(merged_tree, tpc_tree, [var_exp, selection], merged_file_path)
 
     if ':' in var_exp:
         raw_hist = ROOT.TH2D(hash_name, "", *binning)

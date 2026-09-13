@@ -235,7 +235,7 @@ def load_cmaes_params(save_csv_name, folder_name=None):
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
-                    custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1):
+                    custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1):
     
     def _pow_str(base, exp):
         if exp == 0: return "1.0"
@@ -252,7 +252,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
             f.param_bound_functions[p] = additional_param_bounds[p]
     else:
         f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order, 
-                                                  use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers)
+                                                  use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin)
         if custom_initial_values:
             f.custom_initial_values = custom_initial_values
         
@@ -2349,7 +2349,8 @@ num_workers = 200
 Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
-proton_binning = (4000//20, 0, 4000)
+bin_width = 5
+proton_binning = (4000//bin_width, 0, 4000)
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
@@ -2449,7 +2450,7 @@ bg_order=4
 force_refit=False
 args_for_multipeak_fit = {
     'force_refit': force_refit,
-    'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000) for i in range(bg_order+1)},
+    'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000*bin_width/5) for i in range(bg_order+1)},
     'loc_wiggle': 15,
     #'bg_model': 'chebyshev',
     'bg_model': 'bernstein',
@@ -2462,6 +2463,7 @@ args_for_multipeak_fit = {
     'bg_shift_upper_bound': bg_shift_upper_bound,
     'sigma_min': 10,
     'sigma_max': 20/720*2900, #energy resolution at top of band as a percent of energy shouldn't be worse than it is at the bottom
+    'points_per_bin':10,
     'use_cmaes': False,
     'workers': num_workers
 }

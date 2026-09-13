@@ -957,7 +957,7 @@ class multi_spectrum_fitter(spectrum_fitter):
     '''
     Class for simultaneously fitting multiple 1D spectra.
     '''
-    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1):
+    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1):
         if not spectra:
             raise ValueError("Must provide at least one spectrum")
         self.spectra = spectra
@@ -972,6 +972,7 @@ class multi_spectrum_fitter(spectrum_fitter):
         self.use_cmaes = use_cmaes
         self.cmaes_only = cmaes_only
         self.workers = workers
+        self.points_per_bin = points_per_bin
         
     def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0, fit_sig=0, spectrum_index=0):
         '''
@@ -1048,7 +1049,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
-                                    custom_initial_values=getattr(self, 'custom_initial_values', None))
+                                    custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin)
             elif self.peak_model.lower() == 'bg_shift_emg':
                 if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
                     if 'bg_shift' in param_bounds:
@@ -1060,7 +1061,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
-                                    custom_initial_values=getattr(self, 'custom_initial_values', None))
+                                    custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin)
             else:
                 raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports bg_shift_gaus, bg_shift_emg): {self.peak_model}")
 

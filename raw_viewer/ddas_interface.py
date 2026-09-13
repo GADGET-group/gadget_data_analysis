@@ -2,6 +2,7 @@
 import sys
 import hashlib
 import os
+import re
 import pickle
 import gzip
 import subprocess
@@ -453,11 +454,62 @@ import concurrent.futures
 import tqdm
 import ROOT
 
+def get_file_fingerprint(path):
+    '''
+    Identify the version of a file on disk by its resolved path, size, and modification time. Cache keys
+    include this so cached results are rebuilt when the files they were made from change.
+    '''
+    stat = os.stat(path)
+    return (os.path.realpath(path), stat.st_size, stat.st_mtime_ns)
+
+def check_friend_shadowing(tree, friend_tree, expressions, tree_file_path):
+    '''
+    ROOT looks up a branch name in the main tree before its friends, so a branch that exists in both trees
+    silently hides the friend's copy. Raise if any of the expressions uses one of these names without a tree prefix.
+    '''
+    friend_branches = {b.GetName() for b in friend_tree.GetListOfBranches()}
+    duplicated = sorted(friend_branches & {b.GetName() for b in tree.GetListOfBranches()})
+    shadowed = [name for name in duplicated if any(re.search(rf'(?<![\w.]){re.escape(name)}(?!\w)', exp) for exp in expressions)]
+    if shadowed:
+        friend_name = friend_tree.GetName()
+        raise ValueError(f"{tree_file_path} has its own copies of branches {shadowed}, which hide the ones in friend tree '{friend_name}'. "
+                         f"Remake the file without these branches, or refer to them explicitly as {friend_name}.<branch>.")
+
 def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename=""):
     cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
-    
-    unique_string = str((run, tuple(binning), var_exp, selection, tpc_ini_filename)).encode('utf-8')
+
+    # The input files have to exist before the cache key is made, since the key records which version of them was used
+    data_file_path = get_ddas_root_file_path(experiment, run)
+    if not os.path.exists(data_file_path):
+        make_ddas_root_file(experiment, run)
+    input_files = [data_file_path]
+
+    needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
+    if needs_tpc:
+        if not tpc_ini_filename:
+            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+        tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
+        if not os.path.exists(tpc_friend_path):
+            try:
+                make_tpc_friend_file(experiment, run, tpc_ini_filename)
+            except Exception as e:
+                import traceback
+                import sys
+                print(f"\n{'='*80}\n!!! CRITICAL FAILURE in make_tpc_friend_file for RUN {run} !!!\n{'='*80}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                print(f"{'='*80}\n", file=sys.stderr)
+
+                if os.path.exists(tpc_friend_path):
+                    try:
+                        os.remove(tpc_friend_path)
+                    except OSError:
+                        pass
+                raise
+        input_files.append(tpc_friend_path)
+
+    input_fingerprints = [get_file_fingerprint(path) for path in input_files]
+    unique_string = str((run, tuple(binning), var_exp, selection, tpc_ini_filename, input_fingerprints)).encode('utf-8')
     hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
     cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
     
@@ -485,9 +537,6 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
                 pass
 
     # --- BUILD THE HISTOGRAM ---
-    data_file_path = get_ddas_root_file_path(experiment, run)
-    if not os.path.exists(data_file_path):
-        make_ddas_root_file(experiment, run)
     data_file = ROOT.TFile.Open(data_file_path, 'READ')
     
     if not data_file or data_file.IsZombie():
@@ -499,27 +548,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
         raise ValueError(f"Could not find TTree 'merged_data' in {data_file_path}.")
 
     tpc_friend_file = None
-    needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
     if needs_tpc:
-        if not tpc_ini_filename:
-            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
-        tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
-        if not os.path.exists(tpc_friend_path):
-            try:
-                make_tpc_friend_file(experiment, run, tpc_ini_filename)
-            except Exception as e:
-                import traceback
-                import sys
-                print(f"\n{'='*80}\n!!! CRITICAL FAILURE in make_tpc_friend_file for RUN {run} !!!\n{'='*80}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-                print(f"{'='*80}\n", file=sys.stderr)
-                
-                if os.path.exists(tpc_friend_path):
-                    try:
-                        os.remove(tpc_friend_path)
-                    except OSError:
-                        pass
-                raise
         tpc_friend_file = ROOT.TFile.Open(tpc_friend_path, 'READ')
         if not tpc_friend_file or tpc_friend_file.IsZombie():
             raise FileNotFoundError(f"Could not open TPC friend file: {tpc_friend_path}")
@@ -527,6 +556,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
         if not tpc_tree:
             raise ValueError(f"Could not find 'tpc_data' tree in file {tpc_friend_path}")
         tree.AddFriend(tpc_tree)
+        check_friend_shadowing(tree, tpc_tree, [var_exp, selection], data_file_path)
         
     if ':' in var_exp:
         raw_hist = ROOT.TH2D(hash_name, "", *binning)
