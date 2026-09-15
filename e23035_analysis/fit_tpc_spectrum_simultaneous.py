@@ -2473,7 +2473,7 @@ ROOT.Math.MinimizerOptions.SetDefaultStrategy(2)
 if True:
     hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
 else:
-    hash_str = '19dbfa15'
+    hash_str = '4c9f7068'
     f = load_fit(hash_str)
 # res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
 print('hash: ', hash_str)

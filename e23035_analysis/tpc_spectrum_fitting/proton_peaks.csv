@@ -3,8 +3,7 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 ,716,60Ga,,,,
 ,770,60Ga,,,,
 ,820,59Zn,,,,
-,8890,60Ga,,,,not previously observed
-,913,59Zn,914.492,1.059,yes
+,904,59Zn,914.492,1.059,yes
 ,955,59Zn,,,,not previously observed
 ,1010,60Ga,,,,
 ,1070,60Ga,,,,
@@ -36,7 +35,6 @@ fit_window,peak energy,from decay of,known peak energy (keV),known peak energy u
 ,2120,60Ga,,,,
 ,2182,59Zn,2182,10,,
 ,2197,59Zn,2197,10
-,2200,60Ga,,,,
 ,2250,59Zn,2250,10,,
 ,2275,60Ga,,,,
 ,2370,60Ga,,,,
