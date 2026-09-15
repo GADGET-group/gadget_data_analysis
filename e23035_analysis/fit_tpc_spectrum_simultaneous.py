@@ -2360,7 +2360,12 @@ ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma
 ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 pspec_all_energies_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_all_energies_60Ga", "60Ga proton_spectrum all energies", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-c_overlaid, leg, stack = root_vis_tools.draw_overlaid_histograms({'all energy': pspec_all_energies_60Ga, 'low energy': pspec_low_energy_60Ga})
+if False:
+    c_overlaid, leg, stack = root_vis_tools.draw_overlaid_histograms({'all energy': pspec_all_energies_60Ga, 'low energy': pspec_low_energy_60Ga})
+    c_ratio = ROOT.TCanvas()
+    ratio_hist = pspec_low_energy_60Ga/pspec_all_energies_60Ga
+    ratio_hist.Draw()
+
 #loc_wiggle = 15
 
 
@@ -2474,10 +2479,11 @@ args_for_multipeak_fit = {
     'use_cmaes': False,
     'workers': num_workers
 }
-
-ROOT.Math.MinimizerOptions.SetDefaultStrategy(2)
+#fit often won't converge unless exact hessian is computed. Too many correlated parameters!!!
+ROOT.Math.MinimizerOptions.SetDefaultStrategy(2) 
 if True:
-    hash_str, f = try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
+    hash_str, f = try_fit(args_for_multipeak_fit, ga_spec=pspec_all_energies_60Ga,#pspec_low_energy_60Ga,
+                            peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
 else:
     hash_str = '4c9f7068'
     f = load_fit(hash_str)
