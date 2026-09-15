@@ -235,7 +235,8 @@ def load_cmaes_params(save_csv_name, folder_name=None):
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
-                    custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1):
+                    custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1,
+                    peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None):
     
     def _pow_str(base, exp):
         if exp == 0: return "1.0"
@@ -251,8 +252,9 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         for p in additional_param_bounds:
             f.param_bound_functions[p] = additional_param_bounds[p]
     else:
-        f = spectrum_fitter.multi_spectrum_fitter(spectra, 'bg_shift_gaus', bg_model=bg_model, bg_order=bg_order, 
-                                                  use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin)
+        f = spectrum_fitter.multi_spectrum_fitter(spectra, peak_model, bg_model=bg_model, bg_order=bg_order, 
+                                                  use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin,
+                                                  bin_integral=bin_integral, peak_cutoff_sigmas=peak_cutoff_sigmas)
         if custom_initial_values:
             f.custom_initial_values = custom_initial_values
         
@@ -2349,13 +2351,16 @@ num_workers = 200
 Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
-bin_width = 5 
+bin_width = 5
 proton_binning = (4000//bin_width, 0, 4000)
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
 ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
+ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
+pspec_all_energies_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_all_energies_60Ga", "60Ga proton_spectrum all energies", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
+c_overlaid, leg, stack = root_vis_tools.draw_overlaid_histograms({'all energy': pspec_all_energies_60Ga, 'low energy': pspec_low_energy_60Ga})
 #loc_wiggle = 15
 
 
@@ -2444,11 +2449,11 @@ def load_fit(hash_str, folder_name='protons_le'):
             
     return f
 
-folder_name = 'protons_le'
+folder_name = 'protons_le_%dkeV_bins'%bin_width
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', folder_name)
 bg_shift_upper_bound = 0# 0.5/(2000/5) 
 bg_order=4
-force_refit=False
+force_refit=True
 args_for_multipeak_fit = {
     'force_refit': force_refit,
     'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000*bin_width/5) for i in range(bg_order+1)},
@@ -2460,11 +2465,12 @@ args_for_multipeak_fit = {
     #'sigma_monotonic_bernstein_order': 5,
     'sigma_bernstein_order': 3,
     #'bg_shift_monotonic_bernstein_order': 2,
-    'bg_shift_bernstein_order': 0,
-    'bg_shift_upper_bound': bg_shift_upper_bound,
+    'peak_model': 'gaus', 'bin_integral': True,
+    # 'bg_shift_bernstein_order': 0,
+    # 'bg_shift_upper_bound': bg_shift_upper_bound,
     'sigma_min': 10,
     'sigma_max': 20/720*2900, #energy resolution at top of band as a percent of energy shouldn't be worse than it is at the bottom
-    'points_per_bin':10,
+    # 'points_per_bin':10,
     'use_cmaes': False,
     'workers': num_workers
 }

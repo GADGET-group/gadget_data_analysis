@@ -2328,9 +2328,31 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None):
+    """
+    Simultaneously fit Gaussian peaks (optionally on a step-shifted background) across several spectra.
+
+    include_bg_shift (bool):
+        True (default) keeps the erfc step under each peak -- the 'bg_shift_gaus' model. False drops
+        it entirely: no bg_shift parameters are created and no erfc is evaluated. That is the plain
+        'gaus' model, reached through fit_gaussian_2d.
+    bin_integral (bool):
+        False (default) evaluates the Gaussian at points_per_bin sample points across the bin (with
+        points_per_bin=1, at the bin centre -- the historical behaviour). True replaces the sampling
+        with the exact integral of the Gaussian over the bin, written as a difference of erfs, and
+        integrates the background with 4-point Gauss-Legendre. points_per_bin is then unused. Only
+        available with include_bg_shift False, because the step term sits inside the background's
+        smooth-absolute-value floor and so has no closed-form bin integral there.
+    peak_cutoff_sigmas (float or None):
+        None (default) sums every peak in every bin. A number skips peaks whose centre is further
+        than that many sigma (plus one bin width) from the bin, which speeds up wide windows holding
+        many peaks at the cost of truncating tails below ~exp(-cutoff^2/2) of their amplitude.
+    """
     if param_bounds is None:
         param_bounds = {}
+    if bin_integral and include_bg_shift:
+        raise ValueError("bin_integral=True requires include_bg_shift=False: the step term has no "
+                         "closed-form bin integral once the smooth-absolute-value floor is applied to it.")
     e_low, e_high = fit_window
     n_spectra = len(spectra)
     
@@ -2423,26 +2445,32 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
 
 
     # 5. Background Shift (FOURTH)
+    # With include_bg_shift False the step term is dropped outright: no bg_shift parameters are
+    # registered and no erfc is emitted. That is the 'gaus' peak model.
     bg_shift_cpp_strings = []
-    for i in range(n_peaks):
-        mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
-        bg_shift_cpp_strings_for_peak = []
-        for j in range(n_spectra):
-            b_name = f"bg_shift_{i}_{j}" if not shared_bg_shift else f"bg_shift_0_{j}"
-            b_bnd = param_bounds.get(b_name, param_bounds.get(f'bg_shift_{i}', param_bounds.get('bg_shift', (0, 1.0))))
-            bg_str, bg_idx = resolve_string_param(b_name, 0.002, b_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
-            bg_cpp = bg_str.replace('[', 'p[').replace(']', ']')
-            bg_shift_cpp_strings_for_peak.append(bg_cpp)
-        bg_shift_cpp_strings.append(bg_shift_cpp_strings_for_peak)
+    if include_bg_shift:
+        for i in range(n_peaks):
+            mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
+            bg_shift_cpp_strings_for_peak = []
+            for j in range(n_spectra):
+                b_name = f"bg_shift_{i}_{j}" if not shared_bg_shift else f"bg_shift_0_{j}"
+                b_bnd = param_bounds.get(b_name, param_bounds.get(f'bg_shift_{i}', param_bounds.get('bg_shift', (0, 1.0))))
+                bg_str, bg_idx = resolve_string_param(b_name, 0.002, b_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
+                bg_cpp = bg_str.replace('[', 'p[').replace(']', ']')
+                bg_shift_cpp_strings_for_peak.append(bg_cpp)
+            bg_shift_cpp_strings.append(bg_shift_cpp_strings_for_peak)
 
     import uuid
     comp_id = uuid.uuid4().hex[:6]
-    
+
+    # The background is emitted in two pieces: bg_decl_cpp builds the parameter-index lookup
+    # tables once per call, bg_expr_cpp turns one val_x into bg_val. Keeping the tables out of
+    # the sampling loop is what lets the loop body stay cheap.
     if bg_model in ['chebyshev', 'polynomial']:
         bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
         bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
-        bg_eval_cpp = f"""
-        int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};
+        bg_decl_cpp = f"int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};"
+        bg_expr_cpp = f"""
         double x_norm = 2.0 * (val_x - {e_low}) / ({e_high} - {e_low}) - 1.0;
         double bg_val = p[bg_p_idx[0][val_y]];
         if ({bg_order} >= 1) bg_val += p[bg_p_idx[1][val_y]] * x_norm;
@@ -2466,8 +2494,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             p_1x = "1.0" if (bg_order - k) == 0 else (f"(1.0 - x_norm)" if (bg_order - k) == 1 else f"TMath::Power(1.0 - x_norm, {bg_order - k})")
             terms.append(f"{coef} * p[bg_p_idx[{k}][val_y]] * {p_x} * {p_1x}")
         eval_terms = " + ".join(terms)
-        bg_eval_cpp = f"""
-        int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};
+        bg_decl_cpp = f"int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};"
+        bg_expr_cpp = f"""
         double x_norm = (val_x - {e_low}) / ({e_high} - {e_low});
         double bg_val = {eval_terms};
         """
@@ -2476,19 +2504,21 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         bg_slope_idx = [pm.get_idx(f"bg_slope_{j}") for j in range(n_spectra)]
         bg_const_cpp = "{" + ",".join(map(str, bg_const_idx)) + "}"
         bg_slope_cpp = "{" + ",".join(map(str, bg_slope_idx)) + "}"
-        bg_eval_cpp = f"""
+        bg_decl_cpp = f"""
         int bg_const_idx[{n_spectra}] = {bg_const_cpp};
         int bg_slope_idx[{n_spectra}] = {bg_slope_cpp};
         double bg_const = p[bg_const_idx[val_y]];
         double bg_slope = p[bg_slope_idx[val_y]];
+        """
+        bg_expr_cpp = """
         double bg_val = bg_const + bg_slope * val_x;
         """
-        
+
     mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
     mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
-    
+
     sigma_eval_cpp = "\n        ".join([f"sigma_vals[{i}] = {sigma_cpp_strings[i]};" for i in range(n_peaks)])
-    
+
     amp_eval_cases = []
     bg_shift_eval_cases = []
     for j in range(n_spectra):
@@ -2496,129 +2526,204 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         bg_case_str = case_str
         for i in range(n_peaks):
             case_str += f"            amp_vals[{i}] = {amp_cpp_strings[i][j]};\n"
-            bg_case_str += f"            bg_shift_vals[{i}] = {bg_shift_cpp_strings[i][j]};\n"
+            if include_bg_shift:
+                bg_case_str += f"            bg_shift_vals[{i}] = {bg_shift_cpp_strings[i][j]};\n"
         case_str += "        }"
         bg_case_str += "        }"
         amp_eval_cases.append(case_str)
         bg_shift_eval_cases.append(bg_case_str)
-    
+
     amp_eval_cpp = " else ".join(amp_eval_cases)
     bg_shift_eval_cpp = " else ".join(bg_shift_eval_cases)
-    
-    cpp_code = f"""
+
+    # sigma, amplitude and bg_shift depend only on the parameters, never on the position inside the
+    # bin, so they are evaluated once per call instead of once per sample point.
+    shape_preamble = f"""
+        int mu_idx[{n_peaks}] = {mu_cpp};
+        double sigma_vals[{n_peaks}];
+        {sigma_eval_cpp}
+        double amp_vals[{n_peaks}];
+        {amp_eval_cpp}
+    """
+    shape_preamble_w_shift = shape_preamble
+    # The background-only component needs the peak shapes only to draw the step term under each
+    # peak, so without the step it skips them entirely.
+    bg_component_preamble = ""
+    if include_bg_shift:
+        shape_preamble_w_shift = shape_preamble + f"""
+        double bg_shift_vals[{n_peaks}];
+        {bg_shift_eval_cpp}
+        """
+        bg_component_preamble = shape_preamble_w_shift
+
+    # Step term, shared by the full model and the background-only component.
+    step_loop_cpp = ""
+    if include_bg_shift:
+        step_loop_cpp = f"""
+            for (int i = 0; i < {n_peaks}; ++i) {{
+                total += 0.5 * amp_vals[i] * bg_shift_vals[i] * TMath::Erfc((val_x - p[mu_idx[i]]) / (1.41421356 * sigma_vals[i]));
+            }}"""
+
+    cutoff_cpp = ""
+    if peak_cutoff_sigmas is not None:
+        # Peaks further than this many sigma from the bin contribute below ~1e-14 of their
+        # amplitude; skipping them keeps wide multi-peak windows from paying for every peak
+        # in every bin.
+        cutoff_cpp = f"""
+                if (std::fabs(bin_center_x - p[mu_idx[i]]) > {float(peak_cutoff_sigmas)} * sigma_vals[i] + bin_width) continue;"""
+
+    if bin_integral:
+        # Exact integral of each Gaussian over the bin, via the erf difference, instead of
+        # averaging point samples. The background keeps its smooth-absolute-value floor, so it
+        # is averaged with 4-point Gauss-Legendre (exact through 7th order for the bare
+        # polynomial, and the floor only matters where the background approaches zero).
+        gl_nodes = "{-0.8611363115940526, -0.3399810435848563, 0.3399810435848563, 0.8611363115940526}"
+        gl_weights = "{0.3478548451374538, 0.6521451548625461, 0.6521451548625461, 0.3478548451374538}"
+        bg_block_cpp = f"""
+        static const double gl_x[4] = {gl_nodes};
+        static const double gl_w[4] = {gl_weights};
+        double total = 0.0;
+        for (int q = 0; q < 4; ++q) {{
+            double val_x = bin_center_x + gl_x[q] * (bin_width / 2.0);
+            {bg_expr_cpp}
+            total += gl_w[q] * std::sqrt(bg_val * bg_val + 0.5);
+        }}
+        total *= 0.5;
+        """
+        peak_sum_cpp = f"""
+        double x_lo = bin_center_x - bin_width / 2.0;
+        double x_hi = bin_center_x + bin_width / 2.0;
+        for (int i = 0; i < {n_peaks}; ++i) {{{cutoff_cpp}
+            double mu = p[mu_idx[i]];
+            double inv = 1.0 / (1.41421356 * sigma_vals[i]);
+            double t_lo = (x_lo - mu) * inv;
+            double t_hi = (x_hi - mu) * inv;
+            // Erfc on the upper tail: erf(t_hi) - erf(t_lo) cancels catastrophically out there.
+            double frac = (t_lo > 0.0) ? 0.5 * (TMath::Erfc(t_lo) - TMath::Erfc(t_hi))
+                                       : 0.5 * (TMath::Erf(t_hi) - TMath::Erf(t_lo));
+            total += amp_vals[i] * frac;
+        }}
+        """
+        cpp_code = f"""
     double eval_2d_gaus_{comp_id}(double *x, double *p) {{
         double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
-        
-        int mu_idx[{n_peaks}] = {mu_cpp};
         double bin_width = {bin_width};
-        int points_per_bin = {points_per_bin};
-        double total_sum = 0.0;
-        
-        for (int pt = 0; pt < points_per_bin; ++pt) {{
-            double val_x = bin_center_x;
-            if (points_per_bin > 1) {{
-                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
-            }}
-            
-            {bg_eval_cpp}
-            double total = bg_val;
-            
-            double sigma_vals[{n_peaks}];
-            {sigma_eval_cpp}
-            
-            double amp_vals[{n_peaks}];
-            {amp_eval_cpp}
-
-            double bg_shift_vals[{n_peaks}];
-            {bg_shift_eval_cpp}
-            
-            for (int i = 0; i < {n_peaks}; ++i) {{
-                double mu = p[mu_idx[i]];
-                double sigma = sigma_vals[i];
-                double amp = amp_vals[i];
-                double bg_shift = bg_shift_vals[i];
-                
-                total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
-            }}
-            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-            total = std::sqrt(total * total + 0.5);
-            
-            for (int i = 0; i < {n_peaks}; ++i) {{
-                double mu = p[mu_idx[i]];
-                double sigma = sigma_vals[i];
-                double amp = amp_vals[i];
-                
-                total += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
-            }}
-            total_sum += total;
-        }}
-        return total_sum / points_per_bin;
+        {bg_decl_cpp}
+        {shape_preamble}
+        {bg_block_cpp}
+        {peak_sum_cpp}
+        return total;
     }}
-    
+
     double eval_2d_gaus_bg_{comp_id}(double *x, double *p) {{
         double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
-        int mu_idx[{n_peaks}] = {mu_cpp};
         double bin_width = {bin_width};
-        int points_per_bin = {points_per_bin};
-        double total_sum = 0.0;
-        
-        for (int pt = 0; pt < points_per_bin; ++pt) {{
-            double val_x = bin_center_x;
-            if (points_per_bin > 1) {{
-                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
-            }}
-            
-            {bg_eval_cpp}
-            double total = bg_val;
-            double sigma_vals[{n_peaks}];
-            {sigma_eval_cpp}
-            double amp_vals[{n_peaks}];
-            {amp_eval_cpp}
-            double bg_shift_vals[{n_peaks}];
-            {bg_shift_eval_cpp}
-            for (int i = 0; i < {n_peaks}; ++i) {{
-                double mu = p[mu_idx[i]];
-                double sigma = sigma_vals[i];
-                double amp = amp_vals[i];
-                double bg_shift = bg_shift_vals[i];
-                total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
-            }}
-            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-            total = std::sqrt(total * total + 0.5);
-            total_sum += total;
-        }}
-        return total_sum / points_per_bin;
+        {bg_decl_cpp}
+        {bg_block_cpp}
+        return total;
     }}
-    
+
     double eval_2d_gaus_peak_{comp_id}(double *x, double *p) {{
         double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         int target_peak = std::round(x[2]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
-        int mu_idx[{n_peaks}] = {mu_cpp};
+        double bin_width = {bin_width};
+        {shape_preamble}
+        double mu = p[mu_idx[target_peak]];
+        double inv = 1.0 / (1.41421356 * sigma_vals[target_peak]);
+        double t_lo = (bin_center_x - bin_width / 2.0 - mu) * inv;
+        double t_hi = (bin_center_x + bin_width / 2.0 - mu) * inv;
+        double frac = (t_lo > 0.0) ? 0.5 * (TMath::Erfc(t_lo) - TMath::Erfc(t_hi))
+                                   : 0.5 * (TMath::Erf(t_hi) - TMath::Erf(t_lo));
+        return amp_vals[target_peak] * frac;
+    }}
+    """
+    else:
+        cpp_code = f"""
+    double eval_2d_gaus_{comp_id}(double *x, double *p) {{
+        double bin_center_x = x[0];
+        int val_y = std::round(x[1]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+
         double bin_width = {bin_width};
         int points_per_bin = {points_per_bin};
         double total_sum = 0.0;
-        
+        {bg_decl_cpp}
+        {shape_preamble_w_shift}
+
         for (int pt = 0; pt < points_per_bin; ++pt) {{
             double val_x = bin_center_x;
             if (points_per_bin > 1) {{
                 val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
             }}
-            
-            double sigma_vals[{n_peaks}];
-            {sigma_eval_cpp}
-            double amp_vals[{n_peaks}];
-            {amp_eval_cpp}
-            double mu = p[mu_idx[target_peak]];
+
+            {bg_expr_cpp}
+            double total = bg_val;
+            {step_loop_cpp}
+            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+            total = std::sqrt(total * total + 0.5);
+
+            for (int i = 0; i < {n_peaks}; ++i) {{{cutoff_cpp}
+                double sigma = sigma_vals[i];
+                double t = (val_x - p[mu_idx[i]]) / sigma;
+                total += (amp_vals[i] * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * t * t);
+            }}
+            total_sum += total;
+        }}
+        return total_sum / points_per_bin;
+    }}
+
+    double eval_2d_gaus_bg_{comp_id}(double *x, double *p) {{
+        double bin_center_x = x[0];
+        int val_y = std::round(x[1]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        double bin_width = {bin_width};
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
+        {bg_decl_cpp}
+        {bg_component_preamble}
+
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
+
+            {bg_expr_cpp}
+            double total = bg_val;
+            {step_loop_cpp}
+            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
+            total = std::sqrt(total * total + 0.5);
+            total_sum += total;
+        }}
+        return total_sum / points_per_bin;
+    }}
+
+    double eval_2d_gaus_peak_{comp_id}(double *x, double *p) {{
+        double bin_center_x = x[0];
+        int val_y = std::round(x[1]);
+        int target_peak = std::round(x[2]);
+        if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
+        if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
+        double bin_width = {bin_width};
+        int points_per_bin = {points_per_bin};
+        double total_sum = 0.0;
+        {shape_preamble}
+
+        for (int pt = 0; pt < points_per_bin; ++pt) {{
+            double val_x = bin_center_x;
+            if (points_per_bin > 1) {{
+                val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
+            }}
             double sigma = sigma_vals[target_peak];
-            double amp = amp_vals[target_peak];
-            total_sum += (amp * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * std::pow((val_x - mu) / sigma, 2));
+            double t = (val_x - p[mu_idx[target_peak]]) / sigma;
+            total_sum += (amp_vals[target_peak] * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * t * t);
         }}
         return total_sum / points_per_bin;
     }}
@@ -2670,6 +2775,18 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     )
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
+
+def fit_gaussian_2d(spectra, e_guess, fit_window, **kwargs):
+    """
+    Plain Gaussian peaks on a polynomial background, fit simultaneously across several spectra.
+
+    Same as fit_gaussian_w_bg_shift_2d without the erfc step under each peak. Pass
+    bin_integral=True to integrate the Gaussians over each bin exactly (erf difference) instead of
+    sampling points_per_bin points across it; see fit_gaussian_w_bg_shift_2d for the rest.
+    """
+    kwargs.pop('include_bg_shift', None)
+    kwargs.pop('shared_bg_shift', None)
+    return fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, include_bg_shift=False, **kwargs)
 
 def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1):
     from scipy.special import erfcx, erfc

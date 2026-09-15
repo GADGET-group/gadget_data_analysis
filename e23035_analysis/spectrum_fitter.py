@@ -848,7 +848,12 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
             spec.SetDirectory(0)
             spectra.append(spec)
             
-        fitter = multi_spectrum_fitter(spectra, python_state['peak_model'])
+        fitter = multi_spectrum_fitter(spectra, python_state['peak_model'],
+                                       bg_model=python_state.get('bg_model', 'linear'),
+                                       bg_order=python_state.get('bg_order', 1),
+                                       points_per_bin=python_state.get('points_per_bin', 1),
+                                       bin_integral=python_state.get('bin_integral', False),
+                                       peak_cutoff_sigmas=python_state.get('peak_cutoff_sigmas', None))
         fitter.shared_sigma = python_state.get('shared_sigma', False)
         fitter.shared_bg_shift = python_state.get('shared_bg_shift', True)
         fitter.location_wiggle = python_state.get('location_wiggle', 10)
@@ -956,8 +961,21 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
 class multi_spectrum_fitter(spectrum_fitter):
     '''
     Class for simultaneously fitting multiple 1D spectra.
+
+    Supported peak models: 'gaus', 'bg_shift_gaus', 'bg_shift_emg'.
+
+    points_per_bin (int):
+        Number of points across each bin at which the model is sampled and averaged. 1 (default)
+        evaluates it at the bin centre.
+    bin_integral (bool):
+        'gaus' only. Replaces the points_per_bin sampling with the exact integral of each Gaussian
+        over the bin (a difference of erfs), which is both faster and exact. Off by default, so the
+        plain bin-centre Gaussian remains the default behaviour.
+    peak_cutoff_sigmas (float or None):
+        Skip peaks whose centre lies more than this many sigma from the bin. None (default) sums
+        every peak in every bin.
     '''
-    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1):
+    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1, bin_integral:bool=False, peak_cutoff_sigmas=None):
         if not spectra:
             raise ValueError("Must provide at least one spectrum")
         self.spectra = spectra
@@ -973,6 +991,10 @@ class multi_spectrum_fitter(spectrum_fitter):
         self.cmaes_only = cmaes_only
         self.workers = workers
         self.points_per_bin = points_per_bin
+        # 'gaus' only: integrate each Gaussian over the bin analytically instead of sampling
+        # points_per_bin points across it.
+        self.bin_integral = bin_integral
+        self.peak_cutoff_sigmas = peak_cutoff_sigmas
         
     def find_peaks(self, reset_peaks=True, expected_peak_width=1.5, window_width=None, init_sig=3.0, fit_sig=0, spectrum_index=0):
         '''
@@ -1032,7 +1054,20 @@ class multi_spectrum_fitter(spectrum_fitter):
                 E_for_bounds = loc_guess[0] if len(loc_guess) > 0 else (window_start + window_end) / 2.0
                 param_bounds[p] = self.param_bound_functions[p](E_for_bounds)
 
-            if self.peak_model.lower() == 'bg_shift_gaus':
+            if self.peak_model.lower() == 'gaus':
+                if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
+                    if 'sigma' in param_bounds:
+                        del param_bounds['sigma']
+                    for i, loc in enumerate(loc_guess):
+                        param_bounds[f'sigma_{i}'] = self.param_bound_functions['sigma'](loc)
+
+                res = fitting_tools.fit_gaussian_2d(self.spectra, loc_guess, fit_range,
+                                    param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
+                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
+                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
+                                    custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin,
+                                    bin_integral=getattr(self, 'bin_integral', False), peak_cutoff_sigmas=getattr(self, 'peak_cutoff_sigmas', None))
+            elif self.peak_model.lower() == 'bg_shift_gaus':
                 if not self.shared_sigma and len(loc_guess)>1 and 'sigma' in self.param_bound_functions:
                     if 'sigma' in param_bounds:
                         del param_bounds['sigma']
@@ -1063,7 +1098,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
                                     custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin)
             else:
-                raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports bg_shift_gaus, bg_shift_emg): {self.peak_model}")
+                raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports gaus, bg_shift_gaus, bg_shift_emg): {self.peak_model}")
 
             # fit_hist2d returns fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
             res_dict = {
@@ -1446,7 +1481,10 @@ class multi_spectrum_fitter(spectrum_fitter):
             'shared_bg_shift': getattr(self, 'shared_bg_shift', True),
             'location_wiggle': getattr(self, 'location_wiggle', 10),
             'bg_model': getattr(self, 'bg_model', 'linear'),
-            'bg_order': getattr(self, 'bg_order', 1)
+            'bg_order': getattr(self, 'bg_order', 1),
+            'points_per_bin': getattr(self, 'points_per_bin', 1),
+            'bin_integral': getattr(self, 'bin_integral', False),
+            'peak_cutoff_sigmas': getattr(self, 'peak_cutoff_sigmas', None)
         }
         
         import inspect
