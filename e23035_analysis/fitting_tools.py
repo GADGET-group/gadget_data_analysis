@@ -10,6 +10,21 @@ import ROOT
 import numpy as np
 import uuid
 
+# Scale (in counts per bin) of the softplus that keeps the 2D-fit backgrounds positive.
+# Above a few BG_FLOOR_SCALE the background passes through unchanged (the deviation falls off
+# as exp(-bg/scale)); below zero it decays towards 0 instead of reflecting back up the way the
+# old smooth absolute value did. At bg=0 it gives scale*ln2 ~ 0.69, matching the old sqrt(0.5).
+BG_FLOOR_SCALE = 1.0
+
+def bg_floor_cpp(var, scale=BG_FLOOR_SCALE):
+    """C++ statement replacing `var` with its softplus, scale*log(1 + exp(var/scale)).
+
+    The two branches are the same function, split so neither exp can overflow.
+    """
+    s = float(scale)
+    return (f"{var} = ({var} > 0.0) ? {var} + {s} * std::log1p(std::exp(-{var} / {s}))"
+            f" : {s} * std::log1p(std::exp({var} / {s}));")
+
 def get_bernstein_string(order, param_start_idx, e_low, e_high):
     import math
     if e_low == e_high:
@@ -2342,7 +2357,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         with the exact integral of the Gaussian over the bin, written as a difference of erfs, and
         integrates the background with 4-point Gauss-Legendre. points_per_bin is then unused. Only
         available with include_bg_shift False, because the step term sits inside the background's
-        smooth-absolute-value floor and so has no closed-form bin integral there.
+        softplus floor and so has no closed-form bin integral there.
     peak_cutoff_sigmas (float or None):
         None (default) sums every peak in every bin. A number skips peaks whose centre is further
         than that many sigma (plus one bin width) from the bin, which speeds up wide windows holding
@@ -2352,7 +2367,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         param_bounds = {}
     if bin_integral and include_bg_shift:
         raise ValueError("bin_integral=True requires include_bg_shift=False: the step term has no "
-                         "closed-form bin integral once the smooth-absolute-value floor is applied to it.")
+                         "closed-form bin integral once the softplus floor is applied to it.")
     e_low, e_high = fit_window
     n_spectra = len(spectra)
     
@@ -2574,7 +2589,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
 
     if bin_integral:
         # Exact integral of each Gaussian over the bin, via the erf difference, instead of
-        # averaging point samples. The background keeps its smooth-absolute-value floor, so it
+        # averaging point samples. The background keeps its softplus floor, so it
         # is averaged with 4-point Gauss-Legendre (exact through 7th order for the bare
         # polynomial, and the floor only matters where the background approaches zero).
         gl_nodes = "{-0.8611363115940526, -0.3399810435848563, 0.3399810435848563, 0.8611363115940526}"
@@ -2586,7 +2601,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         for (int q = 0; q < 4; ++q) {{
             double val_x = bin_center_x + gl_x[q] * (bin_width / 2.0);
             {bg_expr_cpp}
-            total += gl_w[q] * std::sqrt(bg_val * bg_val + 0.5);
+            {bg_floor_cpp('bg_val')}
+            total += gl_w[q] * bg_val;
         }}
         total *= 0.5;
         """
@@ -2666,8 +2682,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             {bg_expr_cpp}
             double total = bg_val;
             {step_loop_cpp}
-            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-            total = std::sqrt(total * total + 0.5);
+            // Softplus floor: decays to 0 as the background goes negative
+            {bg_floor_cpp('total')}
 
             for (int i = 0; i < {n_peaks}; ++i) {{{cutoff_cpp}
                 double sigma = sigma_vals[i];
@@ -2698,8 +2714,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             {bg_expr_cpp}
             double total = bg_val;
             {step_loop_cpp}
-            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-            total = std::sqrt(total * total + 0.5);
+            // Softplus floor: decays to 0 as the background goes negative
+            {bg_floor_cpp('total')}
             total_sum += total;
         }}
         return total_sum / points_per_bin;
@@ -2978,8 +2994,8 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
                 
                 total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
             }}
-            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-            total = std::sqrt(total * total + 0.5);
+            // Softplus floor: decays to 0 as the background goes negative
+            {bg_floor_cpp('total')}
             
             for (int i = 0; i < {n_peaks}; ++i) {{
                 double mu = p[mu_idx[i]];
@@ -3039,8 +3055,8 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
                 double bg_shift = bg_shift_vals[i];
                 total += 0.5 * amp * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
             }}
-            // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-            total = std::sqrt(total * total + 0.5);
+            // Softplus floor: decays to 0 as the background goes negative
+            {bg_floor_cpp('total')}
             total_sum += total;
         }}
         return total_sum / points_per_bin;

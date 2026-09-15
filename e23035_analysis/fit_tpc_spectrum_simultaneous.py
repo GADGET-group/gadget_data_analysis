@@ -2461,10 +2461,10 @@ bg_order=4
 force_refit=True
 args_for_multipeak_fit = {
     'force_refit': force_refit,
-    'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000*bin_width/5) for i in range(bg_order+1)},
+    #'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000*bin_width/5) for i in range(bg_order+1)},
     'loc_wiggle': 15,
-    #'bg_model': 'chebyshev',
-    'bg_model': 'bernstein',
+    'bg_model': 'chebyshev',
+    #'bg_model': 'bernstein',
     'bg_order': bg_order,
     'fraction_bernstein_order': 3,
     #'sigma_monotonic_bernstein_order': 5,
