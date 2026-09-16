@@ -2457,14 +2457,14 @@ def load_fit(hash_str, folder_name='protons_le'):
 folder_name = 'protons_le_%dkeV_bins'%bin_width
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', folder_name)
 bg_shift_upper_bound = 0# 0.5/(2000/5) 
-bg_order=4
-force_refit=True
+bg_order=10
+force_refit=False
 args_for_multipeak_fit = {
     'force_refit': force_refit,
-    #'additional_param_bounds': {f'bg_p{i}': lambda E: (0, 1000*bin_width/5) for i in range(bg_order+1)},
+    'additional_param_bounds': {f'bg_p{i}': lambda E: (-3, 1000*bin_width/5) for i in range(bg_order+1)},
     'loc_wiggle': 15,
-    'bg_model': 'chebyshev',
-    #'bg_model': 'bernstein',
+    #'bg_model': 'chebyshev',
+    'bg_model': 'bernstein',
     'bg_order': bg_order,
     'fraction_bernstein_order': 3,
     #'sigma_monotonic_bernstein_order': 5,
@@ -2490,6 +2490,8 @@ else:
 # res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
 print('hash: ', hash_str)
 print('p-value: ', f.fit_results[0]['fit_res'].Prob())
+print('chi2: ', f.fit_results[0]['fit_res'].Chi2())
+print('ndf: ', f.fit_results[0]['fit_res'].Ndf())
 f.show_fit_results(peak_index=0, show_fit_params=False, show_components=True)
 show_backgrounds(fitter_or_filename=f)
 #show_bg_shifts(fitter_or_filename=f)
