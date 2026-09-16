@@ -233,7 +233,7 @@ def load_cmaes_params(save_csv_name, folder_name=None):
         return json.load(pf)
 
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
-                    loc_wiggle=10, bg_model='linear', bg_order=1, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
+                    loc_wiggle=10, bg_model='linear', bg_order=1, bg_knots=None, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
                     custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1,
                     peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None):
@@ -252,8 +252,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         for p in additional_param_bounds:
             f.param_bound_functions[p] = additional_param_bounds[p]
     else:
-        f = spectrum_fitter.multi_spectrum_fitter(spectra, peak_model, bg_model=bg_model, bg_order=bg_order, 
-                                                  use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin,
+        f = spectrum_fitter.multi_spectrum_fitter(spectra, peak_model, bg_model=bg_model, bg_order=bg_order,
+                                                  bg_knots=bg_knots, use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin,
                                                   bin_integral=bin_integral, peak_cutoff_sigmas=peak_cutoff_sigmas)
         if custom_initial_values:
             f.custom_initial_values = custom_initial_values
@@ -821,6 +821,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         'likelihood': likelihood,
         'bg_model': bg_model,
         'bg_order': bg_order,
+        'bg_knots': bg_knots,
         'sigma_poly_order': sigma_poly_order,
         'sigma_bernstein_order': sigma_bernstein_order,
         'sigma_monotonic_bernstein_order': sigma_monotonic_bernstein_order,
@@ -835,7 +836,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
             
     return f
 
-def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_include=None, bg_model='chebyshev', bg_order=4, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=None, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, loc_wiggle=10, additional_peaks=None):
+def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_include=None, bg_model='chebyshev', bg_order=4, bg_knots=None, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0, sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=None, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, loc_wiggle=10, additional_peaks=None):
     """
     Creates a merged fit from multiple limited-window fits in the source_fitter.
     
@@ -934,6 +935,7 @@ def make_merged_fit(source_fitter, save_name, force_refit=False, fit_windows_to_
         loc_wiggle=loc_wiggle,
         bg_model=bg_model,
         bg_order=bg_order,
+        bg_knots=bg_knots,
         sigma_poly_order=sigma_poly_order,
         sigma_bernstein_order=sigma_bernstein_order,
         sigma_monotonic_bernstein_order=sigma_monotonic_bernstein_order,
@@ -2403,7 +2405,10 @@ def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_
         'args': {k: v for k, v in args_for_multipeak_fit.items() if k not in ['force_refit', 'workers']},
         'peaks': peaks,
         'isotopes': isotopes,
-        'histograms': hist_info
+        'histograms': hist_info,
+        # Not a fit argument, but it is compiled into the background model, so a fit made with a
+        # different floor is a different fit and must not be served from the cache.
+        'bg_floor_scale': fitting_tools.BG_FLOOR_SCALE
     }
     if extra_hash_info is not None:
         hash_dict['provenance'] = extra_hash_info
@@ -2457,15 +2462,20 @@ def load_fit(hash_str, folder_name='protons_le'):
 folder_name = 'protons_le_%dkeV_bins'%bin_width
 save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', folder_name)
 bg_shift_upper_bound = 0# 0.5/(2000/5) 
-bg_order=10
+bg_order=8
 force_refit=False
 args_for_multipeak_fit = {
     'force_refit': force_refit,
-    'additional_param_bounds': {f'bg_p{i}': lambda E: (-3, 1000*bin_width/5) for i in range(bg_order+1)},
+    #'additional_param_bounds': {f'bg_p{i}': lambda E: (-3, 1000*bin_width/5) for i in range(bg_order+1)},
     'loc_wiggle': 15,
     #'bg_model': 'chebyshev',
-    'bg_model': 'bernstein',
-    'bg_order': bg_order,
+    #'bg_model': 'bernstein',
+    # Spline background: bg_order is the degree, bg_knots the interior knots (a count for evenly
+    # spaced ones, or the energies themselves). Repeating 1000 lets the curvature jump there --
+    # the kink -- while every other knot span keeps its own local coefficients.
+    'bg_model': 'bspline', 'bg_order': 3, 'bg_knots': [900, 1100, 1500, 1900, 2300, 2600],
+    'additional_param_bounds': {'bg_p': lambda E: (1, 1000*bin_width/5)},
+    #'bg_order': bg_order,
     'fraction_bernstein_order': 3,
     #'sigma_monotonic_bernstein_order': 5,
     'sigma_bernstein_order': 3,
@@ -2474,7 +2484,7 @@ args_for_multipeak_fit = {
     # 'bg_shift_bernstein_order': 0,
     # 'bg_shift_upper_bound': bg_shift_upper_bound,
     'sigma_min': 10,
-    'sigma_max': 20/720*2900, #energy resolution at top of band as a percent of energy shouldn't be worse than it is at the bottom
+    'sigma_max': 100,#20/720*2900, #energy resolution at top of band as a percent of energy shouldn't be worse than it is at the bottom
     # 'points_per_bin':10,
     'use_cmaes': False,
     'workers': num_workers
@@ -2482,6 +2492,7 @@ args_for_multipeak_fit = {
 #fit often won't converge unless exact hessian is computed. Too many correlated parameters!!!
 ROOT.Math.MinimizerOptions.SetDefaultStrategy(2) 
 if True:
+    fitting_tools.BG_FLOOR_SCALE=0
     hash_str, f = try_fit(args_for_multipeak_fit, ga_spec=pspec_all_energies_60Ga,#pspec_low_energy_60Ga,
                             peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
 else:

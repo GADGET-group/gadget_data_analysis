@@ -851,6 +851,7 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
         fitter = multi_spectrum_fitter(spectra, python_state['peak_model'],
                                        bg_model=python_state.get('bg_model', 'linear'),
                                        bg_order=python_state.get('bg_order', 1),
+                                       bg_knots=python_state.get('bg_knots', None),
                                        points_per_bin=python_state.get('points_per_bin', 1),
                                        bin_integral=python_state.get('bin_integral', False),
                                        peak_cutoff_sigmas=python_state.get('peak_cutoff_sigmas', None))
@@ -974,8 +975,13 @@ class multi_spectrum_fitter(spectrum_fitter):
     peak_cutoff_sigmas (float or None):
         Skip peaks whose centre lies more than this many sigma from the bin. None (default) sums
         every peak in every bin.
+    bg_knots (int, list or None):
+        Only used by bg_model='bspline'. The interior knots of the spline background, as a count
+        of evenly spaced knots or as a list of energies; bg_order is the spline degree. Unlike the
+        polynomial backgrounds each coefficient acts locally, so a repeated knot buys a kink at
+        one energy without loosening the fit elsewhere.
     '''
-    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1, bin_integral:bool=False, peak_cutoff_sigmas=None):
+    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, bg_knots=None, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1, bin_integral:bool=False, peak_cutoff_sigmas=None):
         if not spectra:
             raise ValueError("Must provide at least one spectrum")
         self.spectra = spectra
@@ -983,6 +989,9 @@ class multi_spectrum_fitter(spectrum_fitter):
         super().__init__(spectra[0], peak_model, bg_model, bg_order)
         self.bg_model = bg_model
         self.bg_order = bg_order
+        # bg_model='bspline' only: interior knots, as a count or a list of energies. bg_order is
+        # then the spline degree. See fitting_tools.bspline_knot_vector.
+        self.bg_knots = bg_knots
         
         # For 2D multi-spectrum fits, we must NOT use the 'I' (Integral) option because the Y axis 
         # is discrete (spectrum index). ROOT's 2D integrator fails to converge on the step function.
@@ -1063,7 +1072,7 @@ class multi_spectrum_fitter(spectrum_fitter):
 
                 res = fitting_tools.fit_gaussian_2d(self.spectra, loc_guess, fit_range,
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
-                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
+                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
                                     custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin,
                                     bin_integral=getattr(self, 'bin_integral', False), peak_cutoff_sigmas=getattr(self, 'peak_cutoff_sigmas', None))
@@ -1082,7 +1091,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 
                 res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma, shared_bg_shift=self.shared_bg_shift,
-                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
+                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
                                     custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin)
             elif self.peak_model.lower() == 'bg_shift_emg':
@@ -1094,7 +1103,7 @@ class multi_spectrum_fitter(spectrum_fitter):
 
                 res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
-                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order,
+                                    parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
                                     custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin)
             else:
@@ -1482,6 +1491,7 @@ class multi_spectrum_fitter(spectrum_fitter):
             'location_wiggle': getattr(self, 'location_wiggle', 10),
             'bg_model': getattr(self, 'bg_model', 'linear'),
             'bg_order': getattr(self, 'bg_order', 1),
+            'bg_knots': getattr(self, 'bg_knots', None),
             'points_per_bin': getattr(self, 'points_per_bin', 1),
             'bin_integral': getattr(self, 'bin_integral', False),
             'peak_cutoff_sigmas': getattr(self, 'peak_cutoff_sigmas', None)

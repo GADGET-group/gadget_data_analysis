@@ -16,12 +16,21 @@ import uuid
 # old smooth absolute value did. At bg=0 it gives scale*ln2 ~ 0.69, matching the old sqrt(0.5).
 BG_FLOOR_SCALE = 1.0
 
-def bg_floor_cpp(var, scale=BG_FLOOR_SCALE):
+def bg_floor_cpp(var, scale=None):
     """C++ statement replacing `var` with its softplus, scale*log(1 + exp(var/scale)).
 
-    The two branches are the same function, split so neither exp can overflow.
+    The two branches are the same function, split so neither exp can overflow. A scale of 0
+    emits nothing: with the background already held positive another way (non-negative Bernstein
+    or B-spline coefficients), the floor only adds bias -- scale*ln2 where the background is 0,
+    dying off as exp(-bg/scale) above that.
+
+    scale defaults to BG_FLOOR_SCALE as of the call, so setting fitting_tools.BG_FLOOR_SCALE
+    before a fit takes effect. The value is baked into the compiled model, so it is fixed once
+    a fit has been built.
     """
-    s = float(scale)
+    s = float(BG_FLOOR_SCALE if scale is None else scale)
+    if s <= 0:
+        return ""
     return (f"{var} = ({var} > 0.0) ? {var} + {s} * std::log1p(std::exp(-{var} / {s}))"
             f" : {s} * std::log1p(std::exp({var} / {s}));")
 
@@ -45,8 +54,96 @@ def get_bernstein_string(order, param_start_idx, e_low, e_high):
 def get_bg_string(bg_model, order, param_start_idx, e_low, e_high):
     if bg_model == 'bernstein':
         return get_bernstein_string(order, param_start_idx, e_low, e_high)
+    elif bg_model == 'bspline':
+        raise ValueError("bg_model='bspline' is only implemented for the 2D multi-spectrum fits "
+                         "(fit_gaussian_2d / fit_gaussian_w_bg_shift_2d / fit_emg_w_bg_shift_2d), "
+                         "which build the basis in C++ rather than as a TFormula string.")
     else:
         return get_chebyshev_string(order, param_start_idx, e_low, e_high)
+
+def bspline_knot_vector(degree, knots, e_low, e_high):
+    """Clamped knot vector for a B-spline background over [e_low, e_high].
+
+    degree: spline degree (the `bg_order` of the other background models). 3 gives the usual
+        cubic spline.
+    knots: the interior knots. An int asks for that many, evenly spaced; a list gives their
+        energies directly. Repeat an energy to lower the continuity there: multiplicity m leaves
+        the curve C^(degree-m) at that knot, so a cubic with a doubled knot keeps a continuous
+        slope but lets the curvature jump -- a localized kink. Knots outside the window are
+        dropped, so one list can be reused across fit windows.
+
+    Returns (knot_vector, n_basis). n_basis coefficients are needed, named bg_p0..bg_p{n-1} like
+    every other background model, and each basis function is non-zero over only degree+1 knot
+    spans, which is what keeps a feature in one part of the window from rippling through the rest.
+    """
+    degree = int(degree)
+    if degree < 1:
+        raise ValueError(f"bspline background needs bg_order >= 1, got {degree}")
+    e_low, e_high = float(e_low), float(e_high)
+
+    if knots is None:
+        interior = []
+    elif isinstance(knots, (int, np.integer)):
+        n_interior = int(knots)
+        if n_interior < 0:
+            raise ValueError(f"bg_knots as a count must be >= 0, got {n_interior}")
+        step = (e_high - e_low) / (n_interior + 1)
+        interior = [e_low + (i + 1) * step for i in range(n_interior)]
+    else:
+        interior = sorted(float(t) for t in knots if e_low < float(t) < e_high)
+
+    for t in set(interior):
+        multiplicity = interior.count(t)
+        if multiplicity > degree:
+            raise ValueError(f"knot {t} is repeated {multiplicity} times, which exceeds the spline "
+                             f"degree {degree}; the spline would come apart there. Use at most "
+                             f"{degree} repeats (that many gives a C0 corner).")
+
+    knot_vector = [e_low] * (degree + 1) + interior + [e_high] * (degree + 1)
+    return knot_vector, len(interior) + degree + 1
+
+def bspline_cpp(knot_vector, degree, n_basis, idx_table='bg_p_idx', x_var='val_x', out_var='bg_val'):
+    """C++ for evaluating a B-spline background, as (declarations, expression).
+
+    The declarations hold the knot table and belong outside any per-sample loop; the expression
+    sets `out_var` from `x_var` and is what goes inside it. Coefficients are read from
+    idx_table[basis][val_y], so each spectrum keeps its own set. Evaluation is Cox-de Boor
+    (the standard BasisFuns recursion), which touches only the degree+1 basis functions that are
+    non-zero at x. Outside the window the value is held constant rather than extrapolated.
+    """
+    knots_cpp = "{" + ",".join(f"{t:.10g}" for t in knot_vector) + "}"
+    decl = f"""
+        static const double bs_knots[{len(knot_vector)}] = {knots_cpp};
+        """
+    expr = f"""
+        double {out_var} = 0.0;
+        {{
+            double bs_x = {x_var};
+            if (bs_x < bs_knots[{degree}]) bs_x = bs_knots[{degree}];
+            if (bs_x > bs_knots[{n_basis}]) bs_x = bs_knots[{n_basis}];
+            int bs_span = {degree};
+            while (bs_span < {n_basis - 1} && bs_x >= bs_knots[bs_span + 1]) ++bs_span;
+            double bs_N[{degree + 1}];
+            double bs_left[{degree + 1}];
+            double bs_right[{degree + 1}];
+            bs_N[0] = 1.0;
+            for (int bs_j = 1; bs_j <= {degree}; ++bs_j) {{
+                bs_left[bs_j] = bs_x - bs_knots[bs_span + 1 - bs_j];
+                bs_right[bs_j] = bs_knots[bs_span + bs_j] - bs_x;
+                double bs_saved = 0.0;
+                for (int bs_r = 0; bs_r < bs_j; ++bs_r) {{
+                    double bs_tmp = bs_N[bs_r] / (bs_right[bs_r + 1] + bs_left[bs_j - bs_r]);
+                    bs_N[bs_r] = bs_saved + bs_right[bs_r + 1] * bs_tmp;
+                    bs_saved = bs_left[bs_j - bs_r] * bs_tmp;
+                }}
+                bs_N[bs_j] = bs_saved;
+            }}
+            for (int bs_j = 0; bs_j <= {degree}; ++bs_j) {{
+                {out_var} += p[{idx_table}[bs_span - {degree} + bs_j][val_y]] * bs_N[bs_j];
+            }}
+        }}
+        """
+    return decl, expr
 
 def get_chebyshev_string(order, param_start_idx, e_low, e_high):
     X = f"(2.0*(x - ({e_low}))/(({e_high}) - ({e_low})) - 1.0)"
@@ -2343,9 +2440,14 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None):
     """
     Simultaneously fit Gaussian peaks (optionally on a step-shifted background) across several spectra.
+
+    bg_knots (int, list or None):
+        Only for bg_model='bspline', where bg_order is the spline degree. Sets the interior knots
+        -- a count for evenly spaced ones, or the energies themselves. See bspline_knot_vector for
+        how a repeated knot buys a kink at one energy without loosening the rest of the window.
 
     include_bg_shift (bool):
         True (default) keeps the erfc step under each peak -- the 'bg_shift_gaus' model. False drops
@@ -2386,15 +2488,25 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         sigma_guess = get_sigma(data_source, e_guess_list[0])
         
     pm = ParamManager()
-    
+
+    if bg_model == 'bspline':
+        bs_knot_vector, bs_n_basis = bspline_knot_vector(bg_order, bg_knots, e_low, e_high)
+
     # 1. Independent backgrounds for each spectrum
     for j in range(n_spectra):
         spectra[j].GetXaxis().SetRangeUser(*fit_window)
         bg_guess = spectra[j].GetBinContent(spectra[j].GetXaxis().GetFirst())
         bg_guess_end = spectra[j].GetBinContent(spectra[j].GetXaxis().GetLast())
         spectra[j].GetXaxis().UnZoom()
-        
-        if bg_model in ['chebyshev', 'polynomial', 'bernstein']:
+
+        if bg_model == 'bspline':
+            # The basis is a partition of unity, so equal coefficients start the fit off as the
+            # flat average of the two window edges.
+            for k in range(bs_n_basis):
+                p_name = f"bg_p{k}_{j}"
+                p_guess = (bg_guess_end + bg_guess) / 2.0
+                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, param_bounds.get('bg_p', (-np.inf, np.inf)))))
+        elif bg_model in ['chebyshev', 'polynomial', 'bernstein']:
             for k in range(bg_order + 1):
                 p_name = f"bg_p{k}_{j}"
                 if bg_model == 'bernstein':
@@ -2404,7 +2516,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
                     if bg_order >= 1:
                         if k == 0: p_guess = (bg_guess_end + bg_guess) / 2.0
                         if k == 1: p_guess = (bg_guess_end - bg_guess) / 2.0
-                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, (-np.inf, np.inf))))
+                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, param_bounds.get('bg_p', (-np.inf, np.inf)))))
         else:
             pm.add(f"bg_const_{j}", bg_guess, param_bounds.get('bg_const', (-np.inf, np.inf)))
             pm.add(f"bg_slope_{j}", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
@@ -2481,7 +2593,12 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     # The background is emitted in two pieces: bg_decl_cpp builds the parameter-index lookup
     # tables once per call, bg_expr_cpp turns one val_x into bg_val. Keeping the tables out of
     # the sampling loop is what lets the loop body stay cheap.
-    if bg_model in ['chebyshev', 'polynomial']:
+    if bg_model == 'bspline':
+        bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bs_n_basis)]
+        bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
+        bs_decl, bg_expr_cpp = bspline_cpp(bs_knot_vector, bg_order, bs_n_basis)
+        bg_decl_cpp = f"int bg_p_idx[{bs_n_basis}][{n_spectra}] = {bg_p_cpp};" + bs_decl
+    elif bg_model in ['chebyshev', 'polynomial']:
         bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
         bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
         bg_decl_cpp = f"int bg_p_idx[{bg_order + 1}][{n_spectra}] = {bg_p_cpp};"
@@ -2804,7 +2921,7 @@ def fit_gaussian_2d(spectra, e_guess, fit_window, **kwargs):
     kwargs.pop('shared_bg_shift', None)
     return fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, include_bg_shift=False, **kwargs)
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1):
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1):
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:
@@ -2821,7 +2938,7 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     bin_width = spectra[0].GetBinWidth(1) 
 
     # 1. First fit with Gaussian to get guesses
-    gaus_res = fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source, param_bounds, shared_bg_shift=shared_bg_shift, bg_model=bg_model, bg_order=bg_order)
+    gaus_res = fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source, param_bounds, shared_bg_shift=shared_bg_shift, bg_model=bg_model, bg_order=bg_order, bg_knots=bg_knots)
     gaus_params_obj = gaus_res[0]
     pm_gaus = gaus_res[6]
     
@@ -2831,13 +2948,21 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
             gaus_p_map[gaus_res[3].GetParName(i)] = gaus_params_obj.Parameter(i)
 
     pm = ParamManager()
-    
+
+    if bg_model == 'bspline':
+        bs_knot_vector, bs_n_basis = bspline_knot_vector(bg_order, bg_knots, e_low, e_high)
+
     for j in range(n_spectra):
-        if bg_model in ['chebyshev', 'polynomial', 'bernstein']:
+        if bg_model == 'bspline':
+            for k in range(bs_n_basis):
+                p_name = f"bg_p{k}_{j}"
+                p_guess = gaus_p_map.get(p_name, 0.0)
+                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, param_bounds.get('bg_p', (-np.inf, np.inf)))))
+        elif bg_model in ['chebyshev', 'polynomial', 'bernstein']:
             for k in range(bg_order + 1):
                 p_name = f"bg_p{k}_{j}"
                 p_guess = gaus_p_map.get(p_name, 0.0)
-                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, (-np.inf, np.inf))))
+                pm.add(p_name, p_guess, param_bounds.get(f"bg_p{k}", param_bounds.get(p_name, param_bounds.get('bg_p', (-np.inf, np.inf)))))
         else:
             pm.add(f"bg_const_{j}", gaus_p_map.get(f"bg_const_{j}", 0), param_bounds.get('bg_const', (-np.inf, np.inf)))
             pm.add(f"bg_slope_{j}", gaus_p_map.get(f"bg_slope_{j}", 0), param_bounds.get('bg_slope', (-np.inf, np.inf)))
@@ -2895,7 +3020,12 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
     import uuid
     comp_id = uuid.uuid4().hex[:6]
     
-    if bg_model in ['chebyshev', 'polynomial']:
+    if bg_model == 'bspline':
+        bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bs_n_basis)]
+        bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
+        bs_decl, bs_expr = bspline_cpp(bs_knot_vector, bg_order, bs_n_basis)
+        bg_eval_cpp = f"int bg_p_idx[{bs_n_basis}][{n_spectra}] = {bg_p_cpp};" + bs_decl + bs_expr
+    elif bg_model in ['chebyshev', 'polynomial']:
         bg_p_idx = [[pm.get_idx(f"bg_p{k}_{j}") for j in range(n_spectra)] for k in range(bg_order + 1)]
         bg_p_cpp = "{" + ",".join(["{" + ",".join(map(str, row)) + "}" for row in bg_p_idx]) + "}"
         bg_eval_cpp = f"""
