@@ -2474,7 +2474,7 @@ args_for_multipeak_fit = {
     # spaced ones, or the energies themselves). Repeating 1000 lets the curvature jump there --
     # the kink -- while every other knot span keeps its own local coefficients.
     'bg_model': 'bspline', 'bg_order': 3, 'bg_knots': (2900-550-200)//200,#[850, 1000, 1150, 1500, 1900, 2300, 2600],
-    'additional_param_bounds': {'bg_p': lambda E: (1, 1000*bin_width/5)},
+    'additional_param_bounds': {'bg_p': lambda E: (0.1, 1000*bin_width/5)},
     #'bg_order': bg_order,
     'fraction_bernstein_order': 3,
     #'sigma_monotonic_bernstein_order': 5,
@@ -2496,8 +2496,8 @@ if True:
     hash_str, f = try_fit(args_for_multipeak_fit, ga_spec=pspec_all_energies_60Ga,#pspec_low_energy_60Ga,
                             peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
 else:
-    hash_str = '4c9f7068'
-    f = load_fit(hash_str)
+    hash_str = '7111e668'
+    f = load_fit(hash_str, folder_name=folder_name)
 # res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
 print('hash: ', hash_str)
 print('p-value: ', f.fit_results[0]['fit_res'].Prob())
