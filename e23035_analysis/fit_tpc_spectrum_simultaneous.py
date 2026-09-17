@@ -2353,7 +2353,7 @@ num_workers = 200
 Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
-bin_width = 5
+bin_width = 10
 proton_binning = (4000//bin_width, 0, 4000)
 ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
 pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
@@ -2473,7 +2473,8 @@ args_for_multipeak_fit = {
     # Spline background: bg_order is the degree, bg_knots the interior knots (a count for evenly
     # spaced ones, or the energies themselves). Repeating 1000 lets the curvature jump there --
     # the kink -- while every other knot span keeps its own local coefficients.
-    'bg_model': 'bspline', 'bg_order': 3, 'bg_knots': [700, 900, 1000, 1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500, 2700],#(2900-550-200)//200,#[850, 1000, 1150, 1500, 1900, 2300, 2600],
+    'bg_model': 'bspline', 'bg_order': 3, 'bg_knots': [850, 1000, 1200, 1500, 1800, 2100, 2400, 2700],
+    #[700, 900, 1000, 1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500, 2700],#(2900-550-200)//200,#[850, 1000, 1150, 1500, 1900, 2300, 2600],
     'additional_param_bounds': {'bg_p': lambda E: (0.1, 1000*bin_width/5)},
     #'bg_order': bg_order,
     'fraction_bernstein_order': 3,
@@ -2510,3 +2511,5 @@ show_detector_energy_resolution(fitter_or_filename=f)
 show_peak_fractions(fitter_or_filename=f)
 slope, offset, cov = make_energy_calibration(fitter=f, fit_name='59Zn_pcal', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
 apply_fit_to_csv((slope, offset, cov), f'{folder_name}/fit_{hash_str}_evaluated')
+
+slope, offset, cov = make_energy_calibration(fitter=f, fit_name='test', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
