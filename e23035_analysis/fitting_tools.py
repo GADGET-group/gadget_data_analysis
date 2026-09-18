@@ -2211,6 +2211,25 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
         f_to_fit.SetNpx(100)
     f_to_fit.SetNpy(100)
 
+    def _fit_and_residual_hists():
+        h_fit = sub_hist.Clone(f"h_fit2d_{unique_id}")
+        h_fit.SetTitle("Fit")
+        h_fit.Reset()
+        h_resid = sub_hist.Clone(f"h_resid2d_{unique_id}")
+        h_resid.SetTitle("Residuals (Data - Fit)")
+        h_resid.Reset()
+        for i in range(1, sub_hist.GetNbinsX() + 1):
+            for j in range(1, sub_hist.GetNbinsY() + 1):
+                bin_x_center = sub_hist.GetXaxis().GetBinCenter(i)
+                bin_y_center = sub_hist.GetYaxis().GetBinCenter(j)
+                fit_val = f_to_fit.Eval(bin_x_center, bin_y_center)
+                data_val = sub_hist.GetBinContent(i, j)
+                h_fit.SetBinContent(i, j, fit_val)
+                h_fit.SetBinError(i, j, 0)
+                h_resid.SetBinContent(i, j, data_val - fit_val)
+                h_resid.SetBinError(i, j, sub_hist.GetBinError(i, j))
+        return h_fit, h_resid
+
     # 3.5 CMA-ES (Optional)
     cpp_func_name = getattr(function_string, "__name__", None)
     
@@ -2430,13 +2449,21 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                 'evaluations': int(es.result.evaluations), 'seconds': time.time() - t_cmaes,
                 'stop': stop, 'seed': co['seed'], 'popsize': popsize, 'n_free': len(free_indices),
                 'warm': co['warm'],
+                'xbest': {(names[i] if names else f'p{i}'): float(v)
+                          for i, v in zip(free_indices, es.result.xbest)},
             }
         
         if cmaes_only:
-            # Re-apply bounds just to set the parameters in f_to_fit to the optimum
+            # No minimiser result. The caller gets the CMA-ES optimum in f_to_fit (statistics
+            # on f_to_fit._cmaes) with the same fit and residual histograms a MINUIT fit
+            # returns, so a CMA-ES-only fit saves, loads and diagnoses like any other; only
+            # the parameter errors are missing. fit_diagnostics.fit_stat recomputes chi2.
             for i in range(n_params):
                 f_to_fit.SetParameter(i, res_x[i])
-            return None, canvas, sub_hist, f_to_fit, None, None
+            h_fit, h_resid = _fit_and_residual_hists()
+            canvas._h_fit = h_fit
+            canvas._h_resid = h_resid
+            return None, canvas, sub_hist, f_to_fit, h_fit, h_resid
         
         # Set the optimized values back into initial_values
         for i in range(n_params):
@@ -2469,27 +2496,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
         attempts += 1
 
     # 5. Create Fit and Residual Histograms
-    h_fit = sub_hist.Clone(f"h_fit2d_{unique_id}")
-    h_fit.SetTitle("Fit")
-    h_fit.Reset() 
-    
-    h_resid = sub_hist.Clone(f"h_resid2d_{unique_id}")
-    h_resid.SetTitle("Residuals (Data - Fit)")
-    h_resid.Reset()
-
-    for i in range(1, sub_hist.GetNbinsX() + 1):
-        for j in range(1, sub_hist.GetNbinsY() + 1):
-            bin_x_center = sub_hist.GetXaxis().GetBinCenter(i)
-            bin_y_center = sub_hist.GetYaxis().GetBinCenter(j)
-            
-            fit_val = f_to_fit.Eval(bin_x_center, bin_y_center)
-            data_val = sub_hist.GetBinContent(i, j)
-            
-            h_fit.SetBinContent(i, j, fit_val)
-            h_fit.SetBinError(i, j, 0)
-            
-            h_resid.SetBinContent(i, j, data_val - fit_val)
-            h_resid.SetBinError(i, j, sub_hist.GetBinError(i, j))
+    h_fit, h_resid = _fit_and_residual_hists()
 
     # 6. Draw
     canvas.Divide(3, 1)

@@ -232,6 +232,14 @@ def load_cmaes_params(save_csv_name, folder_name=None):
     with open(params_path, 'r') as pf:
         return json.load(pf)
 
+def _covariance_or_none(res):
+    """The fit's covariance matrix, or None for a CMA-ES-only fit (no minimiser result)."""
+    fit_res = res.get('fit_res')
+    if fit_res is None or (hasattr(fit_res, 'Get') and not fit_res.Get()):
+        return None
+    return fit_res.GetCovarianceMatrix()
+
+
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, bg_knots=None, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
@@ -532,8 +540,6 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         if not likelihood:
             f.fit_options = f.fit_options.replace('L','')
         f.fit_peaks()
-        if cmaes_only:
-            return f
     
     failed_fits = []
     for i, res in enumerate(f.fit_results):
@@ -542,6 +548,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
             continue
         
         fit_res = res['fit_res']
+        if fit_res is None or (hasattr(fit_res, 'Get') and not fit_res.Get()):
+            continue    # CMA-ES only: no minimiser result to validate (an empty TFitResultPtr when loaded)
         if not fit_res.IsValid():
             status = int(fit_res)
             failed_fits.append((i, f.peaks_to_fit[i], f"Status {status}"))
@@ -704,7 +712,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                                         grad[k] = math.comb(n, k) * (X**k) * ((1.0 - X)**(n - k))
                                     sigma = np.dot(p_vals, grad)
                                     
-                                cov_matrix = res['fit_res'].GetCovarianceMatrix()
+                                cov_matrix = _covariance_or_none(res)
                                 if cov_matrix and cov_matrix.GetNrows() > max(p_indices):
                                     cov_sub = np.zeros((len(param_names), len(param_names)))
                                     for r in range(len(param_names)):
@@ -769,7 +777,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                                     grad_a1[1:] = -tot_amp * frac_grad
                                     
                                     all_indices = [tot_idx] + p_indices
-                                    cov_matrix = res['fit_res'].GetCovarianceMatrix()
+                                    cov_matrix = _covariance_or_none(res)
                                     a0_err, a1_err = 0, 0
                                     if cov_matrix and cov_matrix.GetNrows() > max(all_indices):
                                         cov_sub = np.zeros((len(all_indices), len(all_indices)))
@@ -795,7 +803,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                                     tot = a0 + a1
                                     
                                     grad_tot = np.array([1.0, 1.0])
-                                    cov_matrix = res['fit_res'].GetCovarianceMatrix()
+                                    cov_matrix = _covariance_or_none(res)
                                     tot_err = 0
                                     if cov_matrix and cov_matrix.GetNrows() > max(amp0_idx, amp1_idx):
                                         cov_sub = np.array([[cov_matrix(amp0_idx, amp0_idx), cov_matrix(amp0_idx, amp1_idx)],
@@ -1868,8 +1876,10 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
     kwargs = getattr(fitter, 'fit_multi_peaks_kwargs', {}).copy()
     # try_fit keeps workers out of the hash and so out of the _info.json a loaded parent's
     # kwargs come from; without this a child of a loaded fit would run single-threaded.
+    # A loaded fitter reports workers=1 from its saved state, which is not a choice anyone made.
     if not kwargs.get('workers'):
-        kwargs['workers'] = getattr(fitter, 'workers', None) or NUM_WORKERS
+        parent_workers = getattr(fitter, 'workers', None) or 0
+        kwargs['workers'] = parent_workers if parent_workers > 1 else NUM_WORKERS
     # try_fit passes the isotopes it loads from the CSV, so it must not also get them here.
     kwargs.pop('peak_isotopes', None)
     # Adding or removing a peak renumbers the peak-indexed parameters, so initial values
@@ -1884,7 +1894,10 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
         }
     kwargs['additional_param_bounds'] = merged_param_bounds
     kwargs['loc_wiggle'] = fitter.location_wiggle
-    kwargs['force_refit'] = True
+    # The hash covers everything a child is built from (peaks, seeds, bounds, optimiser),
+    # so an identical trial can be served from disk: the stepwise loop re-tested the same
+    # two removals in consecutive sweeps and paid four minutes for answers it already had.
+    kwargs['force_refit'] = False
     # change_knots_from_fit uses this to swap bg_knots, which the parent's kwargs still hold.
     if kwargs_override:
         kwargs.update(kwargs_override)
@@ -2004,6 +2017,10 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
                 old_idx = new_to_old.get(new_idx)
                 old_name = f'total_amp_{old_idx}'
             elif base_name == 'mu':
+                # The bare name is peak 0 of the window. When the added peak is the lowest in
+                # energy it becomes peak 0 with no old index, and the new-peak branch below
+                # needs new_idx; without this a candidate below the first peak crashed the run.
+                new_idx = 0
                 old_idx = new_to_old.get(0)
                 old_name = f'mu_{old_idx}' if f'mu_{old_idx}' in old_window_bounds.get(old_i, {}) else 'mu'
             else:
@@ -2138,7 +2155,7 @@ def _recenter_mu_bounds(merged_param_bounds, window_mapping, peaks_to_recenter, 
     return recentered
 
 
-def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True):
+def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True, kwargs_override=None):
     '''
     Removes one or more peaks from an existing fit.
     
@@ -2199,10 +2216,10 @@ def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True):
     return _prepare_modified_fit(
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'rm', {'peaks_removed': sorted([list(peak) for peak in peaks_to_remove])},
-        fix_params, refit
+        fix_params, refit, kwargs_override=kwargs_override
     )
 
-def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=False, refit=True):
+def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=False, refit=True, kwargs_override=None):
     '''
     Adds one or more new peaks to an existing fit.
     
@@ -2302,7 +2319,7 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
     return _prepare_modified_fit(
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'add', {'peaks_added': sorted(zip(new_peak_loc, new_peak_iso))},
-        fix_params, refit
+        fix_params, refit, kwargs_override=kwargs_override
     )
 
 
@@ -2355,7 +2372,7 @@ def refit_from_fit(fitter, kwargs_override=None, fix_params=False, refit=True, f
         operation, prov, fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name)
 
 
-def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True):
+def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True, kwargs_override=None):
     '''
     Refit with a different B-spline knot list and the same peaks.
 
@@ -2415,12 +2432,12 @@ def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True):
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'knots', {'bg_knots': list(bg_knots) if not isinstance(bg_knots, int) else bg_knots,
                   'knots_before': old_knots},
-        fix_params, refit, kwargs_override={'bg_knots': bg_knots}
+        fix_params, refit, kwargs_override={**(kwargs_override or {}), 'bg_knots': bg_knots}
     )
 
 
 def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params=False,
-                         pinned_tolerance=1e-3, refit=True):
+                         pinned_tolerance=1e-3, refit=True, kwargs_override=None):
     '''
     Re-centers the mu bounds of one or more peaks on their currently fitted value and refits.
 
@@ -2510,7 +2527,7 @@ def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params
     return _prepare_modified_fit(
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'recenter', {'peaks_recentered': [list(peak) for peak in peaks_to_recenter], 'wiggle': wiggle},
-        fix_params, refit
+        fix_params, refit, kwargs_override=kwargs_override
     )
 
 
@@ -2623,6 +2640,14 @@ def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_
         json.dump(hash_dict, f, indent=4)
             
     fitter = fit_multi_peaks(spectra, peaks, save_name=save_name, peak_isotopes=isotopes, **args_for_multipeak_fit)
+
+    # A CMA-ES stage leaves its statistics on the fitted function; keep them with the fit.
+    cmaes = [getattr(r.get('f_to_fit_2d') or r.get('f_to_fit'), '_cmaes', None)
+             for r in fitter.fit_results if r]
+    if any(cmaes):
+        hash_dict['cmaes'] = cmaes
+        with open(info_path, 'w') as f:
+            json.dump(_json_safe(hash_dict), f, indent=4)
     
     return hash_str, fitter
 

@@ -77,12 +77,39 @@ def fit_stat(fitter, window_idx=0):
     whether fit_res.Chi2() matches it to 1e-6 relative; when it does not, Chi2() is stale and
     must not be used for a nested comparison.
     '''
-    res, _ = _result(fitter, window_idx)
-    fit_res = res['fit_res']
+    res, f_to_fit = _result(fitter, window_idx)
+    fit_res = res.get('fit_res')
+    if fit_res is None or (hasattr(fit_res, 'Get') and not fit_res.Get()):
+        # A CMA-ES-only fit has no minimiser result. It minimised the same Baker-Cousins
+        # statistic, recomputed here from the saved fit histogram (matches 2*MinFcnValue() on
+        # a MINUIT fit to ~1e-6).
+        chi2, n_bins = chi2_baker_cousins(fitter, window_idx)
+        return chi2, n_bins - n_free_params(f_to_fit), True
     chi2 = 2.0 * fit_res.MinFcnValue()
     root_chi2 = fit_res.Chi2()
     agrees = abs(root_chi2 - chi2) <= 1e-6 * max(abs(chi2), 1.0)
     return chi2, fit_res.Ndf(), agrees
+
+
+def chi2_baker_cousins(fitter, window_idx=0):
+    '''(chi2, n_bins): the Poisson likelihood-ratio chi2 of the saved fit against the data.'''
+    _, data, fit, _ = residual_arrays(fitter, window_idx)
+    d, f = data.ravel(), np.maximum(fit.ravel(), 1e-300)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        term = np.where(d > 0, 2.0 * (f - d + d * np.log(np.where(d > 0, d, 1.0) / f)), 2.0 * f)
+    return float(term.sum()), int(d.size)
+
+
+def n_free_params(f_to_fit):
+    '''Parameters the fit could move. TF1::FixParameter stores a fixed value v as limits (v, v),
+    or (1, 1) when v is 0; limits (0, 0) mean unbounded.'''
+    low, high = ctypes.c_double(0), ctypes.c_double(0)
+    n = 0
+    for j in range(f_to_fit.GetNpar()):
+        f_to_fit.GetParLimits(j, low, high)
+        fixed = low.value == high.value and low.value != 0.0
+        n += 0 if fixed else 1
+    return n
 
 
 def pinned_from_function(f_to_fit, err_fraction=PIN_ERR_FRACTION):
@@ -243,11 +270,14 @@ def peak_candidates(fitter, window_idx=0, sig_min=PEAK_SIG_MIN, min_sep_sigmas=M
         E, sig = x[i], sigma_at(x[i])
         if any(abs(E - mu) < min_sep_sigmas * sig for mu in mus):
             continue
-        if any(lo <= E <= hi for lo, hi in exclude):
-            continue
         spec = int(best_spec[i])
+        iso = isotope_of_spectrum(fitter, spec)
+        # An exclude entry is (low, high) or (low, high, isotope); without an isotope it
+        # applies to both.
+        if any(r[0] <= E <= r[1] and (len(r) < 3 or r[2] in (None, iso)) for r in exclude):
+            continue
         candidates.append({'energy': float(E), 'significance': float(best[i]),
-                           'isotope': isotope_of_spectrum(fitter, spec), 'spectrum': spec,
+                           'isotope': iso, 'spectrum': spec,
                            'sigma': float(sig),
                            'per_spectrum': [float(v) for v in S[:, i]]})
 

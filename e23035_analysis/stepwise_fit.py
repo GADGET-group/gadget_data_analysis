@@ -15,20 +15,26 @@ The loop, from a starting fit:
 Every fit goes through try_fit, so it is hashed, cached and carries a provenance block naming
 its parent and the operation -- fit_ledger turns a folder back into the tree. On top of that
 this module appends one record per candidate *considered*, accepted or not, to decisions.jsonl.
-Rejections are what make the run reproducible and resumable: without them a rerun would
-re-try, at six minutes a fit, everything it had already ruled out.
+Rejections are what make the run resumable: a rejected add or removal is not offered again
+while the peaks and knots around it are unchanged (it was a test against that local model, and
+lapses when the model there changes).
 
-Decisions use delta-chi2 = chi2(parent) - chi2(child) on 2*MinFcnValue(), never fit_res.Chi2(),
-and never across bin widths. The thresholds sit above the nominal Wilks values because peak
-locations are picked by scanning residuals (a look-elsewhere penalty) and because an amplitude
-bounded at zero is a boundary case; they are config, not constants.
+Decisions use delta-chi2 = chi2(parent) - chi2(child) on the Baker-Cousins statistic (2*MinFcnValue()
+on a MINUIT fit, recomputed from the saved histograms on a CMA-ES-only one), never fit_res.Chi2(),
+and never across bin widths. The gates are set for an inclusive list -- a peak that plausibly
+exists goes in and the wider intervals where peaks overlap are the price -- so they sit near the
+nominal Wilks values rather than above them; they are config, not constants.
+
+Trial fits use warm, seeded CMA-ES alone (fitting_tools.CMAES_DEFAULTS): ~11 s, reproducible,
+within 0.2 chi2 of the MIGRAD minimum. An accepted trial is polished by MIGRAD before the
+error-based gates read it and before it becomes the next parent.
 
 Screening freezes everything a new peak cannot interact with (fit_diagnostics.local_unfreeze),
 which is ~200x faster than a full refit. Freezing can only make a fit look worse, so a screen
 ranks candidates and nothing else: only a full refit accepts, rejects, or rules a region out.
 
     python -m e23035_analysis.stepwise_fit --folder protons_le_10keV_bins --start d8f7935d --dry-run
-    python -m e23035_analysis.stepwise_fit --folder protons_le_10keV_bins --start d8f7935d --max-fits 40
+    python -m e23035_analysis.stepwise_fit --folder protons_le_10keV_bins --start d8f7935d --max-fits 150
 """
 import os
 import json
@@ -47,17 +53,33 @@ from e23035_analysis.fit_tpc_spectrum_simultaneous import fit_path
 DECISIONS_FILE = 'decisions.jsonl'
 
 DEFAULT_CONFIG = {
-    # Accept an added peak only for this much delta-chi2 (2 free parameters: mu, total_amp).
-    'add_peak_dchi2': 16.0,
-    # Keep a removed peak out unless putting it back is worth this much.
-    'remove_peak_dchi2': 9.0,
+    # The peak list is meant to be inclusive. A peak that might be there goes in, and the
+    # price is wider mu and amplitude intervals where peaks overlap -- which the MCMC error
+    # propagation reports honestly. A peak wrongly left out biases its neighbours, and nothing
+    # downstream can see that. So these gates mean "plausibly there", not "required by the
+    # data"; the table of claimed lines is a separate, stricter cut on the result.
+    # Accept an added peak for this much delta-chi2 (2 free parameters: mu, total_amp).
+    'add_peak_dchi2': 9.0,
+    # Drop a peak only when removing it costs less than this. Well under the add gate, so a
+    # peak near the threshold cannot flip in and out between sweeps.
+    'remove_peak_dchi2': 4.0,
     # Adding a knot costs one coefficient per spectrum.
     'add_knot_dchi2': 12.0,
     'remove_knot_dchi2': 9.0,
-    # A new peak must also be this significant, and off its bound, to be kept.
-    'min_amp_significance': 3.0,
-    # Residual scan: only candidates this significant are worth a screen at all.
-    'candidate_sig_min': fd.PEAK_SIG_MIN,
+    # A new peak must also be this significant, and off its amplitude floor, to be kept.
+    'min_amp_significance': 2.0,
+    # Residual scan: only candidates this significant are offered. A proposal filter, not an
+    # acceptance rule: run 4 stopped at 23 peaks with a 2.9 sigma excess still there, and two
+    # of its four sub-3-sigma candidates were ENSDF lines.
+    'candidate_sig_min': 2.0,
+    # When the residual scan finds nothing, ask the likelihood directly: screen a peak at
+    # every point on this grid (both isotopes) and rank by the screened delta-chi2. A weak
+    # peak between two fitted ones leaves almost no residual -- its counts have already gone
+    # into the neighbours and the spline -- so the residual scan goes blind long before the
+    # list is complete (run 5 stalled at 27 peaks with the hand fit at 43). None disables it.
+    'grid_scan_keV': 25.0,
+    # Grid points closer than this to an existing peak of the same isotope are not offered.
+    'grid_min_sep_sigmas': 0.5,
     # Screen candidates whose screened dchi2 reaches this fraction of the accept bar; below
     # it a candidate is deferred rather than rejected, since a screen underestimates.
     'screen_queue_fraction': 0.5,
@@ -90,7 +112,21 @@ DEFAULT_CONFIG = {
                    [820, '59Zn'], [904, '59Zn'], [940, '59Zn'],
                    [1063, '59Zn'], [1376, '59Zn'], [1778, '59Zn']],
     'core_tolerance': 15.0,
-    'max_fits': 40,
+    # Trial fits (adds, removals, knot changes) use warm, seeded CMA-ES alone: ~11 s against
+    # 60+ for MIGRAD on this model, reproducibly within 0.2 chi2 of the MIGRAD minimum, and in
+    # the perturbed-start tests it reached every minimum MIGRAD reached. What it lacks is a
+    # covariance, so an accepted trial is polished by MIGRAD from its own solution before the
+    # error-based gates read it and before it becomes the next parent. 'minuit' restores the
+    # old behaviour.
+    'trial_optimiser': 'cmaes',
+    # popsize is what the optimiser and robustness tests ran with (there it came from the
+    # worker count); pinned here so it cannot drift with the machine. A 17-member default
+    # population in 96 dimensions missed a dchi2-15 peak its own screen had found.
+    'cmaes_opts': {'seed': 1, 'popsize': 200},
+    # A rejected add or removal is remembered only while the peaks within this distance and
+    # the knots are unchanged: it was a test of one peak against one local model.
+    'reject_memory_keV': 100.0,
+    'max_fits': 150,
 }
 
 
@@ -102,10 +138,23 @@ def load_config(path=None):
     return config
 
 
+def local_context(fitter, energy, radius=100.0):
+    '''
+    What a decision at this energy depended on: the peaks within `radius` (to the nearest
+    5 keV, so ordinary refit jitter does not count as a change) and the knot list. A
+    rejection recorded with this context is honoured only while the context still matches.
+    '''
+    peaks = sorted((int(5 * round(mu / 5.0)), iso)
+                   for _, mu, iso in fd.peak_positions(fitter) if abs(mu - energy) <= radius)
+    knots = getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('bg_knots') or []
+    return {'peaks': [list(p) for p in peaks], 'knots': [float(k) for k in knots]}
+
+
 class Decisions:
     '''
     The append-only record of every candidate considered, and the memory that makes a run
-    resumable: regions a full refit has rejected are not offered again.
+    resumable: an add or removal a full refit rejected is not offered again while the
+    neighbourhood it was judged in is unchanged.
     '''
 
     def __init__(self, folder_name):
@@ -123,15 +172,37 @@ class Decisions:
             fh.write(json.dumps(record) + '\n')
         return record
 
-    def rejected_regions(self, sigma_pad=30.0):
-        '''(low, high) around every peak a full refit rejected, to keep off them on a rerun.'''
+    def rejected_regions(self, fitter, radius=100.0, pad_sigmas=1.0, min_pad=15.0):
+        '''
+        (low, high, isotope) around every add a full refit rejected whose neighbourhood is
+        unchanged since. A rejection was a test of one peak against one local model -- the
+        peaks and knots around it, and through them sigma(E) and the fraction curves -- so it
+        is worth remembering only while that model stands; once a neighbour is added or
+        removed or a knot moves, the same energy is a new question. Keyed by isotope: a 60Ga
+        rejection says nothing about a 59Zn peak at the same energy. Records without a
+        context (older logs) are honoured as they were, permanently.
+        '''
         out = []
         for r in self.records:
-            if r.get('operation') == 'add' and r.get('verdict') == 'reject' and r.get('kind') == 'full':
-                energy = r.get('energy')
-                if energy is not None:
-                    out.append((energy - sigma_pad, energy + sigma_pad))
+            if r.get('operation') != 'add' or r.get('verdict') != 'reject' or r.get('kind') != 'full':
+                continue
+            energy = r.get('energy')
+            if energy is None:
+                continue
+            if r.get('context') is not None and r['context'] != local_context(fitter, energy, radius):
+                continue
+            pad = max(pad_sigmas * float(r.get('sigma') or 0.0), min_pad)
+            out.append((energy - pad, energy + pad, r.get('isotope')))
         return out
+
+    def removal_vetoed(self, fitter, energy, isotope, radius=100.0, tolerance=5.0):
+        '''Whether removing this peak was already rejected under the current neighbourhood.'''
+        context = local_context(fitter, energy, radius)
+        return any(r.get('operation') == 'remove' and r.get('verdict') == 'reject'
+                   and r.get('kind') == 'full' and r.get('isotope') == isotope
+                   and abs((r.get('energy') if r.get('energy') is not None else -1e9) - energy) <= tolerance
+                   and r.get('context') == context
+                   for r in self.records)
 
     def last_accepted_child(self):
         for r in reversed(self.records):
@@ -148,6 +219,50 @@ def chi2_of(fitter):
     if not trustworthy:
         print('  WARNING: fit_res.Chi2() disagrees with 2*MinFcnValue(); using MinFcnValue')
     return chi2, ndf
+
+
+def trial_kwargs(config):
+    '''Optimiser settings for a fit whose only job is a delta-chi2.'''
+    if config.get('trial_optimiser', 'minuit') == 'cmaes':
+        return {'use_cmaes': True, 'cmaes_only': True, 'cmaes_opts': dict(config.get('cmaes_opts') or {})}
+    return {'use_cmaes': False}
+
+
+def needs_polish(fitter):
+    '''Whether the fit has no minimiser result (a CMA-ES-only trial), so no parameter errors.'''
+    fit_res = fitter.fit_results[0].get('fit_res')
+    return fit_res is None or (hasattr(fit_res, 'Get') and not fit_res.Get())
+
+
+def polish(fitter, hash_str, decisions, config, budget, why):
+    '''
+    MIGRAD from a CMA-ES-only trial's solution. Gives the errors the significance and
+    pinned-parameter gates read, and the fit the next step builds on. A fit that already has
+    a minimiser result is returned as it is.
+    '''
+    if not needs_polish(fitter):
+        return fitter, hash_str
+    chi2_trial, _ = chi2_of(fitter)
+    budget.spend()
+    new_hash, new_fitter = fts.refit_from_fit(fitter, kwargs_override={'use_cmaes': False},
+                                              operation='polish', details={'why': why})
+    chi2_polished, _ = chi2_of(new_fitter)
+    print(f'  polish {hash_str} -> {new_hash}: chi2 {chi2_trial:.1f} -> {chi2_polished:.1f}')
+    decisions.append(operation='polish', kind='full', parent=hash_str, child=new_hash,
+                     dchi2=chi2_trial - chi2_polished, verdict='accept', reason=why)
+    return new_fitter, new_hash
+
+
+def pinned_amp_energies(fitter):
+    '''Energies of the peaks whose total_amp sits at its floor.'''
+    positions = {idx: mu for idx, mu, _ in fd.peak_positions(fitter)}
+    out = []
+    for p in fd.pinned_params(fitter):
+        if p['name'].startswith('total_amp') and p['side'] == 'low':
+            idx = 0 if p['name'] == 'total_amp' else int(p['name'].split('_')[2])
+            if idx in positions:
+                out.append(positions[idx])
+    return out
 
 
 def is_core(energy, isotope, config):
@@ -215,9 +330,9 @@ class Budget:
     '''
     Counts full refits against the budget, screens separately.
 
-    A full refit of this model takes ~6 minutes and a screen ~2 seconds, so one limit for both
-    would let a few sweeps of screening consume a run's whole allowance. Screens have their own,
-    much larger cap purely as a runaway guard.
+    A full refit (a CMA-ES trial or a MIGRAD polish) takes ~11-60 s and a screen ~2 s, so one
+    limit for both would let a few sweeps of screening consume a run's whole allowance. Screens
+    have their own, much larger cap purely as a runaway guard.
     '''
 
     def __init__(self, max_fits, max_screens=None, already_spent=0):
@@ -239,6 +354,36 @@ class Budget:
         return f'{self.spent}/{self.max_fits} fits, {self.screens} screens'
 
 
+def grid_candidates(fitter, config, exclude=()):
+    '''
+    Every place a peak could go, whether or not the residuals show one: a grid across the
+    fit window, both isotopes, skipping points within grid_min_sep_sigmas of an existing peak
+    of the same isotope and the vetoed regions. Ordered by local residual excess so the
+    likeliest are screened first, but all of them are screened; the screen is the detector.
+    Same dict shape as fd.peak_candidates.
+    '''
+    step = float(config['grid_scan_keV'])
+    x, S = fd.local_excess(fitter)
+    sigma_at = fd.sigma_function(fitter)
+    positions = fd.peak_positions(fitter)
+    out = []
+    for E in np.arange(x[0] + step, x[-1] - step / 2.0, step):
+        sig = sigma_at(E)
+        i = int(np.argmin(np.abs(x - E)))
+        for spec in range(S.shape[0]):
+            iso = fd.isotope_of_spectrum(fitter, spec)
+            if any(abs(E - mu) < config['grid_min_sep_sigmas'] * sig
+                   for _, mu, p_iso in positions if p_iso == iso):
+                continue
+            if any(r[0] <= E <= r[1] and (len(r) < 3 or r[2] in (None, iso)) for r in exclude):
+                continue
+            out.append({'energy': float(E), 'significance': float(S[spec, i]), 'isotope': iso,
+                        'spectrum': spec, 'sigma': float(sig),
+                        'per_spectrum': [float(v) for v in S[:, i]]})
+    out.sort(key=lambda c: -c['significance'])
+    return out
+
+
 def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
     '''
     One attempt at adding a peak. Returns (fitter, hash, changed).
@@ -246,23 +391,27 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
     Candidates come from the residual scan, are screened (cheap, frozen neighbourhood) to rank
     them, and the best is refit properly. Only that full refit decides.
     '''
-    exclude = decisions.rejected_regions()
+    exclude = decisions.rejected_regions(fitter, config['reject_memory_keV'])
     candidates = fd.peak_candidates(fitter, sig_min=config['candidate_sig_min'], exclude=exclude)
+    source, top_k = 'residual scan', config['screen_top_k']
+    if not candidates and config.get('grid_scan_keV'):
+        print(f'  no peak candidates above {config["candidate_sig_min"]} sigma; grid scan')
+        candidates = grid_candidates(fitter, config, exclude)
+        source, top_k = 'grid scan', len(candidates)
     if not candidates:
-        print('  no peak candidates above '
-              f'{config["candidate_sig_min"]} sigma (excluding {len(exclude)} rejected regions)')
+        print(f'  no peak candidates ({source}, excluding {len(exclude)} rejected regions)')
         return fitter, hash_str, False
 
-    print(f'  {len(candidates)} candidates; top: '
+    print(f'  {len(candidates)} candidates ({source}); top: '
           + ', '.join(f"{c['energy']:.0f} ({c['significance']:.1f} sigma, {c['isotope']})"
                       for c in candidates[:config['screen_top_k']]))
 
     queue = []
     if config['screen_disabled']:
-        queue = [(c, None) for c in candidates[:config['screen_top_k']]]
+        queue = [(c, None) for c in candidates[:top_k]]
     else:
         chi2_parent, _ = chi2_of(fitter)
-        for candidate in candidates[:config['screen_top_k']]:
+        for candidate in candidates[:top_k]:
             if budget.exhausted():
                 break
             budget.spend_screen()
@@ -277,7 +426,7 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
             print(f"    screen {candidate['energy']:.0f}: dchi2 {dchi2:+.1f} -> {verdict}")
             decisions.append(operation='add', kind='screen', parent=hash_str, child=screen_hash,
                              energy=candidate['energy'], isotope=candidate['isotope'],
-                             dchi2=dchi2, verdict=verdict,
+                             dchi2=dchi2, verdict=verdict, source=source,
                              reason=f'screened dchi2 {dchi2:.1f} vs queue threshold {threshold:.1f}',
                              details={'free_params': sorted(predicate.free_params)})
             if verdict == 'queue':
@@ -293,11 +442,46 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
         return fitter, hash_str, False
     print(f"  full refit adding {candidate['energy']:.0f} ({candidate['isotope']})")
     chi2_parent, _ = chi2_of(fitter)
+    context = local_context(fitter, candidate['energy'], config['reject_memory_keV'])
+    parent_floor = pinned_amp_energies(fitter)
     budget.spend()
-    new_hash, new_fitter = fts.add_peak_to_fit(
-        fitter, new_peak_loc=candidate['energy'], new_peak_iso=candidate['isotope'], fix_params=False)
+    trial_hash, trial_fitter = fts.add_peak_to_fit(
+        fitter, new_peak_loc=candidate['energy'], new_peak_iso=candidate['isotope'], fix_params=False,
+        kwargs_override=trial_kwargs(config))
+    chi2_trial, _ = chi2_of(trial_fitter)
+    dchi2 = chi2_parent - chi2_trial
+    if screened is not None and dchi2 < screened - 1.0:
+        # The screen is this same fit with most parameters frozen, so it cannot do better than
+        # the full fit: a trial below its own screen means the optimiser missed the minimum.
+        # Redo it with MIGRAD from the parent, the way the screen was done.
+        print(f'  trial dchi2 {dchi2:+.1f} is below its own screen ({screened:+.1f}): '
+              f'the optimiser missed the minimum; retrying with MIGRAD')
+        budget.spend()
+        retry_hash, retry_fitter = fts.add_peak_to_fit(
+            fitter, new_peak_loc=candidate['energy'], new_peak_iso=candidate['isotope'], fix_params=False,
+            kwargs_override={'use_cmaes': False})
+        chi2_retry, _ = chi2_of(retry_fitter)
+        decisions.append(operation='add', kind='retry', parent=hash_str, child=retry_hash,
+                         energy=candidate['energy'], isotope=candidate['isotope'],
+                         dchi2=chi2_parent - chi2_retry, verdict='replace',
+                         reason=f'CMA-ES trial {trial_hash} gave {dchi2:.1f}, below its screen {screened:.1f}')
+        trial_hash, trial_fitter, chi2_trial = retry_hash, retry_fitter, chi2_retry
+        dchi2 = chi2_parent - chi2_trial
+        print(f'  MIGRAD trial: dchi2 {dchi2:+.1f}')
+    record = dict(operation='add', kind='full', parent=hash_str, trial=trial_hash,
+                  energy=candidate['energy'], isotope=candidate['isotope'], sigma=candidate['sigma'],
+                  context=context, dchi2=dchi2, screened_dchi2=screened, source=source)
+
+    if dchi2 < config['add_peak_dchi2']:
+        reason = f'dchi2 {dchi2:.1f} < {config["add_peak_dchi2"]}'
+        print(f'  -> reject: dchi2 {dchi2:+.1f} ({reason})')
+        decisions.append(child=trial_hash, verdict='reject', reason=reason, **record)
+        return fitter, hash_str, False
+
+    # Worth keeping on chi2 alone. The remaining gates read parameter errors, so polish first.
+    new_fitter, new_hash = polish(trial_fitter, trial_hash, decisions, config, budget,
+                                  why=f"adding {candidate['energy']:.0f} passed the dchi2 gate")
     chi2_child, _ = chi2_of(new_fitter)
-    dchi2 = chi2_parent - chi2_child
 
     # Where did the new peak land in the new numbering, and is it a real peak?
     # The new peak can have moved up to loc_wiggle from the guess it was given.
@@ -313,24 +497,30 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
     # first rebuild run rejected a 20-sigma peak worth dchi2 450 this way.
     mu_pinned = new_idx is not None and f'mu_{new_idx}' in pinned_names
     amp_pinned = new_idx is not None and f'total_amp_{new_idx}' in pinned_names
+    # A neighbour whose amplitude the new peak drove to the floor is the degenerate case an
+    # inclusive gate has to guard against: two peaks where there was one.
+    new_mu = dict((i, mu) for i, mu, _ in fd.peak_positions(new_fitter)).get(new_idx)
+    collapsed = [e for e in pinned_amp_energies(new_fitter)
+                 if not any(abs(e - p) <= 5.0 for p in parent_floor)
+                 and (new_mu is None or abs(e - new_mu) > 5.0)]
 
     reasons = []
-    if dchi2 < config['add_peak_dchi2']:
-        reasons.append(f'dchi2 {dchi2:.1f} < {config["add_peak_dchi2"]}')
     if not np.isnan(significance) and significance < config['min_amp_significance']:
         reasons.append(f'amplitude {significance:.1f} sigma < {config["min_amp_significance"]}')
     if amp_pinned:
         reasons.append('amplitude driven to its floor: the peak has no counts')
+    if collapsed:
+        reasons.append('neighbour amplitude driven to its floor at '
+                       + ', '.join(f'{e:.0f}' for e in collapsed))
     verdict = 'accept' if not reasons else 'reject'
     note = ' [at its mu bound; the next recenter pass will move it]' if mu_pinned else ''
 
-    print(f"  -> {verdict}: dchi2 {dchi2:+.1f}, amplitude {significance:.1f} sigma"
+    print(f"  -> {verdict}: dchi2 {dchi2:+.1f} (polished {chi2_parent - chi2_child:+.1f}), "
+          f"amplitude {significance:.1f} sigma"
           + (f" ({'; '.join(reasons)})" if reasons else '') + note)
-    decisions.append(operation='add', kind='full', parent=hash_str, child=new_hash,
-                     energy=candidate['energy'], isotope=candidate['isotope'],
-                     dchi2=dchi2, screened_dchi2=screened, amp_significance=float(significance),
-                     mu_at_bound=bool(mu_pinned),
-                     verdict=verdict, reason='; '.join(reasons) or 'passes every rule')
+    decisions.append(child=new_hash, verdict=verdict, reason='; '.join(reasons) or 'passes every rule',
+                     dchi2_polished=chi2_parent - chi2_child, amp_significance=float(significance),
+                     mu_at_bound=bool(mu_pinned), **record)
     if verdict == 'accept':
         return new_fitter, new_hash, True
     return fitter, hash_str, False
@@ -373,16 +563,25 @@ def prune_pass(fitter, hash_str, folder, decisions, config, budget):
         idx = current_index_of(fitter, energy)
         if idx is None:
             continue    # it was removed, or moved too far to identify
+        if decisions.removal_vetoed(fitter, energy, iso, config['reject_memory_keV']):
+            print(f'  remove {energy:.0f} ({iso}): already rejected in this neighbourhood; skipping')
+            continue
         chi2_parent, _ = chi2_of(fitter)
+        context = local_context(fitter, energy, config['reject_memory_keV'])
         budget.spend()
-        new_hash, new_fitter = fts.remove_peak_from_fit(fitter, (0, idx))
-        chi2_child, _ = chi2_of(new_fitter)
-        cost = chi2_child - chi2_parent   # removing can only make chi2 worse or equal
+        trial_hash, trial_fitter = fts.remove_peak_from_fit(fitter, (0, idx),
+                                                            kwargs_override=trial_kwargs(config))
+        chi2_trial, _ = chi2_of(trial_fitter)
+        cost = chi2_trial - chi2_parent   # removing can only make chi2 worse or equal
         verdict = 'accept' if cost < config['remove_peak_dchi2'] else 'reject'
         print(f'  remove {energy:.0f} ({iso}, {significance:.1f} sigma): costs {cost:+.1f} -> {verdict}')
+        new_hash, new_fitter = trial_hash, trial_fitter
+        if verdict == 'accept':
+            new_fitter, new_hash = polish(trial_fitter, trial_hash, decisions, config, budget,
+                                          why=f'removing {energy:.0f} accepted')
         decisions.append(operation='remove', kind='full', parent=hash_str, child=new_hash,
-                         energy=energy, isotope=iso, amp_significance=float(significance),
-                         dchi2=-cost, verdict=verdict,
+                         trial=trial_hash, energy=energy, isotope=iso, context=context,
+                         amp_significance=float(significance), dchi2=-cost, verdict=verdict,
                          reason=f'removal costs {cost:.1f} vs {config["remove_peak_dchi2"]}')
         if verdict == 'accept':
             fitter, hash_str, changed = new_fitter, new_hash, True
@@ -398,8 +597,7 @@ def knot_pass(fitter, hash_str, folder, decisions, config, budget):
     changed = False
     knots = list(getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('bg_knots') or [])
     if not knots:
-        print('  no interior knots to work with')
-        return fitter, hash_str, False
+        print('  no interior knots to remove')   # a knot-free start still gets the add loop below
 
     for knot in list(knots):
         if budget.exhausted():
@@ -407,11 +605,14 @@ def knot_pass(fitter, hash_str, folder, decisions, config, budget):
         trial = [k for k in knots if k != knot]
         chi2_parent, _ = chi2_of(fitter)
         budget.spend()
-        new_hash, new_fitter = fts.change_knots_from_fit(fitter, trial)
+        new_hash, new_fitter = fts.change_knots_from_fit(fitter, trial, kwargs_override=trial_kwargs(config))
         chi2_child, _ = chi2_of(new_fitter)
         cost = chi2_child - chi2_parent
         verdict = 'accept' if cost < config['remove_knot_dchi2'] else 'reject'
         print(f'  remove knot {knot:.0f}: costs {cost:+.1f} -> {verdict}')
+        if verdict == 'accept':
+            new_fitter, new_hash = polish(new_fitter, new_hash, decisions, config, budget,
+                                          why=f'removing knot {knot:.0f} accepted')
         decisions.append(operation='knots', kind='full', parent=hash_str, child=new_hash,
                          energy=knot, dchi2=-cost, verdict=verdict,
                          details={'removed_knot': knot, 'bg_knots': trial},
@@ -428,11 +629,14 @@ def knot_pass(fitter, hash_str, folder, decisions, config, budget):
         trial = sorted(knots + [centre])
         chi2_parent, _ = chi2_of(fitter)
         budget.spend()
-        new_hash, new_fitter = fts.change_knots_from_fit(fitter, trial)
+        new_hash, new_fitter = fts.change_knots_from_fit(fitter, trial, kwargs_override=trial_kwargs(config))
         chi2_child, _ = chi2_of(new_fitter)
         dchi2 = chi2_parent - chi2_child
         verdict = 'accept' if dchi2 >= config['add_knot_dchi2'] else 'reject'
         print(f'  add knot {centre:.0f} (run z {run["z"]:+.1f}): dchi2 {dchi2:+.1f} -> {verdict}')
+        if verdict == 'accept':
+            new_fitter, new_hash = polish(new_fitter, new_hash, decisions, config, budget,
+                                          why=f'adding knot {centre:.0f} accepted')
         decisions.append(operation='knots', kind='full', parent=hash_str, child=new_hash,
                          energy=centre, dchi2=dchi2, verdict=verdict,
                          details={'added_knot': centre, 'bg_knots': trial, 'run_z': run['z']},
@@ -447,7 +651,7 @@ def dry_run(fitter, hash_str, decisions, config):
     '''Everything the loop would try next, without fitting anything.'''
     print(f'=== dry run from {hash_str}')
     fd.report(fitter)
-    exclude = decisions.rejected_regions()
+    exclude = decisions.rejected_regions(fitter, config['reject_memory_keV'])
     print(f'\nwould try, in order:')
     pinned = [p for p in fd.pinned_params(fitter) if p['name'].startswith('mu')]
     if pinned:
@@ -483,6 +687,8 @@ def run(folder, start_hash, config, resume=False):
 
     fitter = fts.load_fit(start_hash, folder_name=folder)
     hash_str = start_hash
+    fitter, hash_str = polish(fitter, hash_str, decisions, config, budget,
+                              why='the start fit has no minimiser result')
     chi2, ndf = chi2_of(fitter)
     print(f'start {hash_str}: chi2 {chi2:.1f} / {ndf} = {chi2 / ndf:.3f}, '
           f'{len(fd.peak_positions(fitter))} peaks')

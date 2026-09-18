@@ -615,7 +615,7 @@ class spectrum_fitter:
                 f_to_fit = res['f_to_fit_2d']
             else:
                 continue
-            fit_res = res['fit_res']
+            fit_res = _minimiser_result(res)
             for i in range(f_to_fit.GetNpar()):
                 par_name_i = f_to_fit.GetParName(i)
                 # Check if the parameter name is exactly the base name OR starts with the base name + '_'
@@ -1362,7 +1362,22 @@ class multi_spectrum_fitter(spectrum_fitter):
         print(f"Saving multi_spectrum_fitter CSV to {csv_filepath}...")
         
         import os
+        import ctypes
         os.makedirs(os.path.dirname(os.path.abspath(csv_filepath)), exist_ok=True)
+
+        # A CMA-ES-only fit has no minimiser result: fixedness then comes from the function's
+        # limits (TF1::FixParameter stores v as (v, v), or (1, 1) for v == 0; (0, 0) is free)
+        # and values from the function, with no errors and no p-value.
+        def _minimiser_result(res):
+            fit_res = res.get('fit_res')
+            if fit_res is None or (hasattr(fit_res, 'Get') and not fit_res.Get()):
+                return None
+            return fit_res
+
+        def _limits_fixed(f, j):
+            lo, hi = ctypes.c_double(0), ctypes.c_double(0)
+            f.GetParLimits(j, lo, hi)
+            return lo.value == hi.value and lo.value != 0.0
         
         with open(csv_filepath, 'w', newline='') as csvfile:
             csvwriter = csv.writer(csvfile)
@@ -1371,12 +1386,20 @@ class multi_spectrum_fitter(spectrum_fitter):
             free_base_params = set()
             for res in self.fit_results:
                 if res is None or 'f_to_fit_2d' not in res or 'fit_res' not in res: continue
-                fit_res = res['fit_res']
+                fit_res = _minimiser_result(res)
                 f_to_fit = res['f_to_fit_2d']
                 
                 for j in range(f_to_fit.GetNpar()):
                     param_free = True
+                    if fit_res is None:
+                        param_free = not _limits_fixed(f_to_fit, j)
+                        if param_free:
+                            pass    # falls through to the naming logic below
+                        else:
+                            continue
                     try:
+                        if fit_res is None:
+                            raise AttributeError
                         if hasattr(fit_res, "Get") and fit_res.Get():
                             param_free = not fit_res.Get().IsParameterFixed(j)
                         elif hasattr(fit_res, "IsParameterFixed"):
@@ -1384,7 +1407,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                         else:
                             param_free = (fit_res.ParError(j) != 0.0)
                     except AttributeError:
-                        param_free = (fit_res.ParError(j) != 0.0)
+                        param_free = True if fit_res is None else (fit_res.ParError(j) != 0.0)
                     
                     if param_free:
                         name = f_to_fit.GetParName(j)
@@ -1424,15 +1447,15 @@ class multi_spectrum_fitter(spectrum_fitter):
                 
                 fit_res = res['fit_res']
                 f_to_fit = res['f_to_fit_2d']
-                p_value = fit_res.Prob()
+                p_value = fit_res.Prob() if fit_res is not None else float('nan')
                 
                 # pre-extract all param values and errors
                 p_vals = {}
                 p_errs = {}
                 for j in range(f_to_fit.GetNpar()):
                     name = f_to_fit.GetParName(j)
-                    p_vals[name] = fit_res.Parameter(j)
-                    p_errs[name] = fit_res.ParError(j)
+                    p_vals[name] = f_to_fit.GetParameter(j)
+                    p_errs[name] = f_to_fit.GetParError(j)
                 
                 for k, loc in enumerate(loc_guesses):
                     row_dict = {}
