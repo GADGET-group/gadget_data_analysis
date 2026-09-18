@@ -2372,6 +2372,65 @@ def refit_from_fit(fitter, kwargs_override=None, fix_params=False, refit=True, f
         operation, prov, fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name)
 
 
+def free_sigma_refit(fitter, order=3, sigma_min=None, sigma_max=None, folder_name=None, refit=True):
+    '''
+    Refit the same peaks and knots with the resolution curve free: a Bernstein-`order`
+    sigma(E) seeded from the parent's curve, each coefficient in [sigma_min, sigma_max]
+    (the parent's own limits by default). The final step after a search run that held or
+    constrained sigma, so the reported errors carry the sigma correlation.
+
+    Returns (hash, fitter) if refit, else the try_fit kwargs.
+    '''
+    from e23035_analysis import fit_diagnostics as fd
+    args = getattr(fitter, 'fit_multi_peaks_kwargs', {})
+    smin = args.get('sigma_min', 10) if sigma_min is None else sigma_min
+    smax = args.get('sigma_max', 100) if sigma_max is None else sigma_max
+    kw = refit_from_fit(fitter, kwargs_override={'use_cmaes': False, 'sigma_bernstein_order': order},
+                        refit=False, folder_name=folder_name, operation='free_sigma',
+                        details={'sigma_order': order, 'sigma_min': smin, 'sigma_max': smax})
+    a = kw['args_for_multipeak_fit']
+    for name in [n for n in a['additional_param_bounds'] if n.startswith('sigma_b')]:
+        del a['additional_param_bounds'][name]
+    a['additional_param_bounds'].update(fd.sigma_bound_seeded(fitter, order, smin, smax))
+    civ = a.get('custom_initial_values') or {}
+    a['custom_initial_values'] = {k: v for k, v in civ.items() if not k.startswith('sigma_b')}
+    if not refit:
+        return kw
+    return try_fit(**kw)
+
+
+def relabel_peak_from_fit(fitter, peak, new_iso, fix_params=False, refit=True, kwargs_override=None,
+                          folder_name=None):
+    '''
+    Refit with one peak's isotope label changed and everything else as it was: the test of
+    an isotope assignment. `peak` is (window_index, peak_index). The label only sets which
+    fraction curve splits the peak's counts between the two spectra, so with fix_params
+    freezing the amp_frac_* coefficients the delta-chi2 isolates what the data say about the
+    split; with them free it includes how far the curves can bend to accommodate the label.
+    '''
+    w_i, p_i = peak
+    old_window_bounds = _extract_fitter_bounds(fitter)
+    original_isotopes = getattr(fitter, 'peak_isotopes', getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_isotopes'))
+    new_peaks, new_isotopes, window_mapping = [], [], {}
+    for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
+        new_locs, new_isos = [], []
+        for j, loc in enumerate(locs):
+            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
+            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
+            new_locs.append(_round_peak_loc(fitted_mu))
+            iso = original_isotopes[i][j] if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]) else 'unknown'
+            new_isos.append(new_iso if (i, j) == (w_i, p_i) else iso)
+        new_peaks.append((new_locs, _round_peak_loc(w_start), _round_peak_loc(w_end)))
+        new_isotopes.append(new_isos)
+        window_mapping[new_locs[0]] = (i, {j: j for j in range(len(new_locs))})
+    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
+    return _prepare_modified_fit(
+        fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+        'relabel', {'peak': [w_i, p_i], 'energy': new_peaks[w_i][0][p_i], 'new_isotope': new_iso,
+                    'old_isotope': original_isotopes[w_i][p_i] if original_isotopes else None},
+        fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name)
+
+
 def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True, kwargs_override=None):
     '''
     Refit with a different B-spline knot list and the same peaks.

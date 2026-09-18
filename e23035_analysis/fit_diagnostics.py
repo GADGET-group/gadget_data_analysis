@@ -362,6 +362,57 @@ def sigma_bound_overrides(reference_fitter, window_idx=0):
     return overrides
 
 
+def sigma_bound_free(reference_fitter, sigma_min, sigma_max, window_idx=0):
+    '''
+    additional_param_bounds entries that seed the resolution curve at a reference fit's values
+    but let it float within [sigma_min, sigma_max] -- the counterpart of sigma_bound_overrides,
+    for the final refit after a search run that held sigma fixed.
+    '''
+    _, f_to_fit = _result(reference_fitter, window_idx)
+    out = {}
+    for j in range(f_to_fit.GetNpar()):
+        name = f_to_fit.GetParName(j)
+        if name.startswith('sigma_b'):
+            value = f_to_fit.GetParameter(j)
+            out[name] = (lambda v: (lambda E: (v, sigma_min, sigma_max)))(value)
+    return out
+
+
+def sigma_bound_band(anchors, k=None):
+    '''
+    additional_param_bounds for a Bernstein-1 (linear) sigma(E) held inside the band that
+    tpc_spectrum_fitting/sigma_anchors.py derived from the 720 keV proton and 8.7 MeV alpha
+    peaks. `anchors` is that JSON's path or its dict; the two coefficients are sigma at the
+    fit-window ends, seeded on the line through the anchors.
+    '''
+    import json
+    if isinstance(anchors, str):
+        with open(anchors) as fh:
+            anchors = json.load(fh)
+    b = anchors['bernstein1_bounds']
+    out = {}
+    for name in ('sigma_b0', 'sigma_b1'):
+        centre, lo, hi = b[name]
+        out[name] = (lambda c, l, h: (lambda E: (c, l, h)))(centre, lo, hi)
+    return out
+
+
+def sigma_bound_seeded(reference_fitter, order, sigma_min, sigma_max, window_idx=0):
+    '''
+    additional_param_bounds for a free Bernstein-`order` sigma(E), seeded from the reference
+    fit's curve (control points at k/order across the window; exact for a line) and free
+    within [sigma_min, sigma_max]. For the final polish after a search run with a constrained
+    curve; use with kwargs_override={'sigma_bernstein_order': order}.
+    '''
+    sig = sigma_function(reference_fitter, window_idx)
+    _, e_low, e_high = reference_fitter.peaks_to_fit[window_idx]
+    out = {}
+    for k in range(order + 1):
+        seed = float(min(max(sig(e_low + (e_high - e_low) * k / order), sigma_min), sigma_max))
+        out[f'sigma_b{k}'] = (lambda s: (lambda E: (s, sigma_min, sigma_max)))(seed)
+    return out
+
+
 def local_unfreeze(fitter, new_peak_locs, n_sigmas=3.0, window_idx=0):
     '''
     A fix_params predicate that frees only what a new peak can actually interact with.

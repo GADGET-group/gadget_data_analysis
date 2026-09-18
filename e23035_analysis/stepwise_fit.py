@@ -126,6 +126,14 @@ DEFAULT_CONFIG = {
     # A rejected add or removal is remembered only while the peaks within this distance and
     # the knots are unchanged: it was a test of one peak against one local model.
     'reject_memory_keV': 100.0,
+    # After the search converges, refit once with sigma(E) free as a Bernstein of this order
+    # (None: skip). The search holds or constrains the curve so the candidate scan stays
+    # sharp; the reported fit must not, or every error is understated. 3 or 4 is enough.
+    'final_sigma_order': 3,
+    # With a knot-free (Bernstein polynomial) background there is nothing to place, so the
+    # knot pass instead tries one degree up (accept for add_knot_dchi2, one coefficient per
+    # spectrum) and one degree down (accept when it costs less than remove_knot_dchi2).
+    'degree_pass': True,
     'max_fits': 150,
 }
 
@@ -172,7 +180,7 @@ class Decisions:
             fh.write(json.dumps(record) + '\n')
         return record
 
-    def rejected_regions(self, fitter, radius=100.0, pad_sigmas=1.0, min_pad=15.0):
+    def rejected_regions(self, fitter, radius=100.0, pad_sigmas=1.0, min_pad=15.0, gate=None):
         '''
         (low, high, isotope) around every add a full refit rejected whose neighbourhood is
         unchanged since. A rejection was a test of one peak against one local model -- the
@@ -191,17 +199,23 @@ class Decisions:
                 continue
             if r.get('context') is not None and r['context'] != local_context(fitter, energy, radius):
                 continue
+            # A rejection only vetoes while it would still be a rejection: a lower gate on a
+            # resumed run must be able to revisit a +7 that was turned away at 9.
+            if gate is not None and r.get('dchi2') is not None and r['dchi2'] >= gate:
+                continue
             pad = max(pad_sigmas * float(r.get('sigma') or 0.0), min_pad)
             out.append((energy - pad, energy + pad, r.get('isotope')))
         return out
 
-    def removal_vetoed(self, fitter, energy, isotope, radius=100.0, tolerance=5.0):
-        '''Whether removing this peak was already rejected under the current neighbourhood.'''
+    def removal_vetoed(self, fitter, energy, isotope, radius=100.0, tolerance=5.0, gate=None):
+        '''Whether removing this peak was already rejected under the current neighbourhood
+        (and would still be rejected at the current gate; dchi2 is minus the removal cost).'''
         context = local_context(fitter, energy, radius)
         return any(r.get('operation') == 'remove' and r.get('verdict') == 'reject'
                    and r.get('kind') == 'full' and r.get('isotope') == isotope
                    and abs((r.get('energy') if r.get('energy') is not None else -1e9) - energy) <= tolerance
                    and r.get('context') == context
+                   and (gate is None or r.get('dchi2') is None or -r['dchi2'] >= gate)
                    for r in self.records)
 
     def last_accepted_child(self):
@@ -391,27 +405,15 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
     Candidates come from the residual scan, are screened (cheap, frozen neighbourhood) to rank
     them, and the best is refit properly. Only that full refit decides.
     '''
-    exclude = decisions.rejected_regions(fitter, config['reject_memory_keV'])
-    candidates = fd.peak_candidates(fitter, sig_min=config['candidate_sig_min'], exclude=exclude)
-    source, top_k = 'residual scan', config['screen_top_k']
-    if not candidates and config.get('grid_scan_keV'):
-        print(f'  no peak candidates above {config["candidate_sig_min"]} sigma; grid scan')
-        candidates = grid_candidates(fitter, config, exclude)
-        source, top_k = 'grid scan', len(candidates)
-    if not candidates:
-        print(f'  no peak candidates ({source}, excluding {len(exclude)} rejected regions)')
-        return fitter, hash_str, False
+    exclude = decisions.rejected_regions(fitter, config['reject_memory_keV'], gate=config['add_peak_dchi2'])
+    chi2_parent, _ = chi2_of(fitter)
 
-    print(f'  {len(candidates)} candidates ({source}); top: '
-          + ', '.join(f"{c['energy']:.0f} ({c['significance']:.1f} sigma, {c['isotope']})"
-                      for c in candidates[:config['screen_top_k']]))
-
-    queue = []
-    if config['screen_disabled']:
-        queue = [(c, None) for c in candidates[:top_k]]
-    else:
-        chi2_parent, _ = chi2_of(fitter)
-        for candidate in candidates[:top_k]:
+    def screen(cands, source):
+        '''Screen candidates in order; return [(candidate, screened dchi2)] worth a full refit.'''
+        queue = []
+        if config['screen_disabled']:
+            return [(c, None) for c in cands]
+        for candidate in cands:
             if budget.exhausted():
                 break
             budget.spend_screen()
@@ -432,7 +434,31 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
             if verdict == 'queue':
                 queue.append((candidate, dchi2))
         queue.sort(key=lambda item: -(item[1] or 0))
+        return queue
 
+    # The residual scan first: cheap, and right when the excess is visible. When it offers
+    # nothing worth a full refit -- nothing at all, or only candidates that screen below the
+    # queue bar -- fall back to the grid, which asks the likelihood at every point. Run 6
+    # spent three sweeps re-screening one 2-sigma residual candidate at +4.1 while the grid
+    # scan never ran, because the fallback only fired on an empty candidate list.
+    source = 'residual scan'
+    candidates = fd.peak_candidates(fitter, sig_min=config['candidate_sig_min'], exclude=exclude)
+    if candidates:
+        print(f'  {len(candidates)} candidates ({source}); top: '
+              + ', '.join(f"{c['energy']:.0f} ({c['significance']:.1f} sigma, {c['isotope']})"
+                          for c in candidates[:config['screen_top_k']]))
+        queue = screen(candidates[:config['screen_top_k']], source)
+    else:
+        print(f'  no peak candidates above {config["candidate_sig_min"]} sigma '
+              f'(excluding {len(exclude)} rejected regions)')
+        queue = []
+    if not queue and config.get('grid_scan_keV') and not budget.exhausted():
+        source = 'grid scan'
+        candidates = grid_candidates(fitter, config, exclude)
+        print(f'  nothing worth a full refit from the residual scan; {len(candidates)} grid candidates'
+              + (', top: ' + ', '.join(f"{c['energy']:.0f} ({c['significance']:.1f} sigma, {c['isotope']})"
+                                       for c in candidates[:config['screen_top_k']]) if candidates else ''))
+        queue = screen(candidates, source)
     if not queue:
         print('  nothing worth a full refit')
         return fitter, hash_str, False
@@ -563,7 +589,7 @@ def prune_pass(fitter, hash_str, folder, decisions, config, budget):
         idx = current_index_of(fitter, energy)
         if idx is None:
             continue    # it was removed, or moved too far to identify
-        if decisions.removal_vetoed(fitter, energy, iso, config['reject_memory_keV']):
+        if decisions.removal_vetoed(fitter, energy, iso, config['reject_memory_keV'], gate=config['remove_peak_dchi2']):
             print(f'  remove {energy:.0f} ({iso}): already rejected in this neighbourhood; skipping')
             continue
         chi2_parent, _ = chi2_of(fitter)
@@ -596,6 +622,8 @@ def knot_pass(fitter, hash_str, folder, decisions, config, budget):
     '''
     changed = False
     knots = list(getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('bg_knots') or [])
+    if not knots and config.get('degree_pass'):
+        return degree_pass(fitter, hash_str, folder, decisions, config, budget)
     if not knots:
         print('  no interior knots to remove')   # a knot-free start still gets the add loop below
 
@@ -647,11 +675,42 @@ def knot_pass(fitter, hash_str, folder, decisions, config, budget):
     return fitter, hash_str, changed
 
 
+def degree_pass(fitter, hash_str, folder, decisions, config, budget):
+    '''
+    The knot pass for a Bernstein-polynomial (knot-free) background: try the degree one
+    lower (drop it when that costs less than remove_knot_dchi2) and one higher (take it when
+    it is worth add_knot_dchi2). Each step is one coefficient per spectrum, like a knot.
+    '''
+    changed = False
+    degree = int(getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('bg_order') or 3)
+    for new_degree, gate, direction in ((degree - 1, config['remove_knot_dchi2'], 'down'),
+                                        (degree + 1, config['add_knot_dchi2'], 'up')):
+        if new_degree < 1 or budget.exhausted():
+            continue
+        chi2_parent, _ = chi2_of(fitter)
+        budget.spend()
+        new_hash, new_fitter = fts.change_knots_from_fit(
+            fitter, [], kwargs_override={**trial_kwargs(config), 'bg_order': new_degree})
+        chi2_child, _ = chi2_of(new_fitter)
+        dchi2 = chi2_parent - chi2_child
+        verdict = ('accept' if -dchi2 < gate else 'reject') if direction == 'down' else ('accept' if dchi2 >= gate else 'reject')
+        print(f'  background degree {degree} -> {new_degree}: dchi2 {dchi2:+.1f} -> {verdict}')
+        if verdict == 'accept':
+            new_fitter, new_hash = polish(new_fitter, new_hash, decisions, config, budget,
+                                          why=f'background degree {new_degree} accepted')
+        decisions.append(operation='degree', kind='full', parent=hash_str, child=new_hash,
+                         dchi2=dchi2, verdict=verdict, details={'degree_before': degree, 'degree_after': new_degree},
+                         reason=f'degree {direction}: dchi2 {dchi2:.1f} vs {gate}')
+        if verdict == 'accept':
+            fitter, hash_str, degree, changed = new_fitter, new_hash, new_degree, True
+    return fitter, hash_str, changed
+
+
 def dry_run(fitter, hash_str, decisions, config):
     '''Everything the loop would try next, without fitting anything.'''
     print(f'=== dry run from {hash_str}')
     fd.report(fitter)
-    exclude = decisions.rejected_regions(fitter, config['reject_memory_keV'])
+    exclude = decisions.rejected_regions(fitter, config['reject_memory_keV'], gate=config['add_peak_dchi2'])
     print(f'\nwould try, in order:')
     pinned = [p for p in fd.pinned_params(fitter) if p['name'].startswith('mu')]
     if pinned:
@@ -738,6 +797,21 @@ def run(folder, start_hash, config, resume=False):
     print(f'final {hash_str}: chi2 {chi2:.1f} / {ndf} = {chi2 / ndf:.3f}, '
           f'{len(fd.peak_positions(fitter))} peaks, '
           f'knots {getattr(fitter, "fit_multi_peaks_kwargs", {}).get("bg_knots")}')
+    if config.get('final_sigma_order'):
+        order = int(config['final_sigma_order'])
+        free_hash, free_fitter = fts.free_sigma_refit(fitter, order=order)
+        chi2_f, ndf_f = chi2_of(free_fitter)
+        sig = fd.sigma_function(free_fitter)
+        # Recorded as 'final', not 'accept': a --resume must continue from the search state
+        # (sigma constrained), never from the free-sigma polish, whose sigma runs away wherever
+        # peaks are still missing.
+        decisions.append(operation='free_sigma', kind='full', parent=hash_str, child=free_hash,
+                         dchi2=chi2 - chi2_f, verdict='final',
+                         reason=f'final polish with sigma(E) free (Bernstein order {order})',
+                         details={'sigma_order': order})
+        print(f'free-sigma polish {free_hash}: chi2 {chi2_f:.1f} / {ndf_f} = {chi2_f / ndf_f:.3f}; '
+              'sigma(E): ' + ', '.join(f'{E}: {sig(E):.1f}' for E in (720, 1000, 1500, 2000, 2500, 2800)))
+        return free_hash, free_fitter
     return hash_str, fitter
 
 
