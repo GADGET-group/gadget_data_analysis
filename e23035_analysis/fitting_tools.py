@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 
 import ROOT
@@ -33,6 +34,26 @@ def bg_floor_cpp(var, scale=None):
         return ""
     return (f"{var} = ({var} > 0.0) ? {var} + {s} * std::log1p(std::exp(-{var} / {s}))"
             f" : {s} * std::log1p(std::exp({var} / {s}));")
+
+def bg_floor_formula(expr, scale=None):
+    """TFormula expression for the softplus of `expr`, for the 1D string-built models.
+
+    The same function as bg_floor_cpp, written as max(v, 0) + scale*log(1 + exp(-|v|/scale)) so
+    neither exp can overflow inside a formula string. A scale of 0 returns `expr` unchanged.
+    `expr` appears three times in the result, so pass a parenthesised sub-expression, not a
+    whole model.
+    """
+    s = float(BG_FLOOR_SCALE if scale is None else scale)
+    if s <= 0:
+        return expr
+    return (f"(TMath::Max(({expr}), 0.0) + {s} * TMath::Log(1.0 + TMath::Exp(-TMath::Abs({expr}) / {s})))")
+
+def bg_floor_py(value, scale=None):
+    """Softplus of a float, for the 1D python-callable models. Same conventions as bg_floor_formula."""
+    s = float(BG_FLOOR_SCALE if scale is None else scale)
+    if s <= 0:
+        return value
+    return max(value, 0.0) + s * np.log1p(np.exp(-abs(value) / s))
 
 def get_bernstein_string(order, param_start_idx, e_low, e_high):
     import math
@@ -804,11 +825,9 @@ def fit_emg_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_window,
         else:
             bg_val = p[pm.get_idx("bg_const")]
             
-        import math
-        # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        # Prevents vanishing gradients (local minima) if background evaluates < 0, 
-        # while preserving exact physical meaning (linear step height) for > 0
-        bg_val = math.sqrt(bg_val**2 + 1e-4)
+        # Softplus floor: unchanged where the background is positive, decays to 0 below zero
+        # instead of reflecting back up. Same floor the 2D fits apply (see bg_floor_cpp).
+        bg_val = bg_floor_py(bg_val)
             
         amp = resolve_python_param("amplitude", p, pm, parameterizations)
         mu = resolve_python_param("mu", p, pm, parameterizations)
@@ -944,9 +963,9 @@ def fit_gaussian_peak(spectrum:ROOT.TH1D, data_source:str, e_guess:float, fit_wi
     
 
     gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
-    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-    # Avoids vanishing gradients if bg_string goes negative, preserves linear meaning for > 0
-    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
+    # Softplus floor: unchanged where the background is positive, decays to 0 below zero
+    # instead of reflecting back up. Same floor the 2D fits apply (see bg_floor_cpp).
+    bg_string = bg_floor_formula(bg_string)
     function_string = f"{bg_string} + {gaus_string}"
 
     # 3. Call our generalized fit engine
@@ -1096,9 +1115,9 @@ def fit_gaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:t
         gaus_string = f"({amp_string} * {bin_width} / ({sigma_string} * 2.50662827)) * TMath::Exp(-0.5 * ((x-{mu_string})/{sigma_string}) * ((x-{mu_string})/{sigma_string}))"
         gaus_strings.append(gaus_string)
 
-    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-    # Avoids vanishing gradients if bg_string goes negative, preserves linear meaning for > 0
-    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
+    # Softplus floor: unchanged where the background is positive, decays to 0 below zero
+    # instead of reflecting back up. Same floor the 2D fits apply (see bg_floor_cpp).
+    bg_string = bg_floor_formula(bg_string)
     function_string = f"{bg_string} + {' + '.join(gaus_strings)}"
 
     # 3. Call our generalized fit engine
@@ -1265,9 +1284,9 @@ def fit_emg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple,
             total += 0.5 * amp * bg_shift * erfc((val_x - mu) / (1.41421356 * sigma))
             
         import math
-        # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        # Avoids vanishing gradients if total goes negative, preserves linear meaning for > 0
-        total = math.sqrt(total**2 + 1e-4)
+        # Softplus floor: unchanged where the background is positive, decays to 0 below zero
+        # instead of reflecting back up. Same floor the 2D fits apply (see bg_floor_cpp).
+        total = bg_floor_py(total)
         
         for i in range(n_peaks):
             amp_name = "amplitude" if n_peaks == 1 else f"amplitude_{i}"
@@ -1462,9 +1481,9 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
             gaus_string = f"([{amp_idx}]*({weight_str}) * {bin_width} / ([{sigma_idx}] * 2.50662827)) * TMath::Exp(-0.5 * ((x-[{mu_idx}])/[{sigma_idx}]) * ((x-[{mu_idx}])/[{sigma_idx}]))"
             all_gaus_strings.append(gaus_string)
 
-    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-    # Avoids vanishing gradients if bg_string goes negative, preserves linear meaning for > 0
-    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
+    # Softplus floor: unchanged where the background is positive, decays to 0 below zero
+    # instead of reflecting back up. Same floor the 2D fits apply (see bg_floor_cpp).
+    bg_string = bg_floor_formula(bg_string)
     function_string = f"{bg_string} + {' + '.join(all_gaus_strings)}"
 
     # 2. Setup Parameters and Initial Guesses
@@ -1538,8 +1557,8 @@ def fit_ngaussian_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:
         mu_idx = peak_params_start_idx + 2*i + 1
         reconstructed_bg_string += f" + 0.5*[{amp_idx}]*[{bg_shift_idx}]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{sigma_start_idx}]))"
 
-    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-    reconstructed_bg_string = f"TMath::Sqrt(({reconstructed_bg_string})*({reconstructed_bg_string}) + 1e-4)"
+    # Softplus floor, matching the fitted model
+    reconstructed_bg_string = bg_floor_formula(reconstructed_bg_string)
 
     comp_id = uuid.uuid4().hex[:6]
     fit_params = np.array([f_to_fit.GetParameter(i) for i in range(f_to_fit.GetNpar())])
@@ -1654,8 +1673,8 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         voigt_string = f"[{amp_idx}] * {bin_width} * TMath::Voigt(x-[{mu_idx}], [{sigma_idx}], [{gamma_idx}])"
         voigt_strings.append(voigt_string)
 
-    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-    bg_string = f"TMath::Sqrt(({bg_string})*({bg_string}) + 1e-4)"
+    # Softplus floor, as in the other 1D models (see bg_floor_cpp)
+    bg_string = bg_floor_formula(bg_string)
     function_string = f"{bg_string} + {' + '.join(voigt_strings)}"
 
     # 3. Call our generalized fit engine
@@ -1682,8 +1701,8 @@ def fit_voigt_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tupl
         mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         reconstructed_bg_string += f" + 0.5*[{amp_idx}]*[{pm.get_idx('bg_shift')}]*TMath::Erfc((x-[{mu_idx}])/(1.41421356*[{pm.get_idx('sigma')}]))"
         
-    # Symmetric hyperbolic smoothing (Smooth Absolute Value)
-    reconstructed_bg_string = f"TMath::Sqrt(({reconstructed_bg_string})*({reconstructed_bg_string}) + 1e-4)"
+    # Softplus floor, matching the fitted model
+    reconstructed_bg_string = bg_floor_formula(reconstructed_bg_string)
     background = ROOT.TF1(f'bg_{comp_id}', reconstructed_bg_string, e_low, e_high)
     for i in range(len(fit_params)):
         background.SetParameter(i, fit_params[i])
@@ -1842,9 +1861,8 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
                 total += 0.5 * (amp * weight) * bg_shift * TMath::Erfc((val_x - mu) / (1.41421356 * sigma));
             }}
         }}
-        // Symmetric hyperbolic smoothing (Smooth Absolute Value)
-        // Avoids vanishing gradients if total < 0, preserves linear meaning for > 0
-        total = std::sqrt(total * total + 0.5);
+        // Softplus floor, same as the 2D fits: unchanged for total > 0, decays to 0 below.
+        {bg_floor_cpp('total')}
 
         for (int i = 0; i < {n_peaks}; ++i) {{
             double amp = p[{peak_params_start_idx} + 2 * i];
@@ -2075,10 +2093,42 @@ def fit_nemg_w_bg_shift(spectrum:ROOT.TH1D, e_guess:float|list, fit_window:tuple
     return fit_res, background, peaks, component_peak_funcs, rp, canvas, spectrum_to_plot, f_to_fit, h_fit
 
 
-def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options='LS0QEI', use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1): 
+# CMA-ES stage of fit_hist2d. tolfun is in units of the objective (Baker-Cousins chi2), so 0.1
+# means "stop when the best value has stopped moving at the tenth-of-a-unit level"; the stall
+# counter is the older, cruder criterion and is kept as a backstop.
+CMAES_DEFAULTS = {
+    'warm': True,        # per-parameter initial steps (below) instead of max bound range / 4
+    'std_scale': 1.0,    # multiplies every warm step
+    'seed': 1,           # cma treats None/0 as time-based; keep an integer for reproducibility
+    'tolfun': 0.1,
+    'stall_iters': 300,
+    'popsize': None,     # None: cma's default 4 + 3 ln(N), floored at the worker count
+    'maxiter': 100000,
+}
+
+
+def cmaes_warm_std(name, value, low, high):
+    '''Initial CMA-ES step for one parameter, sized to the parameter rather than its bound range.'''
+    rng = high - low
+    if name.startswith('mu'):
+        return rng / 4.0            # bounds are guess +- loc_wiggle
+    if name.startswith(('amplitude', 'total_amp')):
+        return min(rng / 4.0, 0.1 * abs(value) + np.sqrt(abs(value)) + 1.0)
+    return min(rng / 4.0, 0.1 * abs(value) + 0.005 * rng)
+
+
+def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, names=None, fit_options='LS0QEI', use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, cmaes_opts=None): 
     """
     Fits a function to a 2D histogram.
     fit_range should be ((x_low, x_high), (y_low, y_high))
+
+    cmaes_opts (dict, optional) tunes the CMA-ES stage; see CMAES_DEFAULTS. By default it is a
+    warm start: each coordinate's initial step is scaled to the parameter (loc_wiggle/2 for a
+    location, ~10% + sqrt(N) for an amplitude, ~10% for a coefficient) instead of a quarter of
+    the widest bound range, so a fit seeded from a converged parent searches its neighbourhood
+    rather than the whole box. The stage is seeded, so a given configuration is reproducible.
+    Its statistics are left on f_to_fit._cmaes (fbest is the same Baker-Cousins 2*NLL the
+    fit reports as 2*MinFcnValue()).
     """
     if 'I' in fit_options:
         import warnings
@@ -2302,10 +2352,12 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
             print("All parameters are fixed. Skipping CMA-ES.")
             res_x = [bounds[i][0] for i in range(n_params)]
         else:
-            print(f"Running CMA-ES for starting guesses on {len(free_indices)}/{n_params} free parameters (workers={workers})...")
+            co = dict(CMAES_DEFAULTS)
+            co.update(cmaes_opts or {})
+            print(f"Running CMA-ES for starting guesses on {len(free_indices)}/{n_params} free parameters "
+                  f"(workers={workers}, warm={co['warm']}, seed={co['seed']})...")
             
             # CMA-ES setup — start from the provided initial_values (which may come from a prior fit)
-            sigma0 = max([(b[1] - b[0]) for b in cma_bounds]) / 4.0
             x0 = []
             for j, i in enumerate(free_indices):
                 val = initial_values[i]
@@ -2315,15 +2367,26 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                 x0.append(clipped_val)
             
             default_popsize = 4 + int(3 * np.log(len(free_indices)))
-            popsize = max(default_popsize, workers)
+            popsize = max(co['popsize'] or default_popsize, workers)
             
             opts = {
                 'bounds': [[b[0] for b in cma_bounds], [b[1] for b in cma_bounds]],
                 'verbose': -9,
-                'maxiter': 100000,
+                'maxiter': co['maxiter'],
                 'popsize': popsize,
+                'seed': co['seed'],
+                'tolfun': co['tolfun'],
             }
+            if co['warm']:
+                # Per-coordinate steps: sigma0 is 1 and CMA_stds carries the scale of each parameter.
+                sigma0 = 1.0
+                opts['CMA_stds'] = [
+                    co['std_scale'] * cmaes_warm_std(names[i] if names else '', initial_values[i], *cma_bounds[j])
+                    for j, i in enumerate(free_indices)]
+            else:
+                sigma0 = max([(b[1] - b[0]) for b in cma_bounds]) / 4.0
             
+            t_cmaes = time.time()
             es = cma.CMAEvolutionStrategy(x0, sigma0, opts)
             early_stop_state = {'best_obj': np.inf, 'no_improve_count': 0}
             
@@ -2349,8 +2412,8 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
                 else:
                     early_stop_state['no_improve_count'] += 1
                     
-                if early_stop_state['no_improve_count'] > 300:
-                    print(f"  -> Stopping early: No improvement for 300 iterations.")
+                if early_stop_state['no_improve_count'] > co['stall_iters']:
+                    print(f"  -> Stopping early: No improvement for {co['stall_iters']} iterations.")
                     break
                     
             print(f"CMA-ES finished in {es.countiter} iterations. Best obj = {es.result.fbest:.4e}")
@@ -2359,7 +2422,15 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
             res_x = np.zeros(n_params, dtype=np.float64)
             res_x[free_indices] = es.result.xbest
             res_x[fixed_indices] = [bounds[i][0] for i in fixed_indices]
-            print(f"CMA-ES finished. Best objective: {es.result.fbest}")
+            stop = {k: str(v) for k, v in es.stop().items()}
+            if early_stop_state['no_improve_count'] > co['stall_iters']:
+                stop['stall_iters'] = co['stall_iters']
+            f_to_fit._cmaes = {
+                'fbest': float(es.result.fbest), 'iterations': int(es.countiter),
+                'evaluations': int(es.result.evaluations), 'seconds': time.time() - t_cmaes,
+                'stop': stop, 'seed': co['seed'], 'popsize': popsize, 'n_free': len(free_indices),
+                'warm': co['warm'],
+            }
         
         if cmaes_only:
             # Re-apply bounds just to set the parameters in f_to_fit to the optimum
@@ -2440,7 +2511,7 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None):
     """
     Simultaneously fit Gaussian peaks (optionally on a step-shifted background) across several spectra.
 
@@ -2904,7 +2975,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
                 
     fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
         h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options,
-        use_cmaes=use_cmaes, cmaes_loc_wiggle=cmaes_loc_wiggle, cmaes_only=cmaes_only, workers=workers
+        use_cmaes=use_cmaes, cmaes_loc_wiggle=cmaes_loc_wiggle, cmaes_only=cmaes_only, workers=workers,
+        cmaes_opts=cmaes_opts
     )
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm
@@ -2921,7 +2993,7 @@ def fit_gaussian_2d(spectra, e_guess, fit_window, **kwargs):
     kwargs.pop('shared_bg_shift', None)
     return fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, include_bg_shift=False, **kwargs)
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1):
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, cmaes_opts=None):
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:
@@ -3273,7 +3345,8 @@ def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_
 
     fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid = fit_hist2d(
         h2, eval_2d, pm.initial_values, pm.bounds, fit_range, pm.names, fit_options,
-        use_cmaes=use_cmaes, cmaes_loc_wiggle=cmaes_loc_wiggle, cmaes_only=cmaes_only, workers=workers
+        use_cmaes=use_cmaes, cmaes_loc_wiggle=cmaes_loc_wiggle, cmaes_only=cmaes_only, workers=workers,
+        cmaes_opts=cmaes_opts
     )
     
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid, pm

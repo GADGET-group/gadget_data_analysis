@@ -981,7 +981,7 @@ class multi_spectrum_fitter(spectrum_fitter):
         polynomial backgrounds each coefficient acts locally, so a repeated knot buys a kink at
         one energy without loosening the fit elsewhere.
     '''
-    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, bg_knots=None, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1, bin_integral:bool=False, peak_cutoff_sigmas=None):
+    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, bg_knots=None, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1, bin_integral:bool=False, peak_cutoff_sigmas=None, cmaes_opts=None):
         if not spectra:
             raise ValueError("Must provide at least one spectrum")
         self.spectra = spectra
@@ -998,6 +998,7 @@ class multi_spectrum_fitter(spectrum_fitter):
         self.fit_options = self.fit_options.replace('I', '')
         self.use_cmaes = use_cmaes
         self.cmaes_only = cmaes_only
+        self.cmaes_opts = cmaes_opts
         self.workers = workers
         self.points_per_bin = points_per_bin
         # 'gaus' only: integrate each Gaussian over the bin analytically instead of sampling
@@ -1073,7 +1074,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 res = fitting_tools.fit_gaussian_2d(self.spectra, loc_guess, fit_range,
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
-                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
+                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1), cmaes_opts=getattr(self, 'cmaes_opts', None),
                                     custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin,
                                     bin_integral=getattr(self, 'bin_integral', False), peak_cutoff_sigmas=getattr(self, 'peak_cutoff_sigmas', None))
             elif self.peak_model.lower() == 'bg_shift_gaus':
@@ -1092,7 +1093,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
-                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
+                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1), cmaes_opts=getattr(self, 'cmaes_opts', None),
                                     custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin)
             elif self.peak_model.lower() == 'bg_shift_emg':
                 if not self.shared_bg_shift and len(loc_guess)>1 and 'bg_shift' in self.param_bound_functions:
@@ -1104,7 +1105,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                 res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, 
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
-                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1),
+                                    use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1), cmaes_opts=getattr(self, 'cmaes_opts', None),
                                     custom_initial_values=getattr(self, 'custom_initial_values', None), points_per_bin=self.points_per_bin)
             else:
                 raise ValueError(f"Unknown peak model for multi_spectrum_fitter (currently supports gaus, bg_shift_gaus, bg_shift_emg): {self.peak_model}")

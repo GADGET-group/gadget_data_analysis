@@ -236,7 +236,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     loc_wiggle=10, bg_model='linear', bg_order=1, bg_knots=None, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
                     custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1,
-                    peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None):
+                    peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None):
     
     def _pow_str(base, exp):
         if exp == 0: return "1.0"
@@ -254,7 +254,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
     else:
         f = spectrum_fitter.multi_spectrum_fitter(spectra, peak_model, bg_model=bg_model, bg_order=bg_order,
                                                   bg_knots=bg_knots, use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin,
-                                                  bin_integral=bin_integral, peak_cutoff_sigmas=peak_cutoff_sigmas)
+                                                  bin_integral=bin_integral, peak_cutoff_sigmas=peak_cutoff_sigmas, cmaes_opts=cmaes_opts)
         if custom_initial_values:
             f.custom_initial_values = custom_initial_values
         
@@ -817,8 +817,24 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         # Removed except Exception block to prevent silent failures
             
     f.save_name = save_name
+    # Everything a child fit (add/remove_peak_from_fit, change_knots_from_fit, refit_from_fit)
+    # needs to reproduce this model. A key left out here silently reverts to this function's
+    # default in every descendant: peak_model and bin_integral were missing until 2026-09-17,
+    # so second-generation stepwise fits ran as bg_shift_gaus, point-sampled, while their root
+    # was gaus, bin-integrated.
     f.fit_multi_peaks_kwargs = {
         'likelihood': likelihood,
+        'loc_wiggle': loc_wiggle,
+        'peak_model': peak_model,
+        'bin_integral': bin_integral,
+        'points_per_bin': points_per_bin,
+        'peak_cutoff_sigmas': peak_cutoff_sigmas,
+        'bg_shift_upper_bound': bg_shift_upper_bound,
+        'custom_initial_values': custom_initial_values,
+        'use_cmaes': use_cmaes,
+        'cmaes_only': cmaes_only,
+        'cmaes_opts': cmaes_opts,
+        'workers': workers,
         'bg_model': bg_model,
         'bg_order': bg_order,
         'bg_knots': bg_knots,
@@ -1834,7 +1850,7 @@ def _get_fitter_parent_info(fitter):
 
 
 def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
-                          operation, details, fix_params, refit):
+                          operation, details, fix_params, refit, kwargs_override=None, folder_name=None):
     '''
     Turn a modified peak list into a try_fit call: write the peaks out as a guess CSV next to
     the parent fit and assemble the keyword arguments that refit them with the parent's fitted
@@ -1844,10 +1860,16 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
     modified fit a hash, an _info.json recording where it came from, and a load_fit() handle.
 
     Returns (hash string, new fitter) if refit, otherwise the try_fit(**kwargs) dict to run later.
+    folder_name puts the child somewhere other than beside its parent (an experiment folder).
     '''
-    folder_name, parent_hash = _get_fitter_parent_info(fitter)
+    parent_folder, parent_hash = _get_fitter_parent_info(fitter)
+    folder_name = folder_name or parent_folder
 
     kwargs = getattr(fitter, 'fit_multi_peaks_kwargs', {}).copy()
+    # try_fit keeps workers out of the hash and so out of the _info.json a loaded parent's
+    # kwargs come from; without this a child of a loaded fit would run single-threaded.
+    if not kwargs.get('workers'):
+        kwargs['workers'] = getattr(fitter, 'workers', None) or NUM_WORKERS
     # try_fit passes the isotopes it loads from the CSV, so it must not also get them here.
     kwargs.pop('peak_isotopes', None)
     # Adding or removing a peak renumbers the peak-indexed parameters, so initial values
@@ -1863,6 +1885,9 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
     kwargs['additional_param_bounds'] = merged_param_bounds
     kwargs['loc_wiggle'] = fitter.location_wiggle
     kwargs['force_refit'] = True
+    # change_knots_from_fit uses this to swap bg_knots, which the parent's kwargs still hold.
+    if kwargs_override:
+        kwargs.update(kwargs_override)
 
     provenance = {
         'operation': operation,
@@ -1879,6 +1904,7 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
         json.dumps(_json_safe([new_peaks, new_isotopes]), sort_keys=True).encode('utf-8')
     ).hexdigest()[:8]
     csv_name = os.path.join(folder_name, f'peaks_{parent_hash}_{operation}_{peaks_digest}.csv')
+    os.makedirs(os.path.join(fit_path, folder_name), exist_ok=True)
     _write_peaks_csv(new_peaks, new_isotopes, os.path.join(fit_path, csv_name))
 
     try_fit_kwargs = {
@@ -1921,11 +1947,45 @@ def _extract_fitter_bounds(fitter):
     return old_window_bounds
 
 def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter):
+    '''
+    fix_params : bool or callable
+        True fixes every inherited parameter, False lets them all float from their inherited
+        values. A callable is asked per parameter -- should_fix(param_name, E) -> bool -- which
+        is how a screening fit frees only the new peak and its neighbourhood while holding the
+        rest of a 130-parameter model still. See fit_diagnostics.local_unfreeze.
+    '''
     merged_param_bounds = {}
-    
+
+    # Every peak's location, so a mu can be identified when the fitter asks about it. Only the
+    # first peak of each window is a window_mapping key, but the fitter calls the 'mu' bound
+    # function once per peak with that peak's own location.
+    peak_locations = [(loc, w_i, p_i)
+                      for w_i, (locs, _, _) in enumerate(new_peaks)
+                      for p_i, loc in enumerate(locs)]
+
+    def peak_at(E):
+        for loc, w_i, p_i in peak_locations:
+            if abs(loc - E) < 1e-6:
+                return w_i, p_i
+        return None
+
+    def should_fix(name, E):
+        return bool(fix_params(name, E)) if callable(fix_params) else bool(fix_params)
+
     def make_peak_dependent_bound_func(base_name):
         def bound_func(E):
-            if E not in window_mapping: return (E, E-fitter.location_wiggle, E+fitter.location_wiggle)
+            if E not in window_mapping:
+                # A peak other than its window's first. With a predicate, one that is meant to
+                # stay fixed still has to be held here; E is its seeded location, which is the
+                # parent's fitted mu (to _LOC_PRECISION), so fixing at E is fixing at that value.
+                if callable(fix_params):
+                    found = peak_at(E)
+                    if found is not None:
+                        w_i, p_i = found
+                        mu_name = 'mu' if len(new_peaks[w_i][0]) == 1 else f'mu_{p_i}'
+                        if should_fix(mu_name, E):
+                            return (E, E, E)
+                return (E, E-fitter.location_wiggle, E+fitter.location_wiggle)
             old_i, old_to_new = window_mapping[E]
             new_to_old = {v: k for k, v in old_to_new.items()}
             
@@ -1974,7 +2034,8 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
                 elif base_name.startswith('amplitude') or base_name.startswith('total_amp'): return (200, 1e-3, 1e6)
                 else: return (0, -1e6, 1e6)
             val, low, high = bounds
-            if not fix_params and low == 0 and high == 0:
+            fixed = should_fix(base_name, E)
+            if not fixed and low == 0 and high == 0:
                 if base_name.startswith('amplitude') or base_name.startswith('total_amp'):
                     low, high = 1e-3, 1e6
                 elif base_name.startswith('sigma'):
@@ -1983,7 +2044,7 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
                     low, high = val - fitter.location_wiggle, val + fitter.location_wiggle
                 else:
                     low, high = -1e6, 1e6
-            return (val, val, val) if fix_params else (val, low, high)
+            return (val, val, val) if fixed else (val, low, high)
         return bound_func
         
     def make_global_bound_func(name):
@@ -1993,9 +2054,10 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
             bounds = old_window_bounds.get(old_i, {}).get(name)
             if bounds is None: return (0, -1e6, 1e6)
             val, low, high = bounds
-            if not fix_params and low == 0 and high == 0:
+            fixed = should_fix(name, E)
+            if not fixed and low == 0 and high == 0:
                 low, high = -1e6, 1e6
-            return (val, val, val) if fix_params else (val, low, high)
+            return (val, val, val) if fixed else (val, low, high)
         return bound_func
 
     max_peaks = max((len(locs) for locs, _, _ in new_peaks), default=1)
@@ -2244,6 +2306,119 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
     )
 
 
+def refit_from_fit(fitter, kwargs_override=None, fix_params=False, refit=True, folder_name=None,
+                   operation='refit', details=None):
+    '''
+    Refit the same peaks, knots and bounds, seeded from the parent's fitted values.
+
+    The child differs from its parent only in what kwargs_override changes -- typically the
+    optimiser (use_cmaes / cmaes_opts) or the peak model -- so it is the operation for
+    "re-minimise this configuration under new settings": the control before comparing an
+    optimiser, or the start point of a stepwise run after the optimiser changes, since a
+    delta-chi2 between fits minimised differently would credit the minimiser's gain to the
+    model change.
+
+    Every fitted value, background coefficients included (same basis), is seeded through
+    merged_param_bounds exactly as remove_peak_from_fit does. fix_params as in add_peak_to_fit.
+
+    Returns:
+    (str, SpectrumFitter) if refit, else dict
+    '''
+    old_window_bounds = _extract_fitter_bounds(fitter)
+
+    new_peaks = []
+    new_isotopes = []
+    original_isotopes = getattr(fitter, 'peak_isotopes', getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_isotopes'))
+    window_mapping = {}
+
+    for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
+        new_locs = []
+        new_isos = []
+        for j, loc in enumerate(locs):
+            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
+            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
+            new_locs.append(_round_peak_loc(fitted_mu))
+            if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
+                new_isos.append(original_isotopes[i][j])
+        if new_locs:
+            new_peaks.append((new_locs, _round_peak_loc(w_start), _round_peak_loc(w_end)))
+            if new_isos:
+                new_isotopes.append(new_isos)
+            window_mapping[new_locs[0]] = (i, {j: j for j in range(len(new_locs))})
+
+    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
+
+    prov = {'kwargs_override': dict(kwargs_override or {})}
+    prov.update(details or {})
+    return _prepare_modified_fit(
+        fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+        operation, prov, fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name)
+
+
+def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True):
+    '''
+    Refit with a different B-spline knot list and the same peaks.
+
+    The peak list is unchanged -- every peak keeps its fitted location as the new guess, as in
+    remove_peak_from_fit -- so the child differs from its parent only in background freedom,
+    which is what makes the two comparable by delta-chi2.
+
+    Background coefficients are NOT carried over. They belong to the old basis: with different
+    knots there is a different number of them and each spans a different stretch of the
+    spectrum, so seeding coefficient k of the new basis from coefficient k of the old one
+    would be meaningless. They start from the fit's own flat guess instead, under the generic
+    non-negative bg_p bound, while peak, sigma and fraction parameters are seeded as usual.
+
+    Parameters:
+    bg_knots : list of floats or int
+        The new interior knots, as fitting_tools.bspline_knot_vector takes them.
+    fix_params : bool or callable
+        As in add_peak_to_fit. Background coefficients are always free regardless, since
+        there is nothing to fix them to.
+
+    Returns:
+    (str, SpectrumFitter) if refit, else dict
+    '''
+    old_window_bounds = _extract_fitter_bounds(fitter)
+
+    new_peaks = []
+    new_isotopes = []
+    original_isotopes = getattr(fitter, 'peak_isotopes', getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_isotopes'))
+    window_mapping = {}
+
+    for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
+        new_locs = []
+        new_isos = []
+        for j, loc in enumerate(locs):
+            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
+            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
+            new_locs.append(_round_peak_loc(fitted_mu))
+            if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
+                new_isos.append(original_isotopes[i][j])
+        if new_locs:
+            new_peaks.append((new_locs, _round_peak_loc(w_start), _round_peak_loc(w_end)))
+            if new_isos:
+                new_isotopes.append(new_isos)
+            window_mapping[new_locs[0]] = (i, {j: j for j in range(len(new_locs))})
+
+    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
+
+    # Drop the old basis's coefficients and put back the generic bound every new coefficient
+    # falls through to. Without this a coefficient the parent did not have would come out
+    # unbounded, and with BG_FLOOR_SCALE=0 an unbounded background can go negative.
+    for name in [n for n in merged_param_bounds if n.startswith('bg_p')]:
+        del merged_param_bounds[name]
+    merged_param_bounds['bg_p'] = bg_p_bounds(fitter.spectra[0].GetBinWidth(1))
+
+    old_knots = getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('bg_knots')
+    return _prepare_modified_fit(
+        fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+        'knots', {'bg_knots': list(bg_knots) if not isinstance(bg_knots, int) else bg_knots,
+                  'knots_before': old_knots},
+        fix_params, refit, kwargs_override={'bg_knots': bg_knots}
+    )
+
+
 def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params=False,
                          pinned_tolerance=1e-3, refit=True):
     '''
@@ -2342,9 +2517,9 @@ def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params
 #############################################################################
 # Fit including runs where high energy protons may not be recorded correctly.
 #############################################################################
-experiment = 'e23035'
-tpc_config = 'smart2_rpr.csv'
-num_workers = 200
+EXPERIMENT = 'e23035'
+TPC_CONFIG = 'smart2_rpr.csv'
+NUM_WORKERS = 200
 
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end
@@ -2353,32 +2528,43 @@ num_workers = 200
 Zn59_cycle_efficiency =  0.41616841590773374
 Ga60_cycle_efficiency =  0.37410064021102757
 
-bin_width = 10
-proton_binning = (4000//bin_width, 0, 4000)
-ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_59Zn = ddas_interface.get_histogram(experiment, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
 
-ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
-ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
-pspec_low_energy_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-pspec_all_energies_60Ga = ddas_interface.get_histogram(experiment, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_all_energies_60Ga", "60Ga proton_spectrum all energies", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=tpc_config)
-if False:
-    c_overlaid, leg, stack = root_vis_tools.draw_overlaid_histograms({'all energy': pspec_all_energies_60Ga, 'low energy': pspec_low_energy_60Ga})
-    c_ratio = ROOT.TCanvas()
-    ratio_hist = pspec_low_energy_60Ga/pspec_all_energies_60Ga
-    ratio_hist.Draw()
+def load_spectra(bin_width=10, num_workers=NUM_WORKERS):
+    '''
+    Build the three proton spectra the fits run on, binned at bin_width keV.
 
-#loc_wiggle = 15
+    Reading the runs takes minutes, so this is a function rather than module-level code: the
+    fitting helpers here (try_fit, add/remove_peak_from_fit, load_fit, ...) can then be
+    imported by the diagnostics and stepwise drivers without touching the data. Anything
+    working from an existing fit gets its spectra back from load_fit instead.
+
+    Return: (zn_spec, ga_spec_low_energy, ga_spec_all_energies)
+    '''
+    proton_binning = (4000 // bin_width, 0, 4000)
+
+    ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+    pspec_59Zn = ddas_interface.get_histogram(EXPERIMENT, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=TPC_CONFIG)
+
+    ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)
+    ddas_runs_protons_all_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+    pspec_low_energy_60Ga = ddas_interface.get_histogram(EXPERIMENT, ddas_runs_protons_low_energies_60Ga, proton_binning, "proton_spectrum_low_energy_60Ga", "60Ga proton_spectrum low energy", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=TPC_CONFIG)
+    pspec_all_energies_60Ga = ddas_interface.get_histogram(EXPERIMENT, ddas_runs_protons_all_energies_60Ga, proton_binning, "proton_spectrum_all_energies_60Ga", "60Ga proton_spectrum all energies", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=TPC_CONFIG)
+
+    return pspec_59Zn, pspec_low_energy_60Ga, pspec_all_energies_60Ga
 
 
-def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_name='protons_le', 
-            ga_spec=pspec_low_energy_60Ga, zn_spec=pspec_59Zn, spectra=None, extra_hash_info=None):
+def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_name='protons_le',
+            ga_spec=None, zn_spec=None, spectra=None, extra_hash_info=None):
     '''
     Always reload the csv file so I can change it easily when iterating on fits, and then call the function
     again in the interactive interpreter. Save the results in tpc_spectrum_fitting/folder_name.
     Generate a hash based on peak guesses, histograms passed in, and arguments passed to multipeak fit for 
     bg model, sigma, etc.
 
+    ga_spec, zn_spec : histograms
+        The spectra to fit, from load_spectra(). Pass these or `spectra`; there are no
+        module-level defaults, since loading the data takes minutes and this module is
+        imported by drivers that work from saved fits.
     spectra : list of histograms, optional
         Fit these instead of [ga_spec, zn_spec]. Used by add/remove_peak_from_fit to refit the
         same spectra the parent fitter used.
@@ -2394,18 +2580,24 @@ def try_fit(args_for_multipeak_fit, peak_guesses_csv='proton_peaks.csv', folder_
     
     if spectra is None:
         spectra = [s for s in [ga_spec, zn_spec] if s is not None]
+    if not spectra:
+        raise ValueError("try_fit needs spectra: pass spectra=[...] or ga_spec/zn_spec from load_spectra()")
 
     # Hash configuration
     hist_info = []
     for h in spectra:
         if h:
             hist_info.append((h.GetName(), h.GetTitle(), h.GetEntries()))
-            
+
     hash_dict = {
         'args': {k: v for k, v in args_for_multipeak_fit.items() if k not in ['force_refit', 'workers']},
         'peaks': peaks,
         'isotopes': isotopes,
         'histograms': hist_info,
+        # The same runs binned two ways are two different fits. GetEntries() above does not
+        # distinguish them, so without this the 5 keV and 10 keV fits of one configuration
+        # collide on one hash (as fit_d8f7935d did).
+        'bin_width': spectra[0].GetBinWidth(1),
         # Not a fit argument, but it is compiled into the background model, so a fit made with a
         # different floor is a different fit and must not be served from the cache.
         'bg_floor_scale': fitting_tools.BG_FLOOR_SCALE
@@ -2459,57 +2651,78 @@ def load_fit(hash_str, folder_name='protons_le'):
             
     return f
 
-folder_name = 'protons_le_%dkeV_bins'%bin_width
-save_path_initial = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting/protons_le', folder_name)
-bg_shift_upper_bound = 0# 0.5/(2000/5) 
-bg_order=8
-force_refit=False
-args_for_multipeak_fit = {
-    'force_refit': force_refit,
-    #'additional_param_bounds': {f'bg_p{i}': lambda E: (-3, 1000*bin_width/5) for i in range(bg_order+1)},
-    'loc_wiggle': 15,
-    #'bg_model': 'chebyshev',
-    #'bg_model': 'bernstein',
-    # Spline background: bg_order is the degree, bg_knots the interior knots (a count for evenly
-    # spaced ones, or the energies themselves). Repeating 1000 lets the curvature jump there --
-    # the kink -- while every other knot span keeps its own local coefficients.
-    'bg_model': 'bspline', 'bg_order': 3, 'bg_knots': [850, 1000, 1200, 1500, 1800, 2100, 2400, 2700],
-    #[700, 900, 1000, 1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500, 2700],#(2900-550-200)//200,#[850, 1000, 1150, 1500, 1900, 2300, 2600],
-    'additional_param_bounds': {'bg_p': lambda E: (0.1, 1000*bin_width/5)},
-    #'bg_order': bg_order,
-    'fraction_bernstein_order': 3,
-    #'sigma_monotonic_bernstein_order': 5,
-    'sigma_bernstein_order': 3,
-    #'bg_shift_monotonic_bernstein_order': 2,
-    'peak_model': 'gaus', 'bin_integral': True,
-    # 'bg_shift_bernstein_order': 0,
-    # 'bg_shift_upper_bound': bg_shift_upper_bound,
-    'sigma_min': 10,
-    'sigma_max': 100,#20/720*2900, #energy resolution at top of band as a percent of energy shouldn't be worse than it is at the bottom
-    # 'points_per_bin':10,
-    'use_cmaes': False,
-    'workers': num_workers
-}
-#fit often won't converge unless exact hessian is computed. Too many correlated parameters!!!
-ROOT.Math.MinimizerOptions.SetDefaultStrategy(2) 
-if True:
-    fitting_tools.BG_FLOOR_SCALE=0
-    hash_str, f = try_fit(args_for_multipeak_fit, ga_spec=pspec_all_energies_60Ga,#pspec_low_energy_60Ga,
-                            peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
-else:
-    hash_str = '7111e668'
-    f = load_fit(hash_str, folder_name=folder_name)
-# res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
-print('hash: ', hash_str)
-print('p-value: ', f.fit_results[0]['fit_res'].Prob())
-print('chi2: ', f.fit_results[0]['fit_res'].Chi2())
-print('ndf: ', f.fit_results[0]['fit_res'].Ndf())
-f.show_fit_results(peak_index=0, show_fit_params=False, show_components=True)
-show_backgrounds(fitter_or_filename=f)
-#show_bg_shifts(fitter_or_filename=f)
-show_detector_energy_resolution(fitter_or_filename=f)
-show_peak_fractions(fitter_or_filename=f)
-slope, offset, cov = make_energy_calibration(fitter=f, fit_name='59Zn_pcal', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
-apply_fit_to_csv((slope, offset, cov), f'{folder_name}/fit_{hash_str}_evaluated')
+def bg_p_bounds(bin_width):
+    '''
+    Bounds for every B-spline background coefficient: non-negative (so the background cannot
+    dip below zero and reflect), with a ceiling that scales with the bin width because the
+    coefficients are in counts per bin. Kept in one place because change_knots_from_fit has to
+    rebuild it -- a fit loaded from disk has this lambda serialized to the string '<lambda>'.
+    '''
+    return lambda E: (0.1, 1000 * bin_width / 5)
 
-slope, offset, cov = make_energy_calibration(fitter=f, fit_name='test', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+
+def default_fit_args(bin_width=10, bg_knots=None, num_workers=NUM_WORKERS, force_refit=False):
+    '''
+    The standard multipeak-fit configuration, as a fresh dict.
+
+    bg_knots defaults to the 8-knot list; the stepwise driver passes its own while it is
+    choosing them. The bg_p bound scales with bin width, so it is built here rather than
+    kept as a module-level literal.
+    '''
+    if bg_knots is None:
+        # [700, 900, 1000, 1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500, 2700] is the
+        # 12-knot list the earlier fits used; this is the stiffer 8-knot one.
+        bg_knots = [850, 1000, 1200, 1500, 1800, 2100, 2400, 2700]
+    return {
+        'force_refit': force_refit,
+        'loc_wiggle': 15,
+        # Spline background: bg_order is the degree, bg_knots the interior knots (a count for evenly
+        # spaced ones, or the energies themselves). Repeating 1000 lets the curvature jump there --
+        # the kink -- while every other knot span keeps its own local coefficients.
+        'bg_model': 'bspline', 'bg_order': 3, 'bg_knots': list(bg_knots),
+        'additional_param_bounds': {'bg_p': bg_p_bounds(bin_width)},
+        'fraction_bernstein_order': 3,
+        #'sigma_monotonic_bernstein_order': 5,
+        'sigma_bernstein_order': 3,
+        'peak_model': 'gaus', 'bin_integral': True,
+        'sigma_min': 10,
+        'sigma_max': 100,#20/720*2900, #energy resolution at top of band as a percent of energy shouldn't be worse than it is at the bottom
+        # 'points_per_bin':10,
+        'use_cmaes': False,
+        'workers': num_workers
+    }
+
+
+def main(bin_width=10):
+    folder_name = 'protons_le_%dkeV_bins' % bin_width
+    args_for_multipeak_fit = default_fit_args(bin_width=bin_width)
+
+    #fit often won't converge unless exact hessian is computed. Too many correlated parameters!!!
+    ROOT.Math.MinimizerOptions.SetDefaultStrategy(2)
+    if True:
+        fitting_tools.BG_FLOOR_SCALE=0
+        zn_spec, ga_spec_low_energy, ga_spec_all_energies = load_spectra(bin_width=bin_width)
+        hash_str, f = try_fit(args_for_multipeak_fit, ga_spec=ga_spec_all_energies,#ga_spec_low_energy,
+                                zn_spec=zn_spec,
+                                peak_guesses_csv='proton_peaks.csv', folder_name=folder_name)
+    else:
+        hash_str = '7111e668'
+        f = load_fit(hash_str, folder_name=folder_name)
+    # res.append(add_peak_to_fit(res[-1][1], new_peak_loc=1164, new_peak_iso='59Zn',refit=True))
+    print('hash: ', hash_str)
+    print('p-value: ', f.fit_results[0]['fit_res'].Prob())
+    print('chi2: ', f.fit_results[0]['fit_res'].Chi2())
+    print('ndf: ', f.fit_results[0]['fit_res'].Ndf())
+    f.show_fit_results(peak_index=0, show_fit_params=False, show_components=True)
+    show_backgrounds(fitter_or_filename=f)
+    #show_bg_shifts(fitter_or_filename=f)
+    show_detector_energy_resolution(fitter_or_filename=f)
+    show_peak_fractions(fitter_or_filename=f)
+    slope, offset, cov = make_energy_calibration(fitter=f, fit_name='59Zn_pcal', peaks_csv='proton_peaks.csv', show_fit_result=True, force_0_offset=False)
+    apply_fit_to_csv((slope, offset, cov), f'{folder_name}/fit_{hash_str}_evaluated')
+
+    return hash_str, f
+
+
+if __name__ == '__main__':
+    main()
