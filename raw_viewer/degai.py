@@ -437,6 +437,8 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
 
     # The input files have to exist before the cache key is made, since the key records which version of them was used
     merged_file_path = ddas_interface.get_ddas_root_file_path(experiment, ddas_run)
+    if not os.path.exists(merged_file_path):
+        ddas_interface.make_ddas_root_file(experiment, ddas_run)
     input_files = [merged_file_path]
     needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
     if needs_tpc:
