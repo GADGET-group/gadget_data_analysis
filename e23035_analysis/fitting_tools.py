@@ -218,13 +218,89 @@ class ParamManager:
         """Returns the integer index for a given parameter name."""
         return self.idx_map.get(name, -1)
 
-def resolve_string_param(param_name, default_guess, default_bounds, parameterizations, pm, current_mu_idx=None, param_bounds=None):
+def peak_link_map(peak_links):
+    """
+    {peak_idx: link} from the list form the fitters take:
+
+        [{'peak': i, 'ref': r, 'spacing': s, 'tol': t, 'label': '1817 (ENSDF)'}, ...]
+
+    A linked peak has no free position. It sits at mu_ref + dmu_i, where dmu_i is a fit
+    parameter boxed at [s - t, s + t] (fit x-axis units): a soft link to a known spacing that
+    lets literature energies place the components of an unresolved blend without imposing a
+    precision the literature does not have. The amplitude stays free and may go to zero. A
+    reference must itself be a free peak. Other keys ('label', 'window') ride along.
+    """
+    out = {}
+    for link in (peak_links or []):
+        i, r = int(link['peak']), int(link['ref'])
+        if i == r:
+            raise ValueError(f'peak {i} cannot be linked to itself')
+        if i in out:
+            raise ValueError(f'peak {i} is linked twice')
+        out[i] = {**link, 'peak': i, 'ref': r, 'spacing': float(link['spacing']), 'tol': float(link['tol'])}
+    for i, link in out.items():
+        if link['ref'] in out:
+            raise ValueError(f"peak {i} is linked to peak {link['ref']}, which is itself linked; "
+                             "link both to the same free reference instead")
+    return out
+
+
+def window_links(peak_links, window_idx):
+    """The link records that belong to one fit window (a record without 'window' is window 0)."""
+    return [link for link in (peak_links or []) if int(link.get('window', 0)) == int(window_idx)]
+
+
+def mu_param_name(i, n_peaks):
+    """A single-peak window calls its position 'mu', a multi-peak window 'mu_0', 'mu_1', ..."""
+    return 'mu' if n_peaks == 1 else f'mu_{i}'
+
+
+def dmu_param_name(i):
+    return f'dmu_{i}'
+
+
+def peak_mu_values(f_to_fit, n_peaks, peak_links=None, cov=None):
+    """
+    [(mu, err)] for every peak of a fitted function, in peak-index order.
+
+    A linked peak's position is mu_ref + dmu_i. Its error uses the covariance when one is
+    given (the two are anticorrelated in a blend, so quadrature overstates it) and quadrature
+    otherwise. This is the one place a peak's position is read off a fitted function; anything
+    that enumerates 'mu*' parameters by name misses linked peaks.
+    """
+    links = peak_link_map(peak_links)
+    out = []
+    for i in range(n_peaks):
+        if i in links:
+            r = links[i]['ref']
+            jr = f_to_fit.GetParNumber(mu_param_name(r, n_peaks))
+            jd = f_to_fit.GetParNumber(dmu_param_name(i))
+            if jr < 0 or jd < 0:
+                raise ValueError(f'linked peak {i}: the function has no {mu_param_name(r, n_peaks)} or {dmu_param_name(i)}')
+            mu = f_to_fit.GetParameter(jr) + f_to_fit.GetParameter(jd)
+            er, ed = f_to_fit.GetParError(jr), f_to_fit.GetParError(jd)
+            if cov is not None and cov.GetNrows() > max(jr, jd):
+                var = cov(jr, jr) + cov(jd, jd) + 2.0 * cov(jr, jd)
+            else:
+                var = er * er + ed * ed
+            out.append((mu, float(np.sqrt(max(var, 0.0)))))
+        else:
+            j = f_to_fit.GetParNumber(mu_param_name(i, n_peaks))
+            if j < 0:
+                raise ValueError(f'peak {i}: the function has no parameter {mu_param_name(i, n_peaks)}')
+            out.append((f_to_fit.GetParameter(j), f_to_fit.GetParError(j)))
+    return out
+
+
+def resolve_string_param(param_name, default_guess, default_bounds, parameterizations, pm, current_mu_idx=None, param_bounds=None, current_mu_expr=None):
     """
     Resolves a parameter for ROOT string-based TF1 functions.
     
     If the parameter is parameterized in the `parameterizations` dictionary, it adds the required 
     formula parameters to the ParamManager and returns the formatted C++ string formula (injecting 
-    `{mu}` as the corresponding parameter index if current_mu_idx is provided).
+    `{mu}` as the corresponding parameter index if current_mu_idx is provided, or as
+    current_mu_expr -- a bracket-notation expression such as "([3] + [7])" for a linked peak
+    whose position is reference-plus-offset -- when that is given instead).
     If it is not parameterized, it adds the basic parameter to ParamManager and returns its index representation.
     
     Returns:
@@ -249,7 +325,9 @@ def resolve_string_param(param_name, default_guess, default_bounds, parameteriza
         formula_str = p_dict['formula']
         
         # Replace {mu} placeholder if applicable (usually only for sigma/tau)
-        if current_mu_idx is not None and '{mu}' in formula_str:
+        if current_mu_expr is not None and '{mu}' in formula_str:
+            formula_str = formula_str.replace('{mu}', current_mu_expr)
+        elif current_mu_idx is not None and '{mu}' in formula_str:
             formula_str = formula_str.replace('{mu}', f"[{current_mu_idx}]")
             
         # Replace any known parameter names with their global ROOT indices
@@ -2518,9 +2596,14 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None, peak_links=None):
     """
     Simultaneously fit Gaussian peaks (optionally on a step-shifted background) across several spectra.
+
+    peak_links (list of dicts or None):
+        Peaks whose position is tied to another peak's: see peak_link_map. Each linked peak i
+        trades its mu_i for dmu_i (the offset from its reference), seeded at the spacing and
+        bounded at spacing +- tol unless param_bounds['dmu_i'] says otherwise.
 
     bg_knots (int, list or None):
         Only for bg_model='bspline', where bg_order is the spline degree. Sets the interior knots
@@ -2600,11 +2683,30 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             pm.add(f"bg_slope_{j}", 0.0, param_bounds.get('bg_slope', (-np.inf, np.inf)))
             
 
-    # 2. Peak parameters: shared mu (FIRST)
+    # 2. Peak positions (FIRST). A free peak has mu_i; a linked one has dmu_i, its offset from
+    #    the reference peak, boxed at the given spacing +- tol (see peak_link_map).
+    links = peak_link_map(peak_links)
+    for i, link in links.items():
+        if i >= n_peaks or link['ref'] >= n_peaks:
+            raise ValueError(f"peak_links refer to peaks {i} and {link['ref']} but the window has {n_peaks} peaks")
     for i in range(n_peaks):
-        mu_name = "mu" if n_peaks == 1 else f"mu_{i}"
-        m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
-        pm.add(mu_name, e_guess_list[i], m_bnd)
+        mu_name = mu_param_name(i, n_peaks)
+        if i in links:
+            s, t = links[i]['spacing'], links[i]['tol']
+            pm.add(dmu_param_name(i), s, param_bounds.get(dmu_param_name(i), (s, s - t, s + t)))
+        else:
+            m_bnd = param_bounds.get(mu_name, param_bounds.get('mu', (e_low, e_high)))
+            pm.add(mu_name, e_guess_list[i], m_bnd)
+    # Every peak's position in bracket notation: one index for a free peak, reference plus
+    # offset for a linked one. This stands in for {mu} in the parameterizations and, with
+    # '[' -> 'p[', for the position in the compiled model.
+    mu_bracket = []
+    for i in range(n_peaks):
+        if i in links:
+            mu_bracket.append(f"([{pm.get_idx(mu_param_name(links[i]['ref'], n_peaks))}] + [{pm.get_idx(dmu_param_name(i))}])")
+        else:
+            mu_bracket.append(f"[{pm.get_idx(mu_param_name(i, n_peaks))}]")
+    pm.peak_links = peak_links
 
     # 3. Shared/Independent sigma (SECOND)
     if data_source is None:
@@ -2616,10 +2718,9 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
 
     sigma_cpp_strings = []
     for i in range(n_peaks):
-        mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         sig_name = "sigma" if shared_sigma else f"sigma_{i}"
         s_bnd = param_bounds.get(sig_name, param_bounds.get('sigma', sigma_bounds))
-        sig_str, sig_idx = resolve_string_param(sig_name, sigma_guess, s_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
+        sig_str, sig_idx = resolve_string_param(sig_name, sigma_guess, s_bnd, parameterizations, pm, current_mu_expr=mu_bracket[i], param_bounds=param_bounds)
         
         sig_cpp = sig_str.replace('[', 'p[').replace(']', ']')
         sigma_cpp_strings.append(sig_cpp)
@@ -2627,7 +2728,6 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     # 4. Amplitudes (THIRD)
     amp_cpp_strings = []
     for i in range(n_peaks):
-        mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
         amp_cpp_strings_for_peak = []
         for j in range(n_spectra):
             amp_name = f"amplitude_{i}_{j}"
@@ -2643,7 +2743,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             A_guess = max((local_max - bg_guess) * sigma_guess * 2.50662827 / bin_width, 1.0)
             a_bnd = param_bounds.get(amp_name, param_bounds.get('amplitude', (0, np.inf)))
             
-            amp_str, amp_idx = resolve_string_param(amp_name, A_guess, a_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
+            amp_str, amp_idx = resolve_string_param(amp_name, A_guess, a_bnd, parameterizations, pm, current_mu_expr=mu_bracket[i], param_bounds=param_bounds)
             amp_cpp = amp_str.replace('[', 'p[').replace(']', ']')
             amp_cpp_strings_for_peak.append(amp_cpp)
         amp_cpp_strings.append(amp_cpp_strings_for_peak)
@@ -2655,12 +2755,11 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     bg_shift_cpp_strings = []
     if include_bg_shift:
         for i in range(n_peaks):
-            mu_idx = pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}")
             bg_shift_cpp_strings_for_peak = []
             for j in range(n_spectra):
                 b_name = f"bg_shift_{i}_{j}" if not shared_bg_shift else f"bg_shift_0_{j}"
                 b_bnd = param_bounds.get(b_name, param_bounds.get(f'bg_shift_{i}', param_bounds.get('bg_shift', (0, 1.0))))
-                bg_str, bg_idx = resolve_string_param(b_name, 0.002, b_bnd, parameterizations, pm, current_mu_idx=mu_idx, param_bounds=param_bounds)
+                bg_str, bg_idx = resolve_string_param(b_name, 0.002, b_bnd, parameterizations, pm, current_mu_expr=mu_bracket[i], param_bounds=param_bounds)
                 bg_cpp = bg_str.replace('[', 'p[').replace(']', ']')
                 bg_shift_cpp_strings_for_peak.append(bg_cpp)
             bg_shift_cpp_strings.append(bg_shift_cpp_strings_for_peak)
@@ -2724,8 +2823,9 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double bg_val = bg_const + bg_slope * val_x;
         """
 
-    mu_idx = [pm.get_idx("mu" if n_peaks == 1 else f"mu_{i}") for i in range(n_peaks)]
-    mu_cpp = "{" + ",".join(map(str, mu_idx)) + "}"
+    # Positions are evaluated once per call into mu_vals: a parameter for a free peak, the
+    # reference's parameter plus the offset parameter for a linked one.
+    mu_eval_cpp = "\n        ".join(f"mu_vals[{i}] = {mu_bracket[i].replace('[', 'p[')};" for i in range(n_peaks))
 
     sigma_eval_cpp = "\n        ".join([f"sigma_vals[{i}] = {sigma_cpp_strings[i]};" for i in range(n_peaks)])
 
@@ -2749,7 +2849,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     # sigma, amplitude and bg_shift depend only on the parameters, never on the position inside the
     # bin, so they are evaluated once per call instead of once per sample point.
     shape_preamble = f"""
-        int mu_idx[{n_peaks}] = {mu_cpp};
+        double mu_vals[{n_peaks}];
+        {mu_eval_cpp}
         double sigma_vals[{n_peaks}];
         {sigma_eval_cpp}
         double amp_vals[{n_peaks}];
@@ -2771,7 +2872,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     if include_bg_shift:
         step_loop_cpp = f"""
             for (int i = 0; i < {n_peaks}; ++i) {{
-                total += 0.5 * amp_vals[i] * bg_shift_vals[i] * TMath::Erfc((val_x - p[mu_idx[i]]) / (1.41421356 * sigma_vals[i]));
+                total += 0.5 * amp_vals[i] * bg_shift_vals[i] * TMath::Erfc((val_x - mu_vals[i]) / (1.41421356 * sigma_vals[i]));
             }}"""
 
     cutoff_cpp = ""
@@ -2780,7 +2881,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         # amplitude; skipping them keeps wide multi-peak windows from paying for every peak
         # in every bin.
         cutoff_cpp = f"""
-                if (std::fabs(bin_center_x - p[mu_idx[i]]) > {float(peak_cutoff_sigmas)} * sigma_vals[i] + bin_width) continue;"""
+                if (std::fabs(bin_center_x - mu_vals[i]) > {float(peak_cutoff_sigmas)} * sigma_vals[i] + bin_width) continue;"""
 
     if bin_integral:
         # Exact integral of each Gaussian over the bin, via the erf difference, instead of
@@ -2805,7 +2906,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double x_lo = bin_center_x - bin_width / 2.0;
         double x_hi = bin_center_x + bin_width / 2.0;
         for (int i = 0; i < {n_peaks}; ++i) {{{cutoff_cpp}
-            double mu = p[mu_idx[i]];
+            double mu = mu_vals[i];
             double inv = 1.0 / (1.41421356 * sigma_vals[i]);
             double t_lo = (x_lo - mu) * inv;
             double t_hi = (x_hi - mu) * inv;
@@ -2846,7 +2947,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
         double bin_width = {bin_width};
         {shape_preamble}
-        double mu = p[mu_idx[target_peak]];
+        double mu = mu_vals[target_peak];
         double inv = 1.0 / (1.41421356 * sigma_vals[target_peak]);
         double t_lo = (bin_center_x - bin_width / 2.0 - mu) * inv;
         double t_hi = (bin_center_x + bin_width / 2.0 - mu) * inv;
@@ -2882,7 +2983,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
 
             for (int i = 0; i < {n_peaks}; ++i) {{{cutoff_cpp}
                 double sigma = sigma_vals[i];
-                double t = (val_x - p[mu_idx[i]]) / sigma;
+                double t = (val_x - mu_vals[i]) / sigma;
                 total += (amp_vals[i] * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * t * t);
             }}
             total_sum += total;
@@ -2933,7 +3034,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
                 val_x = bin_center_x - bin_width / 2.0 + (pt + 0.5) * (bin_width / points_per_bin);
             }}
             double sigma = sigma_vals[target_peak];
-            double t = (val_x - p[mu_idx[target_peak]]) / sigma;
+            double t = (val_x - mu_vals[target_peak]) / sigma;
             total_sum += (amp_vals[target_peak] * bin_width / (sigma * 2.50662827)) * std::exp(-0.5 * t * t);
         }}
         return total_sum / points_per_bin;
@@ -3000,7 +3101,9 @@ def fit_gaussian_2d(spectra, e_guess, fit_window, **kwargs):
     kwargs.pop('shared_bg_shift', None)
     return fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, include_bg_shift=False, **kwargs)
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, cmaes_opts=None):
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, cmaes_opts=None, peak_links=None):
+    if peak_links:
+        raise NotImplementedError('peak_links (linked multiplet components) are only implemented for the Gaussian 2D models')
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:

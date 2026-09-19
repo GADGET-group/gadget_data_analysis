@@ -244,7 +244,14 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     loc_wiggle=10, bg_model='linear', bg_order=1, bg_knots=None, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
                     custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1,
-                    peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None):
+                    peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None,
+                    peak_links=None):
+    '''
+    peak_links : list of dicts or None
+        Peaks tied to a reference peak at a known spacing (soft-linked multiplet components):
+        [{'peak': i, 'ref': r, 'spacing': s, 'tol': t, 'label': ...}], indices within the window.
+        See fitting_tools.peak_link_map and add_multiplet_to_fit.
+    '''
     
     def _pow_str(base, exp):
         if exp == 0: return "1.0"
@@ -262,7 +269,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
     else:
         f = spectrum_fitter.multi_spectrum_fitter(spectra, peak_model, bg_model=bg_model, bg_order=bg_order,
                                                   bg_knots=bg_knots, use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin,
-                                                  bin_integral=bin_integral, peak_cutoff_sigmas=peak_cutoff_sigmas, cmaes_opts=cmaes_opts)
+                                                  bin_integral=bin_integral, peak_cutoff_sigmas=peak_cutoff_sigmas, cmaes_opts=cmaes_opts,
+                                                  peak_links=peak_links)
         if custom_initial_values:
             f.custom_initial_values = custom_initial_values
         
@@ -622,12 +630,11 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     f_to_fit = res.get('f_to_fit_2d') or res.get('f_to_fit')
                     if not f_to_fit: continue
                     
-                    mu_params = {}
-                    for j in range(f_to_fit.GetNpar()):
-                        name = f_to_fit.GetParName(j)
-                        if name.startswith('mu'):
-                            idx = 0 if name == 'mu' else int(name.split('_')[1])
-                            mu_params[idx] = (f_to_fit.GetParameter(j), f_to_fit.GetParError(j))
+                    # Positions through fitting_tools.peak_mu_values, so a linked peak (mu_ref + dmu)
+                    # is listed like any other, with its error from the covariance.
+                    n_peaks_w = len(peaks[i][0]) if peaks and len(peaks) > i else 0
+                    mu_params = dict(enumerate(fitting_tools.peak_mu_values(
+                        f_to_fit, n_peaks_w, fitting_tools.window_links(peak_links, i), _covariance_or_none(res))))
                             
                     for idx, (mu_val, mu_err) in mu_params.items():
                         iso = peak_isotopes[i][idx] if peak_isotopes and len(peak_isotopes) > i and len(peak_isotopes[i]) > idx else 'unknown'
@@ -855,8 +862,10 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         'fraction_bernstein_order': fraction_bernstein_order,
         'bg_shift_bernstein_order': bg_shift_bernstein_order,
         'bg_shift_monotonic_bernstein_order': bg_shift_monotonic_bernstein_order,
-        'peak_isotopes': peak_isotopes
+        'peak_isotopes': peak_isotopes,
+        'peak_links': peak_links
     }
+    f.peak_links = peak_links
             
     return f
 
@@ -1858,7 +1867,8 @@ def _get_fitter_parent_info(fitter):
 
 
 def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
-                          operation, details, fix_params, refit, kwargs_override=None, folder_name=None):
+                          operation, details, fix_params, refit, kwargs_override=None, folder_name=None,
+                          peak_links=None):
     '''
     Turn a modified peak list into a try_fit call: write the peaks out as a guess CSV next to
     the parent fit and assemble the keyword arguments that refit them with the parent's fitted
@@ -1869,6 +1879,8 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
 
     Returns (hash string, new fitter) if refit, otherwise the try_fit(**kwargs) dict to run later.
     folder_name puts the child somewhere other than beside its parent (an experiment folder).
+    peak_links is the child's link list in the child's numbering (every caller remaps the
+    parent's with _remap_links, since adding or removing a peak renumbers everything above it).
     '''
     parent_folder, parent_hash = _get_fitter_parent_info(fitter)
     folder_name = folder_name or parent_folder
@@ -1890,8 +1902,13 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
     if custom_initial_values:
         kwargs['custom_initial_values'] = {
             name: value for name, value in custom_initial_values.items()
-            if not name.startswith(('mu', 'amplitude', 'total_amp'))
+            if not name.startswith(('mu', 'amplitude', 'total_amp', 'dmu'))
         }
+    # Present only when there are links, so link-free fits keep the hashes they always had.
+    if peak_links:
+        kwargs['peak_links'] = [dict(link) for link in peak_links]
+    else:
+        kwargs.pop('peak_links', None)
     kwargs['additional_param_bounds'] = merged_param_bounds
     kwargs['loc_wiggle'] = fitter.location_wiggle
     # The hash covers everything a child is built from (peaks, seeds, bounds, optimiser),
@@ -2016,6 +2033,13 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
                 new_idx = int(parts[2])
                 old_idx = new_to_old.get(new_idx)
                 old_name = f'total_amp_{old_idx}'
+            elif base_name.startswith('dmu_'):
+                # A linked peak's offset from its reference. Seeded from the parent when the
+                # parent had the link; None otherwise, which leaves the link's own spacing
+                # +- tol in place (spectrum_fitter skips None bounds).
+                new_idx = int(parts[1])
+                old_idx = new_to_old.get(new_idx)
+                old_name = f'dmu_{old_idx}'
             elif base_name == 'mu':
                 # The bare name is peak 0 of the window. When the added peak is the lowest in
                 # energy it becomes peak 0 with no old index, and the new-peak branch below
@@ -2029,6 +2053,8 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
                 
             if old_idx is None:
                 # It's a new peak
+                if base_name.startswith('dmu'):
+                    return None
                 if base_name.startswith('mu'): 
                     new_i = next((idx for idx, (locs, _, _) in enumerate(new_peaks) if abs(locs[0] - E) < 1e-2), None)
                     if new_i is not None and new_idx < len(new_peaks[new_i][0]):
@@ -2041,6 +2067,8 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
                 
             bounds = old_window_bounds.get(old_i, {}).get(old_name)
             if bounds is None:
+                if base_name.startswith('dmu'):
+                    return None
                 if base_name.startswith('mu'): 
                     new_i = next((idx for idx, (locs, _, _) in enumerate(new_peaks) if abs(locs[0] - E) < 1e-2), None)
                     if new_i is not None and new_idx < len(new_peaks[new_i][0]):
@@ -2082,6 +2110,7 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
     for i in range(max_peaks):
         merged_param_bounds['mu'] = make_peak_dependent_bound_func('mu')
         merged_param_bounds[f'mu_{i}'] = make_peak_dependent_bound_func(f'mu_{i}')
+        merged_param_bounds[f'dmu_{i}'] = make_peak_dependent_bound_func(f'dmu_{i}')
         merged_param_bounds[f'total_amp_{i}'] = make_peak_dependent_bound_func(f'total_amp_{i}')
         for spec_idx in range(len(fitter.spectra)):
             merged_param_bounds[f'amplitude_{i}_{spec_idx}'] = make_peak_dependent_bound_func(f'amplitude_{i}_{spec_idx}')
@@ -2089,7 +2118,7 @@ def _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params
     global_names = set()
     for i, params in old_window_bounds.items():
         for name in params:
-            if not name.startswith('mu') and not name.startswith('amplitude') and not name.startswith('total_amp'):
+            if not name.startswith(('mu', 'amplitude', 'total_amp', 'dmu')):
                 global_names.add(name)
                 
     for name in global_names:
@@ -2155,6 +2184,65 @@ def _recenter_mu_bounds(merged_param_bounds, window_mapping, peaks_to_recenter, 
     return recentered
 
 
+def _links_of(fitter):
+    '''The fit's peak links (list of records, or None): from the fitter, else its recorded kwargs.'''
+    return getattr(fitter, 'peak_links', None) or getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_links')
+
+
+def _fitted_locs(fitter, old_window_bounds, window_idx, locs):
+    '''
+    The parent's fitted position of every peak of one window, rounded for the guess CSV, in
+    peak-index order. A linked peak's position is its reference's plus its offset. Falls back
+    to the guess when the parent has no value for a peak.
+    '''
+    params = old_window_bounds.get(window_idx, {})
+    n = len(locs)
+    links = fitting_tools.peak_link_map(fitting_tools.window_links(_links_of(fitter), window_idx))
+    out = []
+    for j, loc in enumerate(locs):
+        if j in links:
+            r = links[j]['ref']
+            mu_r = params.get(fitting_tools.mu_param_name(r, n), (locs[r], 0, 0))[0]
+            d = params.get(fitting_tools.dmu_param_name(j), (links[j]['spacing'], 0, 0))[0]
+            out.append(_round_peak_loc(mu_r + d))
+        else:
+            out.append(_round_peak_loc(params.get(fitting_tools.mu_param_name(j, n), (loc, 0, 0))[0]))
+    return out
+
+
+def _link_record(spec, peak, ref, window=0):
+    '''A link record with fresh indices; 'window' only when it is not the first window.'''
+    out = {k: v for k, v in spec.items() if k not in ('peak', 'ref', 'window')}
+    out.update(peak=int(peak), ref=int(ref))
+    if window:
+        out['window'] = int(window)
+    return out
+
+
+def _remap_links(fitter, window_mapping):
+    '''
+    The parent's peak links in the child's numbering, from the window_mapping every modifying
+    helper builds ({first new loc: (old window index, {old idx: new idx})}). A linked peak that
+    was removed drops its link; removing a reference while its linked peaks stay is refused,
+    since a multiplet is one object -- unlink or remove the components first.
+    '''
+    links = _links_of(fitter)
+    if not links:
+        return None
+    by_window = {old_i: old_to_new for old_i, old_to_new in window_mapping.values()}
+    out = []
+    for link in links:
+        w = int(link.get('window', 0))
+        old_to_new = by_window.get(w, {})
+        if int(link['peak']) not in old_to_new:
+            continue
+        if int(link['ref']) not in old_to_new:
+            raise ValueError(f"peak {link['ref']} of window {w} is the reference of linked peak "
+                             f"{link['peak']}; remove or unlink the linked peaks first")
+        out.append(_link_record(link, old_to_new[int(link['peak'])], old_to_new[int(link['ref'])], w))
+    return out or None
+
+
 def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True, kwargs_override=None):
     '''
     Removes one or more peaks from an existing fit.
@@ -2195,11 +2283,10 @@ def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True, 
         new_isos = []
         old_to_new_idx = {}
         new_idx = 0
+        fitted = _fitted_locs(fitter, old_window_bounds, i, locs)
         for j, loc in enumerate(locs):
             if (i, j) not in peaks_to_remove:
-                old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
-                fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-                new_locs.append(_round_peak_loc(fitted_mu))
+                new_locs.append(fitted[j])
                 if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
                     new_isos.append(original_isotopes[i][j])
                 old_to_new_idx[j] = new_idx
@@ -2216,7 +2303,8 @@ def remove_peak_from_fit(fitter, peaks_to_remove, fix_params=False, refit=True, 
     return _prepare_modified_fit(
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'rm', {'peaks_removed': sorted([list(peak) for peak in peaks_to_remove])},
-        fix_params, refit, kwargs_override=kwargs_override
+        fix_params, refit, kwargs_override=kwargs_override,
+        peak_links=_remap_links(fitter, window_mapping)
     )
 
 def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=False, refit=True, kwargs_override=None):
@@ -2279,10 +2367,9 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
         new_isos = []
         source_idx = []
         
+        fitted = _fitted_locs(fitter, old_window_bounds, i, locs)
         for j, loc in enumerate(locs):
-            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
-            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-            new_locs.append(_round_peak_loc(fitted_mu))
+            new_locs.append(fitted[j])
             source_idx.append(j)
             if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
                 new_isos.append(original_isotopes[i][j])
@@ -2319,7 +2406,8 @@ def add_peak_to_fit(fitter, new_peak_loc, new_peak_iso='unknown', fix_params=Fal
     return _prepare_modified_fit(
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'add', {'peaks_added': sorted(zip(new_peak_loc, new_peak_iso))},
-        fix_params, refit, kwargs_override=kwargs_override
+        fix_params, refit, kwargs_override=kwargs_override,
+        peak_links=_remap_links(fitter, window_mapping)
     )
 
 
@@ -2351,10 +2439,9 @@ def refit_from_fit(fitter, kwargs_override=None, fix_params=False, refit=True, f
     for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
         new_locs = []
         new_isos = []
+        fitted = _fitted_locs(fitter, old_window_bounds, i, locs)
         for j, loc in enumerate(locs):
-            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
-            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-            new_locs.append(_round_peak_loc(fitted_mu))
+            new_locs.append(fitted[j])
             if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
                 new_isos.append(original_isotopes[i][j])
         if new_locs:
@@ -2369,7 +2456,8 @@ def refit_from_fit(fitter, kwargs_override=None, fix_params=False, refit=True, f
     prov.update(details or {})
     return _prepare_modified_fit(
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
-        operation, prov, fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name)
+        operation, prov, fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name,
+        peak_links=_remap_links(fitter, window_mapping))
 
 
 def free_sigma_refit(fitter, order=3, sigma_min=None, sigma_max=None, folder_name=None, refit=True):
@@ -2414,10 +2502,9 @@ def relabel_peak_from_fit(fitter, peak, new_iso, fix_params=False, refit=True, k
     new_peaks, new_isotopes, window_mapping = [], [], {}
     for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
         new_locs, new_isos = [], []
+        fitted = _fitted_locs(fitter, old_window_bounds, i, locs)
         for j, loc in enumerate(locs):
-            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
-            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-            new_locs.append(_round_peak_loc(fitted_mu))
+            new_locs.append(fitted[j])
             iso = original_isotopes[i][j] if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]) else 'unknown'
             new_isos.append(new_iso if (i, j) == (w_i, p_i) else iso)
         new_peaks.append((new_locs, _round_peak_loc(w_start), _round_peak_loc(w_end)))
@@ -2428,7 +2515,105 @@ def relabel_peak_from_fit(fitter, peak, new_iso, fix_params=False, refit=True, k
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'relabel', {'peak': [w_i, p_i], 'energy': new_peaks[w_i][0][p_i], 'new_isotope': new_iso,
                     'old_isotope': original_isotopes[w_i][p_i] if original_isotopes else None},
-        fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name)
+        fix_params, refit, kwargs_override=kwargs_override, folder_name=folder_name,
+        peak_links=_remap_links(fitter, window_mapping))
+
+
+def add_multiplet_to_fit(fitter, ref_energy, components, remove=(), fix_params=False, refit=True,
+                         kwargs_override=None, folder_name=None, tolerance=15.0):
+    '''
+    Tie peaks to a reference peak at known spacings -- a soft-linked multiplet -- and refit.
+
+    A blend the resolution cannot separate (59Zn 1778/1817/1857, 1.4 sigma apart) fits as one
+    or two free peaks whose individual positions and counts mean nothing. Linking the
+    components to the strongest line at the literature spacings, each spacing free within the
+    literature's own uncertainty, gives every component an amplitude (or an upper limit)
+    without imposing a precision the literature does not have. fitting_tools.peak_link_map
+    describes the model; the linked peaks share the isotope's fraction curve like any other.
+
+    Parameters:
+    ref_energy : float
+        Fitted energy of the reference peak: the existing peak nearest it within `tolerance`.
+        It must be a free (unlinked) peak.
+    components : list of dicts
+        {'spacing': s, 'tol': t, 'iso': isotope, 'label': str, 'energy': E (optional)}.
+        spacing and tol are relative to the reference, in the fit's x-axis units. Without
+        'energy' a new peak is added at reference + spacing; with it the existing peak nearest
+        E (within tolerance) is linked instead of left free, keeping its isotope unless 'iso'
+        is given. 'label' is carried into the link record for provenance.
+    remove : iterable of floats
+        Fitted energies of existing peaks to drop in the same step, e.g. the free peak that
+        stood in for the unresolved part of the blend.
+    The rest as in add_peak_to_fit. Returns (hash, fitter) if refit, else the try_fit kwargs.
+    '''
+    old_window_bounds = _extract_fitter_bounds(fitter)
+    original_isotopes = getattr(fitter, 'peak_isotopes', getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_isotopes'))
+    fitted = {i: _fitted_locs(fitter, old_window_bounds, i, locs) for i, (locs, _, _) in enumerate(fitter.peaks_to_fit)}
+
+    def find(energy, what):
+        best = min(((abs(mu - energy), i, j) for i, mus in fitted.items() for j, mu in enumerate(mus)), default=None)
+        if best is None or best[0] > tolerance:
+            raise ValueError(f'no peak within {tolerance} of {energy} to serve as {what}')
+        return best[1], best[2]
+
+    w_ref, j_ref = find(ref_energy, 'the reference')
+    if j_ref in fitting_tools.peak_link_map(fitting_tools.window_links(_links_of(fitter), w_ref)):
+        raise ValueError(f'the reference peak at {fitted[w_ref][j_ref]} is itself linked')
+    removed = {find(E, 'a peak to remove') for E in remove}
+    if (w_ref, j_ref) in removed:
+        raise ValueError('the reference peak cannot be removed')
+
+    new_peaks, new_isotopes, window_mapping, new_links = [], [], {}, []
+    for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
+        isos = original_isotopes[i] if original_isotopes and i < len(original_isotopes) else []
+        links_here = fitting_tools.peak_link_map(fitting_tools.window_links(_links_of(fitter), i))
+        # One entry per peak of the child: location, isotope, parent index (None for a new
+        # peak), the parent's link record, and the new link spec (to j_ref) if any.
+        entries = [{'loc': fitted[i][j], 'iso': isos[j] if j < len(isos) else 'unknown', 'old': j,
+                    'link': links_here.get(j), 'new': None}
+                   for j in range(len(locs)) if (i, j) not in removed]
+        if i == w_ref:
+            for comp in components:
+                spec = {k: v for k, v in comp.items() if k not in ('energy', 'iso')}
+                spec['spacing'], spec['tol'] = float(comp['spacing']), float(comp['tol'])
+                if 'energy' in comp:
+                    w_c, j_c = find(comp['energy'], f"component {comp.get('label', comp['energy'])}")
+                    if w_c != i:
+                        raise ValueError('a linked component must lie in the reference peak\'s window')
+                    entry = next((e for e in entries if e['old'] == j_c), None)
+                    if entry is None or j_c == j_ref or entry['link'] is not None or entry['new'] is not None:
+                        raise ValueError(f'the peak at {fitted[i][j_c]} cannot be linked: it is the reference, '
+                                         'already linked, or being removed')
+                    entry['new'] = spec
+                    if comp.get('iso'):
+                        entry['iso'] = comp['iso']
+                else:
+                    loc = _round_peak_loc(fitted[i][j_ref] + spec['spacing'])
+                    entries.append({'loc': loc, 'iso': comp.get('iso') or (isos[j_ref] if j_ref < len(isos) else 'unknown'),
+                                    'old': None, 'link': None, 'new': spec})
+                    w_start, w_end = min(w_start, loc - 100), max(w_end, loc + 100)
+        if not entries:
+            continue
+        entries.sort(key=lambda e: e['loc'])
+        old_to_new = {e['old']: n for n, e in enumerate(entries) if e['old'] is not None}
+        for n, e in enumerate(entries):
+            if e['new'] is not None:
+                new_links.append(_link_record(e['new'], n, old_to_new[j_ref], i))
+            elif e['link'] is not None:
+                if e['link']['ref'] not in old_to_new:
+                    raise ValueError(f"the reference of the linked peak at {e['loc']} is being removed")
+                new_links.append(_link_record(e['link'], n, old_to_new[e['link']['ref']], i))
+        new_peaks.append(([e['loc'] for e in entries], _round_peak_loc(w_start), _round_peak_loc(w_end)))
+        new_isotopes.append([e['iso'] for e in entries])
+        window_mapping[new_peaks[-1][0][0]] = (i, old_to_new)
+
+    merged_param_bounds = _build_param_bounds(old_window_bounds, window_mapping, new_peaks, fix_params, fitter)
+    details = {'ref_energy': fitted[w_ref][j_ref], 'components': _json_safe(list(components)),
+               'removed': sorted(fitted[i][j] for i, j in removed), 'links': new_links}
+    return _prepare_modified_fit(
+        fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
+        'multiplet', details, fix_params, refit, kwargs_override=kwargs_override,
+        folder_name=folder_name, peak_links=new_links)
 
 
 def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True, kwargs_override=None):
@@ -2465,10 +2650,9 @@ def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True, kwargs
     for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
         new_locs = []
         new_isos = []
+        fitted = _fitted_locs(fitter, old_window_bounds, i, locs)
         for j, loc in enumerate(locs):
-            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
-            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-            new_locs.append(_round_peak_loc(fitted_mu))
+            new_locs.append(fitted[j])
             if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
                 new_isos.append(original_isotopes[i][j])
         if new_locs:
@@ -2491,7 +2675,8 @@ def change_knots_from_fit(fitter, bg_knots, fix_params=False, refit=True, kwargs
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'knots', {'bg_knots': list(bg_knots) if not isinstance(bg_knots, int) else bg_knots,
                   'knots_before': old_knots},
-        fix_params, refit, kwargs_override={**(kwargs_override or {}), 'bg_knots': bg_knots}
+        fix_params, refit, kwargs_override={**(kwargs_override or {}), 'bg_knots': bg_knots},
+        peak_links=_remap_links(fitter, window_mapping)
     )
 
 
@@ -2566,10 +2751,9 @@ def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params
     for i, (locs, w_start, w_end) in enumerate(fitter.peaks_to_fit):
         new_locs = []
         new_isos = []
+        fitted = _fitted_locs(fitter, old_window_bounds, i, locs)
         for j, loc in enumerate(locs):
-            old_mu_name = 'mu' if len(locs) == 1 else f'mu_{j}'
-            fitted_mu = old_window_bounds.get(i, {}).get(old_mu_name, (loc, 0, 0))[0]
-            new_locs.append(_round_peak_loc(fitted_mu))
+            new_locs.append(fitted[j])
             if original_isotopes and i < len(original_isotopes) and j < len(original_isotopes[i]):
                 new_isos.append(original_isotopes[i][j])
 
@@ -2586,7 +2770,8 @@ def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params
     return _prepare_modified_fit(
         fitter, new_peaks, new_isotopes, merged_param_bounds, old_window_bounds,
         'recenter', {'peaks_recentered': [list(peak) for peak in peaks_to_recenter], 'wiggle': wiggle},
-        fix_params, refit, kwargs_override=kwargs_override
+        fix_params, refit, kwargs_override=kwargs_override,
+        peak_links=_remap_links(fitter, window_mapping)
     )
 
 
@@ -2732,6 +2917,7 @@ def load_fit(hash_str, folder_name='protons_le'):
             f.fit_multi_peaks_kwargs = info.get('args', {})
             f.fit_multi_peaks_kwargs['peak_isotopes'] = info.get('isotopes')
             f.peaks_to_fit = info.get('peaks')
+            f.peak_links = f.fit_multi_peaks_kwargs.get('peak_links') or getattr(f, 'peak_links', None)
             
     return f
 

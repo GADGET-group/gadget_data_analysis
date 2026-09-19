@@ -149,21 +149,34 @@ def pinned_params(fitter, window_idx=0, err_fraction=PIN_ERR_FRACTION):
     return pinned_from_function(f_to_fit, err_fraction)
 
 
+def peak_links(fitter, window_idx=0):
+    '''The fit's link records for one window (see fitting_tools.peak_link_map); [] if none.'''
+    links = getattr(fitter, 'peak_links', None) or getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_links')
+    return fitting_tools.window_links(links, window_idx)
+
+
+def linked_indices(fitter, window_idx=0):
+    '''Peak indices whose position is tied to a reference (the linked components themselves).'''
+    return set(fitting_tools.peak_link_map(peak_links(fitter, window_idx)))
+
+
+def multiplet_indices(fitter, window_idx=0):
+    '''Every peak that belongs to a multiplet: the linked components and their references.'''
+    links = fitting_tools.peak_link_map(peak_links(fitter, window_idx))
+    return set(links) | {link['ref'] for link in links.values()}
+
+
 def peak_positions(fitter, window_idx=0):
-    '''[(peak_idx, mu, isotope)] for the peaks of one window, in peak-index order.'''
+    '''[(peak_idx, mu, isotope)] for the peaks of one window, in peak-index order. A linked
+    peak's position is its reference's plus its offset (fitting_tools.peak_mu_values).'''
     _, f_to_fit = _result(fitter, window_idx)
     isotopes = (getattr(fitter, 'peak_isotopes', None)
                 or getattr(fitter, 'fit_multi_peaks_kwargs', {}).get('peak_isotopes') or [])
     window_isos = isotopes[window_idx] if len(isotopes) > window_idx else []
-    out = []
-    for j in range(f_to_fit.GetNpar()):
-        name = f_to_fit.GetParName(j)
-        if not name.startswith('mu'):
-            continue
-        idx = 0 if name == 'mu' else int(name.split('_')[1])
-        iso = window_isos[idx] if len(window_isos) > idx else 'unknown'
-        out.append((idx, f_to_fit.GetParameter(j), iso))
-    return sorted(out)
+    n_peaks = len(fitter.peaks_to_fit[window_idx][0])
+    mus = fitting_tools.peak_mu_values(f_to_fit, n_peaks, peak_links(fitter, window_idx))
+    return [(idx, mu, window_isos[idx] if len(window_isos) > idx else 'unknown')
+            for idx, (mu, _) in enumerate(mus)]
 
 
 def sigma_function(fitter, window_idx=0):
@@ -437,17 +450,19 @@ def local_unfreeze(fitter, new_peak_locs, n_sigmas=3.0, window_idx=0):
     sigma_at = sigma_function(fitter, window_idx)
     reach = max(n_sigmas * sigma_at(loc) for loc in new_peak_locs)
 
-    # The new peak list, sorted by location, as add_peak_to_fit will build it.
-    existing = [mu for _, mu, _ in peak_positions(fitter, window_idx)]
-    all_locs = sorted(existing + new_peak_locs)
+    # The new peak list, sorted by location, as add_peak_to_fit will build it. A linked peak
+    # has an offset parameter (dmu) in place of a position.
+    linked = linked_indices(fitter, window_idx)
+    existing = [(mu, idx in linked) for idx, mu, _ in peak_positions(fitter, window_idx)]
+    all_locs = sorted(existing + [(loc, False) for loc in new_peak_locs])
     n_peaks = len(all_locs)
 
     free = set()
-    for idx, loc in enumerate(all_locs):
+    for idx, (loc, is_linked) in enumerate(all_locs):
         if min(abs(loc - target) for target in new_peak_locs) > reach:
             continue
         suffix = '' if n_peaks == 1 else f'_{idx}'
-        free.add(f'mu{suffix}')
+        free.add(f'dmu_{idx}' if is_linked else f'mu{suffix}')
         free.add(f'total_amp{suffix}')
         for spec_idx in range(len(fitter.spectra)):
             free.add(f'amplitude_{idx}_{spec_idx}')
@@ -514,6 +529,11 @@ def report(fitter, window_idx=0, max_candidates=10):
     print(f'chi2 {chi2:.1f} / ndf {ndf} = {chi2 / ndf:.3f}'
           + ('' if agrees else '   [WARNING: fit_res.Chi2() disagrees, it is stale]'))
     print(f'{len(peaks)} peaks, {len(pinned)} parameters at a bound')
+    for link in peak_links(fitter, window_idx):
+        pos = dict((i, mu) for i, mu, _ in peaks)
+        print(f"    peak {link['peak']} at {pos.get(link['peak'], float('nan')):.1f} is linked to peak {link['ref']} "
+              f"at {pos.get(link['ref'], float('nan')):.1f}: spacing {link['spacing']:.1f} +- {link['tol']:.1f}"
+              + (f" [{link['label']}]" if link.get('label') else ''))
     for p in pinned:
         print(f"    {p['name']:<18} {p['value']:>10.4g} +- {p['err']:<9.3g} at {p['side']} bound "
               f"[{p['low']:.4g}, {p['high']:.4g}]")

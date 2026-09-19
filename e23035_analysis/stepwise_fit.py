@@ -305,6 +305,13 @@ def try_recenter(fitter, hash_str, folder, decisions, config, budget):
     the peak list does not change, so the result is simply adopted.
     '''
     for round_idx in range(config['max_recenter_rounds']):
+        # A linked component's offset at the edge of its box is reported, never re-centred:
+        # the box is the literature's uncertainty, and a fit pushing against it is a finding
+        # (a hidden neighbour, or a literature energy that is off).
+        for p in fd.pinned_params(fitter):
+            if p['name'].startswith('dmu'):
+                print(f"  note: {p['name']}={p['value']:.1f} sits at its {p['side']} bound "
+                      f"[{p['low']:.1f}, {p['high']:.1f}] (the literature spacing box)")
         pinned = [p for p in fd.pinned_params(fitter) if p['name'].startswith('mu')]
         if not config['recenter_core']:
             positions = {idx: (energy, iso) for idx, energy, iso in fd.peak_positions(fitter)}
@@ -524,11 +531,15 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
     mu_pinned = new_idx is not None and f'mu_{new_idx}' in pinned_names
     amp_pinned = new_idx is not None and f'total_amp_{new_idx}' in pinned_names
     # A neighbour whose amplitude the new peak drove to the floor is the degenerate case an
-    # inclusive gate has to guard against: two peaks where there was one.
+    # inclusive gate has to guard against: two peaks where there was one. A linked multiplet
+    # component is exempt: it sits where the literature puts it, so an amplitude at zero is
+    # an upper limit on that line, not a peak that lost its counts to the newcomer.
     new_mu = dict((i, mu) for i, mu, _ in fd.peak_positions(new_fitter)).get(new_idx)
+    linked_mu = [mu for i, mu, _ in fd.peak_positions(new_fitter) if i in fd.linked_indices(new_fitter)]
     collapsed = [e for e in pinned_amp_energies(new_fitter)
                  if not any(abs(e - p) <= 5.0 for p in parent_floor)
-                 and (new_mu is None or abs(e - new_mu) > 5.0)]
+                 and (new_mu is None or abs(e - new_mu) > 5.0)
+                 and not any(abs(e - m) <= 5.0 for m in linked_mu)]
 
     reasons = []
     if not np.isnan(significance) and significance < config['min_amp_significance']:
@@ -569,11 +580,14 @@ def current_index_of(fitter, energy, tolerance=5.0):
 
 
 def prune_pass(fitter, hash_str, folder, decisions, config, budget):
-    '''Try dropping each non-core peak; keep it dropped when it costs little.'''
+    '''Try dropping each non-core peak; keep it dropped when it costs little. Multiplet
+    members (linked components and their references) are never offered: the multiplet is one
+    object, and a component with no counts is an upper limit, not a peak to remove.'''
     changed = False
     to_try = []
+    members = fd.multiplet_indices(fitter)
     for idx, energy, iso in fd.peak_positions(fitter):
-        if is_core(energy, iso, config):
+        if is_core(energy, iso, config) or idx in members:
             continue
         significance = peak_amp_significance(fitter, idx)
         if np.isfinite(significance) and significance > config['prune_significance_max']:
@@ -587,7 +601,7 @@ def prune_pass(fitter, hash_str, folder, decisions, config, budget):
         if budget.exhausted():
             break
         idx = current_index_of(fitter, energy)
-        if idx is None:
+        if idx is None or idx in fd.multiplet_indices(fitter):
             continue    # it was removed, or moved too far to identify
         if decisions.removal_vetoed(fitter, energy, iso, config['reject_memory_keV'], gate=config['remove_peak_dchi2']):
             print(f'  remove {energy:.0f} ({iso}): already rejected in this neighbourhood; skipping')

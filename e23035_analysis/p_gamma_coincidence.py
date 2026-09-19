@@ -138,3 +138,13 @@ overlay3 = root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h9
 pscaled = protons.Clone('pscaled')
 pscaled.Scale(0.01)
 overlay4 = root_vis_tools.draw_overlaid_histograms({'491 keV':h491, '914 keV':h914,'1398 keV':h1398, 'all protons (scaled)':pscaled})
+
+zn_runs = e23035_runs.get_ddas_59_Zn_runs(good_gamma=True, good_low_energy_tpc=False, good_long_tracks_tpc=False, final_beam_settings=False, tpc_data_valid=True)
+zn_gammaE_v_protonE = degai.get_histogram(experiment, zn_runs, adj_dict, cal_name, (150, 0, 3000, 7000-150, 150, 7000), "gamma_v_proton_energy_time_gate_zn", "59Zn runs gamma energy (keV) vs proton energy (keV) w/ expected (mesh time - gamma time)",
+                                        "addback_energy:tpc_energy", 
+                                       selection='tpc_particle_id==1 &&'+time_gate_str,
+                                        dt_window_ns=event_build_window, e_thresh=addback_ethresh, nonlinearity_correction_name=nlc_name, tpc_ini_filename=tpc_config)
+
+c_zn1 = ROOT.TCanvas()
+zn_gammaE_v_protonE.Draw('colz')
+

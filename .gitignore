@@ -12,3 +12,19 @@ run124_mcmc/
 run124_palpha_mcmc
 *.pkl
 *.root
+
+# Per-fit outputs from try_fit / the stepwise fitter: one set per hashed fit, thousands of
+# them under e23035_analysis/tpc_spectrum_fitting/*/. The .root files are already covered by
+# *.root above. The 8-hex-digit hash is spelled out so these cannot match a hand-named file.
+#   fit_<hash>.csv, fit_<hash>_evaluated.csv, fit_<hash>_evaluated_calibrated.csv
+#   fit_<hash>_info.json
+#   peaks_<parent hash>_<operation>_<digest>.csv   (guess lists for modified fits)
+#   calibration_<hash>.csv
+# Deliberately NOT ignored: hand-maintained peak lists (proton_peaks.csv, alpha_peaks.csv,
+# core_peaks.csv, p914.csv, ...), study summaries (sigma_anchors.json, generous.json,
+# overnight_results*.json, multiplet_tests.json, run9_start.json), decisions*.jsonl,
+# ledger.csv, stepwise_config.json and the run logs.
+fit_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*.csv
+fit_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*.json
+peaks_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*.csv
+calibration_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*.csv
