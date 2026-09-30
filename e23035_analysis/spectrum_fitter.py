@@ -129,7 +129,7 @@ class spectrum_fitter:
         self.location_wiggle = 3
         self.shared_sigma = True
         self.shared_bg_shift = True
-        self.max_implicit_cores = 200
+        self.max_implicit_cores = int(os.environ.get('E23035_NUM_WORKERS', 200))
         self.parameterizations = {}
 
     def add_peaks(self, peak_locations, window_size, sep_factor=1.25):
@@ -281,7 +281,7 @@ class spectrum_fitter:
             try:
                 source_dict[k] = inspect.getsource(v).strip()
             except Exception as e:
-                raise RuntimeError(f"Failed to serialize parameter bound function: {v}. Error: {e}")
+                source_dict[k] = f"<source unavailable for {getattr(v, '__qualname__', v)}: {e}>"  # provenance only; never executed on load
         python_state['param_bound_functions'] = source_dict
 
         # 3. Iterate through fit results and save ROOT objects
@@ -866,6 +866,10 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
         fitter.shared_bg_shift = python_state.get('shared_bg_shift', True)
         fitter.location_wiggle = python_state.get('location_wiggle', 10)
         fitter.peak_links = python_state.get('peak_links', None)
+        fitter.spectrum_scales = python_state.get('spectrum_scales', None)
+        fitter.spectrum_acceptance = python_state.get('spectrum_acceptance', None)
+        fitter.spectrum_smear = python_state.get('spectrum_smear', None)
+        fitter.spectrum_offsets = python_state.get('spectrum_offsets', None); fitter.spectrum_ranges = python_state.get('spectrum_ranges', None)
     else:
         # 2. Extract Main Spectrum and detach it from the file
         main_spectrum = f.Get("main_spectrum")
@@ -989,13 +993,18 @@ class multi_spectrum_fitter(spectrum_fitter):
         polynomial backgrounds each coefficient acts locally, so a repeated knot buys a kink at
         one energy without loosening the fit elsewhere.
     '''
-    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, bg_knots=None, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1, bin_integral:bool=False, peak_cutoff_sigmas=None, cmaes_opts=None, peak_links=None):
+    def __init__(self, spectra:list, peak_model:str, bg_model:str='linear', bg_order:int=1, bg_knots=None, use_cmaes:bool=False, cmaes_only:bool=False, workers:int=1, points_per_bin:int=1, bin_integral:bool=False, peak_cutoff_sigmas=None, cmaes_opts=None, peak_links=None, spectrum_scales=None, spectrum_acceptance=None, spectrum_smear=None, spectrum_offsets=None, spectrum_ranges=None):
         if not spectra:
             raise ValueError("Must provide at least one spectrum")
         self.spectra = spectra
         # Peaks whose position is tied to a reference peak's at a known spacing (soft link):
         # see fitting_tools.peak_link_map. Records name peaks by index within their window.
         self.peak_links = peak_links
+        # Spectra with a free relative energy scale (fitting_tools.fit_gaussian_w_bg_shift_2d).
+        self.spectrum_scales = spectrum_scales
+        self.spectrum_acceptance = spectrum_acceptance
+        self.spectrum_smear = spectrum_smear
+        self.spectrum_offsets = spectrum_offsets; self.spectrum_ranges = spectrum_ranges
         # Initialize the base class with the first spectrum to reuse some base class logic
         super().__init__(spectra[0], peak_model, bg_model, bg_order)
         self.bg_model = bg_model
@@ -1087,7 +1096,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                     for i, loc in enumerate(loc_guess):
                         param_bounds[f'sigma_{i}'] = self.param_bound_functions['sigma'](loc)
 
-                res = fitting_tools.fit_gaussian_2d(self.spectra, loc_guess, fit_range, peak_links=links_here,
+                res = fitting_tools.fit_gaussian_2d(self.spectra, loc_guess, fit_range, peak_links=links_here, spectrum_scales=getattr(self, 'spectrum_scales', None), spectrum_acceptance=getattr(self, 'spectrum_acceptance', None), spectrum_smear=getattr(self, 'spectrum_smear', None), spectrum_offsets=getattr(self, 'spectrum_offsets', None), spectrum_ranges=getattr(self, 'spectrum_ranges', None),
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1), cmaes_opts=getattr(self, 'cmaes_opts', None),
@@ -1106,7 +1115,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                     for i, loc in enumerate(loc_guess):
                         param_bounds[f'bg_shift_{i}'] = self.param_bound_functions['bg_shift'](loc)
                 
-                res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, peak_links=links_here,
+                res = fitting_tools.fit_gaussian_w_bg_shift_2d(self.spectra, loc_guess, fit_range, peak_links=links_here, spectrum_scales=getattr(self, 'spectrum_scales', None), spectrum_acceptance=getattr(self, 'spectrum_acceptance', None), spectrum_smear=getattr(self, 'spectrum_smear', None), spectrum_offsets=getattr(self, 'spectrum_offsets', None), spectrum_ranges=getattr(self, 'spectrum_ranges', None),
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_sigma=self.shared_sigma, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1), cmaes_opts=getattr(self, 'cmaes_opts', None),
@@ -1118,7 +1127,7 @@ class multi_spectrum_fitter(spectrum_fitter):
                     for i, loc in enumerate(loc_guess):
                         param_bounds[f'bg_shift_{i}'] = self.param_bound_functions['bg_shift'](loc)
 
-                res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, peak_links=links_here,
+                res = fitting_tools.fit_emg_w_bg_shift_2d(self.spectra, loc_guess, fit_range, peak_links=links_here, spectrum_scales=getattr(self, 'spectrum_scales', None), spectrum_acceptance=getattr(self, 'spectrum_acceptance', None), spectrum_smear=getattr(self, 'spectrum_smear', None), spectrum_offsets=getattr(self, 'spectrum_offsets', None), spectrum_ranges=getattr(self, 'spectrum_ranges', None),
                                     param_bounds=param_bounds, fit_options=self.fit_options, shared_bg_shift=self.shared_bg_shift,
                                     parameterizations=self.parameterizations, bg_model=self.bg_model, bg_order=self.bg_order, bg_knots=getattr(self, 'bg_knots', None),
                                     use_cmaes=getattr(self, 'use_cmaes', False), cmaes_loc_wiggle=location_wiggle, cmaes_only=getattr(self, 'cmaes_only', False), workers=getattr(self, 'workers', 1), cmaes_opts=getattr(self, 'cmaes_opts', None),
@@ -1344,6 +1353,19 @@ class multi_spectrum_fitter(spectrum_fitter):
                 res['resid_graphs'].append(resid_graph)
                 
             pad1.cd()
+            # Legend naming each overlaid spectrum. Labels come from self.spectrum_labels when the
+            # caller set them, otherwise from the histogram titles.
+            labels = getattr(self, 'spectrum_labels', None) or [spec.GetTitle() or f'spectrum {j}' for j, spec in enumerate(self.spectra)]
+            spec_legend = ROOT.TLegend(0.60, 0.88 - 0.065 * len(self.spectra), 0.89, 0.88)
+            spec_legend.SetBorderSize(0)
+            spec_legend.SetFillStyle(0)
+            spec_legend.SetTextSize(0.04)
+            for j, (spec_clone, f1d) in enumerate([t for t in res['1d_funcs'] if t[0] is not None]):
+                spec_legend.AddEntry(f1d, labels[j] if j < len(labels) else f'spectrum {j}', 'l')
+            spec_legend.Draw()
+            ROOT.SetOwnership(spec_legend, False)
+            res['spectrum_legend'] = spec_legend
+
             exec_pad1 = ROOT.TExec(f"exec_pad1_{peak_index}_{id(self)}", f'SyncAxes((TPad*)gPad, (TPad*)gPad->GetCanvas()->GetPrimitive("{pad2_name}"));')
             exec_pad1.Draw()
             
@@ -1535,7 +1557,11 @@ class multi_spectrum_fitter(spectrum_fitter):
             'points_per_bin': getattr(self, 'points_per_bin', 1),
             'bin_integral': getattr(self, 'bin_integral', False),
             'peak_cutoff_sigmas': getattr(self, 'peak_cutoff_sigmas', None),
-            'peak_links': getattr(self, 'peak_links', None)
+            'peak_links': getattr(self, 'peak_links', None),
+            'spectrum_scales': getattr(self, 'spectrum_scales', None),
+            'spectrum_acceptance': getattr(self, 'spectrum_acceptance', None),
+            'spectrum_smear': getattr(self, 'spectrum_smear', None),
+            'spectrum_offsets': getattr(self, 'spectrum_offsets', None), 'spectrum_ranges': getattr(self, 'spectrum_ranges', None)
         }
         
         import inspect
@@ -1545,7 +1571,7 @@ class multi_spectrum_fitter(spectrum_fitter):
             try:
                 source_dict[k] = inspect.getsource(v).strip()
             except Exception as e:
-                raise RuntimeError(f"Failed to serialize parameter bound function: {v}. Error: {e}")
+                source_dict[k] = f"<source unavailable for {getattr(v, '__qualname__', v)}: {e}>"  # provenance only; never executed on load
         python_state['param_bound_functions'] = source_dict
         
         for i, res in enumerate(self.fit_results):

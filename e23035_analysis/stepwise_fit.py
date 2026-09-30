@@ -134,6 +134,15 @@ DEFAULT_CONFIG = {
     # knot pass instead tries one degree up (accept for add_knot_dchi2, one coefficient per
     # spectrum) and one degree down (accept when it costs less than remove_knot_dchi2).
     'degree_pass': True,
+    # Screen each residual-scan candidate under every isotope label and queue the better one.
+    # The residual scan labels a candidate by the spectrum with the largest excess, which is
+    # reliable once the fraction curves are pinned by many peaks and not before: a search from
+    # an empty peak list turns this on.
+    'screen_both_isotopes': False,
+    # Stop (without the final free-sigma polish) once the list holds at least this many peaks
+    # of each isotope, e.g. {"59Zn": 8, "60Ga": 8}. For staged runs that raise the order of
+    # the fraction curves once enough peaks exist to determine them. None: never.
+    'stop_when_peaks_at_least': None,
     'max_fits': 150,
 }
 
@@ -313,6 +322,13 @@ def try_recenter(fitter, hash_str, folder, decisions, config, budget):
                 print(f"  note: {p['name']}={p['value']:.1f} sits at its {p['side']} bound "
                       f"[{p['low']:.1f}, {p['high']:.1f}] (the literature spacing box)")
         pinned = [p for p in fd.pinned_params(fitter) if p['name'].startswith('mu')]
+        # A multiplet reference sits at a literature energy: like a core peak, when it is
+        # against its bound the cause is a missing neighbour, and re-centring would walk the
+        # whole multiplet away with it.
+        members = fd.multiplet_indices(fitter)
+        for p in [p for p in pinned if (0 if p['name'] == 'mu' else int(p['name'].split('_')[1])) in members]:
+            print(f"  leaving multiplet reference {p['name']}={p['value']:.0f} at its bound")
+        pinned = [p for p in pinned if (0 if p['name'] == 'mu' else int(p['name'].split('_')[1])) not in members]
         if not config['recenter_core']:
             positions = {idx: (energy, iso) for idx, energy, iso in fd.peak_positions(fitter)}
             kept = []
@@ -398,6 +414,12 @@ def grid_candidates(fitter, config, exclude=()):
                 continue
             if any(r[0] <= E <= r[1] and (len(r) < 3 or r[2] in (None, iso)) for r in exclude):
                 continue
+            # Several spectra can belong to one isotope (59Zn early and late): one candidate per
+            # (energy, isotope), ranked by the largest excess among that isotope's spectra.
+            same = [c for c in out if c['energy'] == float(E) and c['isotope'] == iso]
+            if same:
+                same[0]['significance'] = max(same[0]['significance'], float(S[spec, i]))
+                continue
             out.append({'energy': float(E), 'significance': float(S[spec, i]), 'isotope': iso,
                         'spectrum': spec, 'sigma': float(sig),
                         'per_spectrum': [float(v) for v in S[:, i]]})
@@ -420,6 +442,20 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
         queue = []
         if config['screen_disabled']:
             return [(c, None) for c in cands]
+        if config.get('screen_both_isotopes') and source == 'residual scan':
+            labels = sorted({fd.isotope_of_spectrum(fitter, j) for j in range(len(fitter.spectra))} - {'unknown'})
+            positions = fd.peak_positions(fitter)
+            sigma_at = fd.sigma_function(fitter)
+            both = []
+            for c in cands:
+                for iso in labels:
+                    if iso != c['isotope'] and (
+                            any(abs(c['energy'] - mu) < config['grid_min_sep_sigmas'] * sigma_at(c['energy'])
+                                for _, mu, p_iso in positions if p_iso == iso)
+                            or any(r[0] <= c['energy'] <= r[1] and (len(r) < 3 or r[2] in (None, iso)) for r in exclude)):
+                        continue
+                    both.append({**c, 'isotope': iso})
+            cands = both
         for candidate in cands:
             if budget.exhausted():
                 break
@@ -432,7 +468,7 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
             dchi2 = chi2_parent - chi2_screen
             threshold = config['screen_queue_fraction'] * config['add_peak_dchi2']
             verdict = 'queue' if dchi2 >= threshold else 'defer'
-            print(f"    screen {candidate['energy']:.0f}: dchi2 {dchi2:+.1f} -> {verdict}")
+            print(f"    screen {candidate['energy']:.0f} ({candidate['isotope']}): dchi2 {dchi2:+.1f} -> {verdict}")
             decisions.append(operation='add', kind='screen', parent=hash_str, child=screen_hash,
                              energy=candidate['energy'], isotope=candidate['isotope'],
                              dchi2=dchi2, verdict=verdict, source=source,
@@ -470,9 +506,23 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
         print('  nothing worth a full refit')
         return fitter, hash_str, False
 
-    candidate, screened = queue[0]
-    if budget.exhausted():
-        return fitter, hash_str, False
+    # One full refit per sweep decides on delta-chi2. But a candidate that clears the delta-chi2 gate and is then
+    # turned away by a guard (its amplitude, or a neighbour's, at the floor) is not remembered as a rejection --
+    # the guard verdict depends on the rest of the list -- so without moving on the same candidate would be
+    # retried every sweep until the run stops (run 14 stalled at 25 peaks this way). Try the next queued one.
+    for rank, (candidate, screened) in enumerate(queue[:max(int(config.get('guard_retry_candidates', 4)), 1)]):
+        if budget.exhausted():
+            return fitter, hash_str, False
+        fitter_out, hash_out, accepted, guard_rejected = _try_add_candidate(fitter, hash_str, candidate, screened, source, decisions, config, budget)
+        if accepted or not guard_rejected:
+            return fitter_out, hash_out, accepted
+        print(f"  {candidate['energy']:.0f} ({candidate['isotope']}) was turned away by a guard; trying the next queued candidate")
+    return fitter, hash_str, False
+
+
+def _try_add_candidate(fitter, hash_str, candidate, screened, source, decisions, config, budget):
+    '''Full refit with one candidate added. Returns (fitter, hash, accepted, guard_rejected): guard_rejected is
+    True when the delta-chi2 gate was passed and a later rule rejected the peak.'''
     print(f"  full refit adding {candidate['energy']:.0f} ({candidate['isotope']})")
     chi2_parent, _ = chi2_of(fitter)
     context = local_context(fitter, candidate['energy'], config['reject_memory_keV'])
@@ -509,7 +559,7 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
         reason = f'dchi2 {dchi2:.1f} < {config["add_peak_dchi2"]}'
         print(f'  -> reject: dchi2 {dchi2:+.1f} ({reason})')
         decisions.append(child=trial_hash, verdict='reject', reason=reason, **record)
-        return fitter, hash_str, False
+        return fitter, hash_str, False, False
 
     # Worth keeping on chi2 alone. The remaining gates read parameter errors, so polish first.
     new_fitter, new_hash = polish(trial_fitter, trial_hash, decisions, config, budget,
@@ -551,6 +601,34 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
                        + ', '.join(f'{e:.0f}' for e in collapsed))
     verdict = 'accept' if not reasons else 'reject'
     note = ' [at its mu bound; the next recenter pass will move it]' if mu_pinned else ''
+    if collapsed and len(reasons) == 1 and config.get('swap_collapsed_neighbours', True):
+        # The new peak is sound and took a neighbour's counts: that is a better peak replacing a worse one (a
+        # mislabelled or misplaced stand-in), not two peaks where there was one. Drop the emptied neighbours
+        # and judge the pair of lists: the swap stands if the result still beats the parent by the add gate
+        # for every peak it nets, and by anything at all when it nets none.
+        swap_fitter, swap_hash, dropped = new_fitter, new_hash, []
+        for energy in collapsed:
+            idx = current_index_of(swap_fitter, energy)
+            if idx is None or idx in fd.multiplet_indices(swap_fitter) or budget.exhausted():
+                continue
+            budget.spend()
+            swap_hash, swap_fitter = fts.remove_peak_from_fit(swap_fitter, (0, idx), kwargs_override=trial_kwargs(config))
+            dropped.append(energy)
+        if dropped:
+            swap_fitter, swap_hash = polish(swap_fitter, swap_hash, decisions, config, budget,
+                                            why=f"swap: {candidate['energy']:.0f} in, {', '.join(f'{e:.0f}' for e in dropped)} out")
+            chi2_swap, _ = chi2_of(swap_fitter)
+            gain, need = chi2_parent - chi2_swap, config['add_peak_dchi2'] * max(1 - len(dropped), 0)
+            ok = gain >= need and gain > 0
+            print(f"  swap: {candidate['energy']:.0f} ({candidate['isotope']}) in, {', '.join(f'{e:.0f}' for e in dropped)} out: "
+                  f"dchi2 {gain:+.1f} vs {need:.1f} -> {'accept' if ok else 'reject'}")
+            decisions.append(operation='swap', kind='full', parent=hash_str, child=swap_hash, energy=candidate['energy'],
+                             isotope=candidate['isotope'], dchi2=gain, verdict='accept' if ok else 'reject',
+                             details={'dropped': dropped}, reason=f'add emptied its neighbours; swap dchi2 {gain:.1f} vs {need:.1f}')
+            if ok:
+                decisions.append(child=new_hash, verdict='superseded', reason='accepted as a swap', dchi2_polished=chi2_parent - chi2_child,
+                                 amp_significance=float(significance), mu_at_bound=bool(mu_pinned), **record)
+                return swap_fitter, swap_hash, True, False
 
     print(f"  -> {verdict}: dchi2 {dchi2:+.1f} (polished {chi2_parent - chi2_child:+.1f}), "
           f"amplitude {significance:.1f} sigma"
@@ -559,8 +637,8 @@ def add_peak_pass(fitter, hash_str, folder, decisions, config, budget):
                      dchi2_polished=chi2_parent - chi2_child, amp_significance=float(significance),
                      mu_at_bound=bool(mu_pinned), **record)
     if verdict == 'accept':
-        return new_fitter, new_hash, True
-    return fitter, hash_str, False
+        return new_fitter, new_hash, True, False
+    return fitter, hash_str, False, True
 
 
 def current_index_of(fitter, energy, tolerance=5.0):
@@ -625,6 +703,47 @@ def prune_pass(fitter, hash_str, folder, decisions, config, budget):
                          reason=f'removal costs {cost:.1f} vs {config["remove_peak_dchi2"]}')
         if verdict == 'accept':
             fitter, hash_str, changed = new_fitter, new_hash, True
+    return fitter, hash_str, changed
+
+
+def relabel_pass(fitter, hash_str, folder, decisions, config, budget):
+    '''
+    Try each peak under the other isotope label; keep the change when it lowers chi2 by relabel_dchi2 (no
+    parameter is added, so the gate is about not flipping on noise). A search that starts with the fraction
+    curves unconstrained labels some early peaks wrongly, and no add or remove can repair that: the right
+    peak is rejected for emptying the wrong one. Multiplet members keep their label.
+    '''
+    labels = sorted({fd.isotope_of_spectrum(fitter, j) for j in range(len(fitter.spectra))} - {'unknown'})
+    if len(labels) < 2:
+        return fitter, hash_str, False
+    changed = False
+    gate = float(config.get('relabel_dchi2', 6.0))
+    for energy, iso in [(e, i) for _, e, i in fd.peak_positions(fitter)]:
+        if budget.exhausted():
+            break
+        idx = current_index_of(fitter, energy)
+        if idx is None or idx in fd.multiplet_indices(fitter):
+            continue
+        context = local_context(fitter, energy, config['reject_memory_keV'])
+        if any(r.get('operation') == 'relabel' and r.get('verdict') == 'reject' and r.get('context') == context
+               and abs((r.get('energy') or -1e9) - energy) <= 5.0 for r in decisions.records):
+            continue
+        chi2_parent, _ = chi2_of(fitter)
+        for new_iso in [l for l in labels if l != iso]:
+            budget.spend()
+            trial_hash, trial_fitter = fts.relabel_peak_from_fit(fitter, (0, idx), new_iso, kwargs_override=trial_kwargs(config))
+            chi2_trial, _ = chi2_of(trial_fitter)
+            dchi2 = chi2_parent - chi2_trial
+            verdict = 'accept' if dchi2 >= gate else 'reject'
+            print(f'  relabel {energy:.0f} {iso} -> {new_iso}: dchi2 {dchi2:+.1f} -> {verdict}')
+            new_hash, new_fitter = trial_hash, trial_fitter
+            if verdict == 'accept':
+                new_fitter, new_hash = polish(trial_fitter, trial_hash, decisions, config, budget, why=f'relabel {energy:.0f} as {new_iso}')
+            decisions.append(operation='relabel', kind='full', parent=hash_str, child=new_hash, trial=trial_hash, energy=energy,
+                             isotope=new_iso, context=context, dchi2=dchi2, verdict=verdict, reason=f'{iso} -> {new_iso}: dchi2 {dchi2:.1f} vs {gate}')
+            if verdict == 'accept':
+                fitter, hash_str, changed = new_fitter, new_hash, True
+                break
     return fitter, hash_str, changed
 
 
@@ -773,6 +892,16 @@ def run(folder, start_hash, config, resume=False):
         sweep += 1
         print(f'\n=== sweep {sweep} ({budget})')
         changed = False
+        target = config.get('stop_when_peaks_at_least')
+        if target:
+            counts = {}
+            for _, _, iso in fd.peak_positions(fitter):
+                counts[iso] = counts.get(iso, 0) + 1
+            if all(counts.get(iso, 0) >= n for iso, n in target.items()):
+                print(f'\nstage target reached ({counts} vs {target}); stopping at {hash_str} ({budget})')
+                decisions.append(operation='stop', kind='terminal', parent=hash_str, child=None,
+                                 verdict='stop', reason=f'stage target {target} reached with {counts}')
+                return hash_str, fitter
 
         fitter, hash_str = try_recenter(fitter, hash_str, folder, decisions, config, budget)
 
@@ -788,6 +917,12 @@ def run(folder, start_hash, config, resume=False):
             since_prune = 0
 
         stalls = 0 if added else stalls + 1
+        if not added and config.get('relabel_pass', False):
+            print(' labels:')
+            fitter, hash_str, relabelled = relabel_pass(fitter, hash_str, folder, decisions, config, budget)
+            changed |= relabelled
+            if relabelled:
+                stalls = 0
         if not added and stalls >= config['knot_pass_after_stalls']:
             print(' knots:')
             fitter, hash_str, knotted = knot_pass(fitter, hash_str, folder, decisions, config, budget)

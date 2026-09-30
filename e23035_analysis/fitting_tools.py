@@ -2596,9 +2596,38 @@ def fit_hist2d(histogram, function_string, initial_values, bounds, fit_range, na
 
     return fit_res, canvas, sub_hist, f_to_fit, h_fit, h_resid
 
-def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None, peak_links=None):
+def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_sigma=True, shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, include_bg_shift=True, bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None, peak_links=None, spectrum_scales=None, spectrum_acceptance=None, spectrum_smear=None, spectrum_offsets=None, spectrum_ranges=None):
     """
     Simultaneously fit Gaussian peaks (optionally on a step-shifted background) across several spectra.
+
+    spectrum_ranges (list of [int, low, high] or None):
+        Energy range (observed energy of that spectrum) inside which spectrum j is trusted. Bins of
+        spectrum j outside it are taken out of the likelihood: there the model returns the observed
+        count, so the bin contributes exactly zero to the Poisson likelihood-ratio chi2 and nothing
+        to any gradient. For run groups whose detector response is only understood in part of the
+        window. ROOT still counts those bins in Ndf(); fit_diagnostics.fit_stat subtracts them.
+        Only with bin_integral=True.
+    spectrum_offsets (list of int or None):
+        Spectra that also get a free additive energy offset eoff_j (keV, +-40): a peak sits at
+        mu * (1 + escale_j) + eoff_j. With spectrum_scales this separates a gain difference from
+        an offset difference between run groups; the peaks must span enough energy to tell them apart.
+    spectrum_smear (list of int or None):
+        Spectra whose peaks get an extra fractional broadening smear_j in quadrature:
+        sigma_j = sqrt(sigma(E)^2 + (smear_j * mu)^2), smear_j in [0, 0.05]. For a spectrum summed
+        over runs whose gains differ: a spread of gains broadens every peak in proportion to its
+        energy, which a resolution curve shared with a stable run group cannot describe.
+    spectrum_acceptance (list of [int, 'rise'|'fall'] or None):
+        Spectra whose whole model (peaks and background) is multiplied by a logistic acceptance in
+        the observed energy x: 'rise' = 1/(1+exp(-(x-acc_E0_j)/acc_w_j)) for a trigger threshold,
+        'fall' = 1/(1+exp((x-acc_E0_j)/acc_w_j)) for the loss of long tracks. The amplitudes of such
+        a spectrum are then counts before acceptance. Only with bin_integral=True (the acceptance
+        is taken at the bin centre, so acc_w_j should stay well above the bin width).
+    spectrum_scales (list of int or None):
+        Spectrum indices that get a free relative energy scale: in spectrum j every peak sits at
+        mu * (1 + escale_j), escale_j bounded at +-3%. The others stay on the common scale. This is
+        the test of whether spectra taken under different conditions (run type, time after
+        beam-off) share one calibration: all peaks pull on one parameter, so no single hidden
+        line can fake a shift. Widths and fraction curves still use the unscaled mu.
 
     peak_links (list of dicts or None):
         Peaks whose position is tied to another peak's: see peak_link_map. Each linked peak i
@@ -2707,6 +2736,52 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         else:
             mu_bracket.append(f"[{pm.get_idx(mu_param_name(i, n_peaks))}]")
     pm.peak_links = peak_links
+    scale_idx = {}
+    for j in sorted(set(int(v) for v in (spectrum_scales or []))):
+        if not 0 <= j < n_spectra:
+            raise ValueError(f'spectrum_scales names spectrum {j} but there are {n_spectra}')
+        scale_idx[j] = pm.add(f'escale_{j}', 0.0, param_bounds.get(f'escale_{j}', (0.0, -0.03, 0.03)))
+    offset_idx = {}
+    for j in sorted(set(int(v) for v in (spectrum_offsets or []))):
+        if not 0 <= j < n_spectra:
+            raise ValueError(f'spectrum_offsets names spectrum {j} but there are {n_spectra}')
+        offset_idx[j] = pm.add(f'eoff_{j}', 0.0, param_bounds.get(f'eoff_{j}', (0.0, -40.0, 40.0)))
+    smear_idx = {}
+    for j in sorted(set(int(v) for v in (spectrum_smear or []))):
+        if not 0 <= j < n_spectra:
+            raise ValueError(f'spectrum_smear names spectrum {j} but there are {n_spectra}')
+        smear_idx[j] = pm.add(f'smear_{j}', 0.005, param_bounds.get(f'smear_{j}', (0.005, 0.0, 0.05)))
+    acc_terms = []
+    for j, kind in (spectrum_acceptance or []):
+        j = int(j)
+        if not 0 <= j < n_spectra or kind not in ('rise', 'fall'):
+            raise ValueError(f'spectrum_acceptance entry ({j}, {kind}) is not valid for {n_spectra} spectra')
+        if not bin_integral:
+            raise NotImplementedError('spectrum_acceptance is only implemented with bin_integral=True')
+        d_e0, d_w = ((950.0, 600.0, 1400.0), (60.0, 15.0, 400.0)) if kind == 'rise' else ((2650.0, 1900.0, 3600.0), (150.0, 15.0, 800.0))
+        k_e0 = pm.add(f'acc_E0_{j}', d_e0[0], param_bounds.get(f'acc_E0_{j}', d_e0))
+        k_w = pm.add(f'acc_w_{j}', d_w[0], param_bounds.get(f'acc_w_{j}', d_w))
+        acc_terms.append(f"if (val_y == {j}) acc = 1.0 / (1.0 + std::exp({'-' if kind == 'rise' else ''}(bin_center_x - p[{k_e0}]) / p[{k_w}]));")
+    acc_cpp = "double acc = 1.0;\n        " + "\n        ".join(acc_terms)
+    mask_cpp = ""
+    if spectrum_ranges:
+        if not bin_integral:
+            raise NotImplementedError('spectrum_ranges is only implemented with bin_integral=True')
+        ax = spectra[0].GetXaxis()
+        b_lo, b_hi = ax.FindBin(fit_window[0]), ax.FindBin(fit_window[1])
+        x0, n_x = ax.GetBinLowEdge(b_lo), b_hi - b_lo + 1
+        rows = []
+        for j in range(n_spectra):
+            rng = [(float(lo), float(hi)) for jj, lo, hi in spectrum_ranges if int(jj) == j]
+            vals = []
+            for b in range(b_lo, b_hi + 1):
+                c = ax.GetBinCenter(b)
+                masked = bool(rng) and not any(lo <= c <= hi for lo, hi in rng)
+                vals.append(repr(max(float(spectra[j].GetBinContent(b)), 1e-9)) if masked else '-1.0')
+            rows.append('{' + ', '.join(vals) + '}')
+        mask_cpp = (f"static const double masked_counts[{n_spectra}][{n_x}] = {{" + ', '.join(rows) + "};\n"
+                    f"        int mask_bin = (int) std::floor((bin_center_x - ({x0!r})) / bin_width);\n"
+                    f"        if (mask_bin >= 0 && mask_bin < {n_x} && masked_counts[val_y][mask_bin] >= 0.0) return MASKED_RETURN;")
 
     # 3. Shared/Independent sigma (SECOND)
     if data_source is None:
@@ -2826,8 +2901,21 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
     # Positions are evaluated once per call into mu_vals: a parameter for a free peak, the
     # reference's parameter plus the offset parameter for a linked one.
     mu_eval_cpp = "\n        ".join(f"mu_vals[{i}] = {mu_bracket[i].replace('[', 'p[')};" for i in range(n_peaks))
+    if scale_idx:
+        mu_eval_cpp += "\n        double escale = 0.0;\n        " + "\n        ".join(
+            f"if (val_y == {j}) escale = p[{k}];" for j, k in scale_idx.items())
+        mu_eval_cpp += f"\n        for (int i = 0; i < {n_peaks}; ++i) mu_vals[i] *= (1.0 + escale);"
+    if offset_idx:
+        mu_eval_cpp += "\n        double eoff = 0.0;\n        " + "\n        ".join(
+            f"if (val_y == {j}) eoff = p[{k}];" for j, k in offset_idx.items())
+        mu_eval_cpp += f"\n        for (int i = 0; i < {n_peaks}; ++i) mu_vals[i] += eoff;"
 
     sigma_eval_cpp = "\n        ".join([f"sigma_vals[{i}] = {sigma_cpp_strings[i]};" for i in range(n_peaks)])
+    if smear_idx:
+        sigma_eval_cpp += "\n        double smear = 0.0;\n        " + "\n        ".join(
+            f"if (val_y == {j}) smear = p[{k}];" for j, k in smear_idx.items())
+        sigma_eval_cpp += (f"\n        if (smear > 0.0) for (int i = 0; i < {n_peaks}; ++i) "
+                           "sigma_vals[i] = std::sqrt(sigma_vals[i] * sigma_vals[i] + smear * smear * mu_vals[i] * mu_vals[i]);")
 
     amp_eval_cases = []
     bg_shift_eval_cases = []
@@ -2916,17 +3004,21 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
             total += amp_vals[i] * frac;
         }}
         """
+        mask_total_cpp = mask_cpp.replace('MASKED_RETURN', 'masked_counts[val_y][mask_bin]')
+        mask_zero_cpp = mask_cpp.replace('MASKED_RETURN', '0.0')
         cpp_code = f"""
     double eval_2d_gaus_{comp_id}(double *x, double *p) {{
         double bin_center_x = x[0];
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         double bin_width = {bin_width};
+        {mask_total_cpp}
         {bg_decl_cpp}
         {shape_preamble}
         {bg_block_cpp}
         {peak_sum_cpp}
-        return total;
+        {acc_cpp}
+        return total * acc;
     }}
 
     double eval_2d_gaus_bg_{comp_id}(double *x, double *p) {{
@@ -2934,9 +3026,11 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         int val_y = std::round(x[1]);
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         double bin_width = {bin_width};
+        {mask_zero_cpp}
         {bg_decl_cpp}
         {bg_block_cpp}
-        return total;
+        {acc_cpp}
+        return total * acc;
     }}
 
     double eval_2d_gaus_peak_{comp_id}(double *x, double *p) {{
@@ -2946,6 +3040,7 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         if (val_y < 0 || val_y >= {n_spectra}) return 0.0;
         if (target_peak < 0 || target_peak >= {n_peaks}) return 0.0;
         double bin_width = {bin_width};
+        {mask_zero_cpp}
         {shape_preamble}
         double mu = mu_vals[target_peak];
         double inv = 1.0 / (1.41421356 * sigma_vals[target_peak]);
@@ -2953,7 +3048,8 @@ def fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, p
         double t_hi = (bin_center_x + bin_width / 2.0 - mu) * inv;
         double frac = (t_lo > 0.0) ? 0.5 * (TMath::Erfc(t_lo) - TMath::Erfc(t_hi))
                                    : 0.5 * (TMath::Erf(t_hi) - TMath::Erf(t_lo));
-        return amp_vals[target_peak] * frac;
+        {acc_cpp}
+        return amp_vals[target_peak] * frac * acc;
     }}
     """
     else:
@@ -3101,9 +3197,9 @@ def fit_gaussian_2d(spectra, e_guess, fit_window, **kwargs):
     kwargs.pop('shared_bg_shift', None)
     return fit_gaussian_w_bg_shift_2d(spectra, e_guess, fit_window, include_bg_shift=False, **kwargs)
 
-def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, cmaes_opts=None, peak_links=None):
-    if peak_links:
-        raise NotImplementedError('peak_links (linked multiplet components) are only implemented for the Gaussian 2D models')
+def fit_emg_w_bg_shift_2d(spectra, e_guess, fit_window, data_source=None, param_bounds=None, fit_options='LS0QEI', shared_bg_shift=True, parameterizations=None, bg_model='linear', bg_order=1, bg_knots=None, use_cmaes=False, cmaes_loc_wiggle=None, cmaes_only=False, workers=1, custom_initial_values=None, points_per_bin=1, cmaes_opts=None, peak_links=None, spectrum_scales=None, spectrum_acceptance=None, spectrum_smear=None, spectrum_offsets=None, spectrum_ranges=None):
+    if peak_links or spectrum_scales or spectrum_acceptance or spectrum_smear or spectrum_offsets or spectrum_ranges:
+        raise NotImplementedError('peak_links, spectrum_scales and spectrum_acceptance are only implemented for the Gaussian 2D models')
     from scipy.special import erfcx, erfc
     import math
     if param_bounds is None:

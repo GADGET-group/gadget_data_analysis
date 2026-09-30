@@ -33,6 +33,10 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
     runs = []
     for run, get_run in zip(run_df['DDAS'][(run_df['Run Type']=='60Ga')], run_df['GET'][(run_df['Run Type']=='60Ga')]):
         if tpc_data_valid:
+            if len(str(run_df['Field Cage Functional?'][run_df['DDAS']==run].iloc[0]).strip()) != 0:
+                 #I think all 60Ga runs have valid field cage data, so this isn't currently implemented.
+                 # Revisit if I start putting things in this column.
+                assert False
             if not np.isfinite(get_run):
                 continue
         if np.isnan(run) or run in runs:
@@ -67,11 +71,10 @@ def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
     TPC data valid: requires GET data to be in the merged tree
     '''
     runs = []
-
+    
+    run_selector = (run_df['Run Type']=='59Zn')
     if tpc_data_valid:
-        run_selector = (run_df['Run Type']=='59Zn')
-    else:
-        run_selector = (run_df['Run Type']=='59Zn') & (run_df['Field Cage Functional?']=='yes')
+        run_selector &= (run_df['Field Cage Functional?']=='yes')
 
     for run, get_run in zip(run_df['DDAS'][run_selector], run_df['GET'][run_selector]):
         if tpc_data_valid:

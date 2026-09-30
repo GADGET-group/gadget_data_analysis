@@ -84,11 +84,11 @@ def fit_stat(fitter, window_idx=0):
         # statistic, recomputed here from the saved fit histogram (matches 2*MinFcnValue() on
         # a MINUIT fit to ~1e-6).
         chi2, n_bins = chi2_baker_cousins(fitter, window_idx)
-        return chi2, n_bins - n_free_params(f_to_fit), True
+        return chi2, n_bins - n_free_params(f_to_fit) - n_masked_bins(fitter, window_idx), True
     chi2 = 2.0 * fit_res.MinFcnValue()
     root_chi2 = fit_res.Chi2()
     agrees = abs(root_chi2 - chi2) <= 1e-6 * max(abs(chi2), 1.0)
-    return chi2, fit_res.Ndf(), agrees
+    return chi2, fit_res.Ndf() - n_masked_bins(fitter, window_idx), agrees
 
 
 def chi2_baker_cousins(fitter, window_idx=0):
@@ -557,6 +557,31 @@ def report(fitter, window_idx=0, max_candidates=10):
     return {'chi2': chi2, 'ndf': ndf, 'chi2_trustworthy': agrees, 'pinned': pinned,
             'peaks': peaks, 'peak_candidates': candidates, 'near_candidates': near,
             'broad_runs': runs}
+
+
+_MASKED_BINS_CACHE = {}
+
+
+def n_masked_bins(fitter, window_idx=0):
+    """Bins taken out of the likelihood by spectrum_ranges (see fitting_tools.fit_gaussian_w_bg_shift_2d).
+    They contribute zero to chi2 but ROOT counts them in Ndf(), so fit_stat subtracts them. Computed from the
+    axis of the input spectrum and the fit window only, once per configuration: fit_stat runs after every fit,
+    and reading a fit's own histograms that often trips the ROOT crash on in-memory fit histograms."""
+    ranges = (getattr(fitter, 'fit_multi_peaks_kwargs', None) or {}).get('spectrum_ranges') or getattr(fitter, 'spectrum_ranges', None)
+    if not ranges:
+        return 0
+    _, e_low, e_high = fitter.peaks_to_fit[window_idx]
+    key = (repr(ranges), float(e_low), float(e_high), len(fitter.spectra))
+    if key not in _MASKED_BINS_CACHE:
+        ax = fitter.spectra[0].GetXaxis()
+        centres = [c for c in (ax.GetBinCenter(b) for b in range(ax.FindBin(e_low), ax.FindBin(e_high) + 1)) if e_low <= c <= e_high]
+        n = 0
+        for j in range(len(fitter.spectra)):
+            rng = [(float(lo), float(hi)) for jj, lo, hi in ranges if int(jj) == j]
+            if rng:
+                n += sum(1 for c in centres if not any(lo <= c <= hi for lo, hi in rng))
+        _MASKED_BINS_CACHE[key] = n
+    return _MASKED_BINS_CACHE[key]
 
 
 def main():

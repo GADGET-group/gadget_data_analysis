@@ -240,13 +240,74 @@ def _covariance_or_none(res):
     return fit_res.GetCovarianceMatrix()
 
 
+def _frac_param_names(curve, order, iso_suffix):
+    '''Coefficient names of fraction curve `curve` (0-based) for one isotope: the first curve keeps
+    the historical amp_frac_b*, later ones are amp_frac2_b*, amp_frac3_b*, ...'''
+    stem = 'amp_frac' if curve == 0 else f'amp_frac{curve + 1}'
+    return [f"{stem}_b{k}{iso_suffix}" for k in range(order + 1)]
+
+
+def _spectrum_shares(curve_values):
+    '''Stick-breaking shares of N spectra from the N-1 curve values: F0, (1-F0)F1, ..., prod(1-Fc).'''
+    shares, rest = [], 1.0
+    for F in curve_values:
+        shares.append(rest * F); rest *= (1.0 - F)
+    return shares + [rest]
+
+
+def _n_spectra_amplitude_columns(f_to_fit, cov, idx, iso, n_spectra, fraction_bernstein_order, mu_val, e_low, e_high):
+    '''
+    Evaluated-CSV columns of one peak for three or more spectra: total_amp and its error, the
+    counts in each spectrum with errors propagated through the covariance (numerical gradient
+    over total_amp and every fraction coefficient), and each spectrum's share.
+    '''
+    import math
+    blank = [""] * (2 + 3 * n_spectra)
+    tot_idx = f_to_fit.GetParNumber(f"total_amp_{idx}")
+    if tot_idx < 0:
+        return blank
+    iso_suffix = f"_{iso}" if iso != 'all' else ""
+    order = (fraction_bernstein_order.get(iso, fraction_bernstein_order.get('default', fraction_bernstein_order.get('all', 1)))
+             if isinstance(fraction_bernstein_order, dict) else fraction_bernstein_order)
+    names = [n for c in range(n_spectra - 1) for n in _frac_param_names(c, order, iso_suffix)]
+    p_idx = [f_to_fit.GetParNumber(n) for n in names]
+    if any(j < 0 for j in p_idx):
+        return blank
+    X = (mu_val - e_low) / (e_high - e_low)
+    basis = np.array([math.comb(order, k) * X ** k * (1.0 - X) ** (order - k) for k in range(order + 1)])
+
+    def counts(v):
+        curves = [float(np.dot(v[1 + c * (order + 1): 1 + (c + 1) * (order + 1)], basis)) for c in range(n_spectra - 1)]
+        return np.array([v[0] * s for s in _spectrum_shares(curves)])
+
+    all_idx = [tot_idx] + p_idx
+    v0 = np.array([f_to_fit.GetParameter(j) for j in all_idx])
+    a = counts(v0)
+    errs = np.zeros(n_spectra)
+    if cov and cov.GetNrows() > max(all_idx):
+        C = np.array([[cov(r, c) for c in all_idx] for r in all_idx])
+        J = np.zeros((n_spectra, len(all_idx)))
+        for k in range(len(all_idx)):
+            h = 1e-6 * max(abs(v0[k]), 1.0)
+            vp, vm = v0.copy(), v0.copy(); vp[k] += h; vm[k] -= h
+            J[:, k] = (counts(vp) - counts(vm)) / (2 * h)
+        errs = np.sqrt(np.maximum(np.einsum('ik,kl,il->i', J, C, J), 0.0))
+    out = [f"{v0[0]:.6g}", f"{f_to_fit.GetParError(tot_idx):.6g}"]
+    for j in range(n_spectra):
+        out += [f"{a[j]:.6g}", f"{errs[j]:.6g}"]
+    return out + [f"{(a[j] / v0[0] if v0[0] > 0 else 0):.6g}" for j in range(n_spectra)]
+
+
 def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=False, additional_param_bounds={}, 
                     loc_wiggle=10, bg_model='linear', bg_order=1, bg_knots=None, sigma_poly_order=None, sigma_bernstein_order=None, sigma_monotonic_bernstein_order=None, sigma_min=18.0, sigma_max=200.0,
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
                     custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1,
                     peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None,
-                    peak_links=None):
+                    peak_links=None, spectrum_scales=None, spectrum_acceptance=None, spectrum_smear=None, spectrum_offsets=None, spectrum_ranges=None):
     '''
+    spectrum_scales : list of int or None
+        Spectra that get a free relative energy scale escale_j (see
+        fitting_tools.fit_gaussian_w_bg_shift_2d): the test of a shared calibration.
     peak_links : list of dicts or None
         Peaks tied to a reference peak at a known spacing (soft-linked multiplet components):
         [{'peak': i, 'ref': r, 'spacing': s, 'tol': t, 'label': ...}], indices within the window.
@@ -270,7 +331,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         f = spectrum_fitter.multi_spectrum_fitter(spectra, peak_model, bg_model=bg_model, bg_order=bg_order,
                                                   bg_knots=bg_knots, use_cmaes=use_cmaes, cmaes_only=cmaes_only, workers=workers, points_per_bin=points_per_bin,
                                                   bin_integral=bin_integral, peak_cutoff_sigmas=peak_cutoff_sigmas, cmaes_opts=cmaes_opts,
-                                                  peak_links=peak_links)
+                                                  peak_links=peak_links, spectrum_scales=spectrum_scales, spectrum_acceptance=spectrum_acceptance, spectrum_smear=spectrum_smear, spectrum_offsets=spectrum_offsets, spectrum_ranges=spectrum_ranges)
         if custom_initial_values:
             f.custom_initial_values = custom_initial_values
         
@@ -405,7 +466,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                 }
             }
             
-        if fraction_bernstein_order is not None and len(spectra) == 2:
+        if fraction_bernstein_order is not None and len(spectra) >= 2:
             import math
             e_low_global = min(p[1] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmin()
             e_high_global = max(p[2] for p in peaks) if peaks else spectra[0].GetXaxis().GetXmax()
@@ -428,30 +489,35 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                 else:
                     order = fraction_bernstein_order
                 
-                param_names = [f"amp_frac_b{i}{iso_suffix}" for i in range(order + 1)]
-                guesses = [0.5] * (order + 1)
-                
-                terms = []
+                # One fraction curve per spectrum but the last, per isotope, combined by stick
+                # breaking so the shares stay in [0, 1] and sum to one:
+                #   spectrum 0: F0        spectrum 1: (1 - F0) F1      ...     last: prod (1 - Fc)
+                # F0 keeps the historical names amp_frac_b*_<iso> (with two spectra this is exactly
+                # the old model); curve c >= 1 is amp_frac<c+1>_b*_<iso>. For [60Ga runs, 59Zn
+                # early, 59Zn late], F1 is the early share of a line's 59Zn-run counts.
                 n = order
-                for k in range(n + 1):
-                    coef = math.comb(n, k)
-                    term = f"({coef} * {_pow_str(X_str, k)} * {_pow_str(f'1.0 - {X_str}', n - k)})"
-                    terms.append(f"[{param_names[k]}]*{term}")
-                    
-                frac_str = "(" + " + ".join(terms) + ")"
-                
-                f.parameterizations[f'amplitude_{peak_idx}_0'] = {
-                    'formula': f"[total_amp_{peak_idx}]*{frac_str}",
-                    'params': [f"total_amp_{peak_idx}"] + param_names,
-                    'guesses': [200.0] + guesses,
-                    'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(param_names)
-                }
-                f.parameterizations[f'amplitude_{peak_idx}_1'] = {
-                    'formula': f"[total_amp_{peak_idx}]*(1.0 - {frac_str})",
-                    'params': [f"total_amp_{peak_idx}"] + param_names,
-                    'guesses': [200.0] + guesses,
-                    'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(param_names)
-                }
+                frac_strs, frac_names = [], []
+                for curve in range(len(spectra) - 1):
+                    names_c = _frac_param_names(curve, order, iso_suffix)
+                    terms = []
+                    for k in range(n + 1):
+                        coef = math.comb(n, k)
+                        term = f"({coef} * {_pow_str(X_str, k)} * {_pow_str(f'1.0 - {X_str}', n - k)})"
+                        terms.append(f"[{names_c[k]}]*{term}")
+                    frac_strs.append("(" + " + ".join(terms) + ")")
+                    frac_names.append(names_c)
+                for j in range(len(spectra)):
+                    used = frac_names[:min(j + 1, len(frac_names))]
+                    factors = [f"(1.0 - {frac_strs[m]})" for m in range(min(j, len(frac_strs)))]
+                    if j < len(spectra) - 1:
+                        factors.append(frac_strs[j])
+                    flat = [name for names_c in used for name in names_c]
+                    f.parameterizations[f'amplitude_{peak_idx}_{j}'] = {
+                        'formula': f"[total_amp_{peak_idx}]*" + "*".join(factors),
+                        'params': [f"total_amp_{peak_idx}"] + flat,
+                        'guesses': [200.0] + [0.5] * len(flat),
+                        'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(flat)
+                    }
 
         if bg_shift_monotonic_bernstein_order is not None:
             f.shared_bg_shift = False
@@ -618,6 +684,9 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                 header = ['window_idx', 'peak_idx', 'isotope', 'loc_guess', 'mu', 'mu_err', 'sigma', 'sigma_err']
                 if len(spectra) == 2:
                     header.extend(['total_amp', 'total_amp_err', 'amplitude_0', 'amplitude_0_err', 'amplitude_1', 'amplitude_1_err', 'amplitude_fraction_0'])
+                elif len(spectra) >= 3 and fraction_bernstein_order is not None:
+                    header.extend(['total_amp', 'total_amp_err'] + [c for j in range(len(spectra)) for c in (f'amplitude_{j}', f'amplitude_{j}_err')]
+                                  + [f'amplitude_fraction_{j}' for j in range(len(spectra))])
                 else:
                     header.extend(['amplitude', 'amplitude_err'])
                 writer.writerow(header)
@@ -821,6 +890,10 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                                     row.extend([f"{tot:.6g}", f"{tot_err:.6g}", f"{a0:.6g}", f"{a0_err:.6g}", f"{a1:.6g}", f"{a1_err:.6g}", f"{frac:.6g}"])
                                 else:
                                     row.extend(["", "", "", "", "", "", ""])
+                        elif len(spectra) >= 3 and fraction_bernstein_order is not None:
+                            iso_f = peak_isotopes[i][idx] if peak_isotopes and len(peak_isotopes) > i and len(peak_isotopes[i]) > idx else 'all'
+                            row.extend(_n_spectra_amplitude_columns(f_to_fit, _covariance_or_none(res), idx, iso_f, len(spectra),
+                                                                    fraction_bernstein_order, mu_val, e_low_global, e_high_global))
                         else:
                             amp_idx = f_to_fit.GetParNumber(f"amplitude_{idx}")
                             if amp_idx >= 0:
@@ -863,7 +936,11 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         'bg_shift_bernstein_order': bg_shift_bernstein_order,
         'bg_shift_monotonic_bernstein_order': bg_shift_monotonic_bernstein_order,
         'peak_isotopes': peak_isotopes,
-        'peak_links': peak_links
+        'peak_links': peak_links,
+        'spectrum_scales': spectrum_scales,
+        'spectrum_acceptance': spectrum_acceptance,
+        'spectrum_smear': spectrum_smear,
+        'spectrum_offsets': spectrum_offsets, 'spectrum_ranges': spectrum_ranges
     }
     f.peak_links = peak_links
             
@@ -1892,6 +1969,8 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
     if not kwargs.get('workers'):
         parent_workers = getattr(fitter, 'workers', None) or 0
         kwargs['workers'] = parent_workers if parent_workers > 1 else NUM_WORKERS
+    if os.environ.get('E23035_NUM_WORKERS'):
+        kwargs['workers'] = NUM_WORKERS
     # try_fit passes the isotopes it loads from the CSV, so it must not also get them here.
     kwargs.pop('peak_isotopes', None)
     # Adding or removing a peak renumbers the peak-indexed parameters, so initial values
@@ -1904,6 +1983,14 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
             name: value for name, value in custom_initial_values.items()
             if not name.startswith(('mu', 'amplitude', 'total_amp', 'dmu'))
         }
+    if not kwargs.get('spectrum_scales'):
+        kwargs.pop('spectrum_scales', None)    # absent unless used, so older hashes are unchanged
+    if not kwargs.get('spectrum_acceptance'):
+        kwargs.pop('spectrum_acceptance', None)
+    if not kwargs.get('spectrum_smear'):
+        kwargs.pop('spectrum_smear', None)
+    for _k in ('spectrum_offsets', 'spectrum_ranges'):
+        if not kwargs.get(_k): kwargs.pop(_k, None)
     # Present only when there are links, so link-free fits keep the hashes they always had.
     if peak_links:
         kwargs['peak_links'] = [dict(link) for link in peak_links]
@@ -2780,7 +2867,9 @@ def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params
 #############################################################################
 EXPERIMENT = 'e23035'
 TPC_CONFIG = 'smart2_rpr.csv'
-NUM_WORKERS = 200
+# E23035_NUM_WORKERS caps the threads of one process, so several searches can share the machine
+# (three uncapped fits at 200 workers each ran 5x slower than one after another).
+NUM_WORKERS = int(os.environ.get('E23035_NUM_WORKERS', 200))
 
 # efficiencies with 0.100000 s implant time and 0.100000 s decay time
 # Assumes 12 ms dead time at start of decay window + 2 ms at end
