@@ -378,6 +378,8 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
     runs = [int(r) for r in runs]
     to_return = {q: [] for q in qnames}
     
+    ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress)
+    
     if show_load_progress:
         print(f'loading {qnames} for {runs}')
         

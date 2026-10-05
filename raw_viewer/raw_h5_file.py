@@ -680,17 +680,25 @@ class raw_h5_file:
                 xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
                                                np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
                 ys = trace[xs]
-                slope, offset = np.polyfit(xs, ys, 1)
-                #offset = np.mean(ys)
-                #baseline will be the trace except in the peak region,
-                #so that everything away from the peak is zero'd out
-                baseline = np.array(trace, copy=True)
-                # for i in range(peak_start, peak_end+1):
-                #     baseline[i] = slope*i + offset
-                #baseline[np.arange(peak_start, peak_end+1)] = offset
+                
+                n = len(xs)
+                if n > 1:
+                    sum_x = np.sum(xs)
+                    sum_y = np.sum(ys)
+                    sum_x2 = np.sum(xs * xs)
+                    sum_xy = np.sum(xs * ys)
+                    denominator = n * sum_x2 - sum_x * sum_x
+                    if denominator != 0:
+                        slope = (n * sum_xy - sum_x * sum_y) / denominator
+                        offset = (sum_y - slope * sum_x) / n
+                    else:
+                        slope, offset = 0.0, sum_y / n
+                else:
+                    slope, offset = 0.0, ys[0] if n > 0 else 0.0
+                
+                baselines[b] = trace
                 x_peak = np.arange(peak_start, peak_end)
-                baseline[x_peak] = offset + slope*x_peak
-                baselines[b] = baseline
+                baselines[b, x_peak] = offset + slope * x_peak
             elif self.background_subtract_mode == 'snip':
                 p = self.smart_bins_away_to_check#20 # window size
                 
