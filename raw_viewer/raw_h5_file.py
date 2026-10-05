@@ -33,6 +33,7 @@ except Exception as e:
 import skimage.measure
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
+ZERO_PAD_PROBE_EVENTS = 20 #events probed per file to detect zero padding (remove_zero_pad)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_PADS = 1024
 
@@ -202,8 +203,172 @@ def _smart2_numba_peak_trimming_2d(traces, ransac_baselines, min_bins_in_peak, b
             baseline[i] = ransac_baseline[i]
             
         baselines[b] = baseline
-        
+
     return baselines
+
+
+@numba.njit(cache=True)
+def _pairwise_block(a, lo, n):
+    # numpy's DOUBLE_pairwise_sum for n <= 128, so that sums match np.sum bit for bit
+    if n < 8:
+        r = -0.0
+        for i in range(n):
+            r += a[lo + i]
+        return r
+    r0 = a[lo]; r1 = a[lo + 1]; r2 = a[lo + 2]; r3 = a[lo + 3]
+    r4 = a[lo + 4]; r5 = a[lo + 5]; r6 = a[lo + 6]; r7 = a[lo + 7]
+    i = 8
+    while i < n - (n % 8):
+        r0 += a[lo + i]; r1 += a[lo + i + 1]; r2 += a[lo + i + 2]; r3 += a[lo + i + 3]
+        r4 += a[lo + i + 4]; r5 += a[lo + i + 5]; r6 += a[lo + i + 6]; r7 += a[lo + i + 7]
+        i += 8
+    res = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7))
+    while i < n:
+        res += a[lo + i]
+        i += 1
+    return res
+
+
+@numba.njit(cache=True)
+def _pairwise_sum(a, n):
+    # np.sum of a[:n] (float64) in numpy's order: blocks of <= 128, recursive halving (n/2 rounded down to a
+    # multiple of 8) above that, evaluated here with an explicit stack
+    if n <= 128:
+        return _pairwise_block(a, 0, n)
+    los = np.empty(64, np.int64); ns = np.empty(64, np.int64); state = np.zeros(64, np.int64)
+    vals = np.empty(64, np.float64)
+    sp = 0
+    los[0] = 0; ns[0] = n; state[0] = 0
+    result = 0.0
+    while sp >= 0:
+        lo = los[sp]; m = ns[sp]
+        if m <= 128:
+            v = _pairwise_block(a, lo, m)
+            sp -= 1
+            if sp < 0:
+                result = v
+            elif state[sp] == 1:
+                vals[sp] = v; state[sp] = 2
+            else:
+                vals[sp] = vals[sp] + v; state[sp] = 3
+            continue
+        if state[sp] == 0:
+            n2 = m // 2
+            n2 -= n2 % 8
+            state[sp] = 1
+            los[sp + 1] = lo; ns[sp + 1] = n2; state[sp + 1] = 0
+            sp += 1
+        elif state[sp] == 2:
+            n2 = m // 2
+            n2 -= n2 % 8
+            los[sp + 1] = lo + n2; ns[sp + 1] = m - n2; state[sp + 1] = 0
+            sp += 1
+        else:
+            v = vals[sp]
+            sp -= 1
+            if sp < 0:
+                result = v
+            elif state[sp] == 1:
+                vals[sp] = v; state[sp] = 2
+            else:
+                vals[sp] = vals[sp] + v; state[sp] = 3
+    return result
+
+
+@numba.njit(cache=True)
+def _smart1_baselines_2d(traces, bins_away, ave_bins, threshold, peak_lo, peak_hi):
+    '''
+    numba version of the 'smart' (smart1) branch of calculate_background_2d. Same operations in the same
+    order (np.argmax semantics, same walk, same fit samples, int64 sums of x and x^2, numpy pairwise sums
+    of y and x*y, same slope/offset expressions), so the result is bit-identical to the Python loop.
+    traces: C-contiguous float64 (B, N).
+    '''
+    B, N = traces.shape
+    out = np.empty_like(traces)
+    m = 2 * ave_bins if ave_bins > 0 else 0
+    xs = np.empty(m, np.int64)
+    ys = np.empty(m, np.float64)
+    xy = np.empty(m, np.float64)
+    for b in range(B):
+        t = traces[b]
+        for k in range(N):
+            out[b, k] = t[k]
+        peak = 0  # np.argmax: first maximum, a NaN wins
+        best = t[0]
+        if not np.isnan(best):
+            for k in range(1, N):
+                v = t[k]
+                if np.isnan(v):
+                    peak = k
+                    break
+                if v > best:
+                    best = v
+                    peak = k
+        if peak < peak_lo or peak > peak_hi:
+            continue
+        i = peak
+        while i > 0:
+            j = max(0, i - bins_away)
+            if t[i] < t[j] + threshold:
+                break
+            i -= 1
+        peak_start = i
+        i = peak
+        while i < N - 1:
+            j = min(N - 1, i + bins_away)
+            if t[i] < t[j] + threshold:
+                break
+            i += 1
+        peak_end = i
+        n = 0
+        for x in range(max(0, peak_start - ave_bins), peak_start):
+            xs[n] = x; n += 1
+        for x in range(peak_end, min(peak_end + ave_bins, N)):
+            xs[n] = x; n += 1
+        if n > 1:
+            sum_x = 0
+            sum_x2 = 0
+            for k in range(n):
+                ys[k] = t[xs[k]]
+                xy[k] = xs[k] * ys[k]
+                sum_x += xs[k]
+                sum_x2 += xs[k] * xs[k]
+            sum_y = _pairwise_sum(ys, n)
+            sum_xy = _pairwise_sum(xy, n)
+            denominator = n * sum_x2 - sum_x * sum_x
+            if denominator != 0:
+                slope = (n * sum_xy - sum_x * sum_y) / denominator
+                offset = (sum_y - slope * sum_x) / n
+            else:
+                slope = 0.0
+                offset = sum_y / n
+        elif n == 1:
+            slope = 0.0
+            offset = t[xs[0]]
+        else:
+            slope = 0.0
+            offset = 0.0
+        for x in range(peak_start, peak_end):
+            out[b, x] = offset + slope * x
+    return out
+
+
+_CUSOLVER_OK = None
+def _cusolver_available():
+    '''
+    cp.linalg.svd imports cupy's cusolver on every call. In the gadget_analysis environment that import fails
+    once torch is loaded (libcusolver.so.11 needs cublasSetEnvironmentMode, torch's libcublas 12.1 lacks it),
+    so every call raised and fell back to np.linalg.svd, paying for the failed import each time. Probe once.
+    '''
+    global _CUSOLVER_OK
+    if _CUSOLVER_OK is None:
+        try:
+            from cupy_backends.cuda.libs import cusolver  # noqa: F401
+            _CUSOLVER_OK = True
+        except Exception:
+            _CUSOLVER_OK = False
+    return _CUSOLVER_OK
+
 
 class raw_h5_file:
     def __init__(self, file_path, zscale, flat_lookup_csv):
@@ -295,6 +460,11 @@ class raw_h5_file:
         #if True, will try to fit a skew normal distrubution to bins just to the left and right of the railed region, and use this to replace the railed region
         self.reconstruct_railed_pads = False 
         self.railed_pad_reconstruct_fit_bins = (8,8) #bins to the (left, right) of the railed region to use for fitting
+        #if True, time-bin columns that are zero in every trace of every probed event at the start or end of the
+        #traces (written by the merger when the GET depth did not match, e.g. e23035 GET 214, 215, 216, 229, 234, 235:
+        #512 columns with the last 112 zero) are removed when events are read, so the run looks like a run of its
+        #true depth. A no-op for files without padding. See _zero_pad_info.
+        self.remove_zero_pad = False
 
         self.batched_data_cache = {}
         self.batch_event_cache_size = 1
@@ -320,6 +490,69 @@ class raw_h5_file:
             self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
         except KeyError:
             self.num_time_bins = 512 # Default value if there are no events in the h5 file
+
+    #num_time_bins is kept in the instance __dict__ (so save_config_file still writes it); with remove_zero_pad
+    #it reports the depth after the padding is removed
+    @property
+    def num_time_bins(self):
+        n = self.__dict__.get('num_time_bins', 512)
+        if self.__dict__.get('remove_zero_pad', False):
+            info = self._zero_pad_info()
+            if info['n_cols'] == n and (info['lead'] or info['trail']):
+                return n - info['lead'] - info['trail']
+        return n
+
+    @num_time_bins.setter
+    def num_time_bins(self, value):
+        self.__dict__['num_time_bins'] = value
+
+    def _zero_pad_info(self):
+        '''
+        Detect zero padding once per file: probe ZERO_PAD_PROBE_EVENTS events spread over the run; for each, count the
+        data columns at the start (lead) and end (trail) that are exactly 0 in every trace. The padding is the minimum
+        over the probed events (a column is removed only if it is all-zero in every probed event). Real data never has
+        a whole column at 0 (pedestals are ~250-400 ADC), so files without padding give lead = trail = 0.
+        Requires >= 3 probed events with data and one common trace length; otherwise nothing is removed (warning).
+        '''
+        info = self.__dict__.get('_zero_pad_cache')
+        if info is None:
+            import warnings
+            leads, trails, ncols = [], [], set()
+            first, last = self.get_event_num_bounds()
+            if last >= first:
+                for evt in np.unique(np.linspace(first, last, ZERO_PAD_PROBE_EVENTS).astype(np.int64)):
+                    try:
+                        d = self.h5_file['get']['evt%d_data'%evt][()]
+                    except KeyError:
+                        continue
+                    if d.ndim != 2 or len(d) == 0 or d.shape[1] <= FIRST_DATA_BIN:
+                        continue
+                    z = np.all(d[:, FIRST_DATA_BIN:] == 0, axis=0)
+                    if z.all():
+                        continue #an all-zero event says nothing about the padding
+                    leads.append(int(np.argmin(z)))
+                    trails.append(int(np.argmin(z[::-1])))
+                    ncols.add(int(z.size))
+            if len(leads) >= 3 and len(ncols) == 1:
+                info = dict(lead=min(leads), trail=min(trails), n_cols=ncols.pop(), probed=len(leads))
+            else:
+                warnings.warn('remove_zero_pad: %s: %d usable probe events, trace lengths %s; no padding removed'
+                              % (self.file_path, len(leads), sorted(ncols)))
+                info = dict(lead=0, trail=0, n_cols=None, probed=len(leads))
+            self.__dict__['_zero_pad_cache'] = info
+        return info
+
+    def _remove_zero_pad(self, data):
+        '''Rows [cobo, asad, aget, channel, pad, ..., samples] of one event, padding columns removed (if any).'''
+        info = self._zero_pad_info()
+        if not (info['lead'] or info['trail']):
+            return data
+        d = np.asarray(data)
+        if d.ndim != 2 or d.shape[1] - FIRST_DATA_BIN != info['n_cols']:
+            raise ValueError('remove_zero_pad: event with %s columns in %s, padding was detected for %s data columns'
+                             % (d.shape, self.file_path, info['n_cols']))
+        return np.concatenate((d[:, :FIRST_DATA_BIN],
+                               d[:, FIRST_DATA_BIN + info['lead']:FIRST_DATA_BIN + info['n_cols'] - info['trail']]), axis=1)
 
     def close(self):
         if self.h5_file:
@@ -428,7 +661,14 @@ class raw_h5_file:
         '''
         Returns a list of pads which railed in the current event
         '''
+        #get_data computes this from the raw samples while it reads a batch; avoids reading the event twice
+        railed_cache = self.__dict__.get('_railed_pads_cache')
+        if railed_cache is not None and event_number in railed_cache and self.asads == 'all' \
+                and self.cobos == 'all' and self.pads == 'all':
+            return railed_cache.pop(event_number)
         data = self.h5_file['get']['evt%d_data'%event_number]
+        if self.remove_zero_pad:
+            data = self._remove_zero_pad(data)
         traces = data[:,FIRST_DATA_BIN:]
         which_ones_railed = np.logical_not(np.all(traces<4095, axis=1))
         ch_info = data[which_ones_railed,0:4]
@@ -449,6 +689,8 @@ class raw_h5_file:
         Veto pads should NOT be removed during outlier removal.
         Does NOT apply thresholding. However, this is applied in get_xyte and and get_xyze.
         '''
+        if self._vectorized_bookkeeping_ok():
+            return self._get_data_vectorized(event_number)
         if self.cache_enable and event_number == self.cached_event:
             return np.array(self.cached_data, copy=True)
 
@@ -475,6 +717,8 @@ class raw_h5_file:
                 data = self.h5_file['get']['evt%d_data'%evt]
             except KeyError:
                 continue
+            if self.remove_zero_pad:
+                data = self._remove_zero_pad(data)
 
             if self.asads != 'all' or self.cobos != 'all' or self.pads != 'all':
                 to_copy = []
@@ -601,6 +845,166 @@ class raw_h5_file:
             self.cached_event = event_number
         return np.array(data, copy=True)
 
+    def _chnl_tables(self):
+        '''Lookup arrays equivalent to the chnls_to_pad / pad_to_xy_index dicts (built once per instance).'''
+        tables = self.__dict__.get('_chnl_tables_cache')
+        if tables is None:
+            keys = np.array(list(self.chnls_to_pad.keys()), dtype=np.int64)
+            dims = keys.max(axis=0) + 1
+            lut = np.full(int(np.prod(dims)), -1, dtype=np.int64)
+            lut[np.ravel_multi_index(keys.T, dims)] = np.array(list(self.chnls_to_pad.values()), dtype=np.int64)
+            npads = max(max(self.chnls_to_pad.values()), max(self.pad_to_xy_index)) + 1
+            px = np.full(npads, -1, np.int64)
+            py = np.full(npads, -1, np.int64)
+            for pad, (x, y) in self.pad_to_xy_index.items():
+                px[pad] = x
+                py[pad] = y
+            is_veto = np.zeros(npads, bool)
+            is_veto[[p for p in VETO_PADS if p < npads]] = True
+            tables = dict(dims=dims, lut=lut, px=px, py=py, is_veto=is_veto)
+            self.__dict__['_chnl_tables_cache'] = tables
+        return tables
+
+    def _pads_of_rows(self, chnl_cols):
+        '''
+        Pad number of each row from its (cobo, asad, aget, channel) columns, -1 where
+        `tuple(line[0:4]) in self.chnls_to_pad` would be False (only exact integer values match).
+        '''
+        tables = self._chnl_tables()
+        c = np.asarray(chnl_cols)
+        if c.shape[0] == 0:
+            return np.empty(0, np.int64)
+        ci = np.floor(c).astype(np.int64) if c.dtype.kind == 'f' else c.astype(np.int64)
+        ok = np.all((ci >= 0) & (ci < tables['dims']) & (ci == c), axis=1)
+        pads = np.full(len(c), -1, np.int64)
+        if ok.any():
+            pads[ok] = tables['lut'][np.ravel_multi_index(ci[ok].T, tables['dims'])]
+        return pads
+
+    def _vectorized_bookkeeping_ok(self):
+        return self.asads == 'all' and self.cobos == 'all' and self.pads == 'all' \
+            and self.data_select_mode == 'all data' and not self.apply_gain_match
+
+    def _get_data_vectorized(self, event_number):
+        '''
+        get_data for all cobos/asads/pads, data_select_mode 'all data' and no gain match: identical output,
+        with the per-line dictionary loops replaced by array lookups. Also fills the railed pad cache that
+        get_railed_pads uses for the events of the current batch.
+        '''
+        if self.cache_enable and event_number == self.cached_event:
+            return np.array(self.cached_data, copy=True)
+
+        if self.batch_event_cache_size > 1 and event_number in self.batched_data_cache:
+            data = self.batched_data_cache.pop(event_number)
+            if self.cache_enable:
+                self.cached_data = data
+                self.cached_event = event_number
+            return np.array(data, copy=True)
+
+        tables = self._chnl_tables()
+        first_evt, last_evt = self.get_event_num_bounds()
+        batch_end = min(event_number + self.batch_event_cache_size, last_evt + 1)
+        batch_events = range(event_number, batch_end)
+
+        railed_cache = {}
+        self.__dict__['_railed_pads_cache'] = railed_cache #only the current batch is kept
+        event_datas, event_valid_indices, event_pads = {}, {}, {}
+        massive_traces, massive_trace_lens = [], []
+
+        for evt in batch_events:
+            try:
+                data = self.h5_file['get']['evt%d_data'%evt]
+            except KeyError:
+                continue
+            if self.remove_zero_pad:
+                data = self._remove_zero_pad(data)
+            data = np.array(data, copy=True, dtype=float)
+
+            if len(data) == 0:
+                event_datas[evt] = data
+                event_valid_indices[evt] = []
+                event_pads[evt] = None
+                massive_trace_lens.append(0)
+                railed_cache[evt] = []
+                continue
+
+            pads = self._pads_of_rows(data[:, 0:4])
+            #railed pads from the raw samples, as get_railed_pads computes them. Only cached if every railed
+            #channel is mapped; otherwise get_railed_pads reads the event and raises KeyError as before.
+            railed_rows = np.logical_not(np.all(data[:, FIRST_DATA_BIN:] < 4095, axis=1))
+            if np.all(pads[railed_rows] >= 0):
+                railed_cache[evt] = [self.chnls_to_pad[tuple(int(v) for v in row)] for row in data[railed_rows, 0:4]]
+
+            valid = pads >= 0
+            valid_indices = np.nonzero(valid)[0]
+            if self.reconstruct_railed_pads:
+                for i in np.nonzero(valid & (np.max(data[:, FIRST_DATA_BIN:], axis=1) == 4095))[0]:
+                    line = data[i]
+                    line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
+
+            event_datas[evt] = data
+            event_valid_indices[evt] = valid_indices
+            event_pads[evt] = pads
+
+            if len(valid_indices) > 0 and self.background_subtract_mode != 'none':
+                massive_traces.append(data[valid_indices, FIRST_DATA_BIN:])
+                massive_trace_lens.append(len(valid_indices))
+            else:
+                massive_trace_lens.append(0)
+
+        if len(massive_traces) > 0 and self.background_subtract_mode != 'none':
+            massive_traces_2d = np.concatenate(massive_traces, axis=0)
+            massive_baselines = self.calculate_background_2d(massive_traces_2d)
+            idx = 0
+            for i, evt in enumerate(batch_events):
+                if evt not in event_datas: continue
+                trace_len = massive_trace_lens[i]
+                if trace_len > 0:
+                    event_datas[evt][event_valid_indices[evt], FIRST_DATA_BIN:] -= massive_baselines[idx:idx+trace_len]
+                    idx += trace_len
+
+        for evt in batch_events:
+            if evt not in event_datas: continue
+            data = event_datas[evt]
+            if len(data) == 0:
+                self.batched_data_cache[evt] = data
+                continue
+            if self.remove_outliers:
+                pads = event_pads[evt]
+                pv = pads[pads >= 0]
+                pad_image = np.zeros(np.shape(self.pad_plane))
+                pad_image[tables['px'][pv], tables['py'][pv]] = 1
+                labeled_image = skimage.measure.label(pad_image, background=0)
+                labels, counts = np.unique(labeled_image[labeled_image!=0], return_counts=True)
+                if len(counts) > 0:
+                    bigest_label = labels[np.argmax(counts)]
+                    keep = np.zeros(len(data), bool)
+                    keep[pads >= 0] = (labeled_image[tables['px'][pv], tables['py'][pv]] == bigest_label) | tables['is_veto'][pv]
+                    data = np.array(data[keep]) if keep.any() else np.array([])
+                else:
+                    data = np.array([])
+            self.batched_data_cache[evt] = data
+
+        if event_number in self.batched_data_cache:
+            data = self.batched_data_cache.pop(event_number)
+        else:
+            data = np.array([])
+        if self.cache_enable:
+            self.cached_data = data
+            self.cached_event = event_number
+        return np.array(data, copy=True)
+
+    def _event_rows(self, event_data, include_veto_pads):
+        '''rows of event_data with a pad mapping (and not a veto pad unless include_veto_pads), and their pads'''
+        if event_data.ndim != 2 or len(event_data) == 0:
+            return np.empty(0, np.int64), np.empty(0, np.int64)
+        pads = self._pads_of_rows(event_data[:, 0:4])
+        keep = pads >= 0
+        if not include_veto_pads:
+            keep &= ~self._chnl_tables()['is_veto'][np.where(keep, pads, 0)]
+        rows = np.nonzero(keep)[0]
+        return rows, pads[rows]
+
     def calculate_background(self, trace, debug_plots=False):
         '''
         Wrapper for calculate_background_2d that takes a 1D trace and returns a 1D baseline.
@@ -638,6 +1042,12 @@ class raw_h5_file:
                 self.smart_bins_away_to_check, 
                 self.smart2_min_sigma
             )
+
+        if self.background_subtract_mode == 'smart' and not debug_plots and traces_2d.dtype == np.float64:
+            #numba version of the loop below, bit-identical (get_data always passes float64)
+            return _smart1_baselines_2d(np.ascontiguousarray(traces_2d), int(self.smart_bins_away_to_check),
+                                        int(self.num_smart_background_ave_bins), float(self.ic_counts_threshold),
+                                        float(self.require_peak_within[0]), float(self.require_peak_within[1]))
 
         B, N = traces_2d.shape
         baselines = np.zeros_like(traces_2d)
@@ -735,26 +1145,18 @@ class raw_h5_file:
         '''
         if self.cache_enable and self.cached_event_xyte == event_number:
             return self.cached_xyte
-        xs, ys, es = [], [], []
         event_data =  self.get_data(event_number)
-        #after this look, xs=[x1, x2, ...], same for ys, es=[[1st pad data], [2nd pad data], ...]
-        for pad_data in event_data:
-            chnl_info = tuple(pad_data[0:4])
-            if chnl_info not in self.chnls_to_xy_coord:
-                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                continue
-            if not include_veto_pads:
-                pad = self.chnls_to_pad[chnl_info]
-                if pad in VETO_PADS:
-                    continue
-            x,y = self.chnls_to_xy_coord[chnl_info]
-            xs.append(x)
-            ys.append(y)
-            es.append(pad_data[FIRST_DATA_BIN:])
-        #reshape as needed to get to final format for x,y,e
-        xs = np.repeat(xs, self.num_time_bins)
-        ys = np.repeat(ys, self.num_time_bins)
-        es = np.array(es).flatten()
+        #rows with a pad mapping (minus veto pads unless requested); channels without a mapping are skipped
+        rows, pads = self._event_rows(event_data, include_veto_pads)
+        if len(rows) > 0:
+            xy = self.padxy[pads] #same as chnls_to_xy_coord
+            xs = np.repeat(xy[:, 0], self.num_time_bins)
+            ys = np.repeat(xy[:, 1], self.num_time_bins)
+            es = event_data[rows, FIRST_DATA_BIN:].flatten()
+        else:
+            xs = np.repeat([], self.num_time_bins)
+            ys = np.repeat([], self.num_time_bins)
+            es = np.array([]).flatten()
 
         #make time bins data
         ts = np.tile(np.arange(0, self.num_time_bins), int(len(xs)/self.num_time_bins))
@@ -796,6 +1198,20 @@ class raw_h5_file:
         '''
         if threshold == None:
             threshold = self.length_counts_threshold
+        if type(event) != type(None) and USE_GPU and not _cusolver_available():
+            #cupy cannot load cusolver here, so cp.linalg.svd would raise and the numpy fallback below would run;
+            #do exactly that directly (same cupy-centred points, np.linalg.svd), without the failed import per call
+            x,y,z,e = self.get_xyze(event, threshold, False)
+            points = cp.asarray(np.stack((x, y, z), axis=1))
+            points_mean = points.mean(axis=0)
+            uu, dd, vv = np.linalg.svd(cp.asnumpy(points - points_mean), full_matrices=False)
+            if return_np:
+                points_mean = cp.asnumpy(points_mean)
+            else:
+                dd, vv = cp.array(dd), cp.array(vv)
+            if return_all_svd_results:
+                return points_mean, dd, vv
+            return points_mean, vv
         if type(event) != type(None):
             x,y,z,e = self.get_xyze(event, threshold, False)
             x, y,z,e = cp.array(x), cp.array(y), cp.array(z), cp.array(e)
@@ -864,6 +1280,11 @@ class raw_h5_file:
                 return "inf" if obj > 0 else "-inf"
             return obj
             
+        #added only when on, so that the settings hash of every existing configuration (and of the ROOT files
+        #processed with it, checked in process_runs._load_run_quantities) is unchanged
+        if self.remove_zero_pad:
+            settings['remove_zero_pad'] = True
+
         serialized_settings = {k: serialize(v) for k, v in settings.items()}
         return json.dumps(serialized_settings, sort_keys=True)
 
@@ -879,20 +1300,10 @@ class raw_h5_file:
         Pad numbers are determined from AGET, COBO, and channel number, rather than the pad number written during
         the merging process.
         '''
-        pads, pad_datas = [], []
         event_data =  self.get_data(event_number)
-        for line in event_data:
-            chnl_info = tuple(line[0:4])
-            if chnl_info in self.chnls_to_pad:
-                pad = self.chnls_to_pad[chnl_info]
-            else:
-                #print('warning: the following channel tripped but doesn\'t have  a pad mapping: '+str(chnl_info))
-                continue
-            if include_veto_pads or pad not in VETO_PADS:
-                pads.append(pad)
-                pad_datas.append(line[FIRST_DATA_BIN:])
-        return pads, pad_datas
-    
+        rows, pads = self._event_rows(event_data, include_veto_pads)
+        return list(pads), [event_data[i, FIRST_DATA_BIN:] for i in rows]
+
     def get_num_pads_fired(self, event_number):
         event = self.get_data(event_number)
         return len(event)

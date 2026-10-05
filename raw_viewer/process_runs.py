@@ -17,7 +17,42 @@ OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,101
                    104,87,70,53,35,17,782,800,818,835,852,869,886,902,918,933,948,962,975,987,998,997]
 
 TPC_PROCESSING_GPUS = [0, 2,3] if socket.gethostname() == 'tpcgpu' else [0]
+#conservative default workers per GPU, used for any background_subtract_mode not listed below
 TPC_MAX_WORKERS_PER_GPU = 2
+#default processing workers per GPU by background_subtract_mode (measured 2026-10-05 on 49 GB A6000s):
+#  smart2: torch RANSAC peaks at 12-13.4 GB per worker -> 2 (3 only when alone on a card)
+#  smart (smart1): 264 MiB per worker (CUDA context only); 4 per GPU scaled to 2000 evt/s on GPUs 0,2,3
+TPC_WORKERS_PER_GPU_BY_MODE = {'smart': 4, 'smart2': 2}
+DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config does not set the mode
+
+def get_config_background_mode(config_filename=""):
+    '''
+    background_subtract_mode set by a config in tpc_processing_configs (parsed from the CSV, no h5 file opened).
+    Returns the raw_h5_file default if the config is empty, missing, or does not set it.
+    '''
+    import csv
+    if config_filename and config_filename != 'none':
+        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
+        try:
+            with open(config_path, 'r') as f:
+                for row in csv.reader(f):
+                    if len(row) >= 3 and row[0].strip() == 'background_subtract_mode':
+                        return row[2].strip()
+        except OSError:
+            pass
+    return DEFAULT_BACKGROUND_SUBTRACT_MODE
+
+def get_default_workers_per_gpu(config_filename=""):
+    return TPC_WORKERS_PER_GPU_BY_MODE.get(get_config_background_mode(config_filename), TPC_MAX_WORKERS_PER_GPU)
+
+_assigned_gpu = None
+def _init_worker_gpu(counter, gpus_to_use):
+    '''Pool initializer: worker k (in start order) gets gpus_to_use[k % len], so any worker count is balanced.'''
+    global _assigned_gpu
+    with counter.get_lock():
+        k = counter.value
+        counter.value += 1
+    _assigned_gpu = gpus_to_use[k % len(gpus_to_use)]
 
 def get_save_path(experiment):
     if socket.gethostname() == 'tpcgpu':
@@ -326,7 +361,9 @@ def _worker_ensure_processed(args):
     experiment, run, config_filename, gpus_to_use = args
     import multiprocessing
     identity = multiprocessing.current_process()._identity
-    if identity:
+    if _assigned_gpu is not None:
+        gpu_to_use = _assigned_gpu
+    elif identity:
         idx = (identity[0] - 1) % len(gpus_to_use)
         gpu_to_use = gpus_to_use[idx]
     else:
@@ -337,7 +374,13 @@ def _worker_ensure_processed(args):
     if not os.path.exists(fname):
         process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
 
-def ensure_processed(experiment, runs, config_filename="", show_progress=True):
+def ensure_processed(experiment, runs, config_filename="", show_progress=True, gpus_to_use=None, num_workers=None):
+    '''
+    Process (with process_tpc_run) any of the runs that have no ROOT file yet.
+    gpus_to_use: GPUs for the processing workers (default TPC_PROCESSING_GPUS), balanced over the workers.
+    num_workers: number of processing workers. Default: len(gpus_to_use) * get_default_workers_per_gpu(config),
+                 i.e. chosen from the config's background_subtract_mode.
+    '''
     runs = [int(r) for r in runs]
     config_name = os.path.splitext(config_filename)[0]
     
@@ -351,9 +394,14 @@ def ensure_processed(experiment, runs, config_filename="", show_progress=True):
     if not runs_to_process:
         return
         
-    gpus_to_use = TPC_PROCESSING_GPUS
-    max_workers = len(gpus_to_use) * TPC_MAX_WORKERS_PER_GPU
-    
+    if gpus_to_use is None:
+        gpus_to_use = TPC_PROCESSING_GPUS
+    gpus_to_use = list(gpus_to_use)
+    if num_workers is None:
+        max_workers = len(gpus_to_use) * get_default_workers_per_gpu(config_filename)
+    else:
+        max_workers = int(num_workers)
+
     if show_progress:
         print(f"Pre-processing {len(runs_to_process)} TPC runs with {max_workers} workers...")
         
@@ -362,7 +410,9 @@ def ensure_processed(experiment, runs, config_filename="", show_progress=True):
     if max_workers > 1:
         import multiprocessing
         from concurrent.futures import ProcessPoolExecutor
-        with ProcessPoolExecutor(max_workers=max_workers, mp_context=multiprocessing.get_context('spawn')) as executor:
+        ctx = multiprocessing.get_context('spawn')
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx, initializer=_init_worker_gpu,
+                                 initargs=(ctx.Value('i', 0), gpus_to_use)) as executor:
             if show_progress:
                 list(tqdm(executor.map(_worker_ensure_processed, args_list), total=len(args_list)))
             else:
@@ -372,14 +422,23 @@ def ensure_processed(experiment, runs, config_filename="", show_progress=True):
         for args in iterable:
             _worker_ensure_processed(args)
 
-def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=1, config_filename="", gpus_to_use=None):
+def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=None, config_filename="", gpus_to_use=None):
+    '''
+    num_workers: None (default) -> missing runs are processed with the mode-based default
+                 (ensure_processed) and loading uses 1 process, as before;
+                 a number -> used for both the processing and the loading stage.
+    gpus_to_use: GPUs for both stages (default TPC_PROCESSING_GPUS).
+    '''
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
     runs = [int(r) for r in runs]
     to_return = {q: [] for q in qnames}
-    
-    ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress)
-    
+
+    ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress,
+                     gpus_to_use=gpus_to_use, num_workers=num_workers)
+    if num_workers is None:
+        num_workers = 1
+
     if show_load_progress:
         print(f'loading {qnames} for {runs}')
         
@@ -443,7 +502,7 @@ def _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=1):
     return np.concatenate(to_return, axis=0)
     
 
-def get_lengths(experiment_or_endpoints, runs=None, num_workers=1, config_filename=""):
+def get_lengths(experiment_or_endpoints, runs=None, num_workers=None, config_filename=""):
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
@@ -543,7 +602,7 @@ def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename=""):
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_angle(experiment_or_endpoints, runs=None, num_workers=1, config_filename=""):
+def get_angle(experiment_or_endpoints, runs=None, num_workers=None, config_filename=""):
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
