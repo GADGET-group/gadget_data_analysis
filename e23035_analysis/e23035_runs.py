@@ -133,11 +133,24 @@ def get_veto_mask(get_run=None, endpoints=None, max_veto_counts=None, tpc_ini_fi
     min_z = np.min(endpoints[:,:,2], axis=1)
     return veto_mask & (min_z > 5)
 
-def get_pad_gains():
+GAIN_MATCH_DIR = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results'
+
+def get_pad_gain_path(tpc_ini_filename=""):
+    '''
+    Pad gain map for a TPC processing config. Configs whose main baseline is smart1 (smart1_rpr*, and the hybrid
+    smart1_veto2_rpr_fzp, which has smart1 on every energy pad) use the map made on hybrid charges (6 October 2026:
+    run 49 of e23035_prep_vault, veto-pad cut 200 ADC, raw_viewer/pad_gain_match/hybrid_regain/README.md); smart2
+    configs and no config keep the February 2026 map (run 49, smart2 charges), so that files made with smart2 energies
+    stay comparable with everything made before.
+    '''
+    if process_runs.get_config_background_mode(tpc_ini_filename) == 'smart':
+        return os.path.join(GAIN_MATCH_DIR, 'hybrid_v200_fft6_res3.pkl')
     #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
+    return os.path.join(GAIN_MATCH_DIR, 'gm_old', 'fft6_res3.pkl')
+
+def get_pad_gains(tpc_ini_filename=""):
     #return np.ones(1024)*5.47e-6
-    with open(gain_match_path, 'rb') as f:
+    with open(get_pad_gain_path(tpc_ini_filename), 'rb') as f:
         gain_match_result = pickle.load(f)
     #return gain_match_result.x[:1024]
     return gain_match_result.pad_gains
@@ -150,7 +163,7 @@ def get_length_mm(get_run, tpc_ini_filename=""):
 def get_energy_MeV(get_run, num_workers=1, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    return process_runs.get_gm_ic(experiment, get_run, get_pad_gains(), num_workers=num_workers, config_filename=tpc_ini_filename)
+    return process_runs.get_gm_ic(experiment, get_run, get_pad_gains(tpc_ini_filename), num_workers=num_workers, config_filename=tpc_ini_filename)
 
 def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     if not is_iterable(get_run):

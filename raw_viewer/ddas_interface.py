@@ -367,6 +367,34 @@ def match_get_to_ddas(ddas_trigger_times, get_timestamps, get_run_ids, log_file)
     log_file.write(f'{np.sum(matches < 0)} of {len(matches)} DDAS triggers have no GET event\n')
     return matches
 
+def friend_tree_metadata(experiment, tpc_ini_filename="", get_runs=()):
+    '''
+    Provenance written into every friend tree as TNamed objects (name = key, title = value): the processing config, the
+    pad-gain file and the hash of its gains (the same hash as in the gm_ic cache names), the processing settings hash of
+    the first GET run, the git commit, and the time. Readable with uproot: f[key].member('fTitle').
+    '''
+    import hashlib, datetime, importlib
+    meta = {'tpc_config': tpc_ini_filename or '(none)'}
+    try:
+        exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+        gains = exp_runs.get_pad_gains(tpc_ini_filename) if 'tpc_ini_filename' in exp_runs.get_pad_gains.__code__.co_varnames else exp_runs.get_pad_gains()
+        meta['pad_gain_file'] = exp_runs.get_pad_gain_path(tpc_ini_filename) if hasattr(exp_runs, 'get_pad_gain_path') else '(see get_pad_gains)'
+        meta['pad_gain_hash'] = hashlib.sha256(np.asarray(gains).tobytes()).hexdigest()[:16]
+    except Exception as e:
+        meta['pad_gain_file'] = f'unknown ({e!r})'
+    try:
+        if len(get_runs) > 0:
+            meta['tpc_settings_hash'] = process_runs.get_experiment_settings_hash(experiment, int(get_runs[0]), tpc_ini_filename)
+    except Exception as e:
+        meta['tpc_settings_hash'] = f'unknown ({e!r})'
+    try:
+        import subprocess
+        meta['git_version'] = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).stdout.strip()
+    except Exception:
+        meta['git_version'] = 'unknown'
+    meta['created'] = datetime.datetime.now().isoformat(timespec='seconds')
+    return meta
+
 def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
     merged_path = get_ddas_root_file_path(experiment, ddas_run)
     if not os.path.exists(merged_path):
@@ -466,6 +494,10 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
             out_tree.Fill()
             
         output_file.WriteObject(out_tree, "tpc_data")
+        # provenance (6 October 2026): which pad gains, processing settings and code made the energies of this friend tree
+        for key, value in friend_tree_metadata(experiment, tpc_ini_filename, get_runs).items():
+            output_file.WriteObject(ROOT.TNamed(key, str(value)), key)
+            log_file.write(f'{key}: {value}\n')
 
 
 current_run, current_file, current_data = np.nan, None, None

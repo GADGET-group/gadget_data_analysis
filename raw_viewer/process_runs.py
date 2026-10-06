@@ -19,16 +19,28 @@ OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,101
 TPC_PROCESSING_GPUS = [0, 2,3] if socket.gethostname() == 'tpcgpu' else [0]
 #conservative default workers per GPU, used for any background_subtract_mode not listed below
 TPC_MAX_WORKERS_PER_GPU = 2
-#default processing workers per GPU by background_subtract_mode (measured 2026-10-05 on 49 GB A6000s):
-#  smart2: torch RANSAC peaks at 12-13.4 GB per worker -> 2 (3 only when alone on a card)
-#  smart (smart1): 264 MiB per worker (CUDA context only); 4 per GPU scaled to 2000 evt/s on GPUs 0,2,3
-TPC_WORKERS_PER_GPU_BY_MODE = {'smart': 4, 'smart2': 2}
+#Default processing workers per GPU by background_subtract_mode, from the GPU memory one worker needs (measured
+#2026-10-05/06 on the 49 GB A6000s of tpcgpu; peak over a run, MiB):
+#  smart2                  12,000-13,400 (torch RANSAC on every trace of a 50-event batch)
+#  smart (smart1)          264 (CUDA context only, the baseline runs on the CPU)
+#  'smart+veto_smart2'     620-700 (hybrid: smart1 on the pads, smart2 on the ~8 veto rows per event)
+#The per-GPU default is TPC_GPU_MEMORY_FRACTION x card memory / per-worker peak, so smart2 gets 2 (3 only when alone
+#on a card) and the light modes would get 35+ per card. For them the total is capped by TPC_MAX_TOTAL_WORKERS, because
+#throughput stops rising long before memory runs out: hybrid processing with one numba thread per worker gave 1850 evt/s
+#with 12 workers, 1480 with 24 and 1420 with 36 (cold reads of the raw files from the network filesystem; RAM use
+#~0.9 GB per worker, GPU memory 2.8 / 4.5-5.2 / 5.6-6.3 GB per card). Explicit num_workers / gpus_to_use always win.
+TPC_WORKER_GPU_MEMORY_MIB = {'smart2': 13400.0, 'smart': 264.0, 'smart+veto_smart2': 700.0}
+TPC_GPU_MEMORY_MIB = 49140.0          #per card; measured value of tpcgpu's A6000s (nvidia-smi), used when the card cannot be queried
+TPC_GPU_MEMORY_FRACTION = 0.55        #share of a card one config may fill with its workers (smart2: 0.55 x 49140 / 13400 = 2.0)
+TPC_MAX_TOTAL_WORKERS = 12            #where throughput saturated on tpcgpu (file I/O), all light modes
+TPC_WORKERS_PER_GPU_BY_MODE = {}      #explicit per-mode overrides ('mode' or 'mode+veto_vetomode'); empty = use the memory rule
 DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config does not set the mode
 
-def get_config_background_mode(config_filename=""):
+def get_config_background_mode(config_filename="", key='background_subtract_mode'):
     '''
-    background_subtract_mode set by a config in tpc_processing_configs (parsed from the CSV, no h5 file opened).
-    Returns the raw_h5_file default if the config is empty, missing, or does not set it.
+    background_subtract_mode (or another key, e.g. veto_background_subtract_mode) set by a config in
+    tpc_processing_configs (parsed from the CSV, no h5 file opened). If the config is empty, missing, or does not
+    set it: the raw_h5_file default for background_subtract_mode, None for any other key.
     '''
     import csv
     if config_filename and config_filename != 'none':
@@ -36,14 +48,31 @@ def get_config_background_mode(config_filename=""):
         try:
             with open(config_path, 'r') as f:
                 for row in csv.reader(f):
-                    if len(row) >= 3 and row[0].strip() == 'background_subtract_mode':
+                    if len(row) >= 3 and row[0].strip() == key:
                         return row[2].strip()
         except OSError:
             pass
-    return DEFAULT_BACKGROUND_SUBTRACT_MODE
+    return DEFAULT_BACKGROUND_SUBTRACT_MODE if key == 'background_subtract_mode' else None
 
 def get_default_workers_per_gpu(config_filename=""):
-    return TPC_WORKERS_PER_GPU_BY_MODE.get(get_config_background_mode(config_filename), TPC_MAX_WORKERS_PER_GPU)
+    '''
+    Default processing workers per GPU for a config: by background_subtract_mode, or, for a hybrid config
+    (veto_background_subtract_mode set), by the 'mode+veto_vetomode' entry if measured, otherwise the smaller
+    of the two modes' values.
+    '''
+    mode = get_config_background_mode(config_filename)
+    veto_mode = get_config_background_mode(config_filename, 'veto_background_subtract_mode')
+    key = mode if veto_mode is None else f'{mode}+veto_{veto_mode}'
+    if key in TPC_WORKERS_PER_GPU_BY_MODE:
+        return TPC_WORKERS_PER_GPU_BY_MODE[key]
+    mem = TPC_WORKER_GPU_MEMORY_MIB.get(key)
+    if mem is None and veto_mode is not None:      # hybrid without its own measurement: the heavier of its two modes
+        mem = max([TPC_WORKER_GPU_MEMORY_MIB[m] for m in (mode, veto_mode) if m in TPC_WORKER_GPU_MEMORY_MIB] or [None])
+    if mem is None:
+        return TPC_MAX_WORKERS_PER_GPU
+    per_gpu = int(TPC_GPU_MEMORY_FRACTION * TPC_GPU_MEMORY_MIB // mem)
+    per_gpu = min(per_gpu, max(1, -(-TPC_MAX_TOTAL_WORKERS // max(len(TPC_PROCESSING_GPUS), 1))))
+    return max(1, per_gpu)
 
 _assigned_gpu = None
 def _init_worker_gpu(counter, gpus_to_use):
@@ -53,6 +82,16 @@ def _init_worker_gpu(counter, gpus_to_use):
         k = counter.value
         counter.value += 1
     _assigned_gpu = gpus_to_use[k % len(gpus_to_use)]
+    # one thread per worker: the smart2 peak-trimming kernel is compiled with parallel=True and numba would otherwise
+    # start a thread per CPU core in every worker (12 workers = thousands of threads); it works row by row, so the
+    # thread count does not change results. Measured 2026-10-06: 12 hybrid workers 1450 -> 1850 evt/s.
+    for var in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+        os.environ.setdefault(var, '1')
+    try:
+        import numba
+        numba.set_num_threads(1)
+    except Exception:
+        pass
 
 def get_save_path(experiment):
     if socket.gethostname() == 'tpcgpu':

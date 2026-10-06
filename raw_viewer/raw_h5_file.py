@@ -34,6 +34,27 @@ import skimage.measure
 
 VETO_PADS = (253, 254, 508, 509, 763, 764, 1018, 1019)
 ZERO_PAD_PROBE_EVENTS = 20 #events probed per file to detect zero padding (remove_zero_pad)
+#baseline parameters that can be given a veto-pad specific value with a 'veto_' prefixed key (e.g.
+#veto_smart_bins_away_to_check); used only when veto_background_subtract_mode is set
+VETO_BASELINE_PARAMS = ('smart_bins_away_to_check', 'num_smart_background_ave_bins', 'ic_counts_threshold',
+                        'smart2_min_bins_in_peak', 'smart2_min_sigma', 'require_peak_within',
+                        'num_background_bins', 'background_convolution_kernel')
+
+class _BaselineParams:
+    '''
+    Read-only view of the baseline settings of a raw_h5_file. With veto=True, an attribute X is taken from
+    'veto_X' when that is set (not None), e.g. background_subtract_mode -> veto_background_subtract_mode;
+    otherwise (and always with veto=False) from X itself.
+    '''
+    def __init__(self, h5, veto):
+        self._h5 = h5
+        self._veto = veto
+    def __getattr__(self, name):
+        if self._veto:
+            value = getattr(self._h5, 'veto_' + name, None)
+            if value is not None:
+                return value
+        return getattr(self._h5, name)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_PADS = 1024
 
@@ -465,6 +486,10 @@ class raw_h5_file:
         #512 columns with the last 112 zero) are removed when events are read, so the run looks like a run of its
         #true depth. A no-op for files without padding. See _zero_pad_info.
         self.remove_zero_pad = False
+        #hybrid baseline: if set (e.g. 'smart2'), traces of VETO_PADS are baseline-subtracted with this mode and
+        #with the veto_<param> values that are set (VETO_BASELINE_PARAMS), all other pads with
+        #background_subtract_mode. None (default): every pad uses background_subtract_mode.
+        self.veto_background_subtract_mode = None
 
         self.batched_data_cache = {}
         self.batch_event_cache_size = 1
@@ -711,6 +736,7 @@ class raw_h5_file:
 
         massive_traces = []
         massive_trace_lens = []
+        massive_pads = []
 
         for evt in batch_events:
             try:
@@ -744,12 +770,14 @@ class raw_h5_file:
 
             pad_image = np.zeros(np.shape(self.pad_plane)) if self.remove_outliers else None
             valid_indices = []
+            valid_pads = []
 
             for i, line in enumerate(data):
                 chnl_info = tuple(line[0:4])
                 if chnl_info in self.chnls_to_pad:
                     pad = self.chnls_to_pad[chnl_info]
                     valid_indices.append(i)
+                    valid_pads.append(pad)
                     if self.reconstruct_railed_pads:
                         if np.max(line[FIRST_DATA_BIN:]) == 4095:
                             line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
@@ -764,13 +792,14 @@ class raw_h5_file:
             if len(valid_indices) > 0 and self.background_subtract_mode != 'none':
                 traces_2d = data[valid_indices, FIRST_DATA_BIN:]
                 massive_traces.append(traces_2d)
+                massive_pads.append(np.array(valid_pads, dtype=np.int64))
                 massive_trace_lens.append(len(valid_indices))
             else:
                 massive_trace_lens.append(0)
 
         if len(massive_traces) > 0 and self.background_subtract_mode != 'none':
             massive_traces_2d = np.concatenate(massive_traces, axis=0)
-            massive_baselines = self.calculate_background_2d(massive_traces_2d)
+            massive_baselines = self._calculate_batch_backgrounds(massive_traces_2d, np.concatenate(massive_pads))
 
             idx = 0
             for i, evt in enumerate(batch_events):
@@ -909,7 +938,7 @@ class raw_h5_file:
         railed_cache = {}
         self.__dict__['_railed_pads_cache'] = railed_cache #only the current batch is kept
         event_datas, event_valid_indices, event_pads = {}, {}, {}
-        massive_traces, massive_trace_lens = [], []
+        massive_traces, massive_trace_lens, massive_pads = [], [], []
 
         for evt in batch_events:
             try:
@@ -948,13 +977,14 @@ class raw_h5_file:
 
             if len(valid_indices) > 0 and self.background_subtract_mode != 'none':
                 massive_traces.append(data[valid_indices, FIRST_DATA_BIN:])
+                massive_pads.append(pads[valid_indices])
                 massive_trace_lens.append(len(valid_indices))
             else:
                 massive_trace_lens.append(0)
 
         if len(massive_traces) > 0 and self.background_subtract_mode != 'none':
             massive_traces_2d = np.concatenate(massive_traces, axis=0)
-            massive_baselines = self.calculate_background_2d(massive_traces_2d)
+            massive_baselines = self._calculate_batch_backgrounds(massive_traces_2d, np.concatenate(massive_pads))
             idx = 0
             for i, evt in enumerate(batch_events):
                 if evt not in event_datas: continue
@@ -1005,20 +1035,44 @@ class raw_h5_file:
         rows = np.nonzero(keep)[0]
         return rows, pads[rows]
 
-    def calculate_background(self, trace, debug_plots=False):
+    def calculate_background(self, trace, debug_plots=False, pad=None):
         '''
         Wrapper for calculate_background_2d that takes a 1D trace and returns a 1D baseline.
+        pad: pad number of the trace (optional); for a veto pad the veto baseline settings are used when
+        veto_background_subtract_mode is set, as in get_data.
         '''
         trace_2d = np.ascontiguousarray(trace, dtype=np.float64).reshape(1, -1)
-        return self.calculate_background_2d(trace_2d, debug_plots)[0]
+        veto = pad is not None and pad in VETO_PADS and self.veto_background_subtract_mode is not None
+        return self.calculate_background_2d(trace_2d, debug_plots, veto=veto)[0]
 
-    def calculate_background_2d(self, traces_2d, debug_plots=False):
+    def _calculate_batch_backgrounds(self, traces_2d, pads):
+        '''
+        Baselines for the rows of a get_data batch (pads: pad number of each row). Without
+        veto_background_subtract_mode this is calculate_background_2d(traces_2d). With it, veto-pad rows and
+        the other rows are computed separately, each with its own mode and parameters.
+        '''
+        if self.veto_background_subtract_mode is None:
+            return self.calculate_background_2d(traces_2d)
+        is_veto = np.isin(pads, VETO_PADS)
+        baselines = np.empty_like(traces_2d)
+        if np.any(~is_veto):
+            baselines[~is_veto] = self.calculate_background_2d(traces_2d[~is_veto])
+        if np.any(is_veto):
+            baselines[is_veto] = self.calculate_background_2d(traces_2d[is_veto], veto=True)
+        return baselines
+
+    def calculate_background_2d(self, traces_2d, debug_plots=False, mode=None, veto=False):
         '''
         Return calculated background for each timebin for a 2D array of traces.
 
         Traces should only contain data bins
+        veto: use the veto-pad settings (veto_background_subtract_mode and the veto_<param> keys that are set)
+        mode: overrides the mode (default background_subtract_mode, or veto_background_subtract_mode if veto)
         '''
-        if self.background_subtract_mode == 'smart2':
+        p = _BaselineParams(self, veto)
+        if mode is None:
+            mode = p.background_subtract_mode
+        if mode == 'smart2':
             '''
             RANSAC lowest 25% of points to get initial baseline estimate
             Find peak with maximum value and more than 5 consecutive bins above the baseline found by RANSAC. Trim trace to 10 bins to each side of the found block of bins.
@@ -1038,16 +1092,16 @@ class raw_h5_file:
             return _smart2_numba_peak_trimming_2d(
                 np.ascontiguousarray(traces_2d, dtype=np.float64), 
                 np.ascontiguousarray(ransac_baseline_2d, dtype=np.float64), 
-                self.smart2_min_bins_in_peak, 
-                self.smart_bins_away_to_check, 
-                self.smart2_min_sigma
+                p.smart2_min_bins_in_peak, 
+                p.smart_bins_away_to_check, 
+                p.smart2_min_sigma
             )
 
-        if self.background_subtract_mode == 'smart' and not debug_plots and traces_2d.dtype == np.float64:
+        if mode == 'smart' and not debug_plots and traces_2d.dtype == np.float64:
             #numba version of the loop below, bit-identical (get_data always passes float64)
-            return _smart1_baselines_2d(np.ascontiguousarray(traces_2d), int(self.smart_bins_away_to_check),
-                                        int(self.num_smart_background_ave_bins), float(self.ic_counts_threshold),
-                                        float(self.require_peak_within[0]), float(self.require_peak_within[1]))
+            return _smart1_baselines_2d(np.ascontiguousarray(traces_2d), int(p.smart_bins_away_to_check),
+                                        int(p.num_smart_background_ave_bins), float(p.ic_counts_threshold),
+                                        float(p.require_peak_within[0]), float(p.require_peak_within[1]))
 
         B, N = traces_2d.shape
         baselines = np.zeros_like(traces_2d)
@@ -1055,40 +1109,40 @@ class raw_h5_file:
         for b in range(B):
             trace = traces_2d[b]
             #apply consnant offset of average value of a pad within a time window
-            if self.background_subtract_mode == 'fixed window':
-                baselines[b] = np.average(trace[self.num_background_bins[0]:self.num_background_bins[1]])
+            if mode == 'fixed window':
+                baselines[b] = np.average(trace[p.num_background_bins[0]:p.num_background_bins[1]])
             #rolling average to each side of a pad
-            elif self.background_subtract_mode == 'convolution':
-                baselines[b] = np.convolve(trace, self.background_convolution_kernel, mode='same')
+            elif mode == 'convolution':
+                baselines[b] = np.convolve(trace, p.background_convolution_kernel, mode='same')
             #in the case of none, just return an array of 0s
-            elif self.background_subtract_mode == 'none':
+            elif mode == 'none':
                 baselines[b] = np.zeros(len(trace))
-            elif self.background_subtract_mode == 'smart':
+            elif mode == 'smart':
                 peak_index = np.argmax(trace)
                 #zero traces with peaks outside specified region by returing the trace as the baseline
-                if peak_index < self.require_peak_within[0] or peak_index > self.require_peak_within[1]:
+                if peak_index < p.require_peak_within[0] or peak_index > p.require_peak_within[1]:
                     baselines[b] = trace
                     continue
                 #find  start of the peak, defined as where the going bin smart_bins_away_to_check
                 #is no longer at least ic_counts_threshold below the current bin
                 i = peak_index
                 while i>0:
-                    j = max(0, i - self.smart_bins_away_to_check)
-                    if trace[i] < trace[j] + self.ic_counts_threshold:
+                    j = max(0, i - p.smart_bins_away_to_check)
+                    if trace[i] < trace[j] + p.ic_counts_threshold:
                         break
                     i -= 1
                 peak_start = i
                 #find end
                 i = peak_index
                 while i < len(trace) - 1:
-                    j = min(len(trace) - 1, i + self.smart_bins_away_to_check)
-                    if trace[i] < trace[j] + self.ic_counts_threshold:
+                    j = min(len(trace) - 1, i + p.smart_bins_away_to_check)
+                    if trace[i] < trace[j] + p.ic_counts_threshold:
                         break
                     i += 1
                 peak_end = i
                 #fit a line through the points just outside the peak region
-                xs = np.concatenate([np.arange(max(0, peak_start - self.num_smart_background_ave_bins), peak_start),
-                                               np.arange(peak_end, min(peak_end + self.num_smart_background_ave_bins, len(trace)))])
+                xs = np.concatenate([np.arange(max(0, peak_start - p.num_smart_background_ave_bins), peak_start),
+                                               np.arange(peak_end, min(peak_end + p.num_smart_background_ave_bins, len(trace)))])
                 ys = trace[xs]
                 
                 n = len(xs)
@@ -1109,8 +1163,8 @@ class raw_h5_file:
                 baselines[b] = trace
                 x_peak = np.arange(peak_start, peak_end)
                 baselines[b, x_peak] = offset + slope * x_peak
-            elif self.background_subtract_mode == 'snip':
-                p = self.smart_bins_away_to_check#20 # window size
+            elif mode == 'snip':
+                p = p.smart_bins_away_to_check#20 # window size
                 
                 # LLS transform: log(log(y + 1) + 1)
                 y = np.array(trace, dtype=float, copy=True)
@@ -1284,6 +1338,13 @@ class raw_h5_file:
         #processed with it, checked in process_runs._load_run_quantities) is unchanged
         if self.remove_zero_pad:
             settings['remove_zero_pad'] = True
+        #likewise the hybrid (veto-pad) baseline settings, only when the veto mode is set
+        if self.veto_background_subtract_mode is not None:
+            settings['veto_background_subtract_mode'] = self.veto_background_subtract_mode
+            for name in VETO_BASELINE_PARAMS:
+                value = getattr(self, 'veto_' + name, None)
+                if value is not None:
+                    settings['veto_' + name] = value
 
         serialized_settings = {k: serialize(v) for k, v in settings.items()}
         return json.dumps(serialized_settings, sort_keys=True)
@@ -1693,7 +1754,7 @@ class raw_h5_file:
             r = pad/1024*.8
             g = (pad%512)/512*.8
             b = (pad%256)/256*.8
-            plt.plot(self.calculate_background(data), '.', color=(r,g,b), label='%d baseline'%pad)
+            plt.plot(self.calculate_background(data, pad=pad), '.', color=(r,g,b), label='%d baseline'%pad)
         self.data_select_mode = old_mode
         plt.legend(loc='upper right')
         plt.show(block=block)
