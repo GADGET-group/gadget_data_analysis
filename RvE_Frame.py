@@ -14,7 +14,6 @@ from GadgetRunH5 import GadgetRunH5
 import numpy as np
 from tqdm import tqdm
 import pickle
-from matplotlib.path import Path
 
 import gadget_widgets
 from prev_cut_select_window import PrevCutSelectWindow
@@ -101,7 +100,7 @@ class RvE_Frame(ttk.Frame):
         ttk.Label(self.filter_frame, text="Veto max < ").grid(row=0, column=0)
         self.veto_threshold_entry = gadget_widgets.GEntry(self.filter_frame)
         self.veto_threshold_entry.grid(row=0, column=1)
-        self.veto_threshold_entry.insert(0, "220")  # default
+        self.veto_threshold_entry.insert(0, "150")  # default, as in raw_viewer/plots/rve.py
 
         # Range min / max
         ttk.Label(self.filter_frame, text="Range min:").grid(row=1, column=0)
@@ -136,6 +135,17 @@ class RvE_Frame(ttk.Frame):
         self.ic_max_entry.grid(row=3, column=3)
         self.ic_max_entry.insert(0, "1e9")
 
+        # railed pads / time since beam off (defaults as in raw_viewer/plots/rve.py)
+        ttk.Label(self.filter_frame, text="Railed pads max:").grid(row=4, column=0)
+        self.railed_pads_max_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.railed_pads_max_entry.grid(row=4, column=1)
+        self.railed_pads_max_entry.insert(0, "0")
+
+        ttk.Label(self.filter_frame, text="t since beam off > (s):").grid(row=4, column=2)
+        self.beam_off_min_entry = gadget_widgets.GEntry(self.filter_frame)
+        self.beam_off_min_entry.grid(row=4, column=3)
+        self.beam_off_min_entry.insert(0, "0.05")
+
         # Storage for selected vertices and mask
         self.rve_cut_verticies = []
         self.rve_cut_select_mask = None
@@ -156,8 +166,6 @@ class RvE_Frame(ttk.Frame):
     def get_processed_event_mask(self):
         '''
         Returns a mask that can be used to select events in the processed data set
-
-        TODO: calculate angles from dz and dxy
         '''
         veto_maxs = self.run_data.max_veto_counts 
         veto_thresh = float(self.veto_threshold_entry.get())
@@ -167,15 +175,18 @@ class RvE_Frame(ttk.Frame):
         amax = float(self.angle_max_entry.get())
         icmin = float(self.ic_min_entry.get())
         icmax = float(self.ic_max_entry.get())
+        railed_max = float(self.railed_pads_max_entry.get())
+        beam_off_min = float(self.beam_off_min_entry.get())
 
-        #return veto_maxs < float(self.veto_threshold_entry.get())
         to_return =  np.logical_and.reduce((veto_maxs < float(veto_thresh),
                                       self.run_data.angles < float(amax),
                                       self.run_data.angles > float(amin),
                                       self.run_data.ranges > float(rmin),
                                       self.run_data.ranges < float(rmax),
                                       self.run_data.counts < float(icmax),
-                                      self.run_data.counts > float(icmin)
+                                      self.run_data.counts > float(icmin),
+                                      self.run_data.num_railed_pads <= railed_max,
+                                      self.run_data.time_since_beam_off > beam_off_min
                                     ))
         return to_return
 
@@ -189,7 +200,7 @@ class RvE_Frame(ttk.Frame):
         print(sum(mask), 'events after mask applied', len(mask), 'total events')
         ax.hist2d(self.run_data.counts[mask], self.run_data.ranges[mask],
                   bins=(bins, bins), norm=colors.LogNorm())
-        ax.set_xlabel('adc counts')
+        ax.set_xlabel(f'Energy ({self.run_data.energy_units})')
         ax.set_ylabel('range (mm)')
 
         self.poly_selector = PolygonSelector(ax, self.set_cut_polygon)
@@ -205,7 +216,7 @@ class RvE_Frame(ttk.Frame):
         mask = self.get_processed_event_mask()
         print(sum(mask), 'events after mask applied', len(mask), 'total events')
         ax.hist2d(self.run_data.counts[mask], self.run_data.ranges[mask], bins=(bins, bins), norm=colors.LogNorm())
-        ax.set_xlabel('adc counts')
+        ax.set_xlabel(f'Energy ({self.run_data.energy_units})')
         ax.set_ylabel('range (mm)')
         fig.show()
 
@@ -229,9 +240,9 @@ class RvE_Frame(ttk.Frame):
             plt.figure('RvE')  # switch focus back to RvE plot
         event_num = int(self.event_num_entry.get())
         event_index = self.run_data.get_index(event_num)
-        plt.plot(self.run_data.total_energy_MeV[event_index], self.run_data.len_list[event_index], 'ro', picker=5) 
-        plt.annotate(f"Evt#: {event_num}", (self.run_data.total_energy_MeV[event_index], 
-                    self.run_data.len_list[event_index]), textcoords="offset points", xytext=(-15,7),
+        plt.plot(self.run_data.counts[event_index], self.run_data.ranges[event_index], 'ro', picker=5) 
+        plt.annotate(f"Evt#: {event_num}", (self.run_data.counts[event_index], 
+                    self.run_data.ranges[event_index]), textcoords="offset points", xytext=(-15,7),
                     ha='center', fontsize=10, color='black',
                     bbox=dict(boxstyle="round,pad=0.5", facecolor="yellow", edgecolor="black"))
         plt.show(block=False)
@@ -341,8 +352,8 @@ class RvE_Frame(ttk.Frame):
 
         print("All images have been processed")
 		
-		# Pickle cut_indices
-        cut_indices_H5list = cut_indices
+		# Pickle the event numbers of the events in the cut
+        cut_indices_H5list = self.run_data.get_event_num(cut_indices)
         cut_indices_str = f"cut_indices_H5list.pkl"
         cut_indices_path = os.path.join(imageCut_path, cut_indices_str)
         with open(cut_indices_path, "wb") as file:

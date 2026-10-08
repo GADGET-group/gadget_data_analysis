@@ -29,7 +29,7 @@ class IndividualEventFrame(ttk.Frame):
                                                       text='Enter Event #')
         self.event_num_entry.grid(row=0, column=1)
 
-        self.threeD_frame = ttk.LabelFrame(self, text='Point Cloud Viewer')
+        self.threeD_frame = ttk.LabelFrame(self, text='Raw Data Viewer')
         track_w_trace_button_raw = ttk.Button(self.threeD_frame,
                                           text='Show Track w/ Trace : Unfiltered Trace',
                                           command = self.track_w_trace_raw)
@@ -67,13 +67,10 @@ class IndividualEventFrame(ttk.Frame):
     def project_trace(self):
         debug = True
 
-        index = self.run_data.get_index(int(self.event_num_entry.get()))
+        event_num = int(self.event_num_entry.get())
         bandwidth = float(self.bandwidth_entry.get())
 
-        xHit = self.run_data.xHit_list[index]
-        yHit = self.run_data.yHit_list[index]
-        zHit = self.run_data.zHit_list[index]
-        eHit = self.run_data.eHit_list[index]
+        xHit, yHit, zHit, eHit = self.run_data.get_hit_lists(event_num)
 
         extend_bins = 10 #TODO: this should probably be relaed to the bandwidth
         if debug:
@@ -114,7 +111,6 @@ class IndividualEventFrame(ttk.Frame):
 
     def show_plot(self, xHit, yHit, zHit, eHit):
         event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
         fig = plt.figure(figsize=(6,6))
         ax = plt.axes(projection='3d')
         ax.set_xlim3d(-35, 35)
@@ -130,15 +126,13 @@ class IndividualEventFrame(ttk.Frame):
 
     def track_w_trace_raw(self):
         event_num = int(self.event_num_entry.get())
-        # index = self.run_data.get_index(event_num)
         plt.figure()
         self.run_data.make_image(event_num, show=True)
 
     def track_w_trace_raw_smooth(self):
         event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
         plt.figure()
-        self.run_data.make_image(index, show=True, smoothen = True)
+        self.run_data.make_image(event_num, show=True, smoothen = True)
 
 
     def show_point_cloud(self):
