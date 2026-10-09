@@ -139,12 +139,12 @@ class GadgetRunH5:
 
         #TODO: decide how to store calibration information with runs
         # legacy e21072 two-point calibration; only the image energy bar uses it (to_MeV)
-        calib_point_1 = (0.806, 156745)
-        calib_point_2 = (1.679, 320842)
-        energy_1, channel_1 = calib_point_1
-        energy_2, channel_2 = calib_point_2
-        self.energy_scale_factor = (energy_2 - energy_1) / (channel_2 - channel_1)
-        self.energy_offset = energy_1 - self.energy_scale_factor * channel_1
+        # calib_point_1 = (0.806, 156745)
+        # calib_point_2 = (1.679, 320842)
+        # energy_1, channel_1 = calib_point_1
+        # energy_2, channel_2 = calib_point_2
+        self.energy_scale_factor = 1 # (energy_2 - energy_1) / (channel_2 - channel_1)
+        self.energy_offset = 0 # energy_1 - self.energy_scale_factor * channel_1
 
     def get_event_num_bounds(self):
         #returns first event number, last event number
