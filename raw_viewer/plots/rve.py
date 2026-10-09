@@ -20,8 +20,9 @@ from e23035_analysis import e23035_runs
 experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
-    run_range= [145, 147, 149, 151, 153, 154, 178, 180, 182, 184, 186, 188, 190, 192, 194, 196, 198, 200, 202, 204, 206, 215, 216, 218, 220, 222, 224, 226, 228, 229, 231, 233, 235, 237, 239, 241, 242, 244, 246, 248, 250, 252, 254, 255, 257, 260, 263, 265, 267, 269, 270, 275, 277, 279]  
-    #[123, 124, 125, 126, 127, 128, 129, 130, 132, 133, 136, 137,145, 147, 149, 151, 153, 154, 178, 180, 182, 184, 186, 188,190, 192, 194, 196, 198, 200, 202, 204, 206, 215, 216, 218, 220, 222, 224, 226, 228, 229, 231, 233, 235, 237, 239, 241, 242, 244, 246, 248, 250, 252, 254, 255, 257, 260, 263, 265, 267, 269, 270, 275, 277, 279]
+    #run_range=[71, 72, 76, 77, 78, 79, 80, 81, 82, 83]
+    run_range = [136, 137, 145, 147, 149, 151, 153, 154, 156, 158, 160, 162, 164, 165, 167, 169, 171, 173, 175, 177, 178, 180, 182, 184, 186, 188, 190, 192, 194, 196, 198, 200, 202, 204, 206, 215, 216, 218, 220, 222, 224, 226, 228, 229, 231, 233, 235, 237, 239, 241, 242, 244, 246, 248, 250, 252, 254, 255, 257, 260, 263, 265, 267, 269, 270, 275, 277, 279]
+    #run_range= [123, 124, 125, 126, 127, 128, 129, 130, 132, 133, 136, 137, 145, 147, 149, 151, 153, 154, 200, 277]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range = [] #[216,228,255,260,269]
 # else: #during experiment
@@ -96,7 +97,7 @@ if experiment == 'e23035':
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
-    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.05)
+    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.1)
 veto_mask = veto_mask & (num_pads_railed==0) #& (angles>np.radians(20)) 
 
     
@@ -109,11 +110,17 @@ plt.figure()
 plt_mask = veto_mask&(lengths>1)&(lengths<400)#
 plt.title('runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
-plt.colorbar()
-plt.xlabel('Energy (MeV)')
-plt.ylabel('Range (mm)')
+cbar = plt.colorbar()
+cbar.ax.tick_params(labelsize=16)
+
+plt.xlabel('Energy (MeV)', fontsize=22, fontweight='bold')
+plt.ylabel('Range (mm)', fontsize=22, fontweight='bold')
+
+# Increase the size of the numbers along both axes
+plt.xticks(fontsize=18)
+plt.yticks(fontsize=18)
 plt.xlim(0, 5)
-plt.ylim(0, 140)
+plt.ylim(0, 150)
 
 
 # self.poly_selector = matplotlib.widgets.PolygonSelector(ax,self.set_cut_polygon)
@@ -263,9 +270,6 @@ def set_cut_polygon(verticies):
         selected_rve_path = matplotlib.path.Path(rve_cut_verticies)
         rve_points = np.vstack((energy[plt_mask], lengths[plt_mask])).transpose()
         rve_cut_select_mask = selected_rve_path.contains_points(rve_points)
-         # Number of events inside the polygon cut
-        num_selected = np.sum(rve_cut_select_mask)
-        print(f"\nNumber of events inside cut: {num_selected}\n")
 
 poly_selector = None
 def define_cut_on_gui():
@@ -278,220 +282,82 @@ def define_cut_on_gui():
     poly_selector = matplotlib.widgets.PolygonSelector(ax,set_cut_polygon)
     # if len(self.rve_cut_verticies) > 0:
     #     self.poly_selector.verts = self.rve_cut_verticies
-    ax.set_xlim(0, 6)
+    ax.set_xlim(0, 3.5)
     ax.set_ylim(0, 140)
     fig.show()
 
 evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)
-def plot_rve_with_special_events(
-        special_events= None,
-        xlim=(0, 5),
-        ylim=(0, 140),
-        annotate=True,
-        show_plot=False
-    ):
-    """
-    Plot the normal Range-vs-Energy distribution and highlight
-    selected run/event pairs.
-
-    Parameters
-    ----------
-    special_events : list of tuples
-        List of (run_number, event_number) pairs.
-
-        Example:
-            [(147, 649226),
-             (149, 123456)]
-
-        If [] or None is supplied, the normal RVE plot is shown
-        without highlighted events.
-
-    xlim : tuple
-        Energy-axis limits in MeV.
-
-    ylim : tuple
-        Range-axis limits in mm.
-
-    annotate : bool
-        If True, print the run/event number next to each highlighted
-        point.
-
-    show_plot : bool
-        If True, also display the plot window.
-        If False, just save the plot to file.
-
-    Returns
-    -------
-    dict
-        Information about highlighted and missing events, plus
-        the saved plot path.
-    """
-
-    if special_events is None:
-        special_events = []
-
-    # ----------------------------------------------------------
-    # Create output directory inside raw_viewer/plots/
-    # ----------------------------------------------------------
-    output_dir = Path(__file__).resolve().parent / "special_event_plots"
-    output_dir.mkdir(exist_ok=True)
-
-    output_path = output_dir / "rve_special_events.png"
-
-    # ----------------------------------------------------------
-    # Draw the normal Range-vs-Energy plot
-    # ----------------------------------------------------------
+def plot_selected_events(selected_events):
+    """Plot selected (run, event) pairs on the Range-vs-Energy histogram."""
     fig, ax = plt.subplots(figsize=(10, 7))
 
-    hist = ax.hist2d(
+    h = ax.hist2d(
         energy[plt_mask],
         lengths[plt_mask],
         bins=rve_bins,
         norm=matplotlib.colors.LogNorm()
     )
 
-    fig.colorbar(
-        hist[3],
-        ax=ax,
-        label="Counts"
-    )
+    cbar = plt.colorbar(h[3], ax=ax)
+    cbar.set_label("Counts")
 
-    ax.set_title("Range vs Energy")
-    ax.set_xlabel("Energy (MeV)")
-    ax.set_ylabel("Range (mm)")
-    ax.set_xlim(*xlim)
-    ax.set_ylim(*ylim)
+    first_event = True
 
-    # ----------------------------------------------------------
-    # If no special events were supplied, just save the normal RVE
-    # ----------------------------------------------------------
-    if len(special_events) == 0:
+    for run, event in selected_events:
+        event_mask = (evt_runs == run) & (evt_nums == event)
 
-        print("No special events supplied. Saving normal Range-vs-Energy plot.")
-
-        plt.tight_layout()
-        fig.savefig(output_path, dpi=300, bbox_inches="tight")
-        print(f"Saved plot to: {output_path}")
-
-        if show_plot:
-            plt.show(block=True)
-        else:
-            plt.close(fig)
-
-        return {
-            "found": [],
-            "missing": [],
-            "saved_plot": str(output_path)
-        }
-
-    # ----------------------------------------------------------
-    # Find requested run/event combinations
-    # ----------------------------------------------------------
-    found_events = []
-    missing_events = []
-
-    special_energies = []
-    special_lengths = []
-
-    for run, event in special_events:
-
-        run = int(run)
-        event = int(event)
-
-        event_index = np.where(
-            (evt_runs == run) &
-            (evt_nums == event)
-        )[0]
-
-        if len(event_index) == 0:
-
-            print(
-                f"WARNING: Run {run}, event {event} "
-                "was not found in the currently loaded data."
-            )
-
-            missing_events.append((run, event))
+        if not np.any(event_mask):
+            print(f"WARNING: Run {run}, Event {event} was not found.")
             continue
 
-        i = event_index[0]
-
-        event_energy = energy[i]
-        event_length = lengths[i]
-
-        special_energies.append(event_energy)
-        special_lengths.append(event_length)
-
-        found_events.append({
-            "run": run,
-            "event": event,
-            "energy": event_energy,
-            "range": event_length,
-            "passes_plt_mask": bool(plt_mask[i])
-        })
+        event_energy = energy[event_mask][0]
+        event_range = lengths[event_mask][0]
 
         print(
-            f"Run {run}, event {event}: "
-            f"Energy = {event_energy:.4f} MeV, "
-            f"Range = {event_length:.2f} mm, "
-            f"passes normal RVE mask = {bool(plt_mask[i])}"
+            f"Run {run}, Event {event}: "
+            f"Energy = {event_energy:.3f} MeV, "
+            f"Range = {event_range:.2f} mm"
         )
-
-    # ----------------------------------------------------------
-    # Overlay highlighted events
-    # ----------------------------------------------------------
-    if len(special_energies) > 0:
 
         ax.scatter(
-            special_energies,
-            special_lengths,
-            s=180,
+            event_energy,
+            event_range,
             marker="*",
+            s=100,
             color="red",
-            edgecolors="black",
-            linewidths=1.2,
-            zorder=10,
-            label="Selected events"
+            edgecolor="black",
+            linewidth=1.5,
+            label="Selected events" if first_event else None,
+            zorder=10
         )
 
-        # if annotate:
-        #     for result in found_events:
-        #         ax.annotate(
-        #             f"R{result['run']} E{result['event']}",
-        #             (result["energy"], result["range"]),
-        #             xytext=(8, 8),
-        #             textcoords="offset points",
-        #             fontsize=9,
-        #             fontweight="bold",
-        #             color="red",
-        #             bbox=dict(
-        #                 boxstyle="round,pad=0.2",
-        #                 facecolor="white",
-        #                 alpha=0.8,
-        #                 edgecolor="black"
-        #             ),
-        #             zorder=11
-        #         )
+        ax.annotate(
+            f"{run}:{event}",
+            xy=(event_energy, event_range),
+            xytext=(0, 4),             # 9 points above the star
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize = 6,
+            fontweight="bold",
+            color="blue",
+            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
+            zorder=11
+        )
 
-        ax.legend(loc="upper right")
+        first_event = False
 
-    # ----------------------------------------------------------
-    # Save plot (overwrite each time)
-    # ----------------------------------------------------------
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"Saved plot to: {output_path}")
+    ax.set_title("Range vs Energy")
 
-    if show_plot:
-        plt.show(block=True)
-    else:
-        plt.close(fig)
+    ax.set_xlabel("Energy (MeV)")
+    ax.set_ylabel("Range (mm)")
+    ax.set_xlim(0, 5)
+    ax.set_ylim(0, 140)
 
-    return {
-        "found": found_events,
-        "missing": missing_events,
-        "saved_plot": str(output_path)
-    }
+    if not first_event:
+        ax.legend()
 
+    plt.show()
 def show_selected_event(i):
     run = evt_runs[plt_mask][rve_cut_select_mask][i]
     evt = evt_nums[plt_mask][rve_cut_select_mask][i]
@@ -1524,7 +1390,7 @@ def fit_peak(
 def plot_energy_spectrum_fixed_bin_width1(
         bin_width=0.01,
         title=" Alpha Energy Spectrum",
-        energy_range=(0, 3),
+        energy_range=(0.0, 8.0),
         xlim=None,
         font_scale=4.0,
         line_width=3.0,
