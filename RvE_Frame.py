@@ -254,7 +254,8 @@ class RvE_Frame(ttk.Frame):
     def save_cut_files(self, points):
         now = datetime.datetime.now()
         rand_num = str(random.randrange(0,1000000,1))
-        cut_name = rand_num+now.strftime("CUT_Date_%m_%d_%Y")
+        # cuts of every run share run_data.folder_path, so name them by run
+        cut_name = f'run{self.run_data.run_num}_' + rand_num + now.strftime("CUT_Date_%m_%d_%Y")
         imageCut_path = os.path.join(self.run_data.folder_path, cut_name)
         print('NEW DIRECTORY', imageCut_path)
 

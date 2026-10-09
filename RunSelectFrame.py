@@ -1,11 +1,9 @@
-import os
 from tkinter import ttk
 import gadget_widgets
 import GadgetRunH5
 from raw_viewer import process_runs
 
 import tkinter as tk
-import tkinter.filedialog
 
 class RunSelectFrame(ttk.Frame):
     def __init__(self, parent, main_gui):
@@ -54,13 +52,10 @@ class RunSelectFrame(ttk.Frame):
     def load_button_clicked(self):
         experiment = self.get_experiment()
         self.run_number = int(self.load_run_number_entry.get())
-        default_path = process_runs.get_save_path(experiment) or os.getcwd()
-        selected_path = tk.filedialog.askdirectory(initialdir=default_path,
-                                                   title='Select output directory for cut images')
-        if selected_path:
-            self.run_data = GadgetRunH5.GadgetRunH5(self.run_number, selected_path, experiment=experiment)
-            #TODO: make it possible to see which files and run were selected on the GUI
-            self.main_gui.new_run_loaded()
+        # cut images go to the "cut_images" subfolder of the processed-runs directory
+        self.run_data = GadgetRunH5.GadgetRunH5(self.run_number, experiment=experiment)
+        print('run %d loaded; cut images are saved under %s' % (self.run_number, self.run_data.folder_path))
+        self.main_gui.new_run_loaded()
 
     def process_run_button_clicked(self):
         experiment = self.get_experiment()

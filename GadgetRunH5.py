@@ -62,11 +62,13 @@ def remove_noise(trace, threshold_ratio=0.1):
         return trace
 
 class GadgetRunH5:
-    def __init__(self, run_num, folder_path, experiment='e25058', gains=None, require_processed=True):
+    def __init__(self, run_num, folder_path=None, experiment='e25058', gains=None, require_processed=True):
         '''
         run_num: run number
         folder_path: directory in which cut-image folders are written
-            (RvE_Frame.save_cut_files, prev_cut_select_window)
+            (RvE_Frame.save_cut_files, prev_cut_select_window). None uses the
+            "cut_images" subfolder of the processed-runs directory
+            (process_runs.get_save_path(experiment)); it is created if missing.
         experiment: experiment name understood by raw_viewer.process_runs
         gains: per-pad gains passed to process_runs.get_gm_ic. None uses
             get_default_pad_gains(experiment), which gives energy in MeV. Pass
@@ -80,10 +82,19 @@ class GadgetRunH5:
         '''
         self.run_num = int(run_num)
         self.experiment = experiment
+
+        save_path = process_runs.get_save_path(experiment)
+        if folder_path is None:
+            folder_path = os.path.join(save_path, 'cut_images')
+        if not os.path.isdir(folder_path):
+            os.makedirs(folder_path, exist_ok=True)
+            try:    # shared folder: let the whole group save cuts into it
+                os.chmod(folder_path, 0o2775)
+            except OSError:
+                pass
         self.folder_path = folder_path
 
-        root_file = os.path.join(process_runs.get_save_path(experiment),
-                                 f'{experiment}_run{self.run_num}.root')
+        root_file = os.path.join(save_path, f'{experiment}_run{self.run_num}.root')
         if require_processed and not os.path.exists(root_file):
             raise FileNotFoundError(f'{root_file} does not exist: process the run first, e.g. '
                                     f'process_runs.process_tpc_run({experiment!r}, {self.run_num})')
