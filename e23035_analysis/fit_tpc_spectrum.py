@@ -9,7 +9,7 @@ from raw_viewer import ddas_interface, process_runs, degai
 from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vis_tools
 
 experiment = 'e23035'
-tpc_config = 'smart2_rpr.csv'
+tpc_config = 'smart1_veto2_rpr_fzp.csv'
 num_workers = 200
 force_refit=False
 

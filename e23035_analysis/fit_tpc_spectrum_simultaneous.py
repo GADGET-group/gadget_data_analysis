@@ -255,7 +255,7 @@ def _spectrum_shares(curve_values):
     return shares + [rest]
 
 
-def _n_spectra_amplitude_columns(f_to_fit, cov, idx, iso, n_spectra, fraction_bernstein_order, mu_val, e_low, e_high):
+def _n_spectra_amplitude_columns(f_to_fit, cov, idx, iso, n_spectra, fraction_bernstein_order, mu_val, e_low, e_high, spectrum_ratio_to=None, ratio_per_isotope=False):
     '''
     Evaluated-CSV columns of one peak for three or more spectra: total_amp and its error, the
     counts in each spectrum with errors propagated through the covariance (numerical gradient
@@ -269,16 +269,26 @@ def _n_spectra_amplitude_columns(f_to_fit, cov, idx, iso, n_spectra, fraction_be
     iso_suffix = f"_{iso}" if iso != 'all' else ""
     order = (fraction_bernstein_order.get(iso, fraction_bernstein_order.get('default', fraction_bernstein_order.get('all', 1)))
              if isinstance(fraction_bernstein_order, dict) else fraction_bernstein_order)
-    names = [n for c in range(n_spectra - 1) for n in _frac_param_names(c, order, iso_suffix)]
-    p_idx = [f_to_fit.GetParNumber(n) for n in names]
+    tied = {int(j): int(r) for j, r in (spectrum_ratio_to or [])}
+    free = [j for j in range(n_spectra) if j not in tied]; n_curves = len(free) - 1
+    names = [n for c in range(n_curves) for n in _frac_param_names(c, order, iso_suffix)]
+    rnames = [f"ratio_{t}" + (iso_suffix if ratio_per_isotope else "") for t in sorted(tied)]
+    p_idx = [f_to_fit.GetParNumber(n) for n in names + rnames]
     if any(j < 0 for j in p_idx):
         return blank
     X = (mu_val - e_low) / (e_high - e_low)
     basis = np.array([math.comb(order, k) * X ** k * (1.0 - X) ** (order - k) for k in range(order + 1)])
 
     def counts(v):
-        curves = [float(np.dot(v[1 + c * (order + 1): 1 + (c + 1) * (order + 1)], basis)) for c in range(n_spectra - 1)]
-        return np.array([v[0] * s for s in _spectrum_shares(curves)])
+        curves = [float(np.dot(v[1 + c * (order + 1): 1 + (c + 1) * (order + 1)], basis)) for c in range(n_curves)]
+        shares = _spectrum_shares(curves)                      # one share per free spectrum (block)
+        ratios = dict(zip(sorted(tied), v[1 + n_curves * (order + 1):]))
+        out = np.zeros(n_spectra)
+        for k, r in enumerate(free):
+            block = [t for t in tied if tied[t] == r]
+            out[r] = v[0] * shares[k] / (1.0 + sum(ratios[t] for t in block))
+            for t in block: out[t] = out[r] * ratios[t]
+        return out
 
     all_idx = [tot_idx] + p_idx
     v0 = np.array([f_to_fit.GetParameter(j) for j in all_idx])
@@ -303,8 +313,18 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                     sigma_coef_bounds=(-1000, 1000), fraction_bernstein_order=None, bg_shift_bernstein_order=2, bg_shift_monotonic_bernstein_order=None, bg_shift_upper_bound=1.0, peak_isotopes=None,
                     custom_initial_values=None, use_cmaes=False, cmaes_only=False, workers=1, points_per_bin=1,
                     peak_model='bg_shift_gaus', bin_integral=False, peak_cutoff_sigmas=None, cmaes_opts=None,
-                    peak_links=None, spectrum_scales=None, spectrum_acceptance=None, spectrum_smear=None, spectrum_offsets=None, spectrum_ranges=None):
+                    peak_links=None, spectrum_scales=None, spectrum_acceptance=None, spectrum_smear=None, spectrum_offsets=None, spectrum_ranges=None, fit_options=None,
+                    spectrum_ratio_to=None, ratio_per_isotope=False):
     '''
+    spectrum_ratio_to : list of [j, r] or None
+        Spectra whose line amplitudes are a free CONSTANT times those of spectrum r (the same runs seen through another
+        detector configuration; 8 October 2026): amplitude_{i,j} = ratio_j * amplitude_{i,r} for every line i, one
+        parameter ratio_j per tied spectrum (ratio_j_<iso> per isotope class when ratio_per_isotope is True). The
+        stick-breaking share curves then run over the FREE spectra only (r and its tied spectra form one block whose
+        share the curves give; inside the block the ratios fix the split). None keeps the model and the hashes as before.
+    fit_options : str or None
+        ROOT fit option string for this fit; None keeps the fitter's default ('LS0Q': likelihood, no Minos). The final
+        fit of a search run passes 'LS0QE' so that it alone carries Minos errors.
     spectrum_scales : list of int or None
         Spectra that get a free relative energy scale escale_j (see
         fitting_tools.fit_gaussian_w_bg_shift_2d): the test of a shared calibration.
@@ -480,6 +500,11 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                 
             # Let's map each peak_idx to its formula based on the FIRST window's isotopes
             max_peaks = max(len(grp[0]) for grp in peaks) if peaks else 0
+            # ratio-tied spectra: the curves run over the free spectra, a tied spectrum is a constant times its reference
+            tied = {int(j): int(r) for j, r in (spectrum_ratio_to or [])}
+            free = [j for j in range(len(spectra)) if j not in tied]
+            assert all(r in free for r in tied.values()), f'spectrum_ratio_to {spectrum_ratio_to}: a tied spectrum must point at a free spectrum'
+            n_curves = len(free) - 1
             for peak_idx in range(max_peaks):
                 iso = peak_isotopes[0][peak_idx] if peak_isotopes and len(peak_isotopes[0]) > peak_idx else 'all'
                 iso_suffix = f"_{iso}" if iso != 'all' else ""
@@ -497,7 +522,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                 # early, 59Zn late], F1 is the early share of a line's 59Zn-run counts.
                 n = order
                 frac_strs, frac_names = [], []
-                for curve in range(len(spectra) - 1):
+                for curve in range(n_curves):
                     names_c = _frac_param_names(curve, order, iso_suffix)
                     terms = []
                     for k in range(n + 1):
@@ -506,17 +531,24 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                         terms.append(f"[{names_c[k]}]*{term}")
                     frac_strs.append("(" + " + ".join(terms) + ")")
                     frac_names.append(names_c)
+                ratio_name = lambda t: f"ratio_{t}" + (iso_suffix if ratio_per_isotope else "")
                 for j in range(len(spectra)):
-                    used = frac_names[:min(j + 1, len(frac_names))]
-                    factors = [f"(1.0 - {frac_strs[m]})" for m in range(min(j, len(frac_strs)))]
-                    if j < len(spectra) - 1:
-                        factors.append(frac_strs[j])
+                    r = tied.get(j, j); k = free.index(r)            # the free spectrum whose block j belongs to
+                    used = frac_names[:min(k + 1, n_curves)]
+                    factors = [f"(1.0 - {frac_strs[m]})" for m in range(min(k, n_curves))]
+                    if k < n_curves:
+                        factors.append(frac_strs[k])
                     flat = [name for names_c in used for name in names_c]
+                    block = [t for t in sorted(tied) if tied[t] == r]
+                    rnames = [ratio_name(t) for t in block]
+                    if j in tied: factors.append(f"[{ratio_name(j)}]")
+                    formula = f"[total_amp_{peak_idx}]*" + ("*".join(factors) if factors else "1.0")
+                    if rnames: formula += "/(1.0 + " + " + ".join(f"[{q}]" for q in rnames) + ")"
                     f.parameterizations[f'amplitude_{peak_idx}_{j}'] = {
-                        'formula': f"[total_amp_{peak_idx}]*" + "*".join(factors),
-                        'params': [f"total_amp_{peak_idx}"] + flat,
-                        'guesses': [200.0] + [0.5] * len(flat),
-                        'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(flat)
+                        'formula': formula,
+                        'params': [f"total_amp_{peak_idx}"] + flat + rnames,
+                        'guesses': [200.0] + [0.5] * len(flat) + [1.0] * len(rnames),
+                        'bounds': [(1e-3, 1e6)] + [(0, 1)] * len(flat) + [(0.0, 100.0)] * len(rnames)
                     }
 
         if bg_shift_monotonic_bernstein_order is not None:
@@ -611,6 +643,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         f.shared_sigma = False
         for p in additional_param_bounds:
             f.param_bound_functions[p] = additional_param_bounds[p]
+        if fit_options:
+            f.fit_options = fit_options
         if not likelihood:
             f.fit_options = f.fit_options.replace('L','')
         f.fit_peaks()
@@ -893,7 +927,7 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
                         elif len(spectra) >= 3 and fraction_bernstein_order is not None:
                             iso_f = peak_isotopes[i][idx] if peak_isotopes and len(peak_isotopes) > i and len(peak_isotopes[i]) > idx else 'all'
                             row.extend(_n_spectra_amplitude_columns(f_to_fit, _covariance_or_none(res), idx, iso_f, len(spectra),
-                                                                    fraction_bernstein_order, mu_val, e_low_global, e_high_global))
+                                                                    fraction_bernstein_order, mu_val, e_low_global, e_high_global, spectrum_ratio_to, ratio_per_isotope))
                         else:
                             amp_idx = f_to_fit.GetParNumber(f"amplitude_{idx}")
                             if amp_idx >= 0:
@@ -940,7 +974,8 @@ def fit_multi_peaks(spectra, peaks, save_name, likelihood=True, force_refit=Fals
         'spectrum_scales': spectrum_scales,
         'spectrum_acceptance': spectrum_acceptance,
         'spectrum_smear': spectrum_smear,
-        'spectrum_offsets': spectrum_offsets, 'spectrum_ranges': spectrum_ranges
+        'spectrum_offsets': spectrum_offsets, 'spectrum_ranges': spectrum_ranges, 'fit_options': fit_options,
+        'spectrum_ratio_to': spectrum_ratio_to, 'ratio_per_isotope': ratio_per_isotope
     }
     f.peak_links = peak_links
             
@@ -1989,7 +2024,7 @@ def _prepare_modified_fit(fitter, new_peaks, new_isotopes, merged_param_bounds, 
         kwargs.pop('spectrum_acceptance', None)
     if not kwargs.get('spectrum_smear'):
         kwargs.pop('spectrum_smear', None)
-    for _k in ('spectrum_offsets', 'spectrum_ranges'):
+    for _k in ('spectrum_offsets', 'spectrum_ranges', 'spectrum_ratio_to', 'ratio_per_isotope'):
         if not kwargs.get(_k): kwargs.pop(_k, None)
     # Present only when there are links, so link-free fits keep the hashes they always had.
     if peak_links:
@@ -2547,12 +2582,13 @@ def refit_from_fit(fitter, kwargs_override=None, fix_params=False, refit=True, f
         peak_links=_remap_links(fitter, window_mapping))
 
 
-def free_sigma_refit(fitter, order=3, sigma_min=None, sigma_max=None, folder_name=None, refit=True):
+def free_sigma_refit(fitter, order=3, sigma_min=None, sigma_max=None, folder_name=None, refit=True, minos=True):
     '''
     Refit the same peaks and knots with the resolution curve free: a Bernstein-`order`
     sigma(E) seeded from the parent's curve, each coefficient in [sigma_min, sigma_max]
     (the parent's own limits by default). The final step after a search run that held or
-    constrained sigma, so the reported errors carry the sigma correlation.
+    constrained sigma, so the reported errors carry the sigma correlation. With minos (default) this
+    fit alone runs Minos ('LS0QE'; every other fit of a run is MIGRAD+HESSE only, user 6 October 2026).
 
     Returns (hash, fitter) if refit, else the try_fit kwargs.
     '''
@@ -2560,7 +2596,7 @@ def free_sigma_refit(fitter, order=3, sigma_min=None, sigma_max=None, folder_nam
     args = getattr(fitter, 'fit_multi_peaks_kwargs', {})
     smin = args.get('sigma_min', 10) if sigma_min is None else sigma_min
     smax = args.get('sigma_max', 100) if sigma_max is None else sigma_max
-    kw = refit_from_fit(fitter, kwargs_override={'use_cmaes': False, 'sigma_bernstein_order': order},
+    kw = refit_from_fit(fitter, kwargs_override={'use_cmaes': False, 'sigma_bernstein_order': order, **({'fit_options': 'LS0QE'} if minos else {})},
                         refit=False, folder_name=folder_name, operation='free_sigma',
                         details={'sigma_order': order, 'sigma_min': smin, 'sigma_max': smax})
     a = kw['args_for_multipeak_fit']
@@ -2866,7 +2902,7 @@ def recenter_peak_bounds(fitter, peaks_to_recenter=None, wiggle=None, fix_params
 # Fit including runs where high energy protons may not be recorded correctly.
 #############################################################################
 EXPERIMENT = 'e23035'
-TPC_CONFIG = 'smart2_rpr.csv'
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'   # hybrid processing since 6 October 2026 (smart1 on the energy pads, smart2 on the veto pads, hybrid_v200 pad gains); every fit before that date used smart2_rpr.csv
 # E23035_NUM_WORKERS caps the threads of one process, so several searches can share the machine
 # (three uncapped fits at 200 workers each ran 5x slower than one after another).
 NUM_WORKERS = int(os.environ.get('E23035_NUM_WORKERS', 200))
@@ -2892,7 +2928,7 @@ def load_spectra(bin_width=10, num_workers=NUM_WORKERS):
     '''
     proton_binning = (4000 // bin_width, 0, 4000)
 
-    ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True)
+    ddas_runs_protons_59Zn = e23035_runs.get_ddas_59_Zn_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=True, tpc_data_valid=True)   # field-cage-functional runs only
     pspec_59Zn = ddas_interface.get_histogram(EXPERIMENT, ddas_runs_protons_59Zn, proton_binning, "proton_spectrum_59Zn", "59Zn proton_spectrum", "tpc_energy", "tpc_particle_id==1", num_workers=num_workers, tpc_ini_filename=TPC_CONFIG)
 
     ddas_runs_protons_low_energies_60Ga = e23035_runs.get_ddas_60_Ga_runs(good_gamma=False, final_beam_settings=True, good_low_energy_tpc=True, good_long_tracks_tpc=False)

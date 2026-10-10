@@ -19,7 +19,7 @@ from track_fitting import srim_interface, build_sim
 experiment = 'e23035'
 GPUs_to_use = [0,2,3]
 max_workers=len(GPUs_to_use*2)
-tpc_config = 'smart1_rpr.csv'
+tpc_config = 'smart1_veto2_rpr_fzp.csv'
  
 if experiment == 'e23035':
     if True:
@@ -62,6 +62,8 @@ for run in run_range:
         if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
             get_runs.append(run)
 
+#standard runs:
+#get_runs = [263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279]
 get_runs = np.sort(get_runs)
 print('get_runs:', get_runs)
 
@@ -97,7 +99,7 @@ if load_ddas:
 
 rve_bins = (600, 600)
 phist_bins = np.linspace(0, 4, 1001)
-alphahist_bins = 100
+alphahist_bins = 300
 lengths = process_runs.get_lengths(endpoints)
 angles = process_runs.get_angle(endpoints)
 print('lengths and angles calculated')

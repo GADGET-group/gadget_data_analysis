@@ -1015,7 +1015,10 @@ class multi_spectrum_fitter(spectrum_fitter):
         
         # For 2D multi-spectrum fits, we must NOT use the 'I' (Integral) option because the Y axis 
         # is discrete (spectrum index). ROOT's 2D integrator fails to converge on the step function.
-        self.fit_options = self.fit_options.replace('I', '')
+        # No Minos ('E') either (user, 6 October 2026): on these 140-210 parameter fits Minos takes 100-1000x longer than
+        # MIGRAD+HESSE and nothing downstream reads the Minos errors (the gates and the evaluated csv use GetParError and
+        # the covariance). The final fit of a search run asks for it explicitly (fit_multi_peaks(fit_options='LS0QE')).
+        self.fit_options = self.fit_options.replace('I', '').replace('E', '')
         self.use_cmaes = use_cmaes
         self.cmaes_only = cmaes_only
         self.cmaes_opts = cmaes_opts
