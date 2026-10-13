@@ -33,9 +33,11 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
     runs = []
     for run, get_run in zip(run_df['DDAS'][(run_df['Run Type']=='60Ga')], run_df['GET'][(run_df['Run Type']=='60Ga')]):
         if tpc_data_valid:
-            if len(str(run_df['Field Cage Functional?'][run_df['DDAS']==run].iloc[0]).strip()) != 0:
-                 #I think all 60Ga runs have valid field cage data, so this isn't currently implemented.
-                 # Revisit if I start putting things in this column.
+            fc_status = run_df['Field Cage Functional?'][run_df['DDAS']==run].iloc[0]
+            if pd.notna(fc_status) and len(str(fc_status).strip()) != 0:
+                #I think all 60Ga runs have valid field cage data, so this isn't currently implemented.
+                # Revisit if I start putting things in this column.
+                print('field cage functional field is not empty for ddas run %d / GET %d'%(run, get_run), flush=True)
                 assert False
             if not np.isfinite(get_run):
                 continue

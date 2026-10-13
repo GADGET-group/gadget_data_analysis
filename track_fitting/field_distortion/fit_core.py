@@ -26,15 +26,18 @@ import scipy.optimize as opt
 
 class FieldDistortionFit:
     def __init__(self, basis, endpoints, t, w, masks, true_ranges, peak_widths_to_minimize, peak_spacings_to_preserve,
-                 z_field_dist=False, allow_beam_off_axis=False, offset_endpoints=False):
+                 z_field_dist=False, allow_beam_off_axis=False, offset_endpoints=False, offset_width=None):
         '''
-        endpoints (n, 2, 3) mm, t (n,) s, w (n,) mm; masks {label: bool array (n,)}; true_ranges {label: mm} with
-        'absolute': 0; peak_widths_to_minimize [(weight, label)]; peak_spacings_to_preserve [(weight, label1, label2)].
+        endpoints (n, 2, 3) mm, t (n,) s, w (n,) mm (the basis's third variable: the charge width, or the decay depth
+        when it is known); masks {label: bool array (n,)}; true_ranges {label: mm} with 'absolute': 0;
+        peak_widths_to_minimize [(weight, label)]; peak_spacings_to_preserve [(weight, label1, label2)].
+        offset_width: the width multiplied by offset_multiplier in the endpoint offset (default w).
         '''
         self.basis = basis
         self.endpoints = np.asarray(endpoints, dtype=float)
         self.t = np.asarray(t, dtype=float)
-        self.w = np.asarray(w, dtype=float)
+        self.w = np.asarray(w, dtype=float)   # (n,) one value per track, or (n, 2) one per endpoint (e.g. its depth)
+        self.offset_width = (self.w if self.w.ndim == 1 else self.w.mean(axis=1)) if offset_width is None else np.asarray(offset_width, dtype=float)
         self.true_ranges = dict(true_ranges)
         self.true_ranges.setdefault('absolute', 0.0)
         self.peak_widths_to_minimize = list(peak_widths_to_minimize)
@@ -48,7 +51,8 @@ class FieldDistortionFit:
         for _, l1, l2 in self.peak_spacings_to_preserve:
             self.labels += [l1, l2]
         self.labels = [lab for lab in dict.fromkeys(self.labels) if lab != 'absolute']
-        self.data = {lab: (self.endpoints[masks[lab]], self.t[masks[lab]], self.w[masks[lab]]) for lab in self.labels}
+        self.data = {lab: (self.endpoints[masks[lab]], self.t[masks[lab]], self.w[masks[lab]], self.offset_width[masks[lab]])
+                     for lab in self.labels}
         self.n_events = {lab: len(self.data[lab][0]) for lab in self.labels}
         self.n_a = basis.n_params
         self.n_b = basis.n_z_params if self.z_field_dist else 0
@@ -84,13 +88,13 @@ class FieldDistortionFit:
         return np.concatenate(x)
 
     # ---- the map -------------------------------------------------------------------------------------------------
-    def _prepare(self, endpoints, w, beam_xy, offset_multiplier):
-        '''Endpoint offset of the script, then the two endpoints relative to the beam axis.'''
+    def _prepare(self, endpoints, ow, beam_xy, offset_multiplier):
+        '''Endpoint offset of the script (ow = offset width), then the two endpoints relative to the beam axis.'''
         P = np.array(endpoints, dtype=float)
         if self.offset_endpoints:
             d = P[:, 0, :] - P[:, 1, :]
             d /= np.linalg.norm(d, axis=1)[:, None]
-            shift = (w * offset_multiplier)[:, None] * d
+            shift = (ow * offset_multiplier)[:, None] * d
             P[:, 0, :] -= shift
             P[:, 1, :] += shift
         p1 = P[:, 0, :2] - beam_xy
@@ -99,10 +103,13 @@ class FieldDistortionFit:
         r2 = np.linalg.norm(p2, axis=1)
         return P, p1, p2, r1, r2
 
-    def _ranges(self, a, b, beam_xy, offset_multiplier, endpoints, t, w, with_jac=False):
-        P, p1, p2, r1, r2 = self._prepare(endpoints, w, beam_xy, offset_multiplier)
-        D1 = self.basis.design(r1, t, w)
-        D2 = self.basis.design(r2, t, w)
+    def _ranges(self, a, b, beam_xy, offset_multiplier, endpoints, t, w, ow=None, with_jac=False):
+        w = np.asarray(w)
+        w1, w2 = (w, w) if w.ndim == 1 else (w[:, 0], w[:, 1])
+        ow = w1 if ow is None else ow
+        P, p1, p2, r1, r2 = self._prepare(endpoints, ow, beam_xy, offset_multiplier)
+        D1 = self.basis.design(r1, t, w1)
+        D2 = self.basis.design(r2, t, w2)
         coef = self.basis.delta_coefficients(a)
         r1n = r1 + D1 @ coef
         r2n = r2 + D2 @ coef
@@ -133,24 +140,24 @@ class FieldDistortionFit:
     def map_endpoints(self, x, mask=None):
         a, b, beam_xy, off = self.unpack(x)
         sel = slice(None) if mask is None else mask
-        return self._ranges(a, b, beam_xy, off, self.endpoints[sel], self.t[sel], self.w[sel])[1]
+        return self._ranges(a, b, beam_xy, off, self.endpoints[sel], self.t[sel], self.w[sel], self.offset_width[sel])[1]
 
     def map_ranges(self, x, mask=None):
         a, b, beam_xy, off = self.unpack(x)
         sel = slice(None) if mask is None else mask
-        return self._ranges(a, b, beam_xy, off, self.endpoints[sel], self.t[sel], self.w[sel])[0]
+        return self._ranges(a, b, beam_xy, off, self.endpoints[sel], self.t[sel], self.w[sel], self.offset_width[sel])[0]
 
     def _line_ranges(self, x, with_jac=False):
         '''{label: ranges} (and {label: Jacobian (n_events, n_params)}): the extra parameters by central differences.'''
         a, b, beam_xy, off = self.unpack(x)
         ranges, jacs = {}, {}
         for lab in self.labels:
-            E, t, w = self.data[lab]
+            E, t, w, ow = self.data[lab]
             if with_jac:
-                ranges[lab], _, J = self._ranges(a, b, beam_xy, off, E, t, w, with_jac=True)
+                ranges[lab], _, J = self._ranges(a, b, beam_xy, off, E, t, w, ow, with_jac=True)
                 jacs[lab] = J
             else:
-                ranges[lab] = self._ranges(a, b, beam_xy, off, E, t, w)[0]
+                ranges[lab] = self._ranges(a, b, beam_xy, off, E, t, w, ow)[0]
         if with_jac and self.n_extra:
             x = np.asarray(x, dtype=float)
             extra = {lab: np.zeros((self.n_events[lab], self.n_extra)) for lab in self.labels}
@@ -215,6 +222,32 @@ class FieldDistortionFit:
                 row -= J[l2].mean(axis=0)
             rows.append(np.sqrt(wt) * row[None, :])
         return np.concatenate(rows, axis=0)
+
+    def covariance(self, x):
+        '''
+        Statistical covariance of the parameters at the solution x (sandwich estimate): with the residual Jacobian
+        J, Cov = (J^T J)^-1 J^T S J (J^T J)^-1, S the diagonal variances of the residuals, i.e. w sigma_l^2 / n_l for
+        the events of line l (sigma_l the range spread at the solution) and w (sigma_1^2/n_1 + sigma_2^2/n_2) for a
+        spacing term. Meaningful only where J has full rank (not for saturated monotone steps).
+        '''
+        R, Jd = self._line_ranges(x, with_jac=True)
+        var = {lab: np.var(R[lab]) for lab in self.labels}
+        rows, s2 = [], []
+        for wt, lab in self.peak_widths_to_minimize:
+            rows.append(np.sqrt(wt / self.n_events[lab]) * (Jd[lab] - Jd[lab].mean(axis=0)))
+            s2.append(np.full(self.n_events[lab], wt * var[lab] / self.n_events[lab]))
+        for wt, l1, l2 in self.peak_spacings_to_preserve:
+            row, v = np.zeros(self.n_params), 0.0
+            for lab, sign in ((l1, 1.0), (l2, -1.0)):
+                if lab != 'absolute':
+                    row += sign * Jd[lab].mean(axis=0)
+                    v += var[lab] / self.n_events[lab]
+            rows.append(np.sqrt(wt) * row[None, :])
+            s2.append(np.array([wt * v]))
+        J = np.concatenate(rows, axis=0)
+        s2 = np.concatenate(s2)
+        JtJ_inv = np.linalg.pinv(J.T @ J)
+        return JtJ_inv @ (J.T * s2) @ J @ JtJ_inv
 
     def minimize(self, x0=None, method='BFGS', callback=None, **options):
         '''scipy.optimize.minimize with the analytic gradient; options are passed through (gtol, maxiter, ...).'''

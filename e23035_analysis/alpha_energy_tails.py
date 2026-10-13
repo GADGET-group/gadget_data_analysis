@@ -167,7 +167,7 @@ fig.tight_layout()
 #Energy spectra of the particles of a run type in three equal time slices of the beam-off part of the cycle (from the
 #first to the last particle inside the decay window), overlaid. The slices have the same duration, so the raw counts
 #compare rates directly.
-num_slices = 3
+num_slices = 6
 def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_width, decay_window):
     '''particle_data: an entry of alphas or protons; decay_window: length of the beam-off part of the cycle (s)'''
     energy, tsbo = particle_data['energy'], particle_data['tsbo']
@@ -185,7 +185,13 @@ def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_widt
     plt.tight_layout()
 
 plot_time_slices(alphas['60Ga'], '60Ga run alphas', (2.5, 9.0), 0.05, 0.1)
-plot_time_slices(protons['60Ga'], '60Ga run protons', (0.3, 4.0), 0.01, 0.1)
+
+#The proton plots use only the standard 60Ga runs (GET 263-279, the 0.5 us gate delay / 512 bucket configuration)
+standard_runs = range(263, 280)
+in_standard_runs = np.isin(protons['60Ga']['run'], list(standard_runs))
+standard_protons = {key: values[in_standard_runs] for key, values in protons['60Ga'].items()}
+print(f'standard runs {standard_runs.start}-{standard_runs.stop - 1} have {np.sum(in_standard_runs)} protons')
+plot_time_slices(standard_protons, 'standard 60Ga run protons', (0.3, 4.0), 0.01, 0.1)
 plot_time_slices(protons['59Zn'], '59Zn run protons', (0.3, 4.0), 0.01, 0.5)
 
 plt.show(block=False)
