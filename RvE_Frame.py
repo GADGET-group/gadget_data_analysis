@@ -5,6 +5,7 @@ import os
 import tkinter.filedialog
 import tkinter as tk
 from tkinter import ttk
+from arrow import now
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patches as patches
@@ -35,12 +36,12 @@ class RvE_Frame(ttk.Frame):
         self.range_bins_label.grid(row=0, column=0)
         self.range_bins_entry = gadget_widgets.GEntry(self.plot_settings_frame)
         self.range_bins_entry.grid(row=0, column=1)
-        self.range_bins_entry.insert(0,'200')
+        self.range_bins_entry.insert(0,'300')
         self.energy_bins_label = ttk.Label(self.plot_settings_frame, text='# energy bins:')
         self.energy_bins_label.grid(row=0, column=2)
         self.energy_bins_entry = gadget_widgets.GEntry(self.plot_settings_frame)
         self.energy_bins_entry.grid(row=0, column=3)
-        self.energy_bins_entry.insert(0,'200')
+        self.energy_bins_entry.insert(0,'300')
 
         self.log_scale_var = tk.BooleanVar(value=True)
         self.scale_label = ttk.Label(self.plot_settings_frame, text='energy scale:')
@@ -111,29 +112,29 @@ class RvE_Frame(ttk.Frame):
         ttk.Label(self.filter_frame, text="Range max:").grid(row=1, column=2)
         self.range_max_entry = gadget_widgets.GEntry(self.filter_frame)
         self.range_max_entry.grid(row=1, column=3)
-        self.range_max_entry.insert(0, "200")
+        self.range_max_entry.insert(0, "400")
 
         # Angle min / max
         ttk.Label(self.filter_frame, text="Angle min:").grid(row=2, column=0)
         self.angle_min_entry = gadget_widgets.GEntry(self.filter_frame)
         self.angle_min_entry.grid(row=2, column=1)
-        self.angle_min_entry.insert(0, "0")
+        self.angle_min_entry.insert(0, "-inf")
 
         ttk.Label(self.filter_frame, text="Angle max:").grid(row=2, column=2)
         self.angle_max_entry = gadget_widgets.GEntry(self.filter_frame)
         self.angle_max_entry.grid(row=2, column=3)
-        self.angle_max_entry.insert(0, "90")
+        self.angle_max_entry.insert(0, "inf")
 
         # IC min / max
         ttk.Label(self.filter_frame, text="IC min:").grid(row=3, column=0)
         self.ic_min_entry = gadget_widgets.GEntry(self.filter_frame)
         self.ic_min_entry.grid(row=3, column=1)
-        self.ic_min_entry.insert(0, "0")
+        self.ic_min_entry.insert(0, "-inf")
 
         ttk.Label(self.filter_frame, text="IC max:").grid(row=3, column=2)
         self.ic_max_entry = gadget_widgets.GEntry(self.filter_frame)
         self.ic_max_entry.grid(row=3, column=3)
-        self.ic_max_entry.insert(0, "1e9")
+        self.ic_max_entry.insert(0, "inf")
 
         # railed pads / time since beam off (defaults as in raw_viewer/plots/rve.py)
         ttk.Label(self.filter_frame, text="Railed pads max:").grid(row=4, column=0)
@@ -144,7 +145,7 @@ class RvE_Frame(ttk.Frame):
         ttk.Label(self.filter_frame, text="t since beam off > (s):").grid(row=4, column=2)
         self.beam_off_min_entry = gadget_widgets.GEntry(self.filter_frame)
         self.beam_off_min_entry.grid(row=4, column=3)
-        self.beam_off_min_entry.insert(0, "0.05")
+        self.beam_off_min_entry.insert(0, "0.1")
 
         # Storage for selected vertices and mask
         self.rve_cut_verticies = []
@@ -159,9 +160,13 @@ class RvE_Frame(ttk.Frame):
         self.rve_cut_verticies = verticies
         self.selected_rve_path = Path(self.rve_cut_verticies)
         rve_points = np.vstack((self.run_data.counts, self.run_data.ranges)).transpose()
-        self.rve_cut_select_mask = self.selected_rve_path.contains_points(rve_points)
-        print(sum(self.rve_cut_select_mask), 'events selected in cut')
+        inside_polygon = self.selected_rve_path.contains_points(rve_points)
+        base_mask = self.get_processed_event_mask()
 
+        self.rve_cut_select_mask = inside_polygon & base_mask
+
+        print(np.count_nonzero(inside_polygon),"events inside polygon before filters")
+        print(np.count_nonzero(self.rve_cut_select_mask),"events inside polygon after filters")
 
     def get_processed_event_mask(self):
         '''
@@ -211,10 +216,11 @@ class RvE_Frame(ttk.Frame):
         plt.show(block=False)
 
     def plot_spectrum(self, fig_name='RvE',clear=True, show=True):
-        bins = 100
+        bins = 300
         fig, ax = plt.subplots()
         mask = self.get_processed_event_mask()
         print(sum(mask), 'events after mask applied', len(mask), 'total events')
+        #fig.title('E25058' + 'runs: '+str(get_runs))
         ax.hist2d(self.run_data.counts[mask], self.run_data.ranges[mask], bins=(bins, bins), norm=colors.LogNorm())
         ax.set_xlabel(f'Energy ({self.run_data.energy_units})')
         ax.set_ylabel('range (mm)')
@@ -253,9 +259,8 @@ class RvE_Frame(ttk.Frame):
     
     def save_cut_files(self, points):
         now = datetime.datetime.now()
-        rand_num = str(random.randrange(0,1000000,1))
+        cut_name = f"run{self.run_data.run_num}_{now:%Y_%m_%d}"
         # cuts of every run share run_data.folder_path, so name them by run
-        cut_name = f'run{self.run_data.run_num}_' + rand_num + now.strftime("CUT_Date_%m_%d_%Y")
         imageCut_path = os.path.join(self.run_data.folder_path, cut_name)
         print('NEW DIRECTORY', imageCut_path)
 
@@ -279,7 +284,12 @@ class RvE_Frame(ttk.Frame):
         os.makedirs(imageCut_path)
 		       
         # Process images in chunks to avoiding overloading memory
-        cut_indices = self.run_data.get_RvE_cut_indexes(points)
+        rve_points = np.column_stack((self.run_data.counts, self.run_data.ranges))
+        inside_polygon = Path(points).contains_points(rve_points)
+        selected_mask = inside_polygon & self.get_processed_event_mask()
+        cut_indices = np.flatnonzero(selected_mask)
+
+        print(len(cut_indices), "filtered events selected for image export")
         chunk_size = 500
         num_images = len(cut_indices)
         print("Total Number of Image:", num_images)

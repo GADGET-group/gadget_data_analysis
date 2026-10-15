@@ -884,7 +884,7 @@ class GadgetRunH5:
 
                 # Prepare the data necessary for plotting
                 image_title = f' Image {event_num} of Particle Track Event'
-                image_filename = f"run{self.run_num}_image_{event_num}.png"
+                image_filename = f"run{self.run_num}_event{event_num}.png"
 
                 all_image_data.append((pad_plane, trace, image_title, image_filename))  # Append the result to the list
 
