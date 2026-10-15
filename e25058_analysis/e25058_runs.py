@@ -36,7 +36,7 @@ def get_ddas_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_b
             
         # TODO: Add your experiment specific run filters here
         
-        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
+        if os.path.exists(ddas_interface.get_ddas_root_file_path(experiment, run)):
             runs.append(run)
     return runs
 
@@ -167,7 +167,7 @@ def get_counts_in_pid_cut(ddas_run, species):
     global current_data
     if current_run != ddas_run:
         current_run = ddas_run
-        current_file = ROOT.TFile(ddas_interface.get_merged_root_file_path(experiment, ddas_run), 'READ')
+        current_file = ROOT.TFile(ddas_interface.get_ddas_root_file_path(experiment, ddas_run), 'READ')
         current_data = current_file.Get('merged_data')
     cut = get_pid_cut(ddas_run, species)
     cut_name = 'run%d_%s_cut'%(ddas_run, species)

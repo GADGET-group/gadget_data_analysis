@@ -35,6 +35,15 @@ TPC_GPU_MEMORY_FRACTION = 0.55        #share of a card one config may fill with 
 TPC_MAX_TOTAL_WORKERS = 12            #where throughput saturated on tpcgpu (file I/O), all light modes
 TPC_WORKERS_PER_GPU_BY_MODE = {}      #explicit per-mode overrides ('mode' or 'mode+veto_vetomode'); empty = use the memory rule
 DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config does not set the mode
+#config used when a caller gives none (config_filename ""), by experiment: e25058 uses the hybrid baseline (smart1 on
+#the pads, smart2 on the veto pads). Experiments not listed get the raw_h5_file defaults; 'none' always means no config.
+DEFAULT_TPC_CONFIGS = {'e25058': 'smart1_veto2_rpr_fzp.csv'}
+
+def resolve_config_filename(experiment, config_filename=""):
+    '''config_filename, or the experiment's DEFAULT_TPC_CONFIGS entry if it is empty'''
+    if not config_filename:
+        return DEFAULT_TPC_CONFIGS.get(experiment, "")
+    return config_filename
 
 def get_config_background_mode(config_filename="", key='background_subtract_mode'):
     '''
@@ -103,6 +112,8 @@ def get_save_path(experiment):
             save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
         elif experiment == 'e23035_prep_vault':
             save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
+        elif experiment == 'e25058':
+            save_path = '/egr/research-tpc/shared/proc_runs/%s/new_h5'%experiment
         else:
             save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
         return save_path
@@ -130,11 +141,14 @@ def get_h5_path(experiment, run_number):
         return '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
     elif experiment == 'e23035_prep_vault':
         return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
+    elif experiment == 'e25058':
+        return'%s/%s/newh5/run_%04d.h5'%(h5_base_path, experiment, run_number)
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
 def get_h5_file(experiment, run_number, config_filename=""):
     run_number = int(run_number)
+    config_filename = resolve_config_filename(experiment, config_filename)
     raw_h5_path = get_h5_path(experiment, run_number)
     
     # Defaults in case not all are in config
@@ -151,6 +165,7 @@ def get_h5_file(experiment, run_number, config_filename=""):
 
 _settings_hash_cache = {}
 def get_experiment_settings_hash(experiment, example_run, config_filename=""):
+    config_filename = resolve_config_filename(experiment, config_filename)
     key = (experiment, config_filename)
     if key not in _settings_hash_cache:
         h5file = get_h5_file(experiment, example_run, config_filename)
@@ -166,6 +181,7 @@ def process_tpc_run(experiment, run_number, force_reprocess=False, config_filena
     Only redoes processing if a ROOT version of this information isn't available.
     '''
     run_number = int(run_number)
+    config_filename = resolve_config_filename(experiment, config_filename)
     try:
         import cupy as cp
         cp.cuda.runtime.setDevice(gpu_to_use)
@@ -421,6 +437,7 @@ def ensure_processed(experiment, runs, config_filename="", show_progress=True, g
                  i.e. chosen from the config's background_subtract_mode.
     '''
     runs = [int(r) for r in runs]
+    config_filename = resolve_config_filename(experiment, config_filename)
     config_name = os.path.splitext(config_filename)[0]
     
     # Filter for runs that actually need processing
@@ -471,6 +488,7 @@ def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
     runs = [int(r) for r in runs]
+    config_filename = resolve_config_filename(experiment, config_filename)
     to_return = {q: [] for q in qnames}
 
     ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress,

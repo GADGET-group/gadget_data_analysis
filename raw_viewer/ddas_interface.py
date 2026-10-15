@@ -2,6 +2,7 @@
 import sys
 import hashlib
 import os
+import getpass
 import re
 import pickle
 import gzip
@@ -16,7 +17,6 @@ import tqdm
 import ROOT
 import numpy as np
 
-from e23035_analysis import e23035_runs, energy_calibration_tools
 from raw_viewer import process_runs, ddas_interface
 
 NUM_SLOTS = 10
@@ -170,20 +170,23 @@ def get_time_since_beam_off(experiment, run):
             pickle.dump(to_return, save_file)
         return to_return
 
+def get_user_suffix(experiment):
+    '''
+    e25058 merged and friend files share the ddas folder with other people's, so their names end in the user's
+    login name (e.g. run58_merged.root_adamsa52) and nobody overwrites anyone else's files.
+    '''
+    return '_' + getpass.getuser() if experiment == 'e25058' else ''
+
 def get_ddas_root_file_path(experiment, ddas_run):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merged.root')
-    if experiment == 'e25058':
-        to_return += '_alex'
-    return to_return
+    return to_return + get_user_suffix(experiment)
 
 def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename=""):
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     ini_prefix = os.path.splitext(tpc_ini_filename)[0]
     to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_tpc_{ini_prefix}.root')
-    if experiment == 'e25058':
-        to_return += '_alex'
-    return to_return
+    return to_return + get_user_suffix(experiment)
 
 def make_ddas_root_file(experiment, ddas_run):
     '''
@@ -191,9 +194,7 @@ def make_ddas_root_file(experiment, ddas_run):
     '''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     
-    log_path = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merge.log')
-    if experiment == 'e25058':
-        log_path += '_alex'
+    log_path = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merge.log') + get_user_suffix(experiment)
     output_path = get_ddas_root_file_path(experiment, ddas_run)
     # Write to a temporary path and rename once the merge finishes, so a failed merge doesn't leave a file at output_path
     # The temporary path is unique to this process, so two processes making the same file don't write to or rename each other's output
@@ -401,7 +402,7 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
         make_ddas_root_file(experiment, ddas_run)
         
     output_path = get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
-    log_path = os.path.splitext(output_path)[0] + '.log'
+    log_path = os.path.splitext(output_path)[0] + '.log' + get_user_suffix(experiment)
     
     with ROOT.TFile(merged_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
         in_tree = input_file.Get("merged_data")

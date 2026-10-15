@@ -509,12 +509,36 @@ class raw_h5_file:
         self.cached_data = None
         self.cached_xyte = self.cached_xyze = None
 
+        # Cache for fast lookup of new bucketed group structure
+        self._batch_existence_cache = {}
+
         #look at first event and figure out number of time bins
         try:
-            first_event_data = self.h5_file['get']['evt%d_data'%self.get_event_num_bounds()[0]]
+            first_event_data = self._get_event_dataset(self.get_event_num_bounds()[0], kind='data')
             self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
         except KeyError:
             self.num_time_bins = 512 # Default value if there are no events in the h5 file
+
+    def _get_event_dataset(self, event_number, kind='data'):
+        """
+        Helper method to retrieve the dataset for a given event, supporting
+        both the new bucketed ('batch_XXXX') structure and the legacy flat structure.
+        """
+        dataset_name = "evt%d_%s" % (event_number, kind)
+        batch_index = int(event_number // 5000)
+        batch_name = "batch_%04d" % batch_index
+
+        get_group = self.h5_file['get']
+
+        # Check cache to avoid repeatedly querying HDF5 metadata
+        if batch_name not in self._batch_existence_cache:
+            self._batch_existence_cache[batch_name] = batch_name in get_group
+
+        # Return nested bucketed path, or fallback to root flat path
+        if self._batch_existence_cache[batch_name]:
+            return get_group[batch_name][dataset_name]
+        else:
+            return get_group[dataset_name]
 
     #num_time_bins is kept in the instance __dict__ (so save_config_file still writes it); with remove_zero_pad
     #it reports the depth after the padding is removed
@@ -547,7 +571,7 @@ class raw_h5_file:
             if last >= first:
                 for evt in np.unique(np.linspace(first, last, ZERO_PAD_PROBE_EVENTS).astype(np.int64)):
                     try:
-                        d = self.h5_file['get']['evt%d_data'%evt][()]
+                        d = self._get_event_dataset(evt, kind='data')[()]
                     except KeyError:
                         continue
                     if d.ndim != 2 or len(d) == 0 or d.shape[1] <= FIRST_DATA_BIN:
@@ -667,7 +691,7 @@ class raw_h5_file:
         Returns timestamp in seconds.
         '''
         #timestamps are stored in units of 10ns
-        return self.h5_file['get']['evt%d_header'%event_number][1]/1e8 
+        return self._get_event_dataset(event_number, kind='header')[1]/1e8 
 
     def get_timestamps_array(self):
         '''
@@ -691,7 +715,7 @@ class raw_h5_file:
         if railed_cache is not None and event_number in railed_cache and self.asads == 'all' \
                 and self.cobos == 'all' and self.pads == 'all':
             return railed_cache.pop(event_number)
-        data = self.h5_file['get']['evt%d_data'%event_number]
+        data = self._get_event_dataset(event_number, kind='data')
         if self.remove_zero_pad:
             data = self._remove_zero_pad(data)
         traces = data[:,FIRST_DATA_BIN:]
@@ -740,7 +764,7 @@ class raw_h5_file:
 
         for evt in batch_events:
             try:
-                data = self.h5_file['get']['evt%d_data'%evt]
+                data = self._get_event_dataset(evt, kind='data')
             except KeyError:
                 continue
             if self.remove_zero_pad:
@@ -942,7 +966,7 @@ class raw_h5_file:
 
         for evt in batch_events:
             try:
-                data = self.h5_file['get']['evt%d_data'%evt]
+                data = self._get_event_dataset(evt, kind='data')
             except KeyError:
                 continue
             if self.remove_zero_pad:
