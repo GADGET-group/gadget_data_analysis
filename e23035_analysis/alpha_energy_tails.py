@@ -18,7 +18,7 @@ max_figure_size = (9, 7.5) #inches; the X server over ssh tends to crash on wind
 run_df = e23035_runs.run_df
 #PID runs are TPC background: the beam doesn't make it to the TPC when the silicon detectors are inserted
 run_type_selections = {'background': run_df['Run Type'].isin(['Background', 'background']) | run_df['Run Type'].str.contains('PID', na=False),
-                       '60Ga': (run_df['Run Type'] == '60Ga') & (run_df['final beam settings?'] == 'yes'),
+                       '60Ga': (run_df['Run Type'] == '60Ga') & (run_df['final beam settings?'] == 'yes') & run_df['GET'].between(263, 279),
                        '59Zn': (run_df['Run Type'] == '59Zn') & (run_df['Field Cage Functional?'] == 'yes')}
 run_type_colors = {'background': 'k', '60Ga': 'tab:blue', '59Zn': 'tab:orange'}
 
@@ -32,15 +32,17 @@ for run_type, selection in run_type_selections.items():
 process_runs.ensure_processed(experiment, np.concatenate(list(get_runs_by_type.values())), config_filename=tpc_config, num_workers=1)
 
 alphas, protons = {}, {} #run type -> energy (MeV), time since beam off (s, NaN without a matched DDAS event), GET run, and GET event number of each alpha / proton
+alphas_no_veto = {} #the same with the veto condition (veto pads < 200 ADC and track start > 5 mm into the window) not applied: range vs energy band only
 for run_type, get_runs in get_runs_by_type.items():
     energy = e23035_runs.get_energy_MeV(get_runs, num_workers=num_workers, tpc_ini_filename=tpc_config)
     alpha_mask = e23035_runs.get_alpha_mask(get_runs, energy=energy, tpc_ini_filename=tpc_config)
+    alpha_mask_no_veto = e23035_runs.get_alpha_mask(get_runs, energy=energy, veto_mask=np.ones(len(energy), dtype=bool), tpc_ini_filename=tpc_config)
     proton_mask = e23035_runs.get_proton_mask(get_runs, energy=energy, tpc_ini_filename=tpc_config)
     tsbo = get_tsbo.get_time_since_beam_off(experiment, get_runs, tpc_ini_filename=tpc_config, num_workers=num_workers)
     run_numbers, event_numbers = process_runs.get_run_and_event_numbers(experiment, get_runs, config_filename=tpc_config)
-    for particles, mask in ((alphas, alpha_mask), (protons, proton_mask)):
+    for particles, mask in ((alphas, alpha_mask), (alphas_no_veto, alpha_mask_no_veto), (protons, proton_mask)):
         particles[run_type] = {'energy': energy[mask], 'tsbo': tsbo[mask], 'run': run_numbers[mask].astype(int), 'event': event_numbers[mask].astype(int)}
-    print(run_type, 'has', np.sum(alpha_mask), 'alphas and', np.sum(proton_mask), 'protons')
+    print(run_type, 'has', np.sum(alpha_mask), 'alphas (', np.sum(alpha_mask_no_veto), 'without the veto condition) and', np.sum(proton_mask), 'protons')
 
 
 #make a 2D histogram where each y bin contains a run, and the x axis is energy.
@@ -148,28 +150,27 @@ plot_spectrum_by_run_type('linear', gain_match_spectrum, {gain_match_label: 'tab
 #The same again with background run 73 drawn separately from the other background runs
 plot_spectrum_by_run_type('linear', gain_match_spectrum, {gain_match_label: 'tab:green'}, split_runs={'background': ([73], 'tab:red')})
 
-#Make a 2D histogram of alpha energy vs time since beam off for the 60Ga runs, over the previously mentioned energy
-#range and, in a second subplot, from 2.5 MeV up to include the 60Ga alphas below it
-ga_alphas = alphas['60Ga']
-ga_tsbo = ga_alphas['tsbo']
-print(f'{np.sum(np.isnan(ga_tsbo))} of {len(ga_tsbo)} 60Ga alphas have no matched DDAS event')
+#Make a 2D histogram of alpha energy vs time since beam off for the 60Ga runs, with the production alpha selection in
+#the top subplot and the selection without the veto condition in the bottom one
+print(f"{np.sum(np.isnan(alphas['60Ga']['tsbo']))} of {len(alphas['60Ga']['tsbo'])} 60Ga alphas have no matched DDAS event")
 
 fig, axes = plt.subplots(2, 1, figsize=max_figure_size)
-for ax, plot_energy_range in zip(axes, (energy_range, (2.5, 9.0))):
-    plot_mask = np.isfinite(ga_tsbo) & (ga_alphas['energy'] >= plot_energy_range[0]) & (ga_alphas['energy'] < plot_energy_range[1])
-    hist = ax.hist2d(ga_alphas['energy'][plot_mask], ga_tsbo[plot_mask]*1e3, bins=(np.arange(plot_energy_range[0], plot_energy_range[1] + 1e-6, 0.1), np.arange(0, 100.1, 2.5)))
+for ax, (ga_alphas, label) in zip(axes, ((alphas['60Ga'], '60Ga run alphas'), (alphas_no_veto['60Ga'], '60Ga run alphas, no veto condition'))):
+    ga_tsbo = ga_alphas['tsbo']
+    plot_mask = np.isfinite(ga_tsbo) & (ga_alphas['energy'] >= energy_range[0]) & (ga_alphas['energy'] < energy_range[1])
+    hist = ax.hist2d(ga_alphas['energy'][plot_mask], ga_tsbo[plot_mask]*1e3, bins=(np.arange(energy_range[0], energy_range[1] + 1e-6, 0.1), np.arange(0, 100.1, 2.5)))
     fig.colorbar(hist[3], ax=ax, label='alphas')
     ax.set_xlabel('energy (MeV)')
     ax.set_ylabel('time since beam off (ms)')
-    ax.set_title(f'60Ga run alphas, {plot_energy_range[0]}-{plot_energy_range[1]} MeV', loc='left')
+    ax.set_title(f'{label}, {energy_range[0]}-{energy_range[1]} MeV', loc='left')
 fig.tight_layout()
 
 #Energy spectra of the particles of a run type in three equal time slices of the beam-off part of the cycle (from the
 #first to the last particle inside the decay window), overlaid. The slices have the same duration, so the raw counts
 #compare rates directly.
-num_slices = 6
-def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_width, decay_window):
-    '''particle_data: an entry of alphas or protons; decay_window: length of the beam-off part of the cycle (s)'''
+num_slices = 3
+def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_width, decay_window, particle_name='alphas'):
+    '''particle_data: an entry of alphas or protons; decay_window: length of the beam-off part of the cycle (s); particle_name for the axis label'''
     energy, tsbo = particle_data['energy'], particle_data['tsbo']
     in_slice_range = np.isfinite(tsbo) & (tsbo < decay_window) & (energy >= slice_energy_range[0]) & (energy < slice_energy_range[1])
     slice_edges = np.linspace(np.min(tsbo[in_slice_range]), np.max(tsbo[in_slice_range]), num_slices + 1)
@@ -177,21 +178,22 @@ def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_widt
     for slice_start, slice_end in zip(slice_edges[:-1], slice_edges[1:]):
         in_slice = in_slice_range & (tsbo >= slice_start) & (tsbo <= slice_end)
         plt.hist(energy[in_slice], np.arange(slice_energy_range[0], slice_energy_range[1] + 1e-6, bin_width), histtype='step',
-                 label=f'{slice_start*1e3:.0f}-{slice_end*1e3:.0f} ms after beam off ({np.sum(in_slice)} {particle_label.split()[-1]})')
+                 label=f'{slice_start*1e3:.0f}-{slice_end*1e3:.0f} ms after beam off ({np.sum(in_slice)} {particle_name})')
     plt.xlabel('energy (MeV)')
-    plt.ylabel(f'{particle_label.split()[-1]} / {bin_width*1e3:.0f} keV')
+    plt.ylabel(f'{particle_name} / {bin_width*1e3:.0f} keV')
     plt.title(f'{particle_label} in {num_slices} equal slices of time since beam off')
     plt.legend()
     plt.tight_layout()
 
 plot_time_slices(alphas['60Ga'], '60Ga run alphas', (2.5, 9.0), 0.05, 0.1)
+plot_time_slices(alphas_no_veto['60Ga'], '60Ga run alphas, no veto condition', (2.5, 9.0), 0.05, 0.1)
 
 #The proton plots use only the standard 60Ga runs (GET 263-279, the 0.5 us gate delay / 512 bucket configuration)
 standard_runs = range(263, 280)
 in_standard_runs = np.isin(protons['60Ga']['run'], list(standard_runs))
 standard_protons = {key: values[in_standard_runs] for key, values in protons['60Ga'].items()}
 print(f'standard runs {standard_runs.start}-{standard_runs.stop - 1} have {np.sum(in_standard_runs)} protons')
-plot_time_slices(standard_protons, 'standard 60Ga run protons', (0.3, 4.0), 0.01, 0.1)
-plot_time_slices(protons['59Zn'], '59Zn run protons', (0.3, 4.0), 0.01, 0.5)
+plot_time_slices(standard_protons, 'standard 60Ga run protons', (0.3, 4.0), 0.01, 0.1, 'protons')
+plot_time_slices(protons['59Zn'], '59Zn run protons', (0.3, 4.0), 0.01, 0.5, 'protons')
 
 plt.show(block=False)
