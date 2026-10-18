@@ -29,12 +29,16 @@ class GadgetAnalysisGUI(tk.Tk):
             text="GADGET II Analysis Gadget",bg=bg_color,
             fg="white", font = ('times','22'))
         self.title_label.grid(row=0)
-        git_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
+        try:
+            git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'],
+                                               stderr=subprocess.DEVNULL).decode().strip()
+        except (OSError, subprocess.CalledProcessError):
+            git_hash = 'unavailable'
         self.version_label = tk.Label(self.title_frame, text='hash=%s'%git_hash,
                                         bg="#18453b", fg="white", font = ('times','12'))
         self.version_label.grid(row=1)
 
-        self.notebook = ttk.Notebook(self, height=500, width=500)
+        self.notebook = ttk.Notebook(self, height=630, width=660)
         self.notebook.grid(row=2, column=0)
         
         self.run_select_frame = RunSelectFrame(self.notebook, self)
@@ -48,24 +52,40 @@ class GadgetAnalysisGUI(tk.Tk):
         '''
         function that will be called by RunSelectFrame anytime a new run is loaded
         '''
-        #remove tabs pertaining to previous run/s
+        # Carry cut geometry across run loads, independently of its free filters.
+        previous_rve = next((tab for tab in self.run_specific_tabs
+                             if isinstance(tab, RvE_Frame)), None)
+        cut = previous_rve.get_cut_definition() if previous_rve and previous_rve.rve_cut_verticies else None
+        run_data = self.run_select_frame.run_data
+        if cut is not None and cut['experiment'] != run_data.experiment:
+            cut = None
+        new_tabs = []
+        try:
+            for frame_type in (EnergySpectrumFrame, RvE_Frame, IndividualEventFrame):
+                frame = frame_type(self.notebook, run_data)
+                new_tabs.append(frame)
+                if isinstance(frame, RvE_Frame) and cut is not None:
+                    frame.apply_cut_definition(cut)
+        except Exception:
+            for frame in new_tabs:
+                frame.destroy()
+            raise
         for tab in self.run_specific_tabs:
+            if isinstance(tab, RvE_Frame):
+                tab.close_plots()
             self.notebook.forget(tab)
-        #add tabls back pertaining to current run
-        energy_spectrum_frame = EnergySpectrumFrame(self.notebook,self.run_select_frame.run_data)
-        self.run_specific_tabs.append(energy_spectrum_frame)
-        self.notebook.add(energy_spectrum_frame, text='Energy Spectrum')
-        rve_frame = RvE_Frame(self.notebook, self.run_select_frame.run_data)
-        self.run_specific_tabs.append(rve_frame)
-        self.notebook.add(rve_frame, text='Range vs Energy')
-        single_event_frame = IndividualEventFrame(self.notebook, self.run_select_frame.run_data)
-        self.notebook.add(single_event_frame, text='Individual Events')
-        self.run_specific_tabs.append(single_event_frame)
-        self.title('GADGET II Analysis: Run '+str(self.run_select_frame.run_data.run_num))
+            tab.destroy()
+        self.run_specific_tabs = new_tabs
+        for frame, label in zip(new_tabs, ('Energy Spectrum', 'Range vs Energy', 'Individual Events')):
+            self.notebook.add(frame, text=label)
+        self.title('GADGET II Analysis: Runs ' + run_data.runs_label)
 
 #function to close all matplot windows, if this is run as main program
 def on_closing():
     matplotlib.pyplot.close('all')
+    data = gui.run_select_frame.run_data
+    if data is not None:
+        data.close()
     gui.destroy()
 
 if __name__ == '__main__':

@@ -26,8 +26,13 @@ class IndividualEventFrame(ttk.Frame):
         self.event_select_frame.pack()
         ttk.Label(self.event_select_frame, text='Event #').grid(row=0, column=0)
         self.event_num_entry = gadget_widgets.GEntry(self.event_select_frame,
-                                                      text='Enter Event #')
+                                                      default_text='Enter Event #')
         self.event_num_entry.grid(row=0, column=1)
+        ttk.Label(self.event_select_frame, text='Run #').grid(row=0, column=2)
+        self.run_num_combo = ttk.Combobox(self.event_select_frame, state='readonly',
+                                         values=self.run_data.run_nums, width=9)
+        self.run_num_combo.set(str(self.run_data.run_nums[0]))
+        self.run_num_combo.grid(row=0, column=3)
 
         self.threeD_frame = ttk.LabelFrame(self, text='Raw Data Viewer')
         track_w_trace_button_raw = ttk.Button(self.threeD_frame,
@@ -59,8 +64,11 @@ class IndividualEventFrame(ttk.Frame):
 
     def open_raw_viewer(self):
         new_window = tk.Toplevel(self)
-        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.file_path, flat_lookup_path='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.selected_run().file_path, flat_lookup_path='raw_viewer/channel_mappings/flatlookup4cobos.csv')
         self.viewer_frame.pack()
+
+    def selected_run(self):
+        return self.run_data.get_run(int(self.run_num_combo.get()))
 
     
 
@@ -70,7 +78,7 @@ class IndividualEventFrame(ttk.Frame):
         event_num = int(self.event_num_entry.get())
         bandwidth = float(self.bandwidth_entry.get())
 
-        xHit, yHit, zHit, eHit = self.run_data.get_hit_lists(event_num)
+        xHit, yHit, zHit, eHit = self.selected_run().get_hit_lists(event_num)
 
         extend_bins = 10 #TODO: this should probably be relaed to the bandwidth
         if debug:
@@ -119,7 +127,7 @@ class IndividualEventFrame(ttk.Frame):
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
-        ax.set_title(f"3D Point-cloud of Event {event_num}", fontdict = {'fontsize' : 10})
+        ax.set_title(f"Run {self.selected_run().run_num}, Event {event_num}", fontdict = {'fontsize' : 10})
         ax.scatter(xHit, yHit, zHit-np.min(zHit), c=eHit, cmap='RdBu_r')
         cbar = fig.colorbar(ax.get_children()[0])
         plt.show(block=False) 
@@ -127,24 +135,24 @@ class IndividualEventFrame(ttk.Frame):
     def track_w_trace_raw(self):
         event_num = int(self.event_num_entry.get())
         plt.figure()
-        self.run_data.make_image(event_num, show=True)
+        self.selected_run().make_image(event_num, show=True)
 
     def track_w_trace_raw_smooth(self):
         event_num = int(self.event_num_entry.get())
         plt.figure()
-        self.run_data.make_image(event_num, show=True, smoothen = True)
+        self.selected_run().make_image(event_num, show=True, smoothen = True)
 
 
     def show_point_cloud(self):
         event_num = int(self.event_num_entry.get())
-        xHit, yHit, zHit, eHit = self.run_data.get_hit_lists(event_num)
+        xHit, yHit, zHit, eHit = self.selected_run().get_hit_lists(event_num)
         self.show_plot(xHit, yHit, zHit, eHit)
 
     def plot_dense_3d_track(self):
         radius = 5
 
         event_num = int(self.event_num_entry.get())
-        xHit, yHit, zHit, eHit = self.run_data.get_hit_lists(event_num)
+        xHit, yHit, zHit, eHit = self.selected_run().get_hit_lists(event_num)
         
         nbrs = NearestNeighbors(radius=radius).fit(np.vstack((xHit, yHit, zHit)).T)
 

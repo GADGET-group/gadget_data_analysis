@@ -1,6 +1,7 @@
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import gadget_widgets
-import GadgetRunH5
+from GadgetRunCollection import GadgetRunCollection
+from rve_cuts import parse_run_numbers
 from raw_viewer import process_runs
 
 import tkinter as tk
@@ -25,14 +26,16 @@ class RunSelectFrame(ttk.Frame):
         self.experiment_entry = ttk.Entry(self.load_run_frame)
         self.experiment_entry.insert(0, 'e25058')
         self.experiment_entry.grid(row=0, column=1)
-        ttk.Label(self.load_run_frame, text="Enter Run #:").grid(row=1, column=0)
-        self.load_run_number_entry = ttk.Entry(self.load_run_frame) 
+        ttk.Label(self.load_run_frame, text="Runs (comma-separated):").grid(row=1, column=0)
+        self.load_run_number_entry = ttk.Entry(self.load_run_frame, width=30)
         self.load_run_number_entry.grid(row=1, column=1)
         self.load_button = ttk.Button(self.load_run_frame, text='Load', command=self.load_button_clicked)
         self.load_button.grid(row=2, column=0,columnspan=2)
+        self.load_status = ttk.Label(self.load_run_frame, text='Example: 145,147,149')
+        self.load_status.grid(row=3, column=0, columnspan=2)
         
         #populate process run frame
-        ttk.Label(self.process_run_frame, text="Run #:").grid(row=0, column=0, sticky=tk.E)
+        ttk.Label(self.process_run_frame, text="Runs (comma-separated):").grid(row=0, column=0, sticky=tk.E)
         self.create_run_number_entry = ttk.Entry(self.process_run_frame) 
         self.create_run_number_entry.grid(row=0, column=1)
         self.process_run_button = ttk.Button(self.process_run_frame, text='Process run (force reprocess)',
@@ -51,13 +54,38 @@ class RunSelectFrame(ttk.Frame):
 
     def load_button_clicked(self):
         experiment = self.get_experiment()
-        self.run_number = int(self.load_run_number_entry.get())
-        # cut images go to the "cut_images" subfolder of the processed-runs directory
-        self.run_data = GadgetRunH5.GadgetRunH5(self.run_number, experiment=experiment)
-        print('run %d loaded; cut images are saved under %s' % (self.run_number, self.run_data.folder_path))
-        self.main_gui.new_run_loaded()
+        previous = self.run_data
+        candidate = None
+        try:
+            runs = parse_run_numbers(self.load_run_number_entry.get())
+            if not experiment:
+                raise ValueError('Enter an experiment identifier.')
+            self.load_button.state(['disabled'])
+            self.load_status.configure(text=f'Loading runs {runs}...')
+            self.update_idletasks()
+            candidate = GadgetRunCollection(runs, experiment=experiment)
+            self.run_data = candidate
+            self.main_gui.new_run_loaded()
+            self.run_numbers = runs
+        except Exception as exc:
+            self.run_data = previous
+            if candidate is not None:
+                candidate.close()
+            self.load_status.configure(text='Load failed; previous runs are retained.')
+            messagebox.showerror('Cannot load runs', str(exc), parent=self)
+        else:
+            if previous is not None:
+                previous.close()
+            self.load_status.configure(text=f'Loaded {candidate.runs_label}: {len(candidate.counts):,} events')
+            print(f'Runs {candidate.runs_label} loaded; cut images: {candidate.folder_path}')
+        finally:
+            self.load_button.state(['!disabled'])
 
     def process_run_button_clicked(self):
-        experiment = self.get_experiment()
-        run_num = int(self.create_run_number_entry.get())
-        process_runs.process_tpc_run(experiment, run_num, force_reprocess=True)
+        try:
+            runs = parse_run_numbers(self.create_run_number_entry.get())
+            experiment = self.get_experiment()
+            for run_num in runs:
+                process_runs.process_tpc_run(experiment, run_num, force_reprocess=True)
+        except Exception as exc:
+            messagebox.showerror('Run processing failed', str(exc), parent=self)

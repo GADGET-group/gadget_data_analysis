@@ -1,11 +1,11 @@
 import datetime
-import random
 import os
+import csv
+import json
 
 import tkinter.filedialog
 import tkinter as tk
-from tkinter import ttk
-from arrow import now
+from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patches as patches
@@ -18,6 +18,8 @@ import pickle
 
 import gadget_widgets
 from prev_cut_select_window import PrevCutSelectWindow
+from rve_cuts import load_cut, save_cut, validate_cut, polygon_mask
+from event_image_io import TraceImageRenderer
 
 class RvE_Frame(ttk.Frame):
     def __init__(self, parent, run_data:GadgetRunH5):
@@ -66,6 +68,11 @@ class RvE_Frame(ttk.Frame):
         self.show_event_button = ttk.Button(self.view_frame, text='show event on RvE plot',
                                             command=self.show_event)
         self.show_event_button.grid(row=1, column=1)
+        ttk.Label(self.view_frame, text='Run # for event:').grid(row=2, column=0)
+        self.event_run_combo = ttk.Combobox(self.view_frame, state='readonly',
+                                           values=self.run_data.run_nums, width=12)
+        self.event_run_combo.set(str(self.run_data.run_nums[0]))
+        self.event_run_combo.grid(row=2, column=1)
 
         # --- Cut tools ---
         self.cut_tools_frame = ttk.LabelFrame(self, text='cut tools')
@@ -85,13 +92,19 @@ class RvE_Frame(ttk.Frame):
         self.prev_cut_button = ttk.Button(self.cut_tools_frame, 
                                           text='Previous Cuts',
                                           command=self.prev_cut)
-        self.prev_cut_button.grid(row=1, column=0, columnspan=2)
+        self.prev_cut_button.grid(row=2, column=0, columnspan=2)
+        ttk.Button(self.cut_tools_frame, text='Save Cut', command=self.save_cut_definition).grid(row=1, column=0)
+        ttk.Button(self.cut_tools_frame, text='Load Cut', command=self.load_cut_definition).grid(row=1, column=1)
 
         # Optional projection buttons
-        self.project_cut_x_ax_button = ttk.Button(self.cut_tools_frame, text='Project Cut to X-axis')
-        self.project_cut_x_ax_button.grid(row=2, column=0)
-        self.project_cut_y_ax_button = ttk.Button(self.cut_tools_frame, text='Project Cut to Y-axis')
-        self.project_cut_y_ax_button.grid(row=2, column=1)
+        self.project_cut_x_ax_button = ttk.Button(self.cut_tools_frame, text='Project Cut to X-axis',
+                                                 command=lambda: self.project_cut('energy'))
+        self.project_cut_x_ax_button.grid(row=3, column=0)
+        self.project_cut_y_ax_button = ttk.Button(self.cut_tools_frame, text='Project Cut to Y-axis',
+                                                 command=lambda: self.project_cut('range'))
+        self.project_cut_y_ax_button.grid(row=3, column=1)
+        self.cut_status = ttk.Label(self.cut_tools_frame, text='No polygon selected.', wraplength=520)
+        self.cut_status.grid(row=4, column=0, columnspan=2)
 
         # --- Filter / Selection settings ---
         self.filter_frame = ttk.LabelFrame(self, text='filter settings')
@@ -126,12 +139,12 @@ class RvE_Frame(ttk.Frame):
         self.angle_max_entry.insert(0, "inf")
 
         # IC min / max
-        ttk.Label(self.filter_frame, text="IC min:").grid(row=3, column=0)
+        ttk.Label(self.filter_frame, text=f"Energy min ({self.run_data.energy_units}):").grid(row=3, column=0)
         self.ic_min_entry = gadget_widgets.GEntry(self.filter_frame)
         self.ic_min_entry.grid(row=3, column=1)
         self.ic_min_entry.insert(0, "-inf")
 
-        ttk.Label(self.filter_frame, text="IC max:").grid(row=3, column=2)
+        ttk.Label(self.filter_frame, text=f"Energy max ({self.run_data.energy_units}):").grid(row=3, column=2)
         self.ic_max_entry = gadget_widgets.GEntry(self.filter_frame)
         self.ic_max_entry.grid(row=3, column=3)
         self.ic_max_entry.insert(0, "inf")
@@ -151,231 +164,297 @@ class RvE_Frame(ttk.Frame):
         self.rve_cut_verticies = []
         self.rve_cut_select_mask = None
         self.selected_rve_path = None
+        self.cut_source_runs = list(self.run_data.run_nums)
+        self._plot_figures = []
+        self.poly_selector = None
 
-    def set_cut_polygon(self, verticies):
-        '''
-        verticies: (counts, ranges)
-        '''
-        print("Polygon vertices selected:", verticies)
-        self.rve_cut_verticies = verticies
+    def close_plots(self):
+        if self.poly_selector is not None:
+            self.poly_selector.disconnect_events()
+        for fig in self._plot_figures:
+            plt.close(fig)
+        self._plot_figures.clear()
+
+    def get_cut_definition(self):
+        return validate_cut({
+            'experiment': self.run_data.experiment,
+            'source_runs': self.cut_source_runs,
+            'vertices': self.rve_cut_verticies,
+        }, self.run_data.experiment)
+
+    def apply_cut_definition(self, definition):
+        definition = validate_cut(definition, self.run_data.experiment)
+        self.rve_cut_verticies = definition['vertices']
+        self.cut_source_runs = definition['source_runs']
         self.selected_rve_path = Path(self.rve_cut_verticies)
-        rve_points = np.vstack((self.run_data.counts, self.run_data.ranges)).transpose()
-        inside_polygon = self.selected_rve_path.contains_points(rve_points)
-        base_mask = self.get_processed_event_mask()
-
-        self.rve_cut_select_mask = inside_polygon & base_mask
-
-        print(np.count_nonzero(inside_polygon),"events inside polygon before filters")
-        print(np.count_nonzero(self.rve_cut_select_mask),"events inside polygon after filters")
-
-    def get_processed_event_mask(self):
-        '''
-        Returns a mask that can be used to select events in the processed data set
-        '''
-        veto_maxs = self.run_data.max_veto_counts 
-        veto_thresh = float(self.veto_threshold_entry.get())
-        rmin = float(self.range_min_entry.get())
-        rmax = float(self.range_max_entry.get())
-        amin = float(self.angle_min_entry.get())
-        amax = float(self.angle_max_entry.get())
-        icmin = float(self.ic_min_entry.get())
-        icmax = float(self.ic_max_entry.get())
-        railed_max = float(self.railed_pads_max_entry.get())
-        beam_off_min = float(self.beam_off_min_entry.get())
-
-        to_return =  np.logical_and.reduce((veto_maxs < float(veto_thresh),
-                                      self.run_data.angles < float(amax),
-                                      self.run_data.angles > float(amin),
-                                      self.run_data.ranges > float(rmin),
-                                      self.run_data.ranges < float(rmax),
-                                      self.run_data.counts < float(icmax),
-                                      self.run_data.counts > float(icmin),
-                                      self.run_data.num_railed_pads <= railed_max,
-                                      self.run_data.time_since_beam_off > beam_off_min
-                                    ))
-        return to_return
-
-    def plot_spectrum_polygon(self):
-        '''
-        Opens RvE histogram and allows polygon selection
-        '''
-        bins = int(self.energy_bins_entry.get())
-        fig, ax = plt.subplots()
-        mask = self.get_processed_event_mask()
-        print(sum(mask), 'events after mask applied', len(mask), 'total events')
-        ax.hist2d(self.run_data.counts[mask], self.run_data.ranges[mask],
-                  bins=(bins, bins), norm=colors.LogNorm())
-        ax.set_xlabel(f'Energy ({self.run_data.energy_units})')
-        ax.set_ylabel('range (mm)')
-
-        self.poly_selector = PolygonSelector(ax, self.set_cut_polygon)
-        if len(self.rve_cut_verticies) > 0:
+        self.refresh_selection()
+        if self.poly_selector is not None:
             self.poly_selector.verts = self.rve_cut_verticies
 
-        plt.title("Draw a polygon to select region, then close the figure.")
-        plt.show(block=False)
+    def refresh_selection(self):
+        inside = polygon_mask(self.run_data.counts, self.run_data.ranges, self.rve_cut_verticies)
+        self.rve_cut_select_mask = inside & self.get_processed_event_mask()
+        count = int(self.rve_cut_select_mask.sum())
+        source = ', '.join(str(r) for r in self.cut_source_runs)
+        self.cut_status.configure(text=f'Cut source: {self.run_data.experiment}, runs {source}. '
+                                       f'{count:,} selected with current filters.')
+        print(int(inside.sum()), 'events inside polygon before filters')
+        print(count, 'events inside polygon after filters')
+        return self.rve_cut_select_mask
 
-    def plot_spectrum(self, fig_name='RvE',clear=True, show=True):
-        bins = 300
-        fig, ax = plt.subplots()
-        mask = self.get_processed_event_mask()
-        print(sum(mask), 'events after mask applied', len(mask), 'total events')
-        #fig.title('E25058' + 'runs: '+str(get_runs))
-        ax.hist2d(self.run_data.counts[mask], self.run_data.ranges[mask], bins=(bins, bins), norm=colors.LogNorm())
-        ax.set_xlabel(f'Energy ({self.run_data.energy_units})')
-        ax.set_ylabel('range (mm)')
-        fig.show()
-
-    def save_selected_polygon_images(self):
-        '''
-        Save images using the most recently selected polygon vertices.
-        '''
-        if not self.rve_cut_verticies:
-            print("No polygon selected yet! Please draw one using 'Select Polygon Region'.")
+    def set_cut_polygon(self, verticies):
+        try:
+            definition = validate_cut({'experiment': self.run_data.experiment,
+                                       'source_runs': self.run_data.run_nums,
+                                       'vertices': verticies})
+        except ValueError as exc:
+            print('Incomplete polygon:', exc)
             return
+        # An edit creates a new cut on the currently loaded runs.
+        self.rve_cut_verticies = definition['vertices']
+        self.cut_source_runs = definition['source_runs']
+        self.selected_rve_path = Path(self.rve_cut_verticies)
+        self.refresh_selection()
 
-        print("Saving images for selected polygon...")
-        self.save_cut_files(self.rve_cut_verticies)
-        print("Images saved successfully.")
+    def get_processed_event_mask(self):
+        values = {name: float(getattr(self, name + '_entry').get()) for name in (
+            'veto_threshold', 'range_min', 'range_max', 'angle_min', 'angle_max',
+            'ic_min', 'ic_max', 'railed_pads_max', 'beam_off_min')}
+        if any(np.isnan(value) for value in values.values()):
+            raise ValueError('Filter values cannot be NaN.')
+        for lo, hi in (('range_min', 'range_max'), ('angle_min', 'angle_max'), ('ic_min', 'ic_max')):
+            if values[lo] >= values[hi]:
+                raise ValueError(f'{lo} must be smaller than {hi}.')
+        data = self.run_data
+        return np.logical_and.reduce((
+            data.max_veto_counts < values['veto_threshold'],
+            data.ranges > values['range_min'], data.ranges < values['range_max'],
+            data.angles > values['angle_min'], data.angles < values['angle_max'],
+            data.counts > values['ic_min'], data.counts < values['ic_max'],
+            data.num_railed_pads <= values['railed_pads_max'],
+            data.time_since_beam_off > values['beam_off_min'],
+        ))
 
-    def show_event(self): #TODO: add "show annotation" checkbox
-        #only draw plot if it's not already open
-        if not plt.fignum_exists('RvE'):
-            self.plot_spectrum()
+    def get_bins(self):
+        bins = (int(self.energy_bins_entry.get()), int(self.range_bins_entry.get()))
+        if min(bins) <= 0:
+            raise ValueError('Histogram bin counts must be positive integers.')
+        return bins
+
+    def _draw_histogram(self, ax, mask, vertices=None):
+        if np.any(mask):
+            norm = colors.LogNorm() if self.log_scale_var.get() else None
+            ax.hist2d(self.run_data.counts[mask], self.run_data.ranges[mask],
+                      bins=self.get_bins(), norm=norm)
         else:
-            plt.figure('RvE')  # switch focus back to RvE plot
-        event_num = int(self.event_num_entry.get())
-        event_index = self.run_data.get_index(event_num)
-        plt.plot(self.run_data.counts[event_index], self.run_data.ranges[event_index], 'ro', picker=5) 
-        plt.annotate(f"Evt#: {event_num}", (self.run_data.counts[event_index], 
-                    self.run_data.ranges[event_index]), textcoords="offset points", xytext=(-15,7),
-                    ha='center', fontsize=10, color='black',
-                    bbox=dict(boxstyle="round,pad=0.5", facecolor="yellow", edgecolor="black"))
+            ax.text(0.5, 0.5, 'No events pass the current filters.', transform=ax.transAxes,
+                    ha='center', va='center')
+        ax.set_xlabel(f'Energy ({self.run_data.energy_units})')
+        ax.set_ylabel('Range (mm)')
+        if vertices is not None:
+            ax.add_patch(patches.Polygon(vertices, closed=True, fill=False, color='red'))
+
+    def plot_spectrum(self, fig_name='RvE', clear=True, show=True):
+        mask = self.get_processed_event_mask()
+        print(int(mask.sum()), 'events after mask applied', len(mask), 'total events')
+        fig, ax = plt.subplots(num=fig_name, clear=clear)
+        self._draw_histogram(ax, mask)
+        ax.set_title(f'{self.run_data.experiment}: runs {self.run_data.runs_label}')
+        if self.rve_cut_verticies:
+            ax.add_patch(patches.Polygon(self.rve_cut_verticies, closed=True,
+                                         fill=False, color='red'))
+        if fig not in self._plot_figures:
+            self._plot_figures.append(fig)
+        if show:
+            plt.show(block=False)
+        return fig, ax
+
+    def plot_spectrum_polygon(self):
+        if self.poly_selector is not None:
+            self.poly_selector.disconnect_events()
+        fig, ax = self.plot_spectrum(fig_name='RvE polygon', show=False)
+        # PolygonSelector draws the outline itself; remove the static preview.
+        for patch in list(ax.patches):
+            patch.remove()
+        self.poly_selector = PolygonSelector(ax, self.set_cut_polygon)
+        if self.rve_cut_verticies:
+            self.poly_selector.verts = self.rve_cut_verticies
+            self.refresh_selection()
+        ax.set_title(f'Runs {self.run_data.runs_label}: draw or edit the polygon')
         plt.show(block=False)
-        
+
+    def save_cut_definition(self):
+        try:
+            definition = self.get_cut_definition()
+            directory = os.path.join(self.run_data.folder_path, 'cut_definitions')
+            os.makedirs(directory, exist_ok=True)
+            filename = tkinter.filedialog.asksaveasfilename(
+                parent=self, title='Save reusable RvE cut', initialdir=directory,
+                initialfile=f"{definition['experiment']}_run{definition['source_runs'][0]}_cut.json",
+                defaultextension='.json', filetypes=[('RvE cut definition', '*.json')])
+            if not filename:
+                return
+            save_cut(filename, definition)
+            print('Reusable polygon saved:', filename)
+            self.cut_status.configure(text=f'Saved cut: {os.path.basename(filename)}')
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('Cannot save cut', str(exc), parent=self)
+
+    def load_cut_definition(self):
+        filename = tkinter.filedialog.askopenfilename(
+            parent=self, title='Load reusable RvE cut',
+            initialdir=os.path.join(self.run_data.folder_path, 'cut_definitions'),
+            filetypes=[('RvE cut definition', '*.json')])
+        if not filename:
+            return
+        try:
+            # Validate completely before changing any current cut state.
+            definition = load_cut(filename, self.run_data.experiment)
+            self.apply_cut_definition(definition)
+            self.plot_spectrum_polygon()
+            print('Loaded polygon; current GUI filters retained:', filename)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('Cannot load cut', str(exc), parent=self)
+
+    def project_cut(self, axis):
+        if not self.rve_cut_verticies:
+            messagebox.showinfo('No polygon', 'Draw or load a polygon first.', parent=self)
+            return
+        indices = np.flatnonzero(self.refresh_selection())
+        values = self.run_data.counts[indices] if axis == 'energy' else self.run_data.ranges[indices]
+        bins = self.get_bins()[0 if axis == 'energy' else 1]
+        fig, ax = plt.subplots()
+        ax.hist(values, bins=bins, histtype='step')
+        ax.set_xlabel(f'Energy ({self.run_data.energy_units})' if axis == 'energy' else 'Range (mm)')
+        ax.set_ylabel('Events')
+        ax.set_title(f'Runs {self.run_data.runs_label}: {len(indices):,} selected events')
+        self._plot_figures.append(fig)
+        plt.show(block=False)
+
+    def show_event(self):
+        try:
+            run_num = int(self.event_run_combo.get())
+            event_num = int(self.event_num_entry.get())
+            index = self.run_data.get_index(event_num, run_num=run_num)
+            fig, ax = self.plot_spectrum()
+            energy, track_range = self.run_data.counts[index], self.run_data.ranges[index]
+            ax.plot(energy, track_range, 'ro', picker=5)
+            ax.annotate(f'Run {run_num}, event {event_num}', (energy, track_range),
+                        textcoords='offset points', xytext=(-15, 7), ha='center', fontsize=10,
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', edgecolor='black'))
+            fig.canvas.draw_idle()
+        except (ValueError, IndexError) as exc:
+            messagebox.showerror('Cannot locate event', str(exc), parent=self)
+
     def prev_cut(self):
         PrevCutSelectWindow(self, self.run_data)
 
-    
-    def save_cut_files(self, points):
-        now = datetime.datetime.now()
-        cut_name = f"run{self.run_data.run_num}_{now:%Y_%m_%d}"
-        # cuts of every run share run_data.folder_path, so name them by run
-        imageCut_path = os.path.join(self.run_data.folder_path, cut_name)
-        print('NEW DIRECTORY', imageCut_path)
+    def save_selected_polygon_images(self):
+        if not self.rve_cut_verticies:
+            messagebox.showinfo('No polygon', 'Draw or load a polygon first.', parent=self)
+            return
+        base = tkinter.filedialog.askdirectory(parent=self, title='Choose export parent folder',
+                                               initialdir=self.run_data.folder_path)
+        if not base:
+            return
+        try:
+            self.configure(cursor='watch')
+            self.update_idletasks()
+            result = self.save_cut_files(self.rve_cut_verticies, output_base=base)
+            if result:
+                messagebox.showinfo('Images saved', '\n'.join(result), parent=self)
+        except Exception as exc:
+            messagebox.showerror('Image export failed', str(exc), parent=self)
+        finally:
+            self.configure(cursor='')
 
-        # save an image for future cut selection
-        self.plot_spectrum(fig_name=cut_name)
-        ax = plt.gca()
-        #add once point and use this to close the path
-        #actual value of final vertex is ignored for CLOSEPOLY code
-        points_list = list(points)
-        points_list.append([0,0])
-        codes = [Path.LINETO]*len(points_list)
-        codes[0] = Path.MOVETO
-        codes[-1] = Path.CLOSEPOLY
-        path = Path(points_list, codes)
-        
-        to_draw = patches.PathPatch(path, fill=False, color='red')
-        ax.add_patch(to_draw)
-        plt.savefig(os.path.join(self.run_data.folder_path, cut_name+'.jpg'))
-        plt.close()
-	    
-        os.makedirs(imageCut_path)
-		       
-        # Process images in chunks to avoiding overloading memory
-        rve_points = np.column_stack((self.run_data.counts, self.run_data.ranges))
-        inside_polygon = Path(points).contains_points(rve_points)
-        selected_mask = inside_polygon & self.get_processed_event_mask()
-        cut_indices = np.flatnonzero(selected_mask)
-
-        print(len(cut_indices), "filtered events selected for image export")
-        chunk_size = 500
-        num_images = len(cut_indices)
-        print("Total Number of Image:", num_images)
-        num_chunks = (num_images + chunk_size - 1) // chunk_size
-        print("Total Number of Chunks:", num_chunks)
-        chunk_num = 1
-        import io
+    def save_cut_files(self, points, output_base=None, date=None):
+        """Export separate run/date folders. Never overwrite an earlier export."""
         from PIL import Image
-
-        pbar = tqdm(total=num_chunks)
-        for chunk_idx in range(num_chunks):
-            print(f"Processing Chunk {chunk_idx+1} of {num_chunks}")
-            start_idx = chunk_idx * chunk_size
-            end_idx = min((chunk_idx + 1) * chunk_size, num_images)
-
-            chunk_indices = cut_indices[start_idx:end_idx]
-            image_data = self.run_data.save_cutImages(chunk_indices)
-
-            my_dpi = 96
-            fig_size = (224/my_dpi, 73/my_dpi)  # Fig size to be used in the main thread
-            fig, ax = plt.subplots(figsize=fig_size)
-            ax.tick_params(top=False, bottom=False, left=False, right=False, labelleft=False, labelbottom=False)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['bottom'].set_visible(False)
-            ax.spines['left'].set_visible(False)
-
-			# Plot and save images in the main thread
-            for pad_plane, trace, title, filename in image_data:
-				# Plot trace
-				# Plot trace
-                ax.clear()
-                x = np.linspace(0, len(trace)-1, len(trace))
-                ax.fill_between(x, trace, color='b', alpha=1)
-
-                # Assuming pad_plane is a NumPy array with shape (height, width, 3)
-                alpha_channel = np.ones((pad_plane.shape[0], pad_plane.shape[1], 1), dtype=pad_plane.dtype) * 255
-                pad_plane_rgba = np.concatenate((pad_plane, alpha_channel), axis=2)
-                # Now pad_plane_rgba has an additional alpha channel and can be concatenated with trace_img
-
-                # Ensure trace image is saved as PNG and read it
-                buf = io.BytesIO()
-                fig.savefig(buf, format='png', dpi=my_dpi)
-                buf.seek(0)
-                with Image.open(buf) as im:
-                    trace_img_png = np.array(im)
-                buf.close()
-
-                # Concatenate pad_plane_rgba and trace_img_png
-                complete_image = np.append(pad_plane_rgba, trace_img_png, axis=0)
-
-                # Convert image data to uint8 if it's not already
-                if complete_image.dtype != np.uint8:
-                    if complete_image.max() > 1:
-                        complete_image = complete_image.astype(np.uint8)
-                    else:
-                        complete_image = (255 * complete_image).astype(np.uint8)
-
-                # Save the final concatenated image as PNG
-                plt.imsave(os.path.join(imageCut_path, filename), complete_image)
-                # Close the figure to free memory
+        definition = validate_cut({'experiment': self.run_data.experiment,
+                                   'source_runs': self.cut_source_runs, 'vertices': points})
+        # Evaluate current filters once, so counts, manifests and PNGs agree.
+        base_mask = self.get_processed_event_mask()
+        selected_mask = polygon_mask(self.run_data.counts, self.run_data.ranges, points) & base_mask
+        self.rve_cut_select_mask = selected_mask
+        indices = np.flatnonzero(selected_mask)
+        print(len(indices), 'filtered events selected for image export')
+        if not len(indices):
+            print('No images were written: the cut is empty after filtering.')
+            return []
+        output_base = self.run_data.folder_path if output_base is None else os.fspath(output_base)
+        os.makedirs(output_base, exist_ok=True)
+        date = datetime.datetime.now().strftime('%Y_%m_%d') if date is None else date
+        targets = []
+        for run_num in self.run_data.run_nums:
+            run_indices = indices[self.run_data.event_runs[indices] == run_num]
+            if not len(run_indices):
+                print(f'Run {run_num}: no selected events')
+                continue
+            name = f'run{run_num}_{date}'
+            folder = os.path.join(output_base, name)
+            preview = os.path.join(output_base, name + '.jpg')
+            if os.path.exists(folder) or os.path.exists(preview):
+                raise FileExistsError(f'An export already exists: {folder}. '
+                                      'Choose a different export parent folder to keep both cuts.')
+            targets.append((run_num, run_indices, folder, preview))
+        # Check all target names before creating any output.
+        for _, _, folder, _ in targets:
+            os.mkdir(folder)
+        renderer = TraceImageRenderer()
+        outputs = []
+        for run_num, run_indices, folder, preview in targets:
+            print('NEW DIRECTORY', folder)
+            save_cut(os.path.join(folder, 'cut_definition.json'), definition)
+            selected_events = np.asarray(self.run_data.get_event_num(run_indices), dtype=np.int64)
+            with open(os.path.join(folder, 'selected_events.csv'), 'w', newline='', encoding='utf-8') as handle:
+                writer = csv.writer(handle)
+                writer.writerow(('run', 'event', 'filename'))
+                writer.writerows((run_num, int(evt), f'run{run_num}_event{int(evt)}.png')
+                                 for evt in selected_events)
+            status = {'experiment': self.run_data.experiment, 'run': run_num,
+                      'selected_count': len(run_indices), 'exported_count': 0,
+                      'skipped_empty_events': [], 'status': 'in_progress'}
+            status_path = os.path.join(folder, 'export_status.json')
+            def write_status():
+                with open(status_path, 'w', encoding='utf-8') as handle:
+                    json.dump(status, handle, indent=2)
+                    handle.write('\n')
+            write_status()
+            exported_events = []
+            expected = {f'run{run_num}_event{int(evt)}.png': int(evt) for evt in selected_events}
+            try:
+                fig, ax = plt.subplots()
+                self._draw_histogram(ax, base_mask & (self.run_data.event_runs == run_num), points)
+                ax.set_title(f'{self.run_data.experiment}: run {run_num}')
+                fig.savefig(preview)
                 plt.close(fig)
-
-
-                chunk_num += 1
-                pbar.update(n=1)
-
-			# Update the GUI and process pending events
-            # root.update_idletasks()
-            # root.update()
-
-        print("All images have been processed")
-		
-		# Pickle the event numbers of the events in the cut
-        cut_indices_H5list = self.run_data.get_event_num(cut_indices)
-        cut_indices_str = f"cut_indices_H5list.pkl"
-        cut_indices_path = os.path.join(imageCut_path, cut_indices_str)
-        with open(cut_indices_path, "wb") as file:
-            pickle.dump(cut_indices_H5list, file)
+                for start in tqdm(range(0, len(run_indices), 100), desc=f'Export run {run_num}'):
+                    chunk = run_indices[start:start + 100]
+                    for pad_plane, trace, title, filename in self.run_data.save_cutImages(chunk):
+                        if filename not in expected:
+                            raise ValueError(f'Unexpected or duplicate event filename: {filename}')
+                        image = renderer.compose(pad_plane, trace)
+                        Image.fromarray(image).save(os.path.join(folder, filename))
+                        exported_events.append(expected.pop(filename))
+                    status['exported_count'] = len(exported_events)
+                    write_status()
+                # The existing builder skips events without hits above the image threshold.
+                status['skipped_empty_events'] = list(expected.values())
+                with open(os.path.join(folder, 'cut_indices_H5list.pkl'), 'wb') as handle:
+                    pickle.dump(np.asarray(exported_events, dtype=np.int64), handle)
+                status['status'] = 'complete'
+                write_status()
+            except Exception as exc:
+                status['status'] = 'failed'
+                status['error'] = str(exc)
+                status['exported_count'] = len(exported_events)
+                write_status()
+                raise
+            print(f"Run {run_num}: {len(selected_events)} selected, {len(exported_events)} PNGs saved, "
+                  f"{len(status['skipped_empty_events'])} skipped (no image hits)")
+            outputs.append(folder)
+        return outputs
 
     def cut_from_file(self):
-        '''
-        Input files should have an energy (MeV) followed by range (mm) on each line,
-        with the values seperated by a space. 
-        '''
-        fname = tkinter.filedialog.askopenfile(initialdir=os.getcwd())
-        points = np.loadtxt(fname)
-        self.save_cut_files(points)
-        print("Cut images saved from file selection.")
+        self.load_cut_definition()

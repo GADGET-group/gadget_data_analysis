@@ -1,107 +1,159 @@
-import os
+"""Browse saved run-specific image exports, including exports from several runs."""
 import glob
+import json
+import os
 import pickle
+import re
 
-from tqdm import tqdm
 import tkinter as tk
-from tkinter import ttk
-from PIL import ImageTk, Image
-import h5py
+from tkinter import ttk, messagebox, filedialog
+from PIL import Image, ImageTk
 
-from view_cut_images_window import ViewCutImagesWindow
+
+class _SavedImagesWindow(tk.Toplevel):
+    def __init__(self, parent, directory):
+        super().__init__(parent)
+        self.files = sorted(glob.glob(os.path.join(directory, 'run*_event*.png')))
+        if not self.files:
+            # Also display images exported by the old filename convention.
+            self.files = sorted(glob.glob(os.path.join(directory, '*.png')))
+        self.index = 0
+        self.label = ttk.Label(self)
+        self.label.grid(row=1, column=0, columnspan=3)
+        self.back_button = ttk.Button(self, text='<<', command=lambda: self.show(self.index - 1))
+        self.back_button.grid(row=0, column=0)
+        ttk.Button(self, text='Close', command=self.destroy).grid(row=0, column=1)
+        self.next_button = ttk.Button(self, text='>>', command=lambda: self.show(self.index + 1))
+        self.next_button.grid(row=0, column=2)
+        if self.files:
+            self.show(0)
+        else:
+            self.title('No saved event images')
+            self.label.configure(text='No event PNGs found in this export folder.')
+            self.back_button.state(['disabled'])
+            self.next_button.state(['disabled'])
+
+    def show(self, index):
+        if not 0 <= index < len(self.files):
+            return
+        self.index = index
+        with Image.open(self.files[index]) as image:
+            image = image.convert('RGB')
+            image.thumbnail((700, 700))
+            self.photo = ImageTk.PhotoImage(image.copy())
+        self.label.configure(image=self.photo)
+        self.title(f'{index + 1}/{len(self.files)} — {os.path.basename(self.files[index])}')
+        self.back_button.state(['disabled'] if index == 0 else ['!disabled'])
+        self.next_button.state(['disabled'] if index == len(self.files) - 1 else ['!disabled'])
+
 
 class PrevCutSelectWindow(tk.Toplevel):
     def __init__(self, parent, run_data, **kwargs):
         super().__init__(parent, **kwargs)
         self.run_data = run_data
-        #get previous cut information
-        prev_cut_path = os.path.join(self.run_data.folder_path, "*.jpg")
-        self.image_path_list = glob.glob(prev_cut_path)
-        self.image_list = []
-        for i in range(len(self.image_path_list)):
-            self.image_list.append(ImageTk.PhotoImage(Image.open(self.image_path_list[i])))
+        self.directory = run_data.folder_path
         self.current_image_index = 0
-        #setup GUI
-        self.back_button = ttk.Button(self, text="<<", command=self.back, state=tk.DISABLED)
-        self.exit_button = ttk.Button(self, text="Exit Program", command=self.destroy)
-        self.forward_button = ttk.Button(self, text=">>", command=self.forward)
-        self.select_button = ttk.Button(self, text="Select Cut", command=self.select_cut)
-        self.create_h5_button = ttk.Button(self, text="Create H5 File", command=self.create_h5)
-        self.image_label = ttk.Label(self, image=self.image_list[self.current_image_index])        
-
+        self.image_path_list = []
+        self.image_label = ttk.Label(self)
+        self.image_label.grid(row=2, column=0, columnspan=4)
+        self.back_button = ttk.Button(self, text='<<', command=self.back)
         self.back_button.grid(row=0, column=0)
+        self.select_button = ttk.Button(self, text='View Event Images', command=self.select_cut)
         self.select_button.grid(row=0, column=1)
+        self.forward_button = ttk.Button(self, text='>>', command=self.forward)
         self.forward_button.grid(row=0, column=2)
-        self.exit_button.grid(row=1, column=1)
-        self.image_label.grid(row=2, column=0, columnspan=3)
-        self.create_h5_button.grid(row=3, column=1)
+        ttk.Button(self, text='Close', command=self.destroy).grid(row=0, column=3)
+        ttk.Button(self, text='Browse Export Folder', command=self.browse).grid(row=1, column=0, columnspan=2)
+        self.create_h5_button = ttk.Button(self, text='Copy Selected H5 Datasets', command=self.create_h5)
+        self.create_h5_button.grid(row=1, column=2, columnspan=2)
+        self.reload()
 
-        self.change_image_index_to(0) #enables/disables next button as needed
+    def browse(self):
+        directory = filedialog.askdirectory(parent=self, initialdir=self.directory,
+                                            title='Choose the parent of run/date export folders')
+        if directory:
+            self.directory = directory
+            self.reload()
 
-    def update_title(self, image_index, init_image_list):
-        dir_name = init_image_list[image_index][:-4]
-        self.title(f'Image Viewer - {dir_name}')
-    
+    def reload(self):
+        self.image_path_list = sorted(glob.glob(os.path.join(self.directory, '*.jpg')))
+        self.current_image_index = 0
+        if self.image_path_list:
+            self.select_button.state(['!disabled'])
+            self.create_h5_button.state(['!disabled'])
+            self.change_image_index_to(0)
+        else:
+            self.title('Previous exports')
+            self.image_label.configure(image='', text='No saved cut previews in this folder.')
+            for button in (self.back_button, self.forward_button, self.select_button, self.create_h5_button):
+                button.state(['disabled'])
+
     def change_image_index_to(self, new_index):
+        if not 0 <= new_index < len(self.image_path_list):
+            return
         self.current_image_index = new_index
-        if self.current_image_index == 0:
-            self.back_button.state(["disabled"])
-        else:
-            self.back_button.state(["!disabled"])
-        if self.current_image_index == (len(self.image_list) - 1):
-            self.forward_button.state(["disabled"])
-        else:
-            self.forward_button.state(["!disabled"])
-        self.image_label.configure(image=self.image_list[self.current_image_index])
+        filename = self.image_path_list[new_index]
+        with Image.open(filename) as image:
+            image = image.convert('RGB')
+            image.thumbnail((850, 500))
+            self.photo = ImageTk.PhotoImage(image.copy())
+        self.image_label.configure(image=self.photo, text='')
+        self.title(os.path.basename(filename)[:-4])
+        self.back_button.state(['disabled'] if new_index == 0 else ['!disabled'])
+        self.forward_button.state(['disabled'] if new_index == len(self.image_path_list) - 1 else ['!disabled'])
 
     def forward(self):
-         self.change_image_index_to(self.current_image_index + 1)
-    
+        self.change_image_index_to(self.current_image_index + 1)
+
     def back(self):
-         self.change_image_index_to(self.current_image_index - 1)
-    
+        self.change_image_index_to(self.current_image_index - 1)
+
     def select_cut(self):
-         dir = self.image_path_list[self.current_image_index][:-4] #-4 takes off the .jpg
-         ViewCutImagesWindow(self.master, self.run_data, dir)
-         self.destroy()
-         
+        directory = self.image_path_list[self.current_image_index][:-4]
+        _SavedImagesWindow(self, directory)
 
-    
     def create_h5(self):
-        dir_select = self.image_path_list[self.current_image_index][:-4]
-        print('CUT DIRECTORY \n',dir_select)
+        """Preserve the legacy dataset-copy tool, routing it by the saved run.
 
-        cut_indicies_str = "cut_indices_H5list.pkl"
-        cut_indicies_path = os.path.join(dir_select, cut_indicies_str)
-
-        with open(cut_indicies_path, "rb") as file:
-                cut_indices_H5list = pickle.load(file)
-
-        str_file = f"/mnt/analysis/e21072/h5test/run_{self.run_data.run_num}.h5"
-
-        # Open the original h5 file
-        with h5py.File(str_file, 'r') as original:
-            # Get the Event and Trace groups
-            cloud_group = original['clouds']
-            trace_group = original['get']
-
-            # Create a new h5 file
-            h5_str = f"h5_cut.h5"
-            h5_path = os.path.join(dir_select, h5_str)
-            with h5py.File(h5_path, 'w') as new:
-                # Create the Event and Trace groups in the new file
-                new_cloud_group = new.create_group('clouds')
-                new_trace_group = new.create_group('get')
-
-                # Loop over the indices and extract the corresponding datasets
-                pbar = tqdm(total=len(cut_indices_H5list))
-                for i in cut_indices_H5list:
-                    cloud_dataset = cloud_group[f'evt{i}_cloud']
-                    trace_dataset = trace_group[f'evt{i}_data']
-
-                    # Copy the datasets to the new file
-                    new_cloud_group.create_dataset(f'evt{i}_cloud', data=cloud_dataset)
-                    new_trace_group.create_dataset(f'evt{i}_data', data=trace_dataset)
-                    pbar.update(n=1)
-
-        self.destroy()
+        This produces a sparse subset for inspection, not a complete contiguous
+        run suitable for process_tpc_run.
+        """
+        directory = self.image_path_list[self.current_image_index][:-4]
+        destination = os.path.join(directory, 'h5_cut.h5')
+        try:
+            import h5py
+            status_path = os.path.join(directory, 'export_status.json')
+            if os.path.isfile(status_path):
+                with open(status_path, encoding='utf-8') as handle:
+                    metadata = json.load(handle)
+                if metadata['experiment'] != self.run_data.experiment:
+                    raise ValueError('Load the experiment associated with this saved export first.')
+                run_num = int(metadata['run'])
+            else:
+                match = re.match(r'run(\d+)_', os.path.basename(directory))
+                if match is None:
+                    raise ValueError('The source run cannot be determined from this legacy folder.')
+                run_num = int(match.group(1))
+            source = self.run_data.get_run(run_num).h5_file
+            with open(os.path.join(directory, 'cut_indices_H5list.pkl'), 'rb') as handle:
+                event_numbers = pickle.load(handle)
+            original = source.h5_file
+            with h5py.File(destination, 'x') as new:
+                new.attrs['experiment'] = self.run_data.experiment
+                new.attrs['source_run'] = run_num
+                new.attrs['sparse_subset'] = True
+                new.create_dataset('selected_event_numbers', data=event_numbers)
+                get = new.create_group('get')
+                for event in event_numbers:
+                    for kind in ('data', 'header'):
+                        dataset = source._get_event_dataset(int(event), kind=kind)
+                        original.copy(dataset, get, name=f'evt{int(event)}_{kind}')
+                if 'clouds' in original:
+                    clouds = new.create_group('clouds')
+                    for event in event_numbers:
+                        key = f'evt{int(event)}_cloud'
+                        if key in original['clouds']:
+                            original.copy(original['clouds'][key], clouds, name=key)
+            messagebox.showinfo('H5 datasets copied', destination, parent=self)
+        except Exception as exc:
+            messagebox.showerror('Cannot copy H5 datasets', str(exc), parent=self)

@@ -25,12 +25,12 @@ class EnergySpectrumFrame(ttk.Frame):
         current_row += 1
         self.num_bins_label = ttk.Label(self.hist_settings_frame, text='num bins:')
         self.num_bins_label.grid(row=0, column=0, sticky=tk.E)
-        self.num_bins_entry = gadget_widgets.GEntry(self.hist_settings_frame, default_text='Enter # of Bins')
+        self.num_bins_entry = gadget_widgets.GEntry(self.hist_settings_frame, default_text='300')
         self.num_bins_entry.grid(row=0, column=1, columnspan=num_cols)
         self.units_select_label = ttk.Label(self.hist_settings_frame, text='energy units:')
         self.units_select_label.grid(row=1, column=0, sticky=tk.E)
         self.units_combobox = ttk.Combobox(self.hist_settings_frame, values=['adc counts', 'MeV'])
-        self.units_combobox.set('adc counts')
+        self.units_combobox.set(self.run_data.energy_units)
         self.units_combobox.grid(row=1, column=1)
         self.generate_spectrum_button = \
                     ttk.Button(self.hist_settings_frame, text="Show Spectrum", command=self.plot_spectrum)
@@ -68,7 +68,7 @@ class EnergySpectrumFrame(ttk.Frame):
         if self.units_combobox.get() == 'MeV':
             return self.run_data.total_energy_MeV
         elif self.units_combobox.get() == 'adc counts':
-            return self.run_data.total_energy
+            return self.run_data.get_raw_total_counts()
         else:
             assert False
 
@@ -87,7 +87,7 @@ class EnergySpectrumFrame(ttk.Frame):
         to_plot = self.get_dataset()
         plt.hist(to_plot, bins=num_bins)
         plt.rcParams['figure.figsize'] = [10, 10]
-        plt.title(f'Energy Spectrum', fontdict = {'fontsize' : 20})
+        plt.title(f'Energy Spectrum — runs {self.run_data.runs_label}', fontdict = {'fontsize' : 20})
         plt.ylabel(f'Counts',fontdict = {'fontsize' : 20})
         #plt.show()
 

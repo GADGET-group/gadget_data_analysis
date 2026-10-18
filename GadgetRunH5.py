@@ -104,6 +104,8 @@ class GadgetRunH5:
         self.file_path = self.h5_file.file_path
         self.first_event, self.last_event = self.h5_file.get_event_num_bounds()
         self.event_nums = np.arange(self.first_event, self.last_event + 1)
+        self.run_nums = [self.run_num]
+        self.event_runs = np.full(len(self.event_nums), self.run_num, dtype=np.int64)
 
         # per-event quantities from the processed ROOT file. Every array covers
         # all events first_event..last_event, in order; see get_index/get_event_num.
@@ -136,6 +138,7 @@ class GadgetRunH5:
 
         # threshold on counts for the hits used in the images (get_xyze)
         self.image_hit_threshold = 20
+        self._raw_total_counts = None
 
         #TODO: decide how to store calibration information with runs
         # legacy e21072 two-point calibration; only the image energy bar uses it (to_MeV)
@@ -149,6 +152,28 @@ class GadgetRunH5:
     def get_event_num_bounds(self):
         #returns first event number, last event number
         return self.h5_file.get_event_num_bounds()
+
+    @property
+    def runs_label(self):
+        return str(self.run_num)
+
+    def get_run(self, run_num):
+        if int(run_num) != self.run_num:
+            raise ValueError(f'Run {run_num} is not loaded.')
+        return self
+
+    def get_raw_total_counts(self):
+        """Integrated ADC charge, loaded only when requested by the spectrum tab."""
+        if self._raw_total_counts is None:
+            gains = np.ones(1024, dtype=np.float64)
+            gains[list(VETO_PADS)] = 0
+            self._raw_total_counts = process_runs.get_gm_ic(self.experiment, self.run_nums, gains)
+        return self._raw_total_counts
+
+    def close(self):
+        handle = getattr(self.h5_file, 'h5_file', None)
+        if handle is not None:
+            handle.close()
         
     def to_MeV(self, counts):
         return counts*self.energy_scale_factor + self.energy_offset
@@ -156,11 +181,13 @@ class GadgetRunH5:
     def to_counts(self, MeV):
         return (MeV - self.energy_offset)/self.energy_scale_factor
 
-    def get_index(self, event_num):
+    def get_index(self, event_num, run_num=None):
         '''
         Index into the per-event arrays (counts, ranges, ...) of an event number.
         Accepts a scalar or an array of event numbers.
         '''
+        if run_num is not None:
+            self.get_run(run_num)
         index = np.asarray(event_num, dtype=np.int64) - self.first_event
         if np.any(index < 0) or np.any(index >= len(self.event_nums)):
             raise IndexError(f'event number {event_num} outside [{self.first_event}, {self.last_event}]')
@@ -173,6 +200,9 @@ class GadgetRunH5:
         '''
         event_num = self.event_nums[index]
         return event_num if np.ndim(event_num) else int(event_num)
+
+    def get_event_identity(self, index):
+        return self.run_num, int(self.get_event_num(index))
 
     def get_hit_lists(self, event_num):
         '''
