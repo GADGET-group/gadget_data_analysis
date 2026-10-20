@@ -24,7 +24,8 @@ from raw_viewer import process_runs, ddas_interface
 
 
 def get_tsbo_file_path(experiment, get_run):
-    return os.path.join(process_runs.get_save_path(experiment), f'{experiment}_run{int(get_run)}_get_tsbo.root')
+    # the cache follows the merged-file version (ddas_interface.MERGED_VERSION): entry numbers differ between versions
+    return os.path.join(process_runs.get_save_path(experiment), f'{experiment}_run{int(get_run)}_get_tsbo{ddas_interface._version_suffix("default")}.root')
 
 
 def make_tsbo_file(experiment, get_run, tpc_ini_filename=""):

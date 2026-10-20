@@ -173,6 +173,17 @@ def get_summed_gamma_spectrum(experiment, ddas_run, binning, cal_name='init', no
         
     return to_return
 
+def addback_cache_hash(experiment, ddas_run, adj_hash):
+    '''The add-back cache key: adj_hash alone for the legacy merged files, adj_hash plus the merged file's fingerprint
+    (resolved path, size, modification time) when ddas_interface.MERGED_VERSION selects a versioned merged file.'''
+    if not ddas_interface.MERGED_VERSION:
+        return adj_hash
+    merged_path = ddas_interface.get_ddas_root_file_path(experiment, ddas_run)
+    if not os.path.exists(merged_path):
+        raise FileNotFoundError(f"ROOT data file not found: {merged_path}")
+    return hashlib.md5((adj_hash + str(ddas_interface.get_file_fingerprint(merged_path))).encode()).hexdigest()
+
+
 def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_thresh, sliding_scale=True, nonlinearity_correction_name=None, time_alignment_ns=None):
     '''
     Make a ttree with the gamma ray add back, storing an array of energies and times per event.
@@ -188,6 +199,10 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
     adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v6" + str(nonlinearity_correction_name) + time_align_str).encode()).hexdigest()
+    # Versioned merged files (ddas_interface.MERGED_VERSION, October 2026) add the merged file's fingerprint to the key, so a
+    # regenerated merged file never reuses a stale add-back tree. The legacy unversioned files keep their cache names.
+    # coincidence_inputs.addback_cache_path (track_fitting/field_distortion) builds the same name and must stay in step.
+    adj_hash = addback_cache_hash(experiment, ddas_run, adj_hash)
     if not sliding_scale:
         cache_file_path = os.path.join(cache_dir, f"{ddas_run}_{adj_hash}_{cal_name}_dt{int(dt_window_ns)}_ethresh{e_thresh}_v5.root")
     else:

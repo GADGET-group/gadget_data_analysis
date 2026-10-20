@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib.colors
 import numpy as np
+import scipy.stats
 
 from raw_viewer import process_runs
 from raw_viewer import get_tsbo
@@ -168,12 +169,22 @@ fig.tight_layout()
 #Energy spectra of the particles of a run type in three equal time slices of the beam-off part of the cycle (from the
 #first to the last particle inside the decay window), overlaid. The slices have the same duration, so the raw counts
 #compare rates directly.
+#The decay windows, (start, stop) in s after beam off: GET triggers are released 10.1 ms after beam off and the first
+#ones are a surge of events after the gating grid switches, over (excess below 5 % of the rate of all events) by 11 ms
+#in the 60Ga runs and by 18 ms in the 59Zn runs. The selected protons do not show it, the 59Zn run alphas do.
+decay_windows = {'60Ga': (0.012, 0.1), '59Zn': (0.020, 0.5)}
 num_slices = 3
-def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_width, decay_window, particle_name='alphas'):
-    '''particle_data: an entry of alphas or protons; decay_window: length of the beam-off part of the cycle (s); particle_name for the axis label'''
+def get_time_slice_edges(particle_data, slice_energy_range, decay_window):
+    '''mask of the particles inside the decay window and slice_energy_range, and the edges (s) of the time slices that cover them'''
     energy, tsbo = particle_data['energy'], particle_data['tsbo']
-    in_slice_range = np.isfinite(tsbo) & (tsbo < decay_window) & (energy >= slice_energy_range[0]) & (energy < slice_energy_range[1])
-    slice_edges = np.linspace(np.min(tsbo[in_slice_range]), np.max(tsbo[in_slice_range]), num_slices + 1)
+    in_slice_range = (np.isfinite(tsbo) & (tsbo >= decay_window[0]) & (tsbo < decay_window[1])
+                      & (energy >= slice_energy_range[0]) & (energy < slice_energy_range[1]))
+    return in_slice_range, np.linspace(np.min(tsbo[in_slice_range]), np.max(tsbo[in_slice_range]), num_slices + 1)
+
+def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_width, decay_window, particle_name='alphas'):
+    '''particle_data: an entry of alphas or protons; decay_window: (start, stop) of the beam-off time used (s); particle_name for the axis label'''
+    energy, tsbo = particle_data['energy'], particle_data['tsbo']
+    in_slice_range, slice_edges = get_time_slice_edges(particle_data, slice_energy_range, decay_window)
     plt.figure(figsize=max_figure_size)
     for slice_start, slice_end in zip(slice_edges[:-1], slice_edges[1:]):
         in_slice = in_slice_range & (tsbo >= slice_start) & (tsbo <= slice_end)
@@ -185,15 +196,70 @@ def plot_time_slices(particle_data, particle_label, slice_energy_range, bin_widt
     plt.legend()
     plt.tight_layout()
 
-plot_time_slices(alphas['60Ga'], '60Ga run alphas', (2.5, 9.0), 0.05, 0.1)
-plot_time_slices(alphas_no_veto['60Ga'], '60Ga run alphas, no veto condition', (2.5, 9.0), 0.05, 0.1)
+plot_time_slices(alphas['60Ga'], '60Ga run alphas', (2.5, 9.0), 0.05, decay_windows['60Ga'])
+plot_time_slices(alphas_no_veto['60Ga'], '60Ga run alphas, no veto condition', (2.5, 9.0), 0.05, decay_windows['60Ga'])
 
 #The proton plots use only the standard 60Ga runs (GET 263-279, the 0.5 us gate delay / 512 bucket configuration)
 standard_runs = range(263, 280)
 in_standard_runs = np.isin(protons['60Ga']['run'], list(standard_runs))
 standard_protons = {key: values[in_standard_runs] for key, values in protons['60Ga'].items()}
 print(f'standard runs {standard_runs.start}-{standard_runs.stop - 1} have {np.sum(in_standard_runs)} protons')
-plot_time_slices(standard_protons, 'standard 60Ga run protons', (0.3, 4.0), 0.01, 0.1, 'protons')
-plot_time_slices(protons['59Zn'], '59Zn run protons', (0.3, 4.0), 0.01, 0.5, 'protons')
+plot_time_slices(standard_protons, 'standard 60Ga run protons', (0.3, 4.0), 0.01, decay_windows['60Ga'], 'protons')
+plot_time_slices(protons['59Zn'], '59Zn run protons', (0.3, 4.0), 0.01, decay_windows['59Zn'], 'protons')
+
+#How likely is it that the time slices were all drawn from the same spectrum? Only the shapes are compared (the slices
+#hold different numbers of particles because of the decays). Each slice is tested against the other slices combined
+#with the Pearson chi2 of their counts in the plot binning, and all slices together with the chi2 of the slices x bins
+#table; bins empty in every slice are left out. Most bins hold only a few counts, so the p-values come from shuffling
+#the slice labels of the particles; the p-value of the chi2 distribution is printed as well, for discrepancies too
+#large for the permutations to reach. The unbinned two-sample Kolmogorov-Smirnov test of each slice against the rest is
+#printed alongside: it is the more sensitive to an overall shift such as a change of energy scale, the chi2 to local
+#changes such as a changed peak ratio. The per-slice tests share data, so the all-slice test is the one overall answer.
+num_permutations = 10000
+def test_time_slices(particle_data, particle_label, slice_energy_range, bin_width, decay_window, particle_name='alphas'):
+    '''the arguments are those of plot_time_slices, which shows the slices tested'''
+    in_slice_range, slice_edges = get_time_slice_edges(particle_data, slice_energy_range, decay_window)
+    energy, tsbo = particle_data['energy'][in_slice_range], particle_data['tsbo'][in_slice_range]
+    slice_index = np.clip(np.searchsorted(slice_edges, tsbo, side='right') - 1, 0, num_slices - 1)
+    bin_edges = np.arange(slice_energy_range[0], slice_energy_range[1] + 1e-6, bin_width)
+    num_bins = len(bin_edges) - 1
+    bin_index = np.clip(np.searchsorted(bin_edges, energy, side='right') - 1, 0, num_bins - 1)
+    def get_counts(slice_index):
+        return np.bincount(slice_index*num_bins + bin_index, minlength=num_slices*num_bins).reshape(num_slices, num_bins)
+    counts = get_counts(slice_index)
+    occupied = np.sum(counts, axis=0) > 0
+    num_occupied = np.sum(occupied)
+    slice_fractions = np.sum(counts, axis=1)/np.sum(counts)
+    def get_chi2(counts):
+        '''chi2 of each slice against the rest, and of all slices together'''
+        expected = slice_fractions[:, np.newaxis]*np.sum(counts, axis=0)
+        terms = (counts - expected)**2/expected
+        return np.sum(terms/(1 - slice_fractions[:, np.newaxis]), axis=1), np.sum(terms)
+    chi2_slices, chi2_all = get_chi2(counts[:, occupied])
+    #the bin and slice totals are the same in every permutation, so the occupied bins are too
+    rng = np.random.default_rng(0)
+    permuted_chi2_slices, permuted_chi2_all = np.empty((num_permutations, num_slices)), np.empty(num_permutations)
+    for i in range(num_permutations):
+        permuted_chi2_slices[i], permuted_chi2_all[i] = get_chi2(get_counts(rng.permutation(slice_index))[:, occupied])
+    def format_p(num_as_large):
+        return f'= {(num_as_large + 1)/(num_permutations + 1):.3g}' if num_as_large > 0 else f'< {1/(num_permutations + 1):.1g}'
+    print(f'{particle_label}, {slice_energy_range[0]}-{slice_energy_range[1]} MeV in {bin_width*1e3:.0f} keV bins ({num_occupied} occupied): '
+          f'is each of the {num_slices} time slices drawn from the same spectrum as the others?')
+    for i in range(num_slices):
+        ks = scipy.stats.ks_2samp(energy[slice_index == i], energy[slice_index != i])
+        print(f'  {slice_edges[i]*1e3:.0f}-{slice_edges[i + 1]*1e3:.0f} ms ({np.sum(slice_index == i)} {particle_name}) against the rest: '
+              f'chi2 {chi2_slices[i]:.1f} / {num_occupied - 1} dof, p {format_p(np.sum(permuted_chi2_slices[:, i] >= chi2_slices[i]))} '
+              f'({num_permutations} permutations), {scipy.stats.chi2.sf(chi2_slices[i], num_occupied - 1):.3g} (chi2 distribution); '
+              f'KS D = {ks.statistic:.4f}, p = {ks.pvalue:.3g}')
+    print(f'  all slices: chi2 {chi2_all:.1f} / {(num_slices - 1)*(num_occupied - 1)} dof, p {format_p(np.sum(permuted_chi2_all >= chi2_all))} '
+          f'({num_permutations} permutations), {scipy.stats.chi2.sf(chi2_all, (num_slices - 1)*(num_occupied - 1)):.3g} (chi2 distribution)')
+
+test_time_slices(standard_protons, 'standard 60Ga run protons', (0.3, 4.0), 0.01, decay_windows['60Ga'], 'protons')
+test_time_slices(standard_protons, 'standard 60Ga run protons', (1, 2), 0.01, decay_windows['60Ga'], 'protons')
+test_time_slices(protons['59Zn'], '59Zn run protons', (0.3, 4.0), 0.01, decay_windows['59Zn'], 'protons')
+
+#The same for the 60Ga beta-delayed alpha triplet, 3.5-4.2 MeV
+plot_time_slices(alphas['60Ga'], '60Ga run alphas', (3.5, 4.2), 0.02, decay_windows['60Ga'])
+test_time_slices(alphas['60Ga'], '60Ga run alphas', (3.5, 4.2), 0.02, decay_windows['60Ga'])
 
 plt.show(block=False)
