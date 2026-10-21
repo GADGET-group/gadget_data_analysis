@@ -21,7 +21,8 @@ experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
     #run_range=[71, 72, 76, 77, 78, 79, 80, 81, 82, 83]
-    run_range = [136, 137, 145, 147, 149, 151, 153, 154, 156, 158, 160, 162, 164, 165, 167, 169, 171, 173, 175, 177, 178, 180, 182, 184, 186, 188, 190, 192, 194, 196, 198, 200, 202, 204, 206, 215, 216, 218, 220, 222, 224, 226, 228, 229, 231, 233, 235, 237, 239, 241, 242, 244, 246, 248, 250, 252, 254, 255, 257, 260, 263, 265, 267, 269, 270, 275, 277, 279]
+    #run_range = [71]
+    run_range = [145, 147, 149, 151, 153, 154, 156, 158, 160, 162, 164, 165, 167, 169, 171, 173, 175, 177, 178, 180, 182, 184, 186, 188, 190, 192, 194, 196, 198, 200, 202, 204, 206, 215, 216, 218, 220, 222, 224, 226, 228, 229, 231, 233, 235, 237, 239, 241, 242, 244, 246, 248, 250, 252, 254, 255, 257, 260, 263, 265, 267, 269, 270, 275, 277, 279]
     #run_range= [123, 124, 125, 126, 127, 128, 129, 130, 132, 133, 136, 137, 145, 147, 149, 151, 153, 154, 200, 277]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range = [] #[216,228,255,260,269]
@@ -97,7 +98,7 @@ if experiment == 'e23035':
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
-    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.1)
+    veto_mask = (veto_max < veto_thresh) &(times_since_beam_off>0.05)
 veto_mask = veto_mask & (num_pads_railed==0) #& (angles>np.radians(20)) 
 
     
@@ -108,7 +109,7 @@ if load_ddas:
 print('starting plotting')
 plt.figure()
 plt_mask = veto_mask&(lengths>1)&(lengths<400)#
-plt.title('runs: '+str(get_runs))
+plt.title('E25058' + 'runs: '+str(get_runs))
 plt.hist2d(energy[plt_mask], lengths[plt_mask], bins=rve_bins, norm=matplotlib.colors.LogNorm())
 cbar = plt.colorbar()
 cbar.ax.tick_params(labelsize=16)
@@ -119,7 +120,7 @@ plt.ylabel('Range (mm)', fontsize=22, fontweight='bold')
 # Increase the size of the numbers along both axes
 plt.xticks(fontsize=18)
 plt.yticks(fontsize=18)
-plt.xlim(0, 5)
+plt.xlim(0, 8)
 plt.ylim(0, 150)
 
 
@@ -447,6 +448,154 @@ def plot_energy_spectrum(bins=400):
     plt.show()
    
     print(f"Projected {len(selected_energy)} events onto the energy axis.")
+def plot_selected_events_with_boundary(
+    selected_events,
+    json_file=None,
+    xlim=(0, 3.5),
+    ylim=(0, 140),
+):
+    import json
+    from matplotlib.patches import Polygon
+    from matplotlib.path import Path as MplPath
+
+    # Exact boundary from your GUI JSON.
+    cut = {
+        "experiment": "e25058",
+        "vertices": [
+            [1.0521747374453652, 23.86723433595955],
+            [1.5246802164695494, 42.51173750672063],
+            [1.7161264019362448, 48.87280329439206],
+            [2.1641919423902127, 74.53641354120435],
+            [2.176411911675321, 32.86046527715018],
+            [2.0379189264440942, 31.544382700390578],
+            [1.9605257876384092, 29.131564642997972],
+            [1.8668393564525796, 27.596134970111763],
+            [1.7487129866965332, 28.25417625849157],
+            [1.3128674155276738, 23.647887239832947],
+        ],
+    }
+
+    # Optional: use another saved JSON instead of the embedded boundary.
+    if json_file is not None:
+        with open(json_file, encoding="utf-8") as handle:
+            cut = json.load(handle)
+
+    if cut["experiment"] != experiment:
+        raise ValueError("Cut experiment does not match the loaded experiment.")
+
+    vertices = np.asarray(cut["vertices"], dtype=float)
+    if (
+        vertices.ndim != 2
+        or vertices.shape[1] != 2
+        or len(vertices) < 3
+        or not np.isfinite(vertices).all()
+    ):
+        raise ValueError("Invalid polygon vertices.")
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Background uses your existing RvE filters.
+    background = (
+        np.asarray(plt_mask, dtype=bool)
+        & np.isfinite(energy)
+        & np.isfinite(lengths)
+    )
+
+    if background.any():
+        h = ax.hist2d(
+            energy[background],
+            lengths[background],
+            bins=rve_bins,
+            norm=matplotlib.colors.LogNorm(),
+        )
+        fig.colorbar(h[3], ax=ax, label="Counts")
+
+    ax.add_patch(
+        Polygon(
+            vertices,
+            closed=True,
+            fill=False,
+            edgecolor="red",
+            linewidth=2,
+            label="Saved cut boundary",
+            zorder=9,
+        )
+    )
+
+    polygon = MplPath(vertices)
+    first = True
+
+    for run, event in selected_events:
+        matches = np.flatnonzero(
+            (evt_runs == run) & (evt_nums == event)
+        )
+
+        if not len(matches):
+            print(
+                f"Not found: run {run}, event {event}. "
+                "Is that run loaded?"
+            )
+            continue
+
+        if len(matches) > 1:
+            raise ValueError(
+                f"Duplicate identity: run {run}, event {event}."
+            )
+
+        i = matches[0]
+        x, y = energy[i], lengths[i]
+
+        if not np.isfinite([x, y]).all():
+            print(f"Skipping run {run}, event {event}: nonfinite energy/range.")
+            continue
+
+        inside = bool(polygon.contains_point((x, y)))
+
+        print(
+            f"Run {run}, event {event}: "
+            f"{x:.3f} MeV, {y:.2f} mm; "
+            f"inside boundary={inside}, "
+            f"passes filters={bool(plt_mask[i])}"
+        )
+
+        ax.scatter(
+            x, y,
+            marker="*",
+            s=120,
+            color="gold",
+            edgecolor="black",
+            label="Selected events" if first else None,
+            zorder=10,
+        )
+
+        ax.annotate(
+            f"{run}:{event}",
+            (x, y),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=8,
+            color="blue",
+            bbox=dict(
+                facecolor="white",
+                alpha=0.75,
+                edgecolor="none",
+            ),
+            zorder=11,
+        )
+        first = False
+
+    ax.set(
+        xlabel="Energy (MeV)",
+        ylabel="Range (mm)",
+        title=f"{experiment}: Range vs Energy",
+        xlim=xlim,
+        ylim=ylim,
+    )
+    ax.legend()
+    fig.tight_layout()
+    plt.show(block=False)
+
+    return fig, ax
 
 def plot_energy_spectrum_fixed_bin_width(bin_width=0.01):
     """
@@ -1596,3 +1745,5 @@ def plot_energy_spectrum_fixed_bin_width1(
         "total_selected_events": len(selected_energy),
         "bin_width_mev": bin_width
     }
+
+    
