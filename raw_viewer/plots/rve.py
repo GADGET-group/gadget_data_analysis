@@ -44,11 +44,15 @@ for run in run_range:
     if not np.isnan(run):
         if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
             get_runs.append(run)
-
+get_runs=[177]
 get_runs = np.sort(get_runs)
 print('get_runs:', get_runs)
 
 load_ddas = False
+
+tpc_processing_config = 'smart1_veto2_rpr_fzp.csv'
+
+lengths = process_runs.get_lengths(experiment, get_runs, config_filename=tpc_processing_config)
 
 if load_ddas:
     ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
@@ -56,12 +60,12 @@ if load_ddas:
     print('getting times since beam off for each event')
     times_since_beam_off = []
     for ddas_run, get_run in tqdm(zip(ddas_runs, get_runs)):
-        get_ts = process_runs.get_quantity('timestamps', experiment, [get_run])
+        get_ts = process_runs.get_quantity('timestamps', experiment, [get_run], config_filename=tpc_processing_config)
         times_since_beam_off.append(ddas_interface.get_time_since_beam_off(experiment, ddas_run)[:-1])
         print(get_run, len(times_since_beam_off[-1]), len(get_ts))
     times_since_beam_off = np.concatenate(times_since_beam_off)
 else:
-    times_since_beam_off = process_runs.get_time_since_beam_off(experiment, get_runs)
+    times_since_beam_off = process_runs.get_time_since_beam_off(experiment, get_runs, config_filename=tpc_processing_config)
 veto_thresh =  150
 rve_bins = (300, 300)
 phist_bins = np.linspace(0, 4, 1001)
@@ -70,12 +74,12 @@ alphahist_bins = 100
 print('loading stuff')
 
 
-lengths = process_runs.get_lengths(experiment, get_runs)
-#cpp = process_runs.get_quantity('pad_charge', experiment, get_runs)
-#veto_counts = process_runs.get_veto_counts(exp, runs)
-veto_max = process_runs.get_max_veto_counts(experiment, get_runs)
-charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs)
-#energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
+
+#cpp = process_runs.get_quantity('pad_charge', experiment, get_runs, config_filename=tpc_processing_config)
+#veto_counts = process_runs.get_veto_counts(exp, runs, config_filename=tpc_processing_config)
+veto_max = process_runs.get_max_veto_counts(experiment, get_runs, config_filename=tpc_processing_config)
+charge_widths = process_runs.get_quantity('charge_width', experiment,get_runs, config_filename=tpc_processing_config)
+#energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains, config_filename=tpc_processing_config)
 if experiment == 'e23035':
     energy = e23035_runs.get_energy_MeV(get_runs)
 else:
@@ -84,16 +88,16 @@ else:
         gain_match_result = pickle.load(f)
     #pad_gains = gain_match_result.x[:1024]
     pad_gains = gain_match_result.pad_gains
-    energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains)
-angles = process_runs.get_angle(experiment, get_runs)
+    energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains, config_filename=tpc_processing_config)
+angles = process_runs.get_angle(experiment, get_runs, config_filename=tpc_processing_config)
 
-##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs)<113#
+##&(angles>np.radians(5))#process_runs.get_outer_ring_counts(experiment, runs, config_filename=tpc_processing_config)<113#
 
-pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs)
+pads_railed = process_runs.get_quantity('railed_pads', experiment, get_runs, config_filename=tpc_processing_config)
 num_pads_railed = np.array([len(prl) for prl in pads_railed])
 if experiment == 'e23035':
     veto_mask = e23035_runs.get_veto_mask(get_runs)
-    endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
+    endpoints = process_runs.get_quantity('endpoints', experiment, get_runs, config_filename=tpc_processing_config)
     min_z = np.min(endpoints[:,:,2], axis=1)
     veto_mask = veto_mask&(min_z>5)
 else:
@@ -155,7 +159,7 @@ if experiment == 'e23035':
     plt.colorbar()
     print(str(get_runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
-    timestamps = process_runs.get_quantity('timestamps', experiment, get_runs)
+    timestamps = process_runs.get_quantity('timestamps', experiment, get_runs, config_filename=tpc_processing_config)
     time_since_last_event = timestamps - np.roll(timestamps, 1)
     time_since_last_event[0] = .15 #we don't actuallly know what this is for the first event, so just putting a typical value for start of window
 
@@ -176,7 +180,7 @@ if experiment == 'e23035':
     run_t_offset = [0]
     run_ts = []
     for ddas_run in get_runs:
-        run_ts.append(process_runs.get_quantity('timestamps', experiment, [ddas_run]))
+        run_ts.append(process_runs.get_quantity('timestamps', experiment, [ddas_run], config_filename=tpc_processing_config))
     for i in range(1, len(get_runs)):
         if run_ts[i][0] <= run_ts[i-1][-1]:
             run_t_offset.append(run_t_offset[-1] + run_ts[i-1][-1])
@@ -197,7 +201,7 @@ if experiment == 'e23035':
 if load_ddas:
     plt.figure()
     plt.title('protons')
-    tsbo=times_since_beam_off*1e3#process_runs.get_time_since_beam_off(experiment, runs)
+    tsbo=times_since_beam_off*1e3#process_runs.get_time_since_beam_off(experiment, runs, config_filename=tpc_processing_config)
     tve_bins = (50, 50)
     plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins)#, norm=matplotlib.colors.LogNorm())
     plt.xlabel('energy (MeV)')
@@ -286,7 +290,7 @@ def define_cut_on_gui():
     ax.set_ylim(0, 140)
     fig.show()
 
-evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs)
+evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, get_runs, config_filename=tpc_processing_config)
 def plot_selected_events(selected_events):
     """Plot selected (run, event) pairs on the Range-vs-Energy histogram."""
     fig, ax = plt.subplots(figsize=(10, 7))
@@ -389,7 +393,7 @@ def show_selected_event_side_by_side(i):
     # Create the main container window
     #plt.figure(figsize=(14, 7))
     
-    h5file = process_runs.get_h5_file(experiment, run)
+    h5file = process_runs.get_h5_file(experiment, run, config_filename=tpc_processing_config)
     
     # Position 1: Left side for 2D
     #plt.subplot(1, 2, 1)
@@ -407,7 +411,7 @@ def show_selected_event_side_by_side(i):
     #plt.suptitle(f"Run {run} - Event {evt} ({en:.3f} MeV)")
     #plt.show(block=False)
 def show_event(run, evt):
-    h5file = process_runs.get_h5_file(experiment, run)
+    h5file = process_runs.get_h5_file(experiment, run, config_filename=tpc_processing_config)
     h5file.show_2d_projection(evt, block=False)
     h5file.plot_3d_traces(evt, threshold=h5file.length_counts_threshold, block=False)
     h5file.plot_traces(evt, block=False)
@@ -650,7 +654,7 @@ def fit_peak_and_calibrate(true_energy_mev):
 
 def get_cobos_present(experiment, run, num_events_to_check = 1000):
     num_asads_expected = 4 #terminate once 4 asads have been seen
-    h5 = process_runs.get_h5_file(experiment, run)
+    h5 = process_runs.get_h5_file(experiment, run, config_filename=tpc_processing_config)
     h5.background_subtract_mode = 'none' #disable background subtrction since only care about channels
     cobos = []
     evt_bounds = h5.get_event_num_bounds()
@@ -704,7 +708,8 @@ def get_total_run_duration(runs=None, exp=None):
         timestamps = process_runs.get_quantity(
             'timestamps',
             exp,
-            [int(run)]
+            [int(run)],
+            config_filename=tpc_processing_config
         )
 
         timestamps = np.asarray(timestamps, dtype=float)

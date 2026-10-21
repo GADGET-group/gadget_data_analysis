@@ -16,9 +16,9 @@ OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,101
                    504,503,502,501,507,506,505,250,251,252,246,247,248,249,241,242,232,233,222,210,197,183,168,153,137,121,
                    104,87,70,53,35,17,782,800,818,835,852,869,886,902,918,933,948,962,975,987,998,997]
 
-TPC_PROCESSING_GPUS = [0, 2,3] if socket.gethostname() == 'tpcgpu' else [0]
+TPC_PROCESSING_GPUS = [0,1,2,3] if socket.gethostname() == 'tpcgpu' else [0]
 #conservative default workers per GPU, used for any background_subtract_mode not listed below
-TPC_MAX_WORKERS_PER_GPU = 2
+TPC_MAX_WORKERS_PER_GPU = 4
 #Default processing workers per GPU by background_subtract_mode, from the GPU memory one worker needs (measured
 #2026-10-05/06 on the 49 GB A6000s of tpcgpu; peak over a run, MiB):
 #  smart2                  12,000-13,400 (torch RANSAC on every trace of a 50-event batch)
@@ -42,7 +42,7 @@ DEFAULT_TPC_CONFIGS = {'e25058': 'smart1_veto2_rpr_fzp.csv'}
 def resolve_config_filename(experiment, config_filename=""):
     '''config_filename, or the experiment's DEFAULT_TPC_CONFIGS entry if it is empty'''
     if not config_filename:
-        return DEFAULT_TPC_CONFIGS.get(experiment, "")
+        return DEFAULT_TPC_CONFIGS[experiment]
     return config_filename
 
 def get_config_background_mode(config_filename="", key='background_subtract_mode'):
