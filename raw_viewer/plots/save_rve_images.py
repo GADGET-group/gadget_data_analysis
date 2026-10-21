@@ -17,6 +17,7 @@ if False: #background runs before experiment
 else: #during experiment
     experiment = 'e23035'
     run_range = np.concatenate((np.arange(140,219)))#(101, 143)
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'
 
 exclude_runs = [210]#[1,9, 73, 113]
 runs = []
@@ -36,12 +37,12 @@ for r in runs:
         gain_match_result = pickle.load(f)
     pad_gains = gain_match_result.x
 
-    lengths = process_runs.get_lengths(experiment, run)
-    cpp = process_runs.get_quantity('pad_charge', experiment, run)
+    lengths = process_runs.get_lengths(experiment, run, config_filename=TPC_CONFIG)
+    cpp = process_runs.get_quantity('pad_charge', experiment, run, config_filename=TPC_CONFIG)
     #veto_counts = process_runs.get_veto_counts(exp, runs)
-    veto_max = process_runs.get_max_veto_counts(experiment, run)
-    charge_widths = process_runs.get_quantity('charge_width', experiment,run)
-    energy = process_runs.get_gm_ic(experiment, run, pad_gains)
+    veto_max = process_runs.get_max_veto_counts(experiment, run, config_filename=TPC_CONFIG)
+    charge_widths = process_runs.get_quantity('charge_width', experiment,run, config_filename=TPC_CONFIG)
+    energy = process_runs.get_gm_ic(experiment, run, pad_gains, config_filename=TPC_CONFIG)
 
     veto_mask = (veto_max < veto_thresh)
 

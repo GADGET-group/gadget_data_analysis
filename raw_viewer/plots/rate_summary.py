@@ -15,6 +15,7 @@ if False: #background runs before experiment
 else: #during experiment
     experiment = 'e23035'
     run_range = (140, 279)
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'
 
 if False:
     exclude_runs = [1,9, 19, 73, 113,210,216, 225, 226, 227, 228, 229, #210 needs to be transfered by Tyler
@@ -37,12 +38,12 @@ pad_gains = gain_match_result.x
 print(runs)
 total_counts = []
 for run in runs:
-    lengths = process_runs.get_lengths(experiment, [run])
+    lengths = process_runs.get_lengths(experiment, [run], config_filename=TPC_CONFIG)
     #veto_counts = process_runs.get_veto_counts(exp, runs)
-    veto_max = process_runs.get_max_veto_counts(experiment, [run])
-    energy = process_runs.get_gm_ic(experiment, [run], pad_gains)
+    veto_max = process_runs.get_max_veto_counts(experiment, [run], config_filename=TPC_CONFIG)
+    energy = process_runs.get_gm_ic(experiment, [run], pad_gains, config_filename=TPC_CONFIG)
 
-    veto_mask = process_runs.get_outer_ring_max_counts(experiment, [run])<113
+    veto_mask = process_runs.get_outer_ring_max_counts(experiment, [run], config_filename=TPC_CONFIG)<113
 
 
 
@@ -56,7 +57,7 @@ for run in runs:
     num_protons = len(proton_mask[proton_mask])
     #print(str(run) + " has " + str(num_protons) + " protons")
 
-    ts = process_runs.get_quantity('timestamps', experiment, [run])
+    ts = process_runs.get_quantity('timestamps', experiment, [run], config_filename=TPC_CONFIG)
     #print('run duration (s): ', (ts[-1]-ts[0]))
 
     #print('protons per second = ', num_protons/(ts[-1]-ts[0]))

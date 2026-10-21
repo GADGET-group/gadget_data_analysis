@@ -7,6 +7,7 @@ import matplotlib.pylab as plt
 from raw_viewer import process_runs
 
 experiment = 'e23035'
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'
 run_range = [73,73]#(148,150)#(101, 143)
 
 exclude_runs = []# [1,9, 73, 113,210,216, 225, 226, 227, 228, 229] #210 needs to be transfered by Tyler
@@ -25,18 +26,18 @@ with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
 pad_gains = np.ones(1024)*np.average(gain_match_result.pad_gains)
 
-veto_max = process_runs.get_max_veto_counts(experiment, runs)
-lengths =process_runs.get_lengths(experiment, runs) 
-energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
-angles = process_runs.get_angle(experiment, runs)
+veto_max = process_runs.get_max_veto_counts(experiment, runs, config_filename=TPC_CONFIG)
+lengths =process_runs.get_lengths(experiment, runs, config_filename=TPC_CONFIG) 
+energy = process_runs.get_gm_ic(experiment, runs, pad_gains, config_filename=TPC_CONFIG)
+angles = process_runs.get_angle(experiment, runs, config_filename=TPC_CONFIG)
 xy_len = np.abs(np.sin(angles)*lengths)
 
 
 veto_mask = (veto_max<350)&(energy>7)&(energy<8.4)&(lengths>93)&(np.degrees(angles)<20)#&(xy_len < 20)#&(energy<1.5)&(lengths>5)&(lengths<30)#
 veto_mask = (veto_max<200) &(xy_len < 10)
 
-centers = process_runs.get_quantity('track_center', experiment, runs)[veto_mask]
-endpoints = process_runs.get_quantity('endpoints', experiment, runs)
+centers = process_runs.get_quantity('track_center', experiment, runs, config_filename=TPC_CONFIG)[veto_mask]
+endpoints = process_runs.get_quantity('endpoints', experiment, runs, config_filename=TPC_CONFIG)
 xs, ys = centers[:,0], centers[:,1]
 good_centroid = np.isfinite(xs) & np.isfinite(ys)
 plt.figure()
@@ -62,4 +63,4 @@ plt.hist(np.sqrt(xs[veto_mask]**2+ ys[veto_mask]**2), bins=30)
 
 plt.show(block=False)
 
-evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, runs)
+evt_runs, evt_nums = process_runs.get_run_and_event_numbers(experiment, runs, config_filename=TPC_CONFIG)

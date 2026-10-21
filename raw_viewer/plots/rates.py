@@ -13,6 +13,7 @@ from  raw_viewer import raw_h5_file
 
 
 experiment = 'e23035'
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'
 run = 167
 runs=[run]
 
@@ -28,12 +29,12 @@ pad_gains = gain_match_result.x
 for pad in raw_h5_file.VETO_PADS:
     pad_gains[pad] = 0
 
-lengths = process_runs.get_lengths(experiment, runs)
-cpp = process_runs.get_quantity('pad_charge', experiment, runs)
+lengths = process_runs.get_lengths(experiment, runs, config_filename=TPC_CONFIG)
+cpp = process_runs.get_quantity('pad_charge', experiment, runs, config_filename=TPC_CONFIG)
 #veto_counts = process_runs.get_veto_counts(exp, runs)
-veto_max = process_runs.get_max_veto_counts(experiment, runs)
-charge_widths = process_runs.get_quantity('charge_width', experiment,runs)
-energy = process_runs.get_gm_ic(experiment, runs, pad_gains)
+veto_max = process_runs.get_max_veto_counts(experiment, runs, config_filename=TPC_CONFIG)
+charge_widths = process_runs.get_quantity('charge_width', experiment,runs, config_filename=TPC_CONFIG)
+energy = process_runs.get_gm_ic(experiment, runs, pad_gains, config_filename=TPC_CONFIG)
 
 veto_mask = (veto_max < veto_thresh)
 
@@ -70,14 +71,14 @@ print(str(runs) + "has " + str(len(proton_mask[proton_mask])) + " protons")
 
 plt.figure()
 plt.title('protons')
-tsbo=process_runs.get_time_since_beam_off(experiment, runs)
+tsbo=process_runs.get_time_since_beam_off(experiment, runs, config_filename=TPC_CONFIG)
 tve_bins = (50, 50)
 plt.hist2d(energy[proton_mask&(tsbo>0)], tsbo[proton_mask&(tsbo>0)], bins=tve_bins, norm=matplotlib.colors.LogNorm())
 
 num_protons = len(proton_mask[proton_mask])
 print("Total number of protons in run "+str(run)+": ", num_protons)
 
-ts = process_runs.get_quantity('timestamps', experiment, runs)
+ts = process_runs.get_quantity('timestamps', experiment, runs, config_filename=TPC_CONFIG)
 print('run duration (s): ', (ts[-1]-ts[0]))
 
 print('protons per second = ', num_protons/(ts[-1]-ts[0]))

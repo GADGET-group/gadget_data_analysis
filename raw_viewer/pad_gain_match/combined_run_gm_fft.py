@@ -39,31 +39,32 @@ load_result3 = False
 
 
 exp_runs = [('e23035_prep_vault', (16,17,20,35,49))]
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'
 
 rve_bins = 400
 
-lengths = np.concatenate([process_runs.get_lengths(e, r) for e, r in exp_runs])
-cpp = np.concatenate([process_runs.get_quantity('pad_charge', e, r) for e, r in exp_runs])
+lengths = np.concatenate([process_runs.get_lengths(e, r, config_filename=TPC_CONFIG) for e, r in exp_runs])
+cpp = np.concatenate([process_runs.get_quantity('pad_charge', e, r, config_filename=TPC_CONFIG) for e, r in exp_runs])
 #veto_counts = np.concatenate([process_runs.get_veto_counts(e, r) for e, r in exp_runs])
-veto_max = np.concatenate([process_runs.get_max_veto_counts(e, r) for e, r in exp_runs])
-charge_widths = np.concatenate([process_runs.get_quantity('charge_width', e, r) for e, r in exp_runs])
+veto_max = np.concatenate([process_runs.get_max_veto_counts(e, r, config_filename=TPC_CONFIG) for e, r in exp_runs])
+charge_widths = np.concatenate([process_runs.get_quantity('charge_width', e, r, config_filename=TPC_CONFIG) for e, r in exp_runs])
 #veto_mask = (veto_max < veto_thresh)&(charge_widths>3.25)#(veto_counts < veto_thresh)&(charge_widths>2.5)
 veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
 for pad in process_runs.raw_h5_file.VETO_PADS:
     veto_thresholds[pad] = 200#260
-max_pad_counts = np.concatenate([process_runs.get_quantity('pad_max', e, r) for e, r in exp_runs])
+max_pad_counts = np.concatenate([process_runs.get_quantity('pad_max', e, r, config_filename=TPC_CONFIG) for e, r in exp_runs])
 pads_railed = []
 for e, r in exp_runs:
-    pads_railed.extend(process_runs.get_quantity('railed_pads', e, r))
+    pads_railed.extend(process_runs.get_quantity('railed_pads', e, r, config_filename=TPC_CONFIG))
 num_pads_railed = np.array([len(prl) for prl in pads_railed])
-angles = np.concatenate([process_runs.get_angle(e, r) for e, r in exp_runs])
+angles = np.concatenate([process_runs.get_angle(e, r, config_filename=TPC_CONFIG) for e, r in exp_runs])
 
 veto_mask = np.all(max_pad_counts<veto_thresholds, axis=1)#&(num_pads_railed==0)&(np.degrees(angles)>8)
 
-run_numbers = np.concatenate([process_runs.get_run_and_event_numbers(e, r)[0] for e, r in exp_runs])
-event_numbers = np.concatenate([process_runs.get_run_and_event_numbers(e, r)[1] for e, r in exp_runs])
+run_numbers = np.concatenate([process_runs.get_run_and_event_numbers(e, r, config_filename=TPC_CONFIG)[0] for e, r in exp_runs])
+event_numbers = np.concatenate([process_runs.get_run_and_event_numbers(e, r, config_filename=TPC_CONFIG)[1] for e, r in exp_runs])
 
-h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0])
+h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0], config_filename=TPC_CONFIG)
 freqs_to_use = 20
 freq_bins_to_cut=len(h5.pad_plane) - freqs_to_use
 
@@ -150,7 +151,7 @@ def get_pad_gains(x):
 
 
 def do_gain_match(cut_masks, true_energies):
-    h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0]) #used to make pad plane images
+    h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0], config_filename=TPC_CONFIG) #used to make pad plane images
     
     gm_slices = []
     default_guess = []
@@ -250,7 +251,7 @@ def show_plots(res,block=False):
     #show pad plane image
     plt.figure()
     plt.title('pad gains')
-    h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0])
+    h5 = process_runs.get_h5_file(exp_runs[0][0], exp_runs[0][1][0], config_filename=TPC_CONFIG)
     pad_gains = get_pad_gains(res.x)
     d = {}
     for i in range(len(pad_gains)):
@@ -371,7 +372,7 @@ print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/
 
 # print('fwhm values:', 2.355*fit_params1[3]/fit_params1[2], 2.355*fit_params1[6]/fit_params1[5]), 2.355*fit_params2[3]/fit_params2[2])
 
-angles = np.concatenate([process_runs.get_angle(e, r) for e, r in exp_runs])
+angles = np.concatenate([process_runs.get_angle(e, r, config_filename=TPC_CONFIG) for e, r in exp_runs])
 plt.figure()
 plt.scatter(gm_ic3[veto_mask],lengths[veto_mask],c=np.degrees(angles[veto_mask]), marker='.')
 plt.colorbar()
