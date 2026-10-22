@@ -135,7 +135,7 @@ def get_veto_mask(get_run=None, endpoints=None, max_veto_counts=None, tpc_ini_fi
     min_z = np.min(endpoints[:,:,2], axis=1)
     return veto_mask & (min_z > 5)
 
-GAIN_MATCH_DIR = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results'
+GAIN_MATCH_DIR = os.path.join(current_dir.parent, 'raw_viewer', 'pad_gain_match', 'gain_match_results')
 
 def get_pad_gain_path(tpc_ini_filename=""):
     '''
