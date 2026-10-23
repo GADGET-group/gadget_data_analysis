@@ -15,7 +15,7 @@ import numpy as np
 from raw_viewer import ddas_interface
 
 experiment = 'e25058'
-runs = [171]
+runs = [63]
 tpc_config = 'smart1_veto2_rpr_fzp.csv'
 n_workers = min(len(runs), 150) #cap at 150 so as not to murder the TPCGPU
 
