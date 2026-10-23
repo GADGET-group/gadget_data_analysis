@@ -16,7 +16,6 @@ import tqdm
 import ROOT
 import numpy as np
 
-from e23035_analysis import e23035_runs, energy_calibration_tools
 from raw_viewer import process_runs, ddas_interface
 
 NUM_SLOTS = 10
@@ -193,20 +192,14 @@ def get_ddas_root_file_path(experiment, ddas_run, version='default'):
     otherwise. version='default' uses MERGED_VERSION.
     '''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
-    to_return = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merged{_version_suffix(version)}.root')
-    if experiment == 'e25058':
-        to_return += '_alex'
-    return to_return
+    return os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merged{_version_suffix(version)}.root')
 
 
 def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename="", version='default'):
     '''The TPC friend tree of a merged file; it carries the merged file's version suffix because its entries follow that file.'''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     ini_prefix = os.path.splitext(tpc_ini_filename)[0]
-    to_return = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_tpc_{ini_prefix}{_version_suffix(version)}.root')
-    if experiment == 'e25058':
-        to_return += '_alex'
-    return to_return
+    return os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_tpc_{ini_prefix}{_version_suffix(version)}.root')
 
 
 def make_ddas_root_file(experiment, ddas_run, version='default', rebuild=True, chunk_size=250_000,
@@ -247,8 +240,6 @@ def make_ddas_root_file(experiment, ddas_run, version='default', rebuild=True, c
     version = MERGED_VERSION if version == 'default' else version
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     log_path = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merge{_version_suffix(version)}.log')
-    if experiment == 'e25058':
-        log_path += '_alex'
     output_path = get_ddas_root_file_path(experiment, ddas_run, version)
     # Write to a temporary path and rename once the merge finishes, so a failed merge doesn't leave a file at output_path.
     # The temporary path is unique to this process, so two processes making the same file don't write to or rename each other's output

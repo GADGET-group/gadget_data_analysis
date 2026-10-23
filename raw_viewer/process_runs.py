@@ -103,6 +103,8 @@ def get_save_path(experiment):
             save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
         elif experiment == 'e23035_prep_vault':
             save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
+        elif experiment == 'e25058':
+            save_path = '/egr/research-tpc/shared/proc_runs/%s/new_h5'%experiment
         else:
             save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
         return save_path
@@ -130,6 +132,8 @@ def get_h5_path(experiment, run_number):
         return '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
     elif experiment == 'e23035_prep_vault':
         return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
+    elif experiment == 'e25058':
+        return'%s/%s/newh5/run_%04d.h5'%(h5_base_path, experiment, run_number)
     else:
         return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
 
@@ -217,9 +221,21 @@ def process_tpc_run(experiment, run_number, config_filename, force_reprocess=Fal
         # h5file = build_sim.get_rawh5_object(experiment, run_number)
         print('processing run %d'%run_number)
         first_event, last_event = h5file.get_event_num_bounds()
+        settings_str = h5file.get_settings_str()
+        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff], 'settings_hash':[settings_hash], 'settings_json':[settings_str]}
+        # Events are written in chunks as they are processed, so memory use doesn't grow with the run (holding a whole
+        # 1.9 M event e25058 run took 60-70 GB per worker). The file is written to a temporary path and renamed once it is
+        # complete, so a failed run doesn't leave a file that ensure_processed takes for a processed run. The metadata goes
+        # first: uproot cannot add a new object once the file is past 2 GiB (struct.error packing the key).
+        chunk_size = 1000
+        partial_fname = f'{fname}.{os.getpid()}.partial'
+        file = uproot.recreate(partial_fname)
+        file['metadata'] = metadata
+        events_written = False
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
-        pad_maxs, railed_pads = [], []
+        pad_maxs, railed_pads, timestamps = [], [], []
         for evt in tqdm(range(first_event, last_event + 1)):
+            timestamps.append(h5file.get_timestamp(evt))
             railed_pads.append(h5file.get_railed_pads(evt))
             center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
             xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
@@ -276,63 +292,55 @@ def process_tpc_run(experiment, run_number, config_filename, force_reprocess=Fal
                 track_endpoints.append([(0,0,0), (0,0,0)])
                 charge_widths.append(0)
                 width_above_thresholds.append(0)
-        track_centers = np.array(track_centers).reshape(-1, 3)
-        pad_charges = np.array(pad_charges).reshape(-1, 1024)
-        pad_maxs = np.array(pad_maxs).reshape(-1, 1024)
-        
-        ts = h5file.get_timestamps_array()
 
-
-
-        res_centers = []
-        for c in track_centers:
-            try:
-                if len(c) == 3:
-                    res_centers.append(list(c))
+            if len(timestamps) == chunk_size or evt == last_event:
+                events_data = _events_data(track_centers, principle_axes, variances_along_axes, pad_charges, track_endpoints, charge_widths,
+                                           width_above_thresholds, pad_maxs, timestamps, railed_pads)
+                if events_written:
+                    file['events'].extend(events_data)
                 else:
-                    res_centers.append([0.0, 0.0, 0.0])
-            except TypeError:
-                res_centers.append([0.0, 0.0, 0.0])
-                
-        res_endpoints = []
-        for ep in track_endpoints:
-            try:
-                if len(ep) == 2 and len(ep[0]) == 3 and len(ep[1]) == 3:
-                    res_endpoints.append([list(ep[0]), list(ep[1])])
-                else:
-                    res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-            except TypeError:
-                res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-                
-        events_data = {'track_center':np.array(res_centers, dtype=np.float64).reshape(-1, 3), 'principle_axes':np.array(principle_axes, dtype=np.float64).reshape(-1, 3, 3), 'variance_along_axes': np.array(variances_along_axes, dtype=np.float64).reshape(-1, 3),
-                   'pad_charge': pad_charges, 'endpoints':np.array(res_endpoints, dtype=np.float64).reshape(-1, 2, 3), 'charge_width':np.array(charge_widths, dtype=np.float64),
-                   'width_above_threshold':np.array(width_above_thresholds, dtype=np.float64), 'pad_max':pad_maxs, 'timestamps':ts}
-                   
-        counts = np.array([len(x) for x in railed_pads], dtype=np.int64)
-        if sum(counts) == 0:
-            events_data['railed_pads'] = ak.unflatten(np.array([], dtype=np.int64), counts)
-        else:
-            events_data['railed_pads'] = ak.from_iter(railed_pads)
-        settings_str = h5file.get_settings_str()
-        metadata = {'git_version':[git_version], 'git_status':[git_status], 'git_diff':[git_diff], 'settings_hash':[settings_hash], 'settings_json':[settings_str]}
-        print('saving to ROOT file')
-        with uproot.recreate(fname) as file:
-            lengths = [len(v) for v in events_data.values()]
-            if not lengths or min(lengths) == 0:
-                file['events'] = events_data
+                    file['events'] = events_data
+                    events_written = True
+                track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
+                pad_maxs, railed_pads, timestamps = [], [], []
+        if not events_written: #no events in the run: write the empty tree
+            file['events'] = _events_data(track_centers, principle_axes, variances_along_axes, pad_charges, track_endpoints, charge_widths,
+                                          width_above_thresholds, pad_maxs, timestamps, railed_pads)
+        file.close()
+        os.replace(partial_fname, fname)
+
+def _events_data(track_centers, principle_axes, variances_along_axes, pad_charges, track_endpoints, charge_widths,
+                 width_above_thresholds, pad_maxs, timestamps, railed_pads):
+    '''The arrays process_tpc_run writes to the events tree for a chunk of events.'''
+    res_centers = []
+    for c in track_centers:
+        try:
+            if len(c) == 3:
+                res_centers.append(list(c))
             else:
-                total_events = min(lengths)
-                chunk_size = 1000
-                for i in range(0, total_events, chunk_size):
-                    chunk = {}
-                    for k, v in events_data.items():
-                        chunk[k] = v[i:i+chunk_size]
-                    
-                    if i == 0:
-                        file['events'] = chunk
-                    else:
-                        file['events'].extend(chunk)
-            file['metadata'] = metadata
+                res_centers.append([0.0, 0.0, 0.0])
+        except TypeError:
+            res_centers.append([0.0, 0.0, 0.0])
+
+    res_endpoints = []
+    for ep in track_endpoints:
+        try:
+            if len(ep) == 2 and len(ep[0]) == 3 and len(ep[1]) == 3:
+                res_endpoints.append([list(ep[0]), list(ep[1])])
+            else:
+                res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        except TypeError:
+            res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+
+    events_data = {'track_center':np.array(res_centers, dtype=np.float64).reshape(-1, 3), 'principle_axes':np.array(principle_axes, dtype=np.float64).reshape(-1, 3, 3), 'variance_along_axes': np.array(variances_along_axes, dtype=np.float64).reshape(-1, 3),
+               'pad_charge': np.array(pad_charges).reshape(-1, 1024), 'endpoints':np.array(res_endpoints, dtype=np.float64).reshape(-1, 2, 3), 'charge_width':np.array(charge_widths, dtype=np.float64),
+               'width_above_threshold':np.array(width_above_thresholds, dtype=np.float64), 'pad_max':np.array(pad_maxs).reshape(-1, 1024), 'timestamps':np.array(timestamps, dtype=np.float64)}
+
+    #built with unflatten rather than ak.from_iter so every chunk has the same type (var * int64), even when no pad railed
+    counts = np.array([len(x) for x in railed_pads], dtype=np.int64)
+    flat = np.concatenate([np.asarray(x, dtype=np.int64).ravel() for x in railed_pads] + [np.zeros(0, dtype=np.int64)])
+    events_data['railed_pads'] = ak.unflatten(flat, counts)
+    return events_data
 
 def _load_run_quantities(args):
     if len(args) == 6:

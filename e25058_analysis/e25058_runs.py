@@ -58,34 +58,44 @@ def get_DDAS_run_number(get_run_number):
     return run_df['DDAS'][run_df['GET']==get_run_number].iloc[0]
 
 
-def get_veto_mask(get_run):
+def get_veto_mask(get_run, tpc_ini_filename=""):
     veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
     for pad in process_runs.raw_h5_file.VETO_PADS:
             veto_thresholds[pad] = 500#260
     veto_thresholds[509]=500
 
     if is_iterable(get_run):
-        return process_runs.get_veto_mask(experiment, get_run, veto_thresholds)
-    return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds)
+        return process_runs.get_veto_mask(experiment, get_run, veto_thresholds, config_filename=tpc_ini_filename)
+    return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds, config_filename=tpc_ini_filename)
 
-def get_pad_gains(get_run):
-    #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e25058_prep_runs61to63_gm.pkl'
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
-    with open(gain_match_path, 'rb') as f:
+GAIN_MATCH_DIR = os.path.join(current_dir.parent, 'raw_viewer', 'pad_gain_match', 'gain_match_results')
+
+def get_pad_gain_path(tpc_ini_filename=""):
+    '''
+    Pad gain map for a TPC processing config: the e23035 maps (copied from the e23035 branch, ba702f7). Configs whose
+    main baseline is smart1 (smart1_rpr*, and the hybrid smart1_veto2_rpr_fzp) use the map made on hybrid charges;
+    smart2 configs and no config use the February 2026 map made on smart2 charges.
+    '''
+    if process_runs.get_config_background_mode(tpc_ini_filename) == 'smart':
+        return os.path.join(GAIN_MATCH_DIR, 'hybrid_v200_fft6_res3.pkl')
+    return os.path.join(GAIN_MATCH_DIR, 'gm_old', 'fft6_res3.pkl')
+
+def get_pad_gains(tpc_ini_filename=""):
+    with open(get_pad_gain_path(tpc_ini_filename), 'rb') as f:
         gain_match_result = pickle.load(f)
     return gain_match_result.pad_gains
 
-def get_length_mm(get_run):
+def get_length_mm(get_run, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    return process_runs.get_lengths(experiment, get_run)
+    return process_runs.get_lengths(experiment, get_run, config_filename=tpc_ini_filename)
 
-def get_energy_MeV(get_run):
+def get_energy_MeV(get_run, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
     to_return = []
     for i in get_run:
-        to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(i)))
+        to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(tpc_ini_filename), config_filename=tpc_ini_filename))
     return np.concatenate(to_return)
 
 def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
@@ -108,12 +118,12 @@ def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     upper_band[energies<xb] = ya + (yb-ya)/(xb-xa)*(energies[energies<xb]-xa)
     return lower_band, upper_band
 
-def get_proton_mask(get_run):
+def get_proton_mask(get_run, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    lengths = get_length_mm(get_run)
-    energy = get_energy_MeV(get_run)
-    veto_mask = get_veto_mask(get_run)
+    lengths = get_length_mm(get_run, tpc_ini_filename=tpc_ini_filename)
+    energy = get_energy_MeV(get_run, tpc_ini_filename=tpc_ini_filename)
+    veto_mask = get_veto_mask(get_run, tpc_ini_filename=tpc_ini_filename)
     lower_band, upper_band = get_proton_mask_min_max_range(get_run, energy)
     return veto_mask & (lengths < upper_band) & (lengths > lower_band)
 
@@ -128,12 +138,12 @@ def get_alpha_mask_min_max_range(get_run, energies:np.ndarray):
     upper_band = np.min([lower_proton-10, expected_alpha_length + 30], axis=0)
     return lower_band, upper_band
 
-def get_alpha_mask(get_run):
+def get_alpha_mask(get_run, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    lengths = get_length_mm(get_run)
-    energy = get_energy_MeV(get_run)
-    veto_mask = get_veto_mask(get_run)
+    lengths = get_length_mm(get_run, tpc_ini_filename=tpc_ini_filename)
+    energy = get_energy_MeV(get_run, tpc_ini_filename=tpc_ini_filename)
+    veto_mask = get_veto_mask(get_run, tpc_ini_filename=tpc_ini_filename)
     lower_band, upper_band = get_alpha_mask_min_max_range(get_run, energy)    
     return veto_mask & (lengths > lower_band) & (lengths < upper_band)
 
