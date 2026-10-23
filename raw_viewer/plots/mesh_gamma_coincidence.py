@@ -16,7 +16,7 @@ from raw_viewer import ddas_interface
 
 experiment = 'e25058'
 runs = [63]
-tpc_config = 'smart1_veto2_rpr_fzp.csv'
+tpc_config = 'smart1_veto2_nrpr_fzp.csv'
 n_workers = min(len(runs), 150) #cap at 150 so as not to murder the TPCGPU
 
 chmap = np.genfromtxt(os.path.join(ddas_interface.BASE_DIR, f'{experiment}_analysis', 'channel_map.csv'), delimiter=', ', dtype=str, skip_header=1)

@@ -479,8 +479,11 @@ class raw_h5_file:
         self.require_peak_within = (-np.inf, np.inf)#currentlt implemented for near peak mode only. Zero entire trace if peak is not within this window
         self.include_counts_on_veto_pads = False #if counts on veto pads should be included for energy calibraiton
         #if True, will try to fit a skew normal distrubution to bins just to the left and right of the railed region, and use this to replace the railed region
-        self.reconstruct_railed_pads = False 
+        self.reconstruct_railed_pads = False
         self.railed_pad_reconstruct_fit_bins = (8,8) #bins to the (left, right) of the railed region to use for fitting
+        #'lm': railed_pad_repair.repair_lm (numba fit, ~60x faster); 'scipy': railed_pad_repair.repair (curve_fit),
+        #which the files processed before 2026-10-23 used. See railed_pad_repair for how they compare.
+        self.railed_pad_repair_method = 'lm'
         #if True, time-bin columns that are zero in every trace of every probed event at the start or end of the
         #traces (written by the merger when the GET depth did not match, e.g. e23035 GET 214, 215, 216, 229, 234, 235:
         #512 columns with the last 112 zero) are removed when events are read, so the run looks like a run of its
@@ -519,26 +522,45 @@ class raw_h5_file:
         except KeyError:
             self.num_time_bins = 512 # Default value if there are no events in the h5 file
 
-    def _get_event_dataset(self, event_number, kind='data'):
+    def _event_dataset_path(self, event_number, kind='data'):
         """
-        Helper method to retrieve the dataset for a given event, supporting
-        both the new bucketed ('batch_XXXX') structure and the legacy flat structure.
+        Path of an event's dataset inside the 'get' group, supporting both the new bucketed
+        ('batch_XXXX') structure and the legacy flat structure.
         """
         dataset_name = "evt%d_%s" % (event_number, kind)
         batch_index = int(event_number // 5000)
         batch_name = "batch_%04d" % batch_index
 
-        get_group = self.h5_file['get']
-
         # Check cache to avoid repeatedly querying HDF5 metadata
         if batch_name not in self._batch_existence_cache:
-            self._batch_existence_cache[batch_name] = batch_name in get_group
+            self._batch_existence_cache[batch_name] = batch_name in self.h5_file['get']
 
-        # Return nested bucketed path, or fallback to root flat path
+        # Nested bucketed path, or fallback to root flat path
         if self._batch_existence_cache[batch_name]:
-            return get_group[batch_name][dataset_name]
-        else:
-            return get_group[dataset_name]
+            return batch_name + '/' + dataset_name
+        return dataset_name
+
+    def _get_event_dataset(self, event_number, kind='data'):
+        """
+        Helper method to retrieve the dataset (h5py Dataset) for a given event.
+        """
+        return self.h5_file['get'][self._event_dataset_path(event_number, kind)]
+
+    def _read_event(self, event_number, kind='data'):
+        '''
+        Contents of an event's dataset as a numpy array (same values and dtype as self._get_event_dataset(...)[()]),
+        read with the low-level h5py API: 50-60 us per dataset instead of 130-210 us for the group and dataset
+        lookups of the high-level API (measured 2026-10-23). Raises KeyError if the event is missing, like
+        _get_event_dataset.
+        '''
+        gid = self.__dict__.get('_get_group_id')
+        if gid is None:
+            gid = self.__dict__['_get_group_id'] = self.h5_file['get'].id
+        dsid = h5py.h5d.open(gid, self._event_dataset_path(event_number, kind).encode())
+        out = np.empty(dsid.shape, dtype=dsid.dtype)
+        if out.size:
+            dsid.read(h5py.h5s.ALL, h5py.h5s.ALL, out)
+        return out
 
     #num_time_bins is kept in the instance __dict__ (so save_config_file still writes it); with remove_zero_pad
     #it reports the depth after the padding is removed
@@ -571,7 +593,7 @@ class raw_h5_file:
             if last >= first:
                 for evt in np.unique(np.linspace(first, last, ZERO_PAD_PROBE_EVENTS).astype(np.int64)):
                     try:
-                        d = self._get_event_dataset(evt, kind='data')[()]
+                        d = self._read_event(evt, kind='data')
                     except KeyError:
                         continue
                     if d.ndim != 2 or len(d) == 0 or d.shape[1] <= FIRST_DATA_BIN:
@@ -607,6 +629,7 @@ class raw_h5_file:
         if self.h5_file:
             self.h5_file.close()
             self.h5_file = None
+        self.__dict__.pop('_get_group_id', None)
 
     def load_config(self, config_path):
         import csv
@@ -691,7 +714,7 @@ class raw_h5_file:
         Returns timestamp in seconds.
         '''
         #timestamps are stored in units of 10ns
-        return self._get_event_dataset(event_number, kind='header')[1]/1e8 
+        return self._read_event(event_number, kind='header')[1]/1e8
 
     def get_timestamps_array(self):
         '''
@@ -715,7 +738,7 @@ class raw_h5_file:
         if railed_cache is not None and event_number in railed_cache and self.asads == 'all' \
                 and self.cobos == 'all' and self.pads == 'all':
             return railed_cache.pop(event_number)
-        data = self._get_event_dataset(event_number, kind='data')
+        data = self._read_event(event_number, kind='data')
         if self.remove_zero_pad:
             data = self._remove_zero_pad(data)
         traces = data[:,FIRST_DATA_BIN:]
@@ -764,7 +787,7 @@ class raw_h5_file:
 
         for evt in batch_events:
             try:
-                data = self._get_event_dataset(evt, kind='data')
+                data = self._read_event(evt, kind='data')
             except KeyError:
                 continue
             if self.remove_zero_pad:
@@ -804,7 +827,7 @@ class raw_h5_file:
                     valid_pads.append(pad)
                     if self.reconstruct_railed_pads:
                         if np.max(line[FIRST_DATA_BIN:]) == 4095:
-                            line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
+                            line[FIRST_DATA_BIN:] = self._repair_railed_trace(line[FIRST_DATA_BIN:])
                     if self.remove_outliers:
                         x,y = self.pad_to_xy_index[pad]
                         pad_image[x,y] = 1
@@ -898,6 +921,14 @@ class raw_h5_file:
             self.cached_event = event_number
         return np.array(data, copy=True)
 
+    def _repair_railed_trace(self, trace):
+        '''Repaired copy of a railed trace (reconstruct_railed_pads), with the method set by railed_pad_repair_method.'''
+        if self.railed_pad_repair_method == 'lm':
+            return railed_pad_repair.repair_lm(trace, *self.railed_pad_reconstruct_fit_bins)
+        if self.railed_pad_repair_method == 'scipy':
+            return railed_pad_repair.repair(trace, *self.railed_pad_reconstruct_fit_bins)
+        raise ValueError('railed_pad_repair_method must be lm or scipy, not %r' % (self.railed_pad_repair_method,))
+
     def _chnl_tables(self):
         '''Lookup arrays equivalent to the chnls_to_pad / pad_to_xy_index dicts (built once per instance).'''
         tables = self.__dict__.get('_chnl_tables_cache')
@@ -966,7 +997,7 @@ class raw_h5_file:
 
         for evt in batch_events:
             try:
-                data = self._get_event_dataset(evt, kind='data')
+                data = self._read_event(evt, kind='data')
             except KeyError:
                 continue
             if self.remove_zero_pad:
@@ -993,7 +1024,7 @@ class raw_h5_file:
             if self.reconstruct_railed_pads:
                 for i in np.nonzero(valid & (np.max(data[:, FIRST_DATA_BIN:], axis=1) == 4095))[0]:
                     line = data[i]
-                    line[FIRST_DATA_BIN:] = railed_pad_repair.repair(line[FIRST_DATA_BIN:], *self.railed_pad_reconstruct_fit_bins)
+                    line[FIRST_DATA_BIN:] = self._repair_railed_trace(line[FIRST_DATA_BIN:])
 
             event_datas[evt] = data
             event_valid_indices[evt] = valid_indices
@@ -1362,6 +1393,10 @@ class raw_h5_file:
         #processed with it, checked in process_runs._load_run_quantities) is unchanged
         if self.remove_zero_pad:
             settings['remove_zero_pad'] = True
+        #the repair method changes the processed data only when railed pads are repaired; 'scipy' (the method before
+        #2026-10-23) keeps the hashes of the files processed with it
+        if self.reconstruct_railed_pads and self.railed_pad_repair_method != 'scipy':
+            settings['railed_pad_repair_method'] = self.railed_pad_repair_method
         #likewise the hybrid (veto-pad) baseline settings, only when the veto mode is set
         if self.veto_background_subtract_mode is not None:
             settings['veto_background_subtract_mode'] = self.veto_background_subtract_mode
@@ -1388,6 +1423,17 @@ class raw_h5_file:
         event_data =  self.get_data(event_number)
         rows, pads = self._event_rows(event_data, include_veto_pads)
         return list(pads), [event_data[i, FIRST_DATA_BIN:] for i in rows]
+
+    def get_pad_trace_array(self, event_number, include_veto_pads=True):
+        '''
+        Same pads and traces as get_pad_traces, as arrays: pads (n,), traces (n, num_time_bins). Lets callers
+        reduce all traces at once (e.g. traces.sum(axis=1), which equals np.sum of each trace bit for bit).
+        '''
+        event_data = self.get_data(event_number)
+        rows, pads = self._event_rows(event_data, include_veto_pads)
+        if len(rows) == 0:
+            return pads, np.empty((0, self.num_time_bins))
+        return pads, event_data[rows, FIRST_DATA_BIN:]
 
     def get_num_pads_fired(self, event_number):
         event = self.get_data(event_number)
