@@ -170,6 +170,23 @@ def get_time_since_beam_off(experiment, run):
             pickle.dump(to_return, save_file)
         return to_return
 
+# ---- merged-file versions --------------------------------------------------------------------------------------------
+# MERGED_VERSION selects which merged files the library reads and writes:
+#   None  the legacy files run<N>_merged.root: one entry per DDAS built event, copied as the DDAS event builder made it.
+#   'v2'  the trigger-anchored rebuild of make_ddas_root_file (October 2026): every DDAS event with an accepted GET
+#         trigger is rebuilt from the hits within REBUILD_WINDOW_US of the trigger time, so the mesh pulse and the decay's
+#         gammas sit in the TPC event's entry whatever the event builder did (e23035_analysis/ai_review/ddas_entry_split).
+MERGED_VERSION = 'v2'          # switched from None on 16 October 2026 after the validation in e23035_analysis/ai_review/ddas_entry_split/validation.md
+REBUILD_WINDOW_US = 15.0      # half-width of the rebuild window around the accepted-GET-trigger time
+MESH_DELAY_US = 4.34          # the accepted-GET-trigger pulse follows the mesh preamp pulse by this much (e23035)
+MESH_GATE_US = (3.0, 6.0)     # trigger - mesh delays that set the mesh_in_window flag
+
+
+def _version_suffix(version):
+    version = MERGED_VERSION if version == 'default' else version
+    return f'_{version}' if version else ''
+
+
 def get_user_suffix(experiment):
     '''
     e25058 merged and friend files share the ddas folder with other people's, so their names end in the user's
@@ -177,107 +194,203 @@ def get_user_suffix(experiment):
     '''
     return '_' + getpass.getuser() if experiment == 'e25058' else ''
 
-def get_ddas_root_file_path(experiment, ddas_run):
+
+def get_ddas_root_file_path(experiment, ddas_run, version='default'):
+    '''
+    The merged file of a DDAS run: run<N>_merged.root for the legacy files (version None), run<N>_merged_<version>.root
+    otherwise. version='default' uses MERGED_VERSION.
+    '''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
-    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merged.root')
+    to_return = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merged{_version_suffix(version)}.root')
     return to_return + get_user_suffix(experiment)
 
-def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename=""):
+
+def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename="", version='default'):
+    '''The TPC friend tree of a merged file; it carries the merged file's version suffix because its entries follow that file.'''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     ini_prefix = os.path.splitext(tpc_ini_filename)[0]
-    to_return =  os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_tpc_{ini_prefix}.root')
+    to_return = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_tpc_{ini_prefix}{_version_suffix(version)}.root')
     return to_return + get_user_suffix(experiment)
 
-def make_ddas_root_file(experiment, ddas_run):
+
+def make_ddas_root_file(experiment, ddas_run, version='default', rebuild=True, chunk_size=250_000,
+                        window_us=REBUILD_WINDOW_US, mesh_delay_us=MESH_DELAY_US, mesh_gate_us=MESH_GATE_US):
     '''
-    Create a root file with a new TTree called "merged_data".
+    Create the merged file (TTree "merged_data") of a DDAS run from the raw tree run-NNNN.root.
+
+    Per channel of <experiment>_analysis/channel_map.csv the branches <name>_e (calibrated energy, 0 when the channel did
+    not fire), <name>_t (seconds, NaN when it did not fire), <name>_m (multiplicity), <name>_c (raw ADC, -1 when it did
+    not fire) and <name>_cr (raw ADC plus a uniform random number in [-0.5, 0.5], the sliding scale, -1 when it did not
+    fire), plus time_since_beam_off and time_since_chopper_off (seconds; NaN before the run's first beam-off / chopper-off
+    signal), as the legacy files have them.
+
+    The raw tree has one entry per DDAS built event (a fixed 15 us window opened by the first hit, one recorded hit per
+    channel per event). The accepted-GET-trigger pulse (ch 119) follows the mesh preamp pulse (ch 118) by 4.34 us, so when
+    an unrelated hit opened the event more than 10.7 us before the mesh pulse the trigger lands in the next event, away
+    from the mesh hit and from the decay's gammas (5.7 % of the 60Ga protons, 13.6 % of the 59Zn protons in e23035), and
+    even otherwise the gammas that precede the mesh pulse by the drift time are often in the previous event. With
+    rebuild=True every entry with an accepted GET trigger is therefore rebuilt around the trigger time t_trig: the hits
+    within [t_trig - window_us, t_trig + window_us] of the neighbouring raw events are moved into it. A channel keeps the
+    record it already has in the trigger's own raw event; otherwise, among that channel's records inside the window, the
+    one nearest t_trig - mesh_delay_us (the mean mesh time) moves in and any others stay where they were. Moved records
+    leave their raw events, so every recorded hit appears exactly once in the output; raw events emptied by the moves are
+    dropped. Every entry carries rebuilt_window (true for the rebuilt ones), anchor_t (t_trig in seconds, NaN otherwise),
+    n_source_entries (raw events that contributed, 1 for copied entries) and mesh_in_window (a mesh hit mesh_gate_us
+    before the trigger is in the entry; false for the low-energy TPC events whose mesh pulse is below the DDAS threshold,
+    for which get_trig_accepted_t - 4.34e-6 is the time reference). time_since_beam_off and time_since_chopper_off of a
+    rebuilt entry refer to t_trig; for the other entries they refer to the entry's last hit, as before.
+
+    The file is written with uproot (ZSTD compression) in chunks of chunk_size raw entries (about 4 min per 50 M entries); ROOT reads it
+    like the legacy files, and the TPC friend tree is made from it by make_tpc_friend_file as before. The output goes to
+    get_ddas_root_file_path(experiment, ddas_run, version); the legacy per-entry PyROOT loop that made the version-None
+    files is gone (it took hours per run), so a version-None file written now is this code's output without the rebuild
+    only if rebuild=False is passed.
     '''
+    import time
+    import uproot
+    version = MERGED_VERSION if version == 'default' else version
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
-    
-    log_path = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merge.log') + get_user_suffix(experiment)
-    output_path = get_ddas_root_file_path(experiment, ddas_run)
-    # Write to a temporary path and rename once the merge finishes, so a failed merge doesn't leave a file at output_path
+    log_path = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merge{_version_suffix(version)}.log') + get_user_suffix(experiment)
+    output_path = get_ddas_root_file_path(experiment, ddas_run, version)
+    # Write to a temporary path and rename once the merge finishes, so a failed merge doesn't leave a file at output_path.
     # The temporary path is unique to this process, so two processes making the same file don't write to or rename each other's output
     partial_output_path = f'{output_path}.{os.getpid()}.partial'
-    with ROOT.TFile(root_file_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(partial_output_path, "RECREATE") as output_file:
+    t_start = time.time()
+    with open(log_path, 'w') as log_file:
         # Run git in the repository rather than the current working directory, which may be outside it
         git_version = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, cwd=BASE_DIR).stdout
         git_status = subprocess.run(['git', 'status'], capture_output=True, text=True, check=True, cwd=BASE_DIR).stdout
         git_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, check=True, cwd=BASE_DIR).stdout
-        log_file.write('preparing to process ddas run %d \n'%ddas_run)
-        log_file.write('git commit %s\n'%git_version)
-        log_file.write('git status: %s\n'%git_status)
-        log_file.write('git diff: %s\n'%git_diff)
+        log_file.write('preparing to process ddas run %d \n' % ddas_run)
+        log_file.write('git commit %s\n' % git_version)
+        log_file.write('git status: %s\n' % git_status)
+        log_file.write('git diff: %s\n' % git_diff)
+        log_file.write(f'version: {version}, rebuild: {rebuild}, window: +-{window_us} us around the trigger, mesh delay {mesh_delay_us} us, '
+                       f'mesh gate {mesh_gate_us} us, chunk size {chunk_size}, sliding-scale random seed {int(ddas_run)}\n')
 
         ddas_ch_map_path = os.path.join(BASE_DIR, f'{experiment}_analysis', 'channel_map.csv')
-        log_file.write('loading DDAS channel map from %s\n'%ddas_ch_map_path)
-        chmap = np.genfromtxt(ddas_ch_map_path,delimiter=', ', dtype=str, skip_header=1)
-        ch_indexes = np.array(chmap[:,0], dtype=int)
-        ch_names = chmap[:,1]
-        slopes, offsets = np.array(chmap[:,2], dtype=float), np.array(chmap[:,3], dtype=float)
+        log_file.write('loading DDAS channel map from %s\n' % ddas_ch_map_path)
+        chmap = np.genfromtxt(ddas_ch_map_path, delimiter=', ', dtype=str, skip_header=1)
+        ch_indexes = np.array(chmap[:, 0], dtype=int)
+        ch_names = [str(s) for s in chmap[:, 1]]
+        slopes, offsets = np.array(chmap[:, 2], dtype=float), np.array(chmap[:, 3], dtype=float)
+        log_file.write('ch_names:' + str(ch_names) + '\n slopes: %s\n' % str(slopes))
+        column = {int(ch): k for k, ch in enumerate(ch_indexes)}
+        k_trig, k_mesh = column.get(CH_MAP.GET_TRIG_ACCEPTED), column.get(CH_MAP.MESH_PRE_AMP)
+        k_beam_off, k_chopper_off = column.get(CH_MAP.BEAM_OFF), column.get(CH_MAP.CHOPPER_OFF)
+        if rebuild and k_trig is None:
+            log_file.write('the channel map has no get_trig_accepted channel: nothing to rebuild around\n')
+            rebuild = False
+        unmapped = np.setdiff1d(np.arange(NUM_TOTAL_CH), ch_indexes)
 
-        log_file.write('ch_names:')
-        log_file.write(str(ch_names))
-        log_file.write('\n slopes: %s\n'%str(slopes))
-        
-        log_file.write('Opening ROOT file\n')
-        in_tree = input_file.Get("tree")
-        energies, times, multiplicities = np.zeros(NUM_TOTAL_CH, dtype=np.int32), np.zeros(NUM_TOTAL_CH), np.zeros(NUM_TOTAL_CH,dtype=np.int32)
-        in_tree.SetBranchAddress("energies", energies)
-        in_tree.SetBranchAddress("times", times)
-        in_tree.SetBranchAddress("multiplicity", multiplicities)
+        raw = uproot.open(root_file_path)['tree']
+        n = raw.num_entries
+        log_file.write(f'{n} raw entries\n')
+        branch_types = {}
+        for name in ch_names:
+            branch_types[name + '_e'], branch_types[name + '_t'], branch_types[name + '_m'] = np.float64, np.float64, np.int32
+            branch_types[name + '_c'], branch_types[name + '_cr'] = np.int32, np.float64
+        branch_types.update({'time_since_beam_off': np.float64, 'time_since_chopper_off': np.float64, 'rebuilt_window': np.bool_,
+                             'anchor_t': np.float64, 'n_source_entries': np.int32, 'mesh_in_window': np.bool_})
+        rng = np.random.default_rng(int(ddas_run))
+        window_ns, delay_ns = window_us * 1e3, mesh_delay_us * 1e3
+        gate_ns = (mesh_gate_us[0] * 1e3, mesh_gate_us[1] * 1e3)
+        PAD, REACH = 8, 4                       # raw entries read past the chunk end; raw entries searched on each side of a trigger
+        last_signal = {'beam': np.nan, 'chopper': np.nan}          # ns, carried across chunks
+        counters = {'entries_in': n, 'entries_out': 0, 'triggers': 0, 'mesh_in_window': 0, 'records_moved': 0, 'donors_emptied': 0,
+                    'channels_with_several_candidates': 0, 'chunks': 0}
 
-        log_file.write('Setting up tree in which merged data will be stored\n')
-        out_tree = ROOT.TTree("merged_data", "merged_data")
-        branch_evals = [np.array([0], dtype=np.float64) for i in ch_names]
-        branch_tvals = [np.array([0], dtype=np.float64) for i in ch_names]
-        branch_mvals = [np.array([0], dtype=np.int32) for i in ch_names]
-        branch_counts = [np.array([0], dtype=np.int32) for i in ch_names]
-        branch_counts_ss = [np.array([0], dtype=np.float64) for i in ch_names] #sliding scale method counts
-        
-        for i in range(len(ch_names)):
-            out_tree.Branch(ch_names[i]+'_e', branch_evals[i], ch_names[i]+'_e/D')
-            out_tree.Branch(ch_names[i]+'_t', branch_tvals[i], ch_names[i]+'_t/D')
-            out_tree.Branch(ch_names[i]+'_m', branch_mvals[i], ch_names[i]+'_m/I')
-            out_tree.Branch(ch_names[i]+'_c', branch_counts[i], ch_names[i]+'_c/I')
-            out_tree.Branch(ch_names[i]+'_cr', branch_counts_ss[i], ch_names[i]+'_cr/D')
-            
-        tsbo = np.array([np.nan], dtype=np.float64)
-        out_tree.Branch('time_since_beam_off', tsbo, 'time_since_beam_off/D')
-        tsco = np.array([np.nan], dtype=np.float64)
-        out_tree.Branch('time_since_chopper_off', tsco, 'time_since_chopper_off/D')
-
-        log_file.write('Starting process \n')
-        last_beam_off_time = np.nan
-        last_chopper_off_time = np.nan
-
-        for ddas_index in tqdm.tqdm(range(in_tree.GetEntries())):
-            #copy over ddas values with calibration factors applied
-            in_tree.GetEntry(ddas_index)
-            for i in range(len(ch_names)):
-                branch_mvals[i][0] = multiplicities[ch_indexes[i]]
-                if branch_mvals[i][0] > 0:
-                    branch_evals[i][0] = energies[ch_indexes[i]]*slopes[i] + offsets[i]
-                    branch_tvals[i][0] = times[ch_indexes[i]]/1e9 #store all times in seconds
-                    branch_counts[i][0] = energies[ch_indexes[i]]
-                    branch_counts_ss[i][0] = energies[ch_indexes[i]] + np.random.uniform(-0.5, 0.5)
-                else:
-                    branch_evals[i][0] = 0
-                    branch_tvals[i][0] = np.nan
-                    branch_counts[i][0] = -1 #set to -1 when multiplicity is 0
-                    branch_counts_ss[i][0] = -1
-                
-                if ch_names[i] == 'beam_off' and multiplicities[ch_indexes[i]] == 1:
-                    last_beam_off_time = times[ch_indexes[i]]/1e9
-                if ch_names[i] == 'chopper_off' and multiplicities[ch_indexes[i]] == 1:
-                    last_chopper_off_time = times[ch_indexes[i]]/1e9
-            
-            tsbo[0] = np.max(times)/1e9 - last_beam_off_time
-            tsco[0] = np.max(times)/1e9 - last_chopper_off_time
-            out_tree.Fill()
-
-        output_file.WriteObject(out_tree, "merged_data")
-    os.replace(partial_output_path, output_path)
+        with uproot.recreate(partial_output_path, compression=uproot.ZSTD(3)) as output_file:     # 3x faster than ZLIB(4), 6 % smaller; ROOT >= 6.20 reads it
+            output_file.mktree('merged_data', branch_types, title='merged_data')
+            lo = 0
+            while lo < n:
+                hi0 = min(lo + chunk_size, n)
+                arrays = raw.arrays(['times', 'multiplicity', 'energies'], entry_start=lo, entry_stop=min(hi0 + PAD, n), library='np')
+                times_all, mult_all, adc_all = arrays['times'], arrays['multiplicity'], arrays['energies']
+                # End the chunk where no trigger has neighbours on both sides of the boundary, so every rebuild stays inside one chunk
+                hi = hi0
+                if rebuild and hi0 < n:
+                    trig_rows = np.flatnonzero(mult_all[:, CH_MAP.GET_TRIG_ACCEPTED] > 0) + lo
+                    while hi > lo + 1 and np.any((trig_rows >= hi - REACH) & (trig_rows < hi + REACH)):
+                        hi -= 1
+                L = hi - lo
+                mult = mult_all[:L, ch_indexes].astype(np.int32)
+                adc = adc_all[:L, ch_indexes].astype(np.int32)
+                valid = mult > 0
+                times = np.where(valid, times_all[:L, ch_indexes].astype(np.float64), np.nan)        # ns
+                unmapped_last = times_all[:L][:, unmapped].max(axis=1) if len(unmapped) else np.full(L, -1.0)
+                rebuilt = np.zeros(L, dtype=bool)
+                anchor = np.full(L, np.nan)
+                n_source = np.ones(L, dtype=np.int32)
+                mesh_found = np.zeros(L, dtype=bool)
+                keep = np.ones(L, dtype=bool)
+                if rebuild:
+                    for i in np.flatnonzero(valid[:, k_trig]):
+                        t_trig = times[i, k_trig]
+                        counters['triggers'] += 1
+                        rebuilt[i] = True
+                        anchor[i] = t_trig
+                        target = t_trig - delay_ns
+                        donors = [j for j in range(max(i - REACH, 0), min(i + REACH, L - 1) + 1) if j != i]
+                        if donors:
+                            donor_times = times[donors]                                                   # [donor, channel]
+                            cand = np.isfinite(donor_times) & (donor_times >= t_trig - window_ns) & (donor_times < t_trig + window_ns) & ~valid[i][None, :]
+                            if cand.any():
+                                dist = np.where(cand, np.abs(donor_times - target), np.inf)
+                                best = dist.argmin(axis=0)
+                                cols = np.flatnonzero(cand.any(axis=0))
+                                rows = np.asarray(donors)[best[cols]]
+                                counters['channels_with_several_candidates'] += int((cand.sum(axis=0) > 1).sum())
+                                for arr in (times, mult, adc):
+                                    arr[i, cols] = arr[rows, cols]
+                                valid[i, cols] = True
+                                mult[rows, cols], adc[rows, cols], times[rows, cols], valid[rows, cols] = 0, 0, np.nan, False
+                                counters['records_moved'] += len(cols)
+                                used = np.unique(rows)
+                                n_source[i] = 1 + len(used)
+                                emptied = [j for j in used if not valid[j].any()]
+                                keep[emptied] = False
+                                counters['donors_emptied'] += len(emptied)
+                        if k_mesh is not None and valid[i, k_mesh]:
+                            mesh_found[i] = gate_ns[0] < t_trig - times[i, k_mesh] < gate_ns[1]
+                        counters['mesh_in_window'] += bool(mesh_found[i])
+                # reference time per entry: the trigger for rebuilt entries, the last hit (mapped or not) otherwise, as the legacy files
+                mapped_last = np.where(valid.any(axis=1), np.nanmax(np.where(valid, times, -np.inf), axis=1), -np.inf)
+                t_ref = np.where(rebuilt, anchor, np.maximum(mapped_last, unmapped_last))
+                tsince = {}
+                for key, k in (('beam', k_beam_off), ('chopper', k_chopper_off)):
+                    sig = np.sort(times[mult[:, k] == 1, k]) if k is not None else np.zeros(0)
+                    if np.isfinite(last_signal[key]):
+                        sig = np.concatenate([[last_signal[key]], sig])
+                    idx = np.searchsorted(sig, t_ref, side='right') - 1
+                    tsince[key] = np.where(idx >= 0, (t_ref - sig[np.maximum(idx, 0)]) * 1e-9, np.nan) if len(sig) else np.full(L, np.nan)
+                    if len(sig):
+                        last_signal[key] = sig[-1]
+                # output branches
+                energies = np.where(valid, adc * slopes[None, :] + offsets[None, :], 0.0)
+                counts_ss = np.where(valid, adc + rng.uniform(-0.5, 0.5, size=adc.shape), -1.0)
+                data = {}
+                for k, name in enumerate(ch_names):
+                    data[name + '_e'] = energies[keep, k]
+                    data[name + '_t'] = times[keep, k] * 1e-9
+                    data[name + '_m'] = mult[keep, k]
+                    data[name + '_c'] = np.where(valid[keep, k], adc[keep, k], -1).astype(np.int32)
+                    data[name + '_cr'] = counts_ss[keep, k]
+                data['time_since_beam_off'] = tsince['beam'][keep]
+                data['time_since_chopper_off'] = tsince['chopper'][keep]
+                data['rebuilt_window'] = rebuilt[keep]
+                data['anchor_t'] = anchor[keep] * 1e-9
+                data['n_source_entries'] = n_source[keep]
+                data['mesh_in_window'] = mesh_found[keep]
+                output_file['merged_data'].extend(data)
+                counters['entries_out'] += int(keep.sum())
+                counters['chunks'] += 1
+                log_file.write(f'{hi}/{n} raw entries, {counters["entries_out"]} written, {counters["triggers"]} triggers, {time.time() - t_start:.0f} s\n')
+                log_file.flush()
+                lo = hi
+        os.replace(partial_output_path, output_path)
+        log_file.write(f'done in {time.time() - t_start:.0f} s: {counters}\n')
+    return counters
 
 GET_DDAS_TIME_MATCH_THRESHOLD = 10e-6 # seconds
 GET_DDAS_MAX_CLOCK_DRIFT = 1e-4 # fractional difference in the rates of the GET and DDAS clocks. This was 45 ppm in e23035 run 277
@@ -396,12 +509,18 @@ def friend_tree_metadata(experiment, tpc_ini_filename="", get_runs=()):
     meta['created'] = datetime.datetime.now().isoformat(timespec='seconds')
     return meta
 
-def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename=""):
-    merged_path = get_ddas_root_file_path(experiment, ddas_run)
+def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename="", version='default'):
+    '''
+    The TPC friend tree (one entry per entry of the merged file, TPC quantities on the entries with a matched GET event).
+    version picks the merged file (see MERGED_VERSION); the friend file carries the same suffix.
+    '''
+    if not tpc_ini_filename:
+        raise ValueError(f"tpc_ini_filename is required to make the TPC friend tree of DDAS run {ddas_run}: without it the GET runs would be processed with the empty default config")
+    merged_path = get_ddas_root_file_path(experiment, ddas_run, version)
     if not os.path.exists(merged_path):
-        make_ddas_root_file(experiment, ddas_run)
+        make_ddas_root_file(experiment, ddas_run, version)
         
-    output_path = get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
+    output_path = get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename, version)
     log_path = os.path.splitext(output_path)[0] + '.log' + get_user_suffix(experiment)
     
     with ROOT.TFile(merged_path, "READ") as input_file, open(log_path, 'w') as log_file, ROOT.TFile(output_path, "RECREATE") as output_file:
@@ -683,6 +802,10 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
 def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename=""):
     needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
     if needs_tpc:
+        # A TPC config is required whenever friend-tree variables are used: without it the GET runs would be processed
+        # with the empty default config (and the friend trees built from that), which is never what an analysis wants.
+        if not tpc_ini_filename:
+            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
         import importlib
         try:
             exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")

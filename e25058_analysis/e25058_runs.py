@@ -68,10 +68,20 @@ def get_veto_mask(get_run, tpc_ini_filename=""):
         return process_runs.get_veto_mask(experiment, get_run, veto_thresholds, config_filename=tpc_ini_filename)
     return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds, config_filename=tpc_ini_filename)
 
-def get_pad_gains(get_run):
-    #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e25058_prep_runs61to63_gm.pkl'
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
-    with open(gain_match_path, 'rb') as f:
+GAIN_MATCH_DIR = os.path.join(current_dir.parent, 'raw_viewer', 'pad_gain_match', 'gain_match_results')
+
+def get_pad_gain_path(tpc_ini_filename=""):
+    '''
+    Pad gain map for a TPC processing config: the e23035 maps (copied from the e23035 branch, ba702f7). Configs whose
+    main baseline is smart1 (smart1_rpr*, and the hybrid smart1_veto2_rpr_fzp) use the map made on hybrid charges;
+    smart2 configs and no config use the February 2026 map made on smart2 charges.
+    '''
+    if process_runs.get_config_background_mode(tpc_ini_filename) == 'smart':
+        return os.path.join(GAIN_MATCH_DIR, 'hybrid_v200_fft6_res3.pkl')
+    return os.path.join(GAIN_MATCH_DIR, 'gm_old', 'fft6_res3.pkl')
+
+def get_pad_gains(tpc_ini_filename=""):
+    with open(get_pad_gain_path(tpc_ini_filename), 'rb') as f:
         gain_match_result = pickle.load(f)
     return gain_match_result.pad_gains
 
@@ -85,7 +95,7 @@ def get_energy_MeV(get_run, tpc_ini_filename=""):
         get_run = [get_run]
     to_return = []
     for i in get_run:
-        to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(i), config_filename=tpc_ini_filename))
+        to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(tpc_ini_filename), config_filename=tpc_ini_filename))
     return np.concatenate(to_return)
 
 def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
