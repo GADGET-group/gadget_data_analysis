@@ -35,15 +35,6 @@ TPC_GPU_MEMORY_FRACTION = 0.55        #share of a card one config may fill with 
 TPC_MAX_TOTAL_WORKERS = 12            #where throughput saturated on tpcgpu (file I/O), all light modes
 TPC_WORKERS_PER_GPU_BY_MODE = {}      #explicit per-mode overrides ('mode' or 'mode+veto_vetomode'); empty = use the memory rule
 DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config does not set the mode
-#config used when a caller gives none (config_filename ""), by experiment: e25058 uses the hybrid baseline (smart1 on
-#the pads, smart2 on the veto pads). Experiments not listed get the raw_h5_file defaults; 'none' always means no config.
-DEFAULT_TPC_CONFIGS = {'e25058': 'smart1_veto2_rpr_fzp.csv'}
-
-def resolve_config_filename(experiment, config_filename=""):
-    '''config_filename, or the experiment's DEFAULT_TPC_CONFIGS entry if it is empty'''
-    if not config_filename:
-        return DEFAULT_TPC_CONFIGS[experiment]
-    return config_filename
 
 def get_config_background_mode(config_filename="", key='background_subtract_mode'):
     '''
@@ -148,7 +139,6 @@ def get_h5_path(experiment, run_number):
 
 def get_h5_file(experiment, run_number, config_filename=""):
     run_number = int(run_number)
-    config_filename = resolve_config_filename(experiment, config_filename)
     raw_h5_path = get_h5_path(experiment, run_number)
     
     # Defaults in case not all are in config
@@ -165,7 +155,6 @@ def get_h5_file(experiment, run_number, config_filename=""):
 
 _settings_hash_cache = {}
 def get_experiment_settings_hash(experiment, example_run, config_filename=""):
-    config_filename = resolve_config_filename(experiment, config_filename)
     key = (experiment, config_filename)
     if key not in _settings_hash_cache:
         h5file = get_h5_file(experiment, example_run, config_filename)
@@ -173,15 +162,21 @@ def get_experiment_settings_hash(experiment, example_run, config_filename=""):
         h5file.close()
     return _settings_hash_cache[key]
 
+def _require_config_filename(config_filename):
+    '''Processing and loading need an explicit config: the empty default would silently use the raw_h5_file defaults.'''
+    if not isinstance(config_filename, str) or not config_filename:
+        raise ValueError(f"config_filename must name a config in tpc_processing_configs (got {config_filename!r})")
+
 #coppied from field distortions folder in track fitting branch
 #and modified to configure h5 file differently
-def process_tpc_run(experiment, run_number, force_reprocess=False, config_filename="", gpu_to_use=0):
+def process_tpc_run(experiment, run_number, config_filename, force_reprocess=False, gpu_to_use=0):
     '''
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a ROOT version of this information isn't available.
+    config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
     '''
+    _require_config_filename(config_filename)
     run_number = int(run_number)
-    config_filename = resolve_config_filename(experiment, config_filename)
     try:
         import cupy as cp
         cp.cuda.runtime.setDevice(gpu_to_use)
@@ -433,15 +428,16 @@ def _worker_ensure_processed(args):
     if not os.path.exists(fname):
         process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
 
-def ensure_processed(experiment, runs, config_filename="", show_progress=True, gpus_to_use=None, num_workers=None):
+def ensure_processed(experiment, runs, config_filename, show_progress=True, gpus_to_use=None, num_workers=None):
     '''
     Process (with process_tpc_run) any of the runs that have no ROOT file yet.
+    config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
     gpus_to_use: GPUs for the processing workers (default TPC_PROCESSING_GPUS), balanced over the workers.
     num_workers: number of processing workers. Default: len(gpus_to_use) * get_default_workers_per_gpu(config),
                  i.e. chosen from the config's background_subtract_mode.
     '''
+    _require_config_filename(config_filename)
     runs = [int(r) for r in runs]
-    config_filename = resolve_config_filename(experiment, config_filename)
     config_name = os.path.splitext(config_filename)[0]
     
     # Filter for runs that actually need processing
@@ -482,17 +478,18 @@ def ensure_processed(experiment, runs, config_filename="", show_progress=True, g
         for args in iterable:
             _worker_ensure_processed(args)
 
-def get_quantity(qname, experiment, runs, show_load_progress=False, num_workers=None, config_filename="", gpus_to_use=None):
+def get_quantity(qname, experiment, runs, config_filename, show_load_progress=False, num_workers=None, gpus_to_use=None):
     '''
+    config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
     num_workers: None (default) -> missing runs are processed with the mode-based default
                  (ensure_processed) and loading uses 1 process, as before;
                  a number -> used for both the processing and the loading stage.
     gpus_to_use: GPUs for both stages (default TPC_PROCESSING_GPUS).
     '''
+    _require_config_filename(config_filename)
     is_single = isinstance(qname, str)
     qnames = [qname] if is_single else qname
     runs = [int(r) for r in runs]
-    config_filename = resolve_config_filename(experiment, config_filename)
     to_return = {q: [] for q in qnames}
 
     ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress,
@@ -563,7 +560,8 @@ def _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=1):
     return np.concatenate(to_return, axis=0)
     
 
-def get_lengths(experiment_or_endpoints, runs=None, num_workers=None, config_filename=""):
+def get_lengths(experiment_or_endpoints, runs=None, config_filename=None, num_workers=None):
+    '''Track lengths from an endpoints array, or from (experiment, runs, config_filename), where the config is required.'''
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
@@ -571,7 +569,8 @@ def get_lengths(experiment_or_endpoints, runs=None, num_workers=None, config_fil
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.sqrt(np.sum(dr*dr, axis=1))
 
-def get_veto_counts(experiment, runs, num_workers=1, config_filename=""):
+def get_veto_counts(experiment, runs, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
     runs = [int(r) for r in runs]
     def cache_fname_fn(run):
         settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
@@ -585,7 +584,8 @@ def get_veto_counts(experiment, runs, num_workers=1, config_filename=""):
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1, config_filename=""):
+def get_veto_mask(experiment, runs, veto_thresholds, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
     runs = [int(r) for r in runs]
     thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
     
@@ -599,10 +599,11 @@ def get_veto_mask(experiment, runs, veto_thresholds, num_workers=1, config_filen
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_max_veto_counts(experiment, runs, num_workers=1, config_filename=""):
+def get_max_veto_counts(experiment, runs, config_filename, num_workers=1):
     '''
     gets array of max counts on any individual veto pad
     '''
+    _require_config_filename(config_filename)
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
@@ -618,7 +619,8 @@ def get_max_veto_counts(experiment, runs, num_workers=1, config_filename=""):
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_outer_ring_counts(experiment, runs, num_workers=1, config_filename=""):
+def get_outer_ring_counts(experiment, runs, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
@@ -633,7 +635,8 @@ def get_outer_ring_counts(experiment, runs, num_workers=1, config_filename=""):
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_outer_ring_max_counts(experiment, runs, num_workers=1, config_filename=""):
+def get_outer_ring_max_counts(experiment, runs, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
     runs = [int(r) for r in runs]
     
     def cache_fname_fn(run):
@@ -649,7 +652,8 @@ def get_outer_ring_max_counts(experiment, runs, num_workers=1, config_filename="
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
     
-def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename=""):
+def get_gm_ic(experiment, runs, gains, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
     runs = [int(r) for r in runs]
     gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
     
@@ -663,7 +667,8 @@ def get_gm_ic(experiment, runs, gains, num_workers=1, config_filename=""):
         
     return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
 
-def get_angle(experiment_or_endpoints, runs=None, num_workers=None, config_filename=""):
+def get_angle(experiment_or_endpoints, runs=None, config_filename=None, num_workers=None):
+    '''Track angles from z from an endpoints array, or from (experiment, runs, config_filename), where the config is required.'''
     if runs is None:
         endpoints = np.array(experiment_or_endpoints)
     else:
@@ -671,7 +676,8 @@ def get_angle(experiment_or_endpoints, runs=None, num_workers=None, config_filen
     dr = endpoints[:, 0] - endpoints[:, 1]
     return np.arctan2(np.sqrt(dr[:,0]**2 + dr[:,1]**2), np.abs(dr[:,2]))
 
-def get_time_since_beam_off(experiment, runs, config_filename=""):
+def get_time_since_beam_off(experiment, runs, config_filename):
+    _require_config_filename(config_filename)
     to_return = []
     for run in runs:
         times_since_start_of_window = []

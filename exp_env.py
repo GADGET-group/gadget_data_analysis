@@ -23,10 +23,11 @@ def xy_centering():
     import_or_reload('raw_viewer.plots.xy_centering')
 
 experiment = 'e25058'
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'
 
 def process_run(run):
     try:
-        process_runs.process_tpc_run(experiment, run, True)
+        process_runs.process_tpc_run(experiment, run, TPC_CONFIG, force_reprocess=True)
         print('processed run ', run)
     except Exception as e:
         print('error processing run ', run)
