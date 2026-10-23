@@ -619,7 +619,7 @@ def _process_runs_split(experiment, runs, config_filename, gpus_to_use, max_work
     anything fails, the block and partial files are removed and no run file is written.
     '''
     import multiprocessing
-    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
     config_name = os.path.splitext(config_filename)[0]
     plans = []
     for run in runs:
@@ -650,21 +650,26 @@ def _process_runs_split(experiment, runs, config_filename, gpus_to_use, max_work
     executor = ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx, initializer=_init_worker_gpu,
                                    initargs=(ctx.Value('i', 0), gpus_to_use))
     try:
-        futures = {executor.submit(_worker_process_block, args): plan for plan, args in tasks}
+        #blocks and merges are waited for together, so that a run's file is in place as soon as its own merge is done
+        pending = {executor.submit(_worker_process_block, args): ('block', plan) for plan, args in tasks}
         blocks_left = {id(plan): len(plan['blocks']) for plan in plans}
-        merges = {}
-        for future in tqdm(as_completed(futures), total=len(futures), disable=not show_progress):
-            future.result()
-            plan = futures[future]
-            blocks_left[id(plan)] -= 1
-            if blocks_left[id(plan)] == 0:
-                if len(plan['blocks']) == 1:
+        progress = tqdm(total=len(tasks), disable=not show_progress)
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                kind, plan = pending.pop(future)
+                future.result()
+                if kind == 'merge':
                     os.replace(plan['partial'], plan['fname'])
-                else:
-                    merges[executor.submit(_worker_merge_blocks, (plan['blocks'], plan['partial'], plan['metadata']))] = plan
-        for future in as_completed(merges):
-            future.result()
-            os.replace(merges[future]['partial'], merges[future]['fname'])
+                    continue
+                progress.update()
+                blocks_left[id(plan)] -= 1
+                if blocks_left[id(plan)] == 0:
+                    if len(plan['blocks']) == 1:
+                        os.replace(plan['partial'], plan['fname'])
+                    else:
+                        pending[executor.submit(_worker_merge_blocks, (plan['blocks'], plan['partial'], plan['metadata']))] = ('merge', plan)
+        progress.close()
     except BaseException:
         executor.shutdown(wait=True, cancel_futures=True) #no block is still writing when the files are removed
         for plan in plans:
