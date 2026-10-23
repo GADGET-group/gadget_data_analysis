@@ -5,6 +5,8 @@ import hashlib
 import multiprocessing as mp
 import subprocess
 import socket
+import threading
+import contextlib
 
 from tqdm import tqdm
 import numpy as np
@@ -25,14 +27,16 @@ TPC_MAX_WORKERS_PER_GPU = 6
 #  smart (smart1)          264 (CUDA context only, the baseline runs on the CPU)
 #  'smart+veto_smart2'     620-700 (hybrid: smart1 on the pads, smart2 on the ~8 veto rows per event)
 #The per-GPU default is TPC_GPU_MEMORY_FRACTION x card memory / per-worker peak, so smart2 gets 2 (3 only when alone
-#on a card) and the light modes would get 35+ per card. For them the total is capped by TPC_MAX_TOTAL_WORKERS, because
-#throughput stops rising long before memory runs out: hybrid processing with one numba thread per worker gave 1850 evt/s
-#with 12 workers, 1480 with 24 and 1420 with 36 (cold reads of the raw files from the network filesystem; RAM use
-#~0.9 GB per worker, GPU memory 2.8 / 4.5-5.2 / 5.6-6.3 GB per card). Explicit num_workers / gpus_to_use always win.
+#on a card) and the light modes would get 35+ per card. For them the total is capped by TPC_MAX_TOTAL_WORKERS.
+#On 2026-10-06 hybrid throughput fell beyond 12 workers (1850 evt/s with 12, 1480 with 24, 1420 with 36), but that was
+#CPU oversubscription: every worker kept ~127 OpenBLAS/OpenMP threads spinning (fixed by _single_threaded). Measured
+#2026-10-23 with one thread per worker, whole e23035 runs, hybrid config, 3 GPUs: 12 workers ~3000 evt/s, 24 ~5600,
+#48 ~8100 (233 evt/s per worker, 27 CPU cores, ~0.9 GB RAM per worker, ~10 GB and ~65 % utilization per card); runs
+#not read recently from the file server go ~20 % slower. Explicit num_workers / gpus_to_use always win.
 TPC_WORKER_GPU_MEMORY_MIB = {'smart2': 13400.0, 'smart': 264.0, 'smart+veto_smart2': 700.0}
 TPC_GPU_MEMORY_MIB = 49140.0          #per card; measured value of tpcgpu's A6000s (nvidia-smi), used when the card cannot be queried
 TPC_GPU_MEMORY_FRACTION = 0.55        #share of a card one config may fill with its workers (smart2: 0.55 x 49140 / 13400 = 2.0)
-TPC_MAX_TOTAL_WORKERS = 12            #where throughput saturated on tpcgpu (file I/O), all light modes
+TPC_MAX_TOTAL_WORKERS = 48            #all light modes; throughput still rose from 24 to 48 workers (+45 %)
 TPC_WORKERS_PER_GPU_BY_MODE = {}      #explicit per-mode overrides ('mode' or 'mode+veto_vetomode'); empty = use the memory rule
 DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config does not set the mode
 
@@ -74,6 +78,10 @@ def get_default_workers_per_gpu(config_filename=""):
     per_gpu = min(per_gpu, max(1, -(-TPC_MAX_TOTAL_WORKERS // max(len(TPC_PROCESSING_GPUS), 1))))
     return max(1, per_gpu)
 
+#how far ahead of the event being processed _ReadAhead reads the raw file (0 = no read-ahead), and its read size
+READ_AHEAD_BYTES = 256 * 2**20
+READ_AHEAD_BLOCK_BYTES = 16 * 2**20
+
 _assigned_gpu = None
 def _init_worker_gpu(counter, gpus_to_use):
     '''Pool initializer: worker k (in start order) gets gpus_to_use[k % len], so any worker count is balanced.'''
@@ -82,16 +90,105 @@ def _init_worker_gpu(counter, gpus_to_use):
         k = counter.value
         counter.value += 1
     _assigned_gpu = gpus_to_use[k % len(gpus_to_use)]
-    # one thread per worker: the smart2 peak-trimming kernel is compiled with parallel=True and numba would otherwise
-    # start a thread per CPU core in every worker (12 workers = thousands of threads); it works row by row, so the
-    # thread count does not change results. Measured 2026-10-06: 12 hybrid workers 1450 -> 1850 evt/s.
-    for var in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
-        os.environ.setdefault(var, '1')
+
+@contextlib.contextmanager
+def _single_threaded():
+    '''
+    Runs the block with one OpenBLAS/OpenMP thread (threadpoolctl), one torch thread and one numba thread, and restores
+    the previous settings afterwards. The processing works row by row, so the thread count does not change results.
+    - numba: the smart2 peak-trimming kernel is compiled with parallel=True and would start a thread per CPU core in
+      every worker. Measured 2026-10-06: 12 hybrid workers 1450 -> 1850 evt/s.
+    - OpenBLAS/OpenMP: setting OMP_NUM_THREADS etc. in the pool initializer had no effect, because numpy, OpenBLAS and
+      torch are already loaded when it runs (unpickling it imports this module). Every worker kept ~127 threads
+      spinning: 67 s CPU per 2000 events instead of 11 s, and 12 % less throughput with 12 workers (2026-10-23).
+    '''
+    import threadpoolctl
+    #thread counts are read before threadpoolctl limits anything (it also sets torch's OpenMP pool), and restored in
+    #reverse order
+    torch_threads = numba_threads = None
     try:
-        import numba
-        numba.set_num_threads(1)
+        import torch
+        torch_threads = torch.get_num_threads()
     except Exception:
         pass
+    try:
+        import numba
+        numba_threads = numba.get_num_threads()
+    except Exception:
+        pass
+    limits = threadpoolctl.threadpool_limits(limits=1)
+    if torch_threads is not None:
+        torch.set_num_threads(1)
+    if numba_threads is not None:
+        numba.set_num_threads(1)
+    try:
+        yield
+    finally:
+        if numba_threads is not None:
+            numba.set_num_threads(numba_threads)
+        if torch_threads is not None:
+            torch.set_num_threads(torch_threads)
+        limits.restore_original_limits()
+
+class _ReadAhead:
+    '''
+    Reads a raw h5 file sequentially in a background thread, up to READ_AHEAD_BYTES beyond the event being processed,
+    so that the per-event reads of process_tpc_run come from the page cache. Events are stored in event order (data
+    offsets rise linearly with the event number to within 0.4 % of the file, checked 2026-10-23 on e25058 and e23035
+    files), so the position of the processing is taken as the fraction of the run done times the file size. Measured
+    2026-10-23: cold per-event reads from the network filesystem took 5-9 ms per event with 48 workers, cached ones
+    0.25 ms; a sequential read runs at ~270 MB/s per stream. The thread starts at the first update; read errors only
+    stop the read-ahead.
+    '''
+    def __init__(self, path):
+        self.path = path
+        self._thread = None
+        self._target = 0
+        self._stop = False
+        self._cond = threading.Condition()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def update(self, fraction_done):
+        if READ_AHEAD_BYTES <= 0:
+            return
+        if self._thread is None:
+            self._size = os.path.getsize(self.path)
+            self._thread = threading.Thread(target=self._run, name='process_runs read-ahead', daemon=True)
+            self._thread.start()
+        with self._cond:
+            self._target = min(self._size, int(fraction_done * self._size) + READ_AHEAD_BYTES)
+            self._cond.notify()
+
+    def close(self):
+        if self._thread is not None:
+            with self._cond:
+                self._stop = True
+                self._cond.notify()
+            self._thread.join()
+            self._thread = None
+
+    def _run(self):
+        buf = bytearray(READ_AHEAD_BLOCK_BYTES)
+        pos = 0
+        try:
+            with open(self.path, 'rb', buffering=0) as f:
+                while True:
+                    with self._cond:
+                        while not self._stop and pos >= self._target:
+                            self._cond.wait()
+                        if self._stop:
+                            return
+                    n = f.readinto(buf)
+                    if not n:
+                        return
+                    pos += n
+        except OSError:
+            pass
 
 def get_save_path(experiment):
     if socket.gethostname() == 'tpcgpu':
@@ -174,7 +271,12 @@ def process_tpc_run(experiment, run_number, config_filename, force_reprocess=Fal
     Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
     Only redoes processing if a ROOT version of this information isn't available.
     config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
+    Runs single threaded (_single_threaded) and reads the raw file ahead of the processing (_ReadAhead).
     '''
+    with _single_threaded(), _ReadAhead(get_h5_path(experiment, run_number)) as read_ahead:
+        _process_tpc_run(experiment, run_number, config_filename, force_reprocess, gpu_to_use, read_ahead)
+
+def _process_tpc_run(experiment, run_number, config_filename, force_reprocess, gpu_to_use, read_ahead):
     _require_config_filename(config_filename)
     run_number = int(run_number)
     try:
@@ -235,6 +337,8 @@ def process_tpc_run(experiment, run_number, config_filename, force_reprocess=Fal
         track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
         pad_maxs, railed_pads, timestamps = [], [], []
         for evt in tqdm(range(first_event, last_event + 1)):
+            if (evt - first_event) % 100 == 0:
+                read_ahead.update((evt - first_event) / (last_event - first_event + 1))
             timestamps.append(h5file.get_timestamp(evt))
             railed_pads.append(h5file.get_railed_pads(evt))
             center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
@@ -257,9 +361,11 @@ def process_tpc_run(experiment, run_number, config_filename, force_reprocess=Fal
             track_centers.append(center)
             pad_counts = np.zeros(1024)
             pad_maxs.append(np.zeros(1024))
-            for pad, trace in zip(*h5file.get_pad_traces(evt)):
-                pad_counts[pad] = np.sum(trace)
-                pad_maxs[-1][pad] = np.max(trace)
+            #all pads at once (each pad has one channel); same values as np.sum / np.max of each trace, bit for bit
+            pads, traces = h5file.get_pad_trace_array(evt)
+            if len(pads) > 0:
+                pad_counts[pads] = traces.sum(axis=1)
+                pad_maxs[-1][pads] = traces.max(axis=1)
             pad_charges.append(pad_counts)
 
 
