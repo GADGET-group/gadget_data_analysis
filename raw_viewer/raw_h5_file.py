@@ -58,23 +58,51 @@ class _BaselineParams:
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_PADS = 1024
 
+_M32 = 0xFFFFFFFF
+
+def _mul32(a, c):
+    '''(a * c) mod 2^32 for an int64 tensor a with values in [0, 2^32) and a constant c < 2^32, without int64 overflow'''
+    return (a * (c & 0xFFFF) + (((a * (c >> 16)) & 0xFFFF) << 16)) & _M32
+
+def _hash32(x):
+    '''lowbias32 integer hash (C. Wellons) of an int64 tensor with values in [0, 2^32)'''
+    x = x ^ (x >> 16)
+    x = _mul32(x, 0x7feb352d)
+    x = x ^ (x >> 15)
+    x = _mul32(x, 0x846ca68b)
+    return x ^ (x >> 16)
+
+def _ransac_sample_indices(traces, max_iterations, device):
+    '''
+    Sample indices (B, max_iterations, 2) in [0, N) for batched_line_fit_2d, instead of torch.randint: a hash of each
+    trace's values (float64 bit patterns and positions) and of the iteration. A trace gets the same samples in any
+    batch, so the processing is deterministic and does not depend on how a run is batched or split over workers.
+    '''
+    B, N = traces.shape
+    bits = torch.from_numpy(np.ascontiguousarray(traces, dtype=np.float64)).view(torch.int64).to(device)
+    pos = _hash32((torch.arange(N, dtype=torch.int64, device=device) + 0x9E3779B9) & _M32)
+    key = _hash32(_hash32((bits & _M32) ^ pos) ^ ((bits >> 32) & _M32)).sum(dim=1) & _M32
+    key = _hash32(key)
+    draw = _hash32((torch.arange(2 * max_iterations, dtype=torch.int64, device=device) + 0x85EBCA6B) & _M32)
+    return (_hash32(key[:, None] ^ draw[None, :]) % N).view(B, max_iterations, 2)
+
 def batched_line_fit_2d(traces, device=torch.device('cuda')):
     # traces: numpy array (B, 512)
     if traces.shape[0] == 0:
         return np.empty((0, traces.shape[1]), dtype=np.float32)
-        
+
     traces_torch = torch.tensor(traces, dtype=torch.float32, device=device)
     B, N = traces_torch.shape
-    
+
     # calculate mad_thresh for each batch
     # median across dim 1
     medians = traces_torch.median(dim=1, keepdim=True).values
     abs_dev = torch.abs(traces_torch - medians)
     mad_thresh = abs_dev.median(dim=1).values
     mad_thresh = torch.clamp(mad_thresh, min=1.0) # fallback
-    
+
     max_iterations = 100
-    idx = torch.randint(0, N, (B, max_iterations, 2), device=device)
+    idx = _ransac_sample_indices(traces, max_iterations, device)
     
     x_coords = torch.arange(N, dtype=torch.float32, device=device).unsqueeze(0).expand(B, N)
     x_coords_expanded = x_coords.unsqueeze(1).expand(B, max_iterations, N)
@@ -1140,7 +1168,7 @@ class raw_h5_file:
                 ransac_baseline_2d = np.zeros_like(traces_2d)
                 x = np.arange(traces_2d.shape[1]).reshape(-1, 1)
                 for b in range(traces_2d.shape[0]):
-                    ransac = linear_model.RANSACRegressor()
+                    ransac = linear_model.RANSACRegressor(random_state=0) #deterministic, like the GPU version
                     ransac.fit(x, traces_2d[b])
                     ransac_baseline_2d[b] = ransac.predict(x)
                 
