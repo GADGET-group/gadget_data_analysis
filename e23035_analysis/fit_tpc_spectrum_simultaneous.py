@@ -7,8 +7,10 @@ from pathlib import Path
 import ROOT
 import numpy as np
 
-from raw_viewer import ddas_interface, process_runs, degai
-from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vis_tools
+from tpc_and_decay_station import ddas_interface, degai
+from tpc_data_processing import process_runs
+from e23035_analysis import e23035_runs
+from analysis_tools import fitting_tools, spectrum_fitter, root_vis_tools
 
 fit_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_spectrum_fitting')
 def load_peaks_from_csv(filename):

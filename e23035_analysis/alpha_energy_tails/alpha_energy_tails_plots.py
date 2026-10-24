@@ -5,8 +5,8 @@ import matplotlib.colors
 import numpy as np
 import scipy.stats
 
-from raw_viewer import process_runs
-from raw_viewer import get_tsbo
+from tpc_data_processing import process_runs
+from tpc_and_decay_station import get_tsbo
 from e23035_analysis import e23035_runs
 
 experiment = 'e23035'
@@ -128,7 +128,7 @@ plot_spectrum_by_run_type('log')
 plot_spectrum_by_run_type('linear')
 
 #The linear spectrum again with the 220Rn source run that the pad gain match was made from: e23035_prep_vault run 49
-#(raw_viewer/pad_gain_match/hybrid_regain/README.md), processed with the same config and gains. e23035_runs assumes
+#(tpc_data_processing/pad_gain_match/hybrid_regain/README.md), processed with the same config and gains. e23035_runs assumes
 #experiment e23035 everywhere, so the alpha selection of e23035_runs.get_alpha_mask is repeated here for the other experiment.
 gain_match_experiment, gain_match_runs = 'e23035_prep_vault', [49]
 def get_alpha_energies(experiment, runs):

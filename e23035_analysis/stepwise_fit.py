@@ -47,7 +47,7 @@ import ROOT
 
 from e23035_analysis import fit_tpc_spectrum_simultaneous as fts
 from e23035_analysis import fit_diagnostics as fd
-from e23035_analysis import fitting_tools
+from analysis_tools import fitting_tools
 from e23035_analysis.fit_tpc_spectrum_simultaneous import fit_path
 
 DECISIONS_FILE = 'decisions.jsonl'

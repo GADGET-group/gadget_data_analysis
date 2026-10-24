@@ -5,10 +5,11 @@ import csv
 import numpy as np
 import ROOT
 
-from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
-from raw_viewer import degai
-from e23035_analysis.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
+from tpc_and_decay_station import ddas_interface
+from analysis_tools import fitting_tools, root_vis_tools
+from e23035_analysis import e23035_runs
+from tpc_and_decay_station import degai
+from analysis_tools.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
 from e23035_analysis import final_gamma_ecal
 
 experiment = 'e23035'
@@ -101,13 +102,13 @@ print('duration: %s hr'%(run_duration/3600))
 event_build_window = 500 #ns
 
 
-adj_dict =  degai.crystal_adj_dict#degai.clover_adj_dict#
+adj_dict =  degai.get_crystal_adj_dict(experiment)#degai.get_clover_adj_dict(experiment)#
 
 
 
 gamma_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
-adj_ab_hist = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'ab_hist', 'addback spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+adj_ab_hist = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(experiment, 30), cal_name, gamma_binning, 'ab_hist', 'addback spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
 ab_to_crystal_comparison = root_vis_tools.draw_overlaid_histograms({'addback':adj_ab_hist, 'sum':gamma_hist}, title='addback to sum comparison',
                                                                     x_label='energy (keV)', y_label='counts/0.25 keV')
@@ -130,13 +131,13 @@ if beam_off_selection is not None and beam_on_selection is not None:
 
 gamma_beam_off_hist_ab = None
 if beam_off_selection is not None:
-    gamma_beam_off_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_off_gammas_ab', 'beam off gamma spectrum_ab', 'addback_energy', 
+    gamma_beam_off_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(experiment, 30), cal_name, gamma_binning, 'beam_off_gammas_ab', 'beam off gamma spectrum_ab', 'addback_energy', 
                                               beam_off_selection, event_build_window, addback_ethresh, True,
                                             nonlinearity_correction_name=nlc_name)
 
 gamma_beam_on_hist_ab = None
 if beam_on_selection is not None:
-    gamma_beam_on_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(30), cal_name, gamma_binning, 'beam_on_gammas_ab', 'beam on gamma spectrum_ab', 'addback_energy', 
+    gamma_beam_on_hist_ab = degai.get_histogram(experiment, runs, degai.get_adjacency_dict(experiment, 30), cal_name, gamma_binning, 'beam_on_gammas_ab', 'beam on gamma spectrum_ab', 'addback_energy', 
                                               beam_on_selection, event_build_window, addback_ethresh, True,
                                             nonlinearity_correction_name=nlc_name)
 
@@ -156,10 +157,10 @@ if True: #make plot comparing 60Ga to 59Zn runs
         unscaled_zn_ga_comparison = root_vis_tools.draw_overlaid_histograms({'60Ga':ga_gamma_hist, '59Zn':zn_gamma_hist},
                                                              x_label='gamma energy (keV)', y_label='counts/0.25 keV')
 
-        ga_gamma_hist_ab = degai.get_histogram(experiment, ga_runs, degai.get_adjacency_dict(30), 'gm_511and2614_1', gamma_binning, 'ga_gamma_hist_ab', '60Ga addback spectrum', 'addback_energy',
+        ga_gamma_hist_ab = degai.get_histogram(experiment, ga_runs, degai.get_adjacency_dict(experiment, 30), 'gm_511and2614_1', gamma_binning, 'ga_gamma_hist_ab', '60Ga addback spectrum', 'addback_energy',
                                  '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
-        zn_gamma_hist_ab = degai.get_histogram(experiment, zn_runs, degai.get_adjacency_dict(30), 'gm_511and1301_1', gamma_binning, 'zn_gamma_hist_ab', '59Zn addback spectrum', 'addback_energy',
+        zn_gamma_hist_ab = degai.get_histogram(experiment, zn_runs, degai.get_adjacency_dict(experiment, 30), 'gm_511and1301_1', gamma_binning, 'zn_gamma_hist_ab', '59Zn addback spectrum', 'addback_energy',
                                  '', event_build_window, addback_ethresh, True,
                                   nonlinearity_correction_name=nlc_name)
         unscaled_zn_ga_comparison_ab = root_vis_tools.draw_overlaid_histograms({'60Ga':ga_gamma_hist_ab, '59Zn':zn_gamma_hist_ab},
@@ -249,12 +250,12 @@ coincidence_bin_size = 1.0 # keV
 coincidence_binning = (int((upper_energy-addback_ethresh)/coincidence_bin_size), addback_ethresh, upper_energy)
 coincidence_hist = degai.get_addback_coincidence_spectrum(experiment, runs, adj_dict, cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                 nonlinearity_correction_name=nlc_name)
-ab_coincidence_hist = degai.get_addback_coincidence_spectrum(experiment, runs, degai.get_adjacency_dict(30), cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+ab_coincidence_hist = degai.get_addback_coincidence_spectrum(experiment, runs, degai.get_adjacency_dict(experiment, 30), cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                 nonlinearity_correction_name=nlc_name)
 
-ab_coincidence_hist_59Zn = degai.get_addback_coincidence_spectrum(experiment, zn_runs, degai.get_adjacency_dict(30), 'gm_511and1301_1', coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+ab_coincidence_hist_59Zn = degai.get_addback_coincidence_spectrum(experiment, zn_runs, degai.get_adjacency_dict(experiment, 30), 'gm_511and1301_1', coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                 nonlinearity_correction_name=ga_runs)
-ab_coincidence_hist_60Ga = degai.get_addback_coincidence_spectrum(experiment, runs, degai.get_adjacency_dict(30), cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
+ab_coincidence_hist_60Ga = degai.get_addback_coincidence_spectrum(experiment, runs, degai.get_adjacency_dict(experiment, 30), cal_name, coincidence_binning, event_build_window, addback_ethresh, event_build_window, True, 
                                                 nonlinearity_correction_name=nlc_name)
 # h6134 = degai.get_bg_subtracted_projection(gg_hist, 6134, 4, 6180, 20)
 

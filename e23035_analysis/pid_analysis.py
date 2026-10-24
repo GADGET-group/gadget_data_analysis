@@ -4,8 +4,8 @@ import uuid
 import os
 import json
 
-from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools
+from tpc_and_decay_station import ddas_interface
+from analysis_tools import fitting_tools
 
 experiment = 'e23035'
 ddas_run = 142#262

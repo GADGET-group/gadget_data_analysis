@@ -26,7 +26,7 @@ import numpy as np
 import ROOT
 
 from e23035_analysis import fit_tpc_spectrum_simultaneous as fts
-from e23035_analysis import fitting_tools
+from analysis_tools import fitting_tools
 
 # A parameter is "pinned" when the bound sits within this fraction of its own uncertainty:
 # the minimiser wanted to go past it and stopped. Measuring against the error rather than

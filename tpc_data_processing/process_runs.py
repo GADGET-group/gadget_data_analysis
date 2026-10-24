@@ -1,0 +1,967 @@
+import os
+import uproot
+import awkward as ak
+import hashlib
+import multiprocessing as mp
+import subprocess
+import socket
+import threading
+import contextlib
+
+from tqdm import tqdm
+import numpy as np
+
+from tpc_data_processing import raw_h5_file
+
+OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,1014,752,751,743,742,732,720,707,693,678,663,
+                   647,631,614,597,580,563,545,527,272,290,308,325,342,359,376,392,408,423,438,452,465,477,488,487,497,496,
+                   504,503,502,501,507,506,505,250,251,252,246,247,248,249,241,242,232,233,222,210,197,183,168,153,137,121,
+                   104,87,70,53,35,17,782,800,818,835,852,869,886,902,918,933,948,962,975,987,998,997]
+
+TPC_PROCESSING_GPUS = [0,1,2,3] if socket.gethostname() == 'tpcgpu' else [0]
+#conservative default workers per GPU, used for any background_subtract_mode not listed below
+TPC_MAX_WORKERS_PER_GPU = 4
+#Default processing workers per GPU by background_subtract_mode, from the GPU memory one worker needs (measured
+#2026-10-05/06 on the 49 GB A6000s of tpcgpu; peak over a run, MiB):
+#  smart2                  12,000-13,400 (torch RANSAC on every trace of a 50-event batch)
+#  smart (smart1)          264 (CUDA context only, the baseline runs on the CPU)
+#  'smart+veto_smart2'     620-700 (hybrid: smart1 on the pads, smart2 on the ~8 veto rows per event)
+#The per-GPU default is TPC_GPU_MEMORY_FRACTION x card memory / per-worker peak, so smart2 gets 2 (3 only when alone
+#on a card) and the light modes would get 35+ per card. For them the total is capped by TPC_MAX_TOTAL_WORKERS.
+#On 2026-10-06 hybrid throughput fell beyond 12 workers (1850 evt/s with 12, 1480 with 24, 1420 with 36), but that was
+#CPU oversubscription: every worker kept ~127 OpenBLAS/OpenMP threads spinning (fixed by _single_threaded). Measured
+#2026-10-23 with one thread per worker, whole e23035 runs, hybrid config, 3 GPUs: 12 workers ~3000 evt/s, 24 ~5600,
+#48 ~8100 (233 evt/s per worker, 27 CPU cores, ~0.9 GB RAM per worker, ~10 GB and ~65 % utilization per card); runs
+#not read recently from the file server go ~20 % slower. Explicit num_workers / gpus_to_use always win.
+TPC_WORKER_GPU_MEMORY_MIB = {'smart2': 13400.0, 'smart': 264.0, 'smart+veto_smart2': 700.0}
+TPC_GPU_MEMORY_MIB = 49140.0          #per card; measured value of tpcgpu's A6000s (nvidia-smi), used when the card cannot be queried
+TPC_GPU_MEMORY_FRACTION = 0.55        #share of a card one config may fill with its workers (smart2: 0.55 x 49140 / 13400 = 2.0)
+TPC_MAX_TOTAL_WORKERS = 48            #all light modes; throughput still rose from 24 to 48 workers (+45 %)
+TPC_WORKERS_PER_GPU_BY_MODE = {}      #explicit per-mode overrides ('mode' or 'mode+veto_vetomode'); empty = use the memory rule
+DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config does not set the mode
+
+def get_config_background_mode(config_filename="", key='background_subtract_mode'):
+    '''
+    background_subtract_mode (or another key, e.g. veto_background_subtract_mode) set by a config in
+    tpc_processing_configs (parsed from the CSV, no h5 file opened). If the config is empty, missing, or does not
+    set it: the raw_h5_file default for background_subtract_mode, None for any other key.
+    '''
+    import csv
+    if config_filename and config_filename != 'none':
+        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
+        try:
+            with open(config_path, 'r') as f:
+                for row in csv.reader(f):
+                    if len(row) >= 3 and row[0].strip() == key:
+                        return row[2].strip()
+        except OSError:
+            pass
+    return DEFAULT_BACKGROUND_SUBTRACT_MODE if key == 'background_subtract_mode' else None
+
+def get_default_workers_per_gpu(config_filename=""):
+    '''
+    Default processing workers per GPU for a config: by background_subtract_mode, or, for a hybrid config
+    (veto_background_subtract_mode set), by the 'mode+veto_vetomode' entry if measured, otherwise the smaller
+    of the two modes' values.
+    '''
+    mode = get_config_background_mode(config_filename)
+    veto_mode = get_config_background_mode(config_filename, 'veto_background_subtract_mode')
+    key = mode if veto_mode is None else f'{mode}+veto_{veto_mode}'
+    if key in TPC_WORKERS_PER_GPU_BY_MODE:
+        return TPC_WORKERS_PER_GPU_BY_MODE[key]
+    mem = TPC_WORKER_GPU_MEMORY_MIB.get(key)
+    if mem is None and veto_mode is not None:      # hybrid without its own measurement: the heavier of its two modes
+        mem = max([TPC_WORKER_GPU_MEMORY_MIB[m] for m in (mode, veto_mode) if m in TPC_WORKER_GPU_MEMORY_MIB] or [None])
+    if mem is None:
+        return TPC_MAX_WORKERS_PER_GPU
+    per_gpu = int(TPC_GPU_MEMORY_FRACTION * TPC_GPU_MEMORY_MIB // mem)
+    per_gpu = min(per_gpu, max(1, -(-TPC_MAX_TOTAL_WORKERS // max(len(TPC_PROCESSING_GPUS), 1))))
+    return max(1, per_gpu)
+
+#how far ahead of the event being processed _ReadAhead reads the raw file (0 = no read-ahead), and its read size
+READ_AHEAD_BYTES = 256 * 2**20
+READ_AHEAD_BLOCK_BYTES = 16 * 2**20
+#compression of the processed ROOT files. zstd level 1 writes 2.6x faster than zlib level 1 (uproot's default, used
+#before 2026-10-23) and makes ~6 % smaller files (measured on e25058 output); uproot and ROOT read both.
+TPC_ROOT_COMPRESSION = uproot.ZSTD(1)
+#split processing (ensure_processed with fewer runs than workers, _process_runs_split): blocks of a run are written to
+#temporary LZ4 files (fastest to write and read back) and merged in order. A block has at least SPLIT_MIN_BLOCK_EVENTS
+#events, so the start-up of its worker (imports, CUDA, numba cache, ~5 s) stays small next to its processing.
+TPC_BLOCK_COMPRESSION = uproot.LZ4(1)
+SPLIT_MIN_BLOCK_EVENTS = 20000
+SPLIT_MERGE_CHUNK_EVENTS = 20000
+
+_assigned_gpu = None
+def _init_worker_gpu(counter, gpus_to_use):
+    '''Pool initializer: worker k (in start order) gets gpus_to_use[k % len], so any worker count is balanced.'''
+    global _assigned_gpu
+    with counter.get_lock():
+        k = counter.value
+        counter.value += 1
+    _assigned_gpu = gpus_to_use[k % len(gpus_to_use)]
+
+@contextlib.contextmanager
+def _single_threaded():
+    '''
+    Runs the block with one OpenBLAS/OpenMP thread (threadpoolctl), one torch thread and one numba thread, and restores
+    the previous settings afterwards. The processing works row by row, so the thread count does not change results.
+    - numba: the smart2 peak-trimming kernel is compiled with parallel=True and would start a thread per CPU core in
+      every worker. Measured 2026-10-06: 12 hybrid workers 1450 -> 1850 evt/s.
+    - OpenBLAS/OpenMP: setting OMP_NUM_THREADS etc. in the pool initializer had no effect, because numpy, OpenBLAS and
+      torch are already loaded when it runs (unpickling it imports this module). Every worker kept ~127 threads
+      spinning: 67 s CPU per 2000 events instead of 11 s, and 12 % less throughput with 12 workers (2026-10-23).
+    '''
+    import threadpoolctl
+    #thread counts are read before threadpoolctl limits anything (it also sets torch's OpenMP pool), and restored in
+    #reverse order
+    torch_threads = numba_threads = None
+    try:
+        import torch
+        torch_threads = torch.get_num_threads()
+    except Exception:
+        pass
+    try:
+        import numba
+        numba_threads = numba.get_num_threads()
+    except Exception:
+        pass
+    limits = threadpoolctl.threadpool_limits(limits=1)
+    if torch_threads is not None:
+        torch.set_num_threads(1)
+    if numba_threads is not None:
+        numba.set_num_threads(1)
+    try:
+        yield
+    finally:
+        if numba_threads is not None:
+            numba.set_num_threads(numba_threads)
+        if torch_threads is not None:
+            torch.set_num_threads(torch_threads)
+        limits.restore_original_limits()
+
+class _ReadAhead:
+    '''
+    Reads a raw h5 file sequentially in a background thread, up to READ_AHEAD_BYTES beyond the event being processed,
+    so that the per-event reads of process_tpc_run come from the page cache. Events are stored in event order (data
+    offsets rise linearly with the event number to within 0.4 % of the file, checked 2026-10-23 on e25058 and e23035
+    files), so the position of the processing is taken as the fraction of the run done times the file size. Measured
+    2026-10-23: cold per-event reads from the network filesystem took 5-9 ms per event with 48 workers, cached ones
+    0.25 ms; a sequential read runs at ~270 MB/s per stream. The thread starts at the first update; read errors only
+    stop the read-ahead.
+    start_fraction, end_fraction: for a block of a run (split processing), the part of the run's events it covers;
+    the read-ahead starts at that position in the file and stops at its end.
+    '''
+    def __init__(self, path, start_fraction=0.0, end_fraction=1.0):
+        self.path = path
+        self._start_fraction = start_fraction
+        self._end_fraction = end_fraction
+        self._thread = None
+        self._target = 0
+        self._stop = False
+        self._cond = threading.Condition()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def update(self, fraction_done):
+        '''fraction_done: of the events this read-ahead serves (the run, or the block)'''
+        if READ_AHEAD_BYTES <= 0:
+            return
+        if self._thread is None:
+            size = os.path.getsize(self.path)
+            self._start = int(self._start_fraction * size)
+            self._span = int((self._end_fraction - self._start_fraction) * size)
+            self._end = min(size, self._start + self._span + READ_AHEAD_BLOCK_BYTES)
+            self._thread = threading.Thread(target=self._run, name='process_runs read-ahead', daemon=True)
+            self._thread.start()
+        with self._cond:
+            self._target = min(self._end, self._start + int(fraction_done * self._span) + READ_AHEAD_BYTES)
+            self._cond.notify()
+
+    def close(self):
+        if self._thread is not None:
+            with self._cond:
+                self._stop = True
+                self._cond.notify()
+            self._thread.join()
+            self._thread = None
+
+    def _run(self):
+        buf = bytearray(READ_AHEAD_BLOCK_BYTES)
+        pos = self._start
+        try:
+            with open(self.path, 'rb', buffering=0) as f:
+                f.seek(pos)
+                while True:
+                    with self._cond:
+                        while not self._stop and pos >= self._target:
+                            self._cond.wait()
+                        if self._stop:
+                            return
+                    n = f.readinto(buf)
+                    if not n:
+                        return
+                    pos += n
+        except OSError:
+            pass
+
+def get_save_path(experiment):
+    if socket.gethostname() == 'tpcgpu':
+        if experiment == 'e21072':
+            save_path = '/egr/research-tpc/shared/Run_Data/proc_pkl'
+        elif experiment == 'e23035_prep_2cobo':
+            save_path = '/egr/research-tpc/shared/e23035_prep/2cobo/proc_pkl'
+        elif experiment == 'e23035_prep_4cobo':
+            save_path = '/egr/research-tpc/shared/e23035_prep/4cobo/proc_pkl'
+        elif experiment == 'e23035_prep_vault':
+            save_path = '/egr/research-tpc/shared/e23035_prep/vault/proc_pkl'
+        elif experiment == 'e25058':
+            save_path = '/egr/research-tpc/shared/proc_runs/%s/new_h5'%experiment
+        else:
+            save_path = '/egr/research-tpc/shared/proc_runs/%s/proc_pkl'%experiment
+        return save_path
+    elif 'gadget' in socket.gethostname().lower():
+        if experiment == 'e23035_prep_vault':
+            return '/Volumes/Extreme SSD/e23035prepvault/'
+        if experiment == 'e25058':
+            return '/Volumes/e25058_v1/e25058/proc_pkl'
+
+def get_h5_path(experiment, run_number):
+    run_number = int(run_number)
+    h5_base_path = ''
+    if socket.gethostname() == 'tpcgpu':
+        h5_base_path = '/egr/research-tpc/shared/experiments'
+    elif 'gadget' in socket.gethostname().lower():
+        if experiment == '23035':
+            h5_base_path = '/Volumes/Extreme SSD'
+        elif experiment == 'e25058':
+            h5_base_path = '/Volumes/e25058_v1'
+    if experiment == 'e21072':
+        return '/egr/research-tpc/shared/Run_Data/run_%04d.h5'%run_number
+    elif experiment == 'e23035_prep_2cobo':
+        return '/egr/research-tpc/shared/e23035_prep/2Cobo/run_%04d.h5'%run_number
+    elif experiment == 'e23035_prep_4cobo':
+        return '/egr/research-tpc/shared/e23035_prep/4cobo/run_%04d.h5'%run_number
+    elif experiment == 'e23035_prep_vault':
+        return '/egr/research-tpc/shared/e23035_prep/vault/run_%04d.h5'%run_number
+    elif experiment == 'e25058':
+        return'%s/%s/newh5/run_%04d.h5'%(h5_base_path, experiment, run_number)
+    else:
+        return'%s/%s/h5/run_%04d.h5'%(h5_base_path, experiment, run_number)
+
+def get_h5_file(experiment, run_number, config_filename=""):
+    run_number = int(run_number)
+    raw_h5_path = get_h5_path(experiment, run_number)
+    
+    # Defaults in case not all are in config
+    h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='tpc_data_processing/channel_mappings/flatlookup4cobos.csv')
+    
+    if config_filename and config_filename != 'none':
+        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
+        if os.path.exists(config_path):
+            h5file.load_config(config_path)
+        else:
+            raise FileNotFoundError(f"Config file '{config_filename}' not found at: {config_path}")
+    
+    return h5file
+
+_settings_hash_cache = {}
+def get_experiment_settings_hash(experiment, example_run, config_filename=""):
+    key = (experiment, config_filename)
+    if key not in _settings_hash_cache:
+        h5file = get_h5_file(experiment, example_run, config_filename)
+        _settings_hash_cache[key] = h5file.get_settings_hash()
+        h5file.close()
+    return _settings_hash_cache[key]
+
+def _require_config_filename(config_filename):
+    '''Processing and loading need an explicit config: the empty default would silently use the raw_h5_file defaults.'''
+    if not isinstance(config_filename, str) or not config_filename:
+        raise ValueError(f"config_filename must name a config in tpc_processing_configs (got {config_filename!r})")
+
+#coppied from field distortions folder in track fitting branch
+#and modified to configure h5 file differently
+def process_tpc_run(experiment, run_number, config_filename, force_reprocess=False, gpu_to_use=0):
+    '''
+    Get information about track direction, width, and charge per pad, which isn't normally stored when processing runs.
+    Only redoes processing if a ROOT version of this information isn't available.
+    config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
+    Runs single threaded (_single_threaded) and reads the raw file ahead of the processing (_ReadAhead).
+    '''
+    with _single_threaded(), _ReadAhead(get_h5_path(experiment, run_number)) as read_ahead:
+        _process_tpc_run(experiment, run_number, config_filename, force_reprocess, gpu_to_use, read_ahead)
+
+def _process_tpc_run(experiment, run_number, config_filename, force_reprocess, gpu_to_use, read_ahead):
+    _require_config_filename(config_filename)
+    run_number = int(run_number)
+    try:
+        import cupy as cp
+        cp.cuda.runtime.setDevice(gpu_to_use)
+    except ImportError:
+        pass
+    
+    #save_path = os.path.dirname(os.path.abspath(__file__))
+    h5file = get_h5_file(experiment, run_number, config_filename)
+    config_name = os.path.splitext(config_filename)[0]
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run_number)}_{config_name}.root')
+
+    if force_reprocess:
+        import glob
+        save_path = get_save_path(experiment)
+        cache_patterns = [
+            f'gm_ic_{experiment}_run{int(run_number)}_*.npy',
+            f'veto_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'max_veto_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'outer_ring_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'max_outer_ring_counts_{experiment}_run{int(run_number)}_*.npy',
+            f'veto_mask_{experiment}_run{int(run_number)}_*.npy'
+        ]
+        for pattern in cache_patterns:
+            for cache_file in glob.glob(os.path.join(save_path, pattern)):
+                try:
+                    os.remove(cache_file)
+                    print(f"Cleared cache file: {cache_file}")
+                except OSError as e:
+                    print(f"Error removing {cache_file}: {e}")
+    
+    #fname += '.no_neg'
+    if os.path.exists(fname) and not force_reprocess:
+        print('run %d previously processed, ROOT file exists'%run_number)
+        return
+    else:
+        # h5file = build_sim.get_rawh5_object(experiment, run_number)
+        print('processing run %d'%run_number)
+        first_event, last_event = h5file.get_event_num_bounds()
+        # written to a temporary path and renamed once complete, so a failed run doesn't leave a file that
+        # ensure_processed takes for a processed run
+        partial_fname = f'{fname}.{os.getpid()}.partial'
+        _process_events(h5file, first_event, last_event, partial_fname, _run_metadata(h5file), read_ahead, TPC_ROOT_COMPRESSION)
+        os.replace(partial_fname, fname)
+
+def _run_metadata(h5file):
+    '''The metadata tree of a processed run: git state of the code, and the processing settings of h5file.'''
+    def git(*args):
+        return subprocess.run(['git', *args], capture_output=True, text=True, check=True, errors='replace').stdout
+    return {'git_version':[git('rev-parse', '--verify', 'HEAD')], 'git_status':[git('status')], 'git_diff':[git('diff')],
+            'settings_hash':[h5file.get_settings_hash()], 'settings_json':[h5file.get_settings_str()]}
+
+def _process_events(h5file, first_event, last_event, out_fname, metadata, read_ahead, compression, progress=True):
+    '''
+    Process events first_event..last_event of h5file into a new ROOT file out_fname (metadata and events trees).
+    read_ahead: _ReadAhead for these events.
+    '''
+    # Events are written in chunks as they are processed, so memory use doesn't grow with the run (holding a whole
+    # 1.9 M event e25058 run took 60-70 GB per worker). The metadata goes first: uproot cannot add a new object once
+    # the file is past 2 GiB (struct.error packing the key).
+    chunk_size = 1000
+    file = uproot.recreate(out_fname, compression=compression)
+    file['metadata'] = metadata
+    events_written = False
+    track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
+    pad_maxs, railed_pads, timestamps = [], [], []
+    for evt in tqdm(range(first_event, last_event + 1), disable=not progress):
+        if (evt - first_event) % 100 == 0:
+            read_ahead.update((evt - first_event) / (last_event - first_event + 1))
+        timestamps.append(h5file.get_timestamp(evt))
+        railed_pads.append(h5file.get_railed_pads(evt))
+        center, dd,vv = h5file.get_track_axis(evt, return_all_svd_results=True, threshold=h5file.length_counts_threshold)
+        xs, ys, zs, es = h5file.get_xyze(evt, threshold=h5file.length_counts_threshold, include_veto_pads=False)
+        # pad vv to (3, 3) and dd to (3,) if needed
+        if vv.shape[0] < 3:
+            padded_vv = np.zeros((3, 3))
+            padded_vv[:vv.shape[0], :] = vv
+            vv = padded_vv
+        if dd.shape[0] < 3:
+            padded_dd = np.zeros(3)
+            padded_dd[:dd.shape[0]] = dd
+            dd = padded_dd
+            
+        principle_axes.append(vv)
+        if len(xs) > 1:
+            variances_along_axes.append(dd**2/(len(xs)-1))
+        else:
+            variances_along_axes.append(np.zeros(3))
+        track_centers.append(center)
+        pad_counts = np.zeros(1024)
+        pad_maxs.append(np.zeros(1024))
+        #all pads at once (each pad has one channel); same values as np.sum / np.max of each trace, bit for bit
+        pads, traces = h5file.get_pad_trace_array(evt)
+        if len(pads) > 0:
+            pad_counts[pads] = traces.sum(axis=1)
+            pad_maxs[-1][pads] = traces.max(axis=1)
+        pad_charges.append(pad_counts)
+
+
+        #get track end points
+        if len(xs) > 1:
+            points = np.concatenate((xs[:, np.newaxis], 
+                    ys[:, np.newaxis], 
+                    zs[:, np.newaxis]), 
+                    axis=1)
+            rbar = points - track_centers[-1]
+            track_direction = principle_axes[-1][0]
+            rdotv = np.dot(rbar, track_direction)
+            #project endpoints onto track axis
+            first_point = np.min(rdotv)*track_direction + track_centers[-1]
+            last_point = np.max(rdotv)*track_direction + track_centers[-1]
+            track_endpoints.append([first_point, last_point])
+            #above variance is just variance in postiion of points above some threshold
+            #instead calcualte variance along 2nd axis of charge
+            width_axis = principle_axes[-1][1]
+            total_charge = np.sum(es)
+            center_of_charge = np.einsum('i,ij->j',es, points)/total_charge
+            displacement_from_center = points - center_of_charge
+            displacement_dot_width_axis_squared = np.einsum('ij, j', displacement_from_center, width_axis)**2
+            charge_widths.append((np.einsum('i,i', displacement_dot_width_axis_squared, es)/total_charge)**0.5)
+            #calculate width in the same way we do length
+            rdotv = np.dot(rbar, width_axis)
+            width_above_thresholds.append(np.max(rdotv) - np.min(rdotv))
+
+        else:
+            track_endpoints.append([(0,0,0), (0,0,0)])
+            charge_widths.append(0)
+            width_above_thresholds.append(0)
+
+        if len(timestamps) == chunk_size or evt == last_event:
+            events_data = _events_data(track_centers, principle_axes, variances_along_axes, pad_charges, track_endpoints, charge_widths,
+                                       width_above_thresholds, pad_maxs, timestamps, railed_pads)
+            if events_written:
+                file['events'].extend(events_data)
+            else:
+                file['events'] = events_data
+                events_written = True
+            track_centers, principle_axes,variances_along_axes, pad_charges, track_endpoints, charge_widths, width_above_thresholds = [],[],[],[],[],[], []
+            pad_maxs, railed_pads, timestamps = [], [], []
+    if not events_written: #no events in the run: write the empty tree
+        file['events'] = _events_data(track_centers, principle_axes, variances_along_axes, pad_charges, track_endpoints, charge_widths,
+                                      width_above_thresholds, pad_maxs, timestamps, railed_pads)
+    file.close()
+
+def _events_data(track_centers, principle_axes, variances_along_axes, pad_charges, track_endpoints, charge_widths,
+                 width_above_thresholds, pad_maxs, timestamps, railed_pads):
+    '''The arrays process_tpc_run writes to the events tree for a chunk of events.'''
+    res_centers = []
+    for c in track_centers:
+        try:
+            if len(c) == 3:
+                res_centers.append(list(c))
+            else:
+                res_centers.append([0.0, 0.0, 0.0])
+        except TypeError:
+            res_centers.append([0.0, 0.0, 0.0])
+
+    res_endpoints = []
+    for ep in track_endpoints:
+        try:
+            if len(ep) == 2 and len(ep[0]) == 3 and len(ep[1]) == 3:
+                res_endpoints.append([list(ep[0]), list(ep[1])])
+            else:
+                res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        except TypeError:
+            res_endpoints.append([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+
+    events_data = {'track_center':np.array(res_centers, dtype=np.float64).reshape(-1, 3), 'principle_axes':np.array(principle_axes, dtype=np.float64).reshape(-1, 3, 3), 'variance_along_axes': np.array(variances_along_axes, dtype=np.float64).reshape(-1, 3),
+               'pad_charge': np.array(pad_charges).reshape(-1, 1024), 'endpoints':np.array(res_endpoints, dtype=np.float64).reshape(-1, 2, 3), 'charge_width':np.array(charge_widths, dtype=np.float64),
+               'width_above_threshold':np.array(width_above_thresholds, dtype=np.float64), 'pad_max':np.array(pad_maxs).reshape(-1, 1024), 'timestamps':np.array(timestamps, dtype=np.float64)}
+
+    #built with unflatten rather than ak.from_iter so every chunk has the same type (var * int64), even when no pad railed
+    counts = np.array([len(x) for x in railed_pads], dtype=np.int64)
+    flat = np.concatenate([np.asarray(x, dtype=np.int64).ravel() for x in railed_pads] + [np.zeros(0, dtype=np.int64)])
+    events_data['railed_pads'] = ak.unflatten(flat, counts)
+    return events_data
+
+def _load_run_quantities(args):
+    if len(args) == 6:
+        experiment, run, qnames, settings_hash, config_filename, gpus_to_use = args
+        import multiprocessing
+        identity = multiprocessing.current_process()._identity
+        if identity:
+            idx = (identity[0] - 1) % len(gpus_to_use)
+            gpu_to_use = gpus_to_use[idx]
+        else:
+            gpu_to_use = gpus_to_use[0]
+    else:
+        experiment, run, qnames, settings_hash, config_filename = args
+        gpu_to_use = 0
+    config_name = os.path.splitext(config_filename)[0]
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+    if not os.path.exists(fname):
+        import multiprocessing
+        if multiprocessing.current_process().name != 'MainProcess':
+            print(f"WARNING: Processing TPC run {run} directly inside a worker process ({multiprocessing.current_process().name}). This can cause memory issues if too many workers run concurrently. Please call process_runs.ensure_processed() before launching parallel workers.")
+        process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
+        
+    result = {}
+    with uproot.open(fname) as file:
+        file_hash = file['metadata']['settings_hash'].array(library='np')[0]
+        if file_hash != settings_hash:
+            error_msg = f"Settings hash in file {fname} ({file_hash}) does not match current settings hash ({settings_hash}) for config {config_filename}."
+            if 'settings_json' in file['metadata']:
+                import json
+                file_settings_str = file['metadata']['settings_json'].array(library='np')[0]
+                file_settings = json.loads(file_settings_str)
+                
+                h5file_current = get_h5_file(experiment, run, config_filename)
+                current_settings = json.loads(h5file_current.get_settings_str())
+                h5file_current.close()
+                
+                disagreements = []
+                for k in current_settings:
+                    if k not in file_settings:
+                        disagreements.append(f"  {k}: missing in file, current={current_settings[k]}")
+                    elif file_settings[k] != current_settings[k]:
+                        disagreements.append(f"  {k}: file={file_settings[k]}, current={current_settings[k]}")
+                for k in file_settings:
+                    if k not in current_settings:
+                        disagreements.append(f"  {k}: missing in current, file={file_settings[k]}")
+                
+                if disagreements:
+                    error_msg += "\nDisagreements:\n" + "\n".join(disagreements)
+            else:
+                error_msg += "\n(Settings details are not stored in this older root file to see the disagreement)."
+            raise ValueError(error_msg)
+        
+        for qname in qnames:
+            if qname in file['events']:
+                if qname == 'railed_pads':
+                    arr = file['events'][qname].array(library='ak')
+                    val = ak.to_list(arr)
+                    result[qname] = val
+                else:
+                    arr = file['events'][qname].array(library='np')
+                    val = arr
+                    result[qname] = val
+            elif qname in file['metadata']:
+                arr = file['metadata'][qname].array(library='np')
+                val = arr[0]
+                result[qname] = val
+            else:
+                raise ValueError(f"Quantity {qname} not found in ROOT file")
+    return result
+
+def _worker_ensure_processed(args):
+    experiment, run, config_filename, gpus_to_use = args
+    import multiprocessing
+    identity = multiprocessing.current_process()._identity
+    if _assigned_gpu is not None:
+        gpu_to_use = _assigned_gpu
+    elif identity:
+        idx = (identity[0] - 1) % len(gpus_to_use)
+        gpu_to_use = gpus_to_use[idx]
+    else:
+        gpu_to_use = gpus_to_use[0]
+        
+    config_name = os.path.splitext(config_filename)[0]
+    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+    if not os.path.exists(fname):
+        process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
+
+def _blocks_per_run(n_events, n_workers):
+    '''
+    Blocks per run for split processing: one each, then one more at a time to the run with the largest blocks, until
+    there are n_workers blocks or another block would make that run's blocks smaller than SPLIT_MIN_BLOCK_EVENTS.
+    '''
+    blocks = [1] * len(n_events)
+    for _ in range(n_workers - len(n_events)):
+        i = max(range(len(blocks)), key=lambda j: n_events[j] / blocks[j])
+        if n_events[i] / (blocks[i] + 1) < SPLIT_MIN_BLOCK_EVENTS:
+            break
+        blocks[i] += 1
+    return blocks
+
+def _worker_process_block(args):
+    '''Split processing (pool worker): events first..last of a run into the file out_fname.'''
+    experiment, run, config_filename, first, last, start_fraction, end_fraction, out_fname, metadata, compression, gpus_to_use = args
+    gpu_to_use = _assigned_gpu if _assigned_gpu is not None else gpus_to_use[0]
+    try:
+        import cupy as cp
+        cp.cuda.runtime.setDevice(gpu_to_use)
+    except ImportError:
+        pass
+    with _single_threaded(), _ReadAhead(get_h5_path(experiment, run), start_fraction, end_fraction) as read_ahead:
+        h5file = get_h5_file(experiment, run, config_filename)
+        _process_events(h5file, first, last, out_fname, metadata, read_ahead, compression, progress=False)
+        h5file.close()
+
+def _worker_merge_blocks(args):
+    '''Split processing (pool worker): the events of a run's block files, in order, into out_fname; deletes the blocks.'''
+    block_fnames, out_fname, metadata = args
+    out = uproot.recreate(out_fname, compression=TPC_ROOT_COMPRESSION)
+    out['metadata'] = metadata
+    events_written = False
+    for block_fname in block_fnames:
+        with uproot.open(block_fname) as f:
+            events = f['events']
+            for start in range(0, events.num_entries, SPLIT_MERGE_CHUNK_EVENTS):
+                a = events.arrays(entry_start=start, entry_stop=min(start + SPLIT_MERGE_CHUNK_EVENTS, events.num_entries))
+                chunk = {k: ak.to_numpy(a[k]) for k in a.fields if k != 'railed_pads'}
+                chunk['railed_pads'] = ak.values_astype(a['railed_pads'], np.int64)
+                if events_written:
+                    out['events'].extend(chunk)
+                else:
+                    out['events'] = chunk
+                    events_written = True
+    if not events_written:
+        out['events'] = _events_data(*[[]] * 10)
+    out.close()
+    for block_fname in block_fnames:
+        os.remove(block_fname)
+
+def _process_runs_split(experiment, runs, config_filename, gpus_to_use, max_workers, show_progress):
+    '''
+    ensure_processed for fewer runs than workers: each run is cut into contiguous blocks of events (_blocks_per_run),
+    which are processed in parallel into temporary files and merged in order into the run's file. The result is the
+    file process_tpc_run writes: the processing of an event does not depend on the other events, and the RANSAC
+    samples of a trace do not depend on its batch. The metadata (git state, settings) is taken once per run. If
+    anything fails, the block and partial files are removed and no run file is written.
+    '''
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+    config_name = os.path.splitext(config_filename)[0]
+    plans = []
+    for run in runs:
+        h5file = get_h5_file(experiment, run, config_filename)
+        first, last = h5file.get_event_num_bounds()
+        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+        plans.append({'run': run, 'first': first, 'n': max(last - first + 1, 0), 'fname': fname,
+                      'partial': f'{fname}.{os.getpid()}.partial', 'metadata': _run_metadata(h5file)})
+        h5file.close()
+    tasks = []
+    for plan, n_blocks in zip(plans, _blocks_per_run([p['n'] for p in plans], max_workers)):
+        edges = plan['first'] + np.linspace(0, plan['n'], n_blocks + 1).astype(np.int64)
+        if n_blocks == 1: #written directly as the run's file
+            plan['blocks'] = [plan['partial']]
+            compression = TPC_ROOT_COMPRESSION
+        else:
+            plan['blocks'] = [f"{plan['fname']}.block{i:03d}.{os.getpid()}.partial" for i in range(n_blocks)]
+            compression = TPC_BLOCK_COMPRESSION
+        n = max(plan['n'], 1)
+        for i in range(n_blocks):
+            tasks.append((plan, (experiment, plan['run'], config_filename, int(edges[i]), int(edges[i + 1]) - 1,
+                                 (edges[i] - plan['first']) / n, (edges[i + 1] - plan['first']) / n, plan['blocks'][i],
+                                 plan['metadata'], compression, gpus_to_use)))
+    n_workers = min(max_workers, len(tasks))
+    if show_progress:
+        print(f"Pre-processing {len(runs)} TPC runs in {len(tasks)} blocks with {n_workers} workers...")
+    ctx = multiprocessing.get_context('spawn')
+    executor = ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx, initializer=_init_worker_gpu,
+                                   initargs=(ctx.Value('i', 0), gpus_to_use))
+    try:
+        #blocks and merges are waited for together, so that a run's file is in place as soon as its own merge is done
+        pending = {executor.submit(_worker_process_block, args): ('block', plan) for plan, args in tasks}
+        blocks_left = {id(plan): len(plan['blocks']) for plan in plans}
+        progress = tqdm(total=len(tasks), disable=not show_progress)
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                kind, plan = pending.pop(future)
+                future.result()
+                if kind == 'merge':
+                    os.replace(plan['partial'], plan['fname'])
+                    continue
+                progress.update()
+                blocks_left[id(plan)] -= 1
+                if blocks_left[id(plan)] == 0:
+                    if len(plan['blocks']) == 1:
+                        os.replace(plan['partial'], plan['fname'])
+                    else:
+                        pending[executor.submit(_worker_merge_blocks, (plan['blocks'], plan['partial'], plan['metadata']))] = ('merge', plan)
+        progress.close()
+    except BaseException:
+        executor.shutdown(wait=True, cancel_futures=True) #no block is still writing when the files are removed
+        for plan in plans:
+            for leftover in plan.get('blocks', []) + [plan['partial']]:
+                if os.path.exists(leftover):
+                    os.remove(leftover)
+        raise
+    #the run files are complete: return without waiting for the workers to exit (~15 s for 48 workers)
+    executor.shutdown(wait=False)
+
+def ensure_processed(experiment, runs, config_filename, show_progress=True, gpus_to_use=None, num_workers=None, split_runs=True):
+    '''
+    Process (with process_tpc_run) any of the runs that have no ROOT file yet.
+    config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
+    gpus_to_use: GPUs for the processing workers (default TPC_PROCESSING_GPUS), balanced over the workers.
+    num_workers: number of processing workers. Default: len(gpus_to_use) * get_default_workers_per_gpu(config),
+                 i.e. chosen from the config's background_subtract_mode.
+    split_runs: with fewer runs to process than workers, each run is processed in blocks of events on several workers
+                and merged (_process_runs_split), so that one or a few runs take a fraction of the time.
+    '''
+    _require_config_filename(config_filename)
+    runs = [int(r) for r in runs]
+    config_name = os.path.splitext(config_filename)[0]
+    
+    # Filter for runs that actually need processing
+    runs_to_process = []
+    for run in runs:
+        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+        if not os.path.exists(fname):
+            runs_to_process.append(run)
+            
+    if not runs_to_process:
+        return
+        
+    if gpus_to_use is None:
+        gpus_to_use = TPC_PROCESSING_GPUS
+    gpus_to_use = list(gpus_to_use)
+    if num_workers is None:
+        max_workers = len(gpus_to_use) * get_default_workers_per_gpu(config_filename)
+    else:
+        max_workers = int(num_workers)
+
+    if split_runs and max_workers > 1 and len(runs_to_process) < max_workers:
+        _process_runs_split(experiment, runs_to_process, config_filename, gpus_to_use, max_workers, show_progress)
+        return
+
+    if show_progress:
+        print(f"Pre-processing {len(runs_to_process)} TPC runs with {max_workers} workers...")
+        
+    args_list = [(experiment, run, config_filename, gpus_to_use) for run in runs_to_process]
+    
+    if max_workers > 1:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        ctx = multiprocessing.get_context('spawn')
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx, initializer=_init_worker_gpu,
+                                 initargs=(ctx.Value('i', 0), gpus_to_use)) as executor:
+            if show_progress:
+                list(tqdm(executor.map(_worker_ensure_processed, args_list), total=len(args_list)))
+            else:
+                list(executor.map(_worker_ensure_processed, args_list))
+    else:
+        iterable = tqdm(args_list) if show_progress else args_list
+        for args in iterable:
+            _worker_ensure_processed(args)
+
+def get_quantity(qname, experiment, runs, config_filename, show_load_progress=False, num_workers=None, gpus_to_use=None):
+    '''
+    config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
+    num_workers: None (default) -> missing runs are processed with the mode-based default
+                 (ensure_processed) and loading uses 1 process, as before;
+                 a number -> used for both the processing and the loading stage.
+    gpus_to_use: GPUs for both stages (default TPC_PROCESSING_GPUS).
+    '''
+    _require_config_filename(config_filename)
+    is_single = isinstance(qname, str)
+    qnames = [qname] if is_single else qname
+    runs = [int(r) for r in runs]
+    to_return = {q: [] for q in qnames}
+
+    ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress,
+                     gpus_to_use=gpus_to_use, num_workers=num_workers)
+    if num_workers is None:
+        num_workers = 1
+
+    if show_load_progress:
+        print(f'loading {qnames} for {runs}')
+        
+    settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0, config_filename)
+    if gpus_to_use is None:
+        gpus_to_use = TPC_PROCESSING_GPUS
+    args_list = [(experiment, run, qnames, settings_hash, config_filename, gpus_to_use) for i, run in enumerate(runs)]
+    
+    if num_workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        import multiprocessing
+        
+        with ProcessPoolExecutor(max_workers=num_workers, mp_context=multiprocessing.get_context('spawn')) as executor:
+            if show_load_progress:
+                results = list(tqdm(executor.map(_load_run_quantities, args_list), total=len(runs)))
+            else:
+                results = list(executor.map(_load_run_quantities, args_list))
+    else:
+        results = []
+        iterable = tqdm(args_list) if show_load_progress else args_list
+        for args in iterable:
+            results.append(_load_run_quantities(args))
+            
+    for res in results:
+        for q in qnames:
+            if q == 'railed_pads':
+                to_return[q].extend(res[q])
+            else:
+                to_return[q].append(res[q])
+                
+    final_returns = []
+    for q in qnames:
+        if q == 'railed_pads':
+            final_returns.append(to_return[q])
+        elif q in ['git_version', 'git_status', 'git_diff']:
+            final_returns.append(to_return[q])
+        else:
+            final_returns.append(np.concatenate(to_return[q], axis=0))
+            
+    if is_single:
+        return final_returns[0]
+    else:
+        return final_returns
+    
+def _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=1):
+    def process_run(run):
+        cache_fname = cache_fname_fn(run)
+        if os.path.exists(cache_fname):
+            return np.load(cache_fname)
+        else:
+            res = compute_fn(run)
+            np.save(cache_fname, res)
+            return res
+            
+    if num_workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            to_return = list(executor.map(process_run, runs))
+    else:
+        to_return = [process_run(r) for r in runs]
+    return np.concatenate(to_return, axis=0)
+    
+
+def get_lengths(experiment_or_endpoints, runs=None, config_filename=None, num_workers=None):
+    '''Track lengths from an endpoints array, or from (experiment, runs, config_filename), where the config is required.'''
+    if runs is None:
+        endpoints = np.array(experiment_or_endpoints)
+    else:
+        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers, config_filename=config_filename))
+    dr = endpoints[:, 0] - endpoints[:, 1]
+    return np.sqrt(np.sum(dr*dr, axis=1))
+
+def get_veto_counts(experiment, runs, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
+    runs = [int(r) for r in runs]
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
+        return os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        veto_pad_mask = np.zeros(1024)
+        for i in raw_h5_file.VETO_PADS:
+            veto_pad_mask[i] = 1
+        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run], config_filename=config_filename), veto_pad_mask)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+
+def get_veto_mask(experiment, runs, veto_thresholds, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
+    runs = [int(r) for r in runs]
+    thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
+        return os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{int(run)}_{thresh_hash}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
+        return np.all(pad_maxs < veto_thresholds, axis=1)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+
+def get_max_veto_counts(experiment, runs, config_filename, num_workers=1):
+    '''
+    gets array of max counts on any individual veto pad
+    '''
+    _require_config_filename(config_filename)
+    runs = [int(r) for r in runs]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
+        return os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
+        veto_pad_mask = np.zeros(1024)
+        for i in raw_h5_file.VETO_PADS:
+            veto_pad_mask[i] = 1
+        return np.max(pad_maxs[:,veto_pad_mask==1], axis=1)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+
+def get_outer_ring_counts(experiment, runs, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
+    runs = [int(r) for r in runs]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
+        return os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        outer_ring_mask = np.zeros(1024)
+        for i in OUTER_RING_PADS:
+            outer_ring_mask[i] = 1
+        return np.einsum('ij, j', get_quantity('pad_charge', experiment, [run], config_filename=config_filename), outer_ring_mask)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+
+def get_outer_ring_max_counts(experiment, runs, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
+    runs = [int(r) for r in runs]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
+        return os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{int(run)}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        pad_maxs = get_quantity('pad_max', experiment, [run], config_filename=config_filename)
+        outer_ring_mask = np.zeros(1024)
+        for i in OUTER_RING_PADS:
+            outer_ring_mask[i] = 1
+        return np.max(pad_maxs[:,outer_ring_mask==1], axis=1)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+    
+def get_gm_ic(experiment, runs, gains, config_filename, num_workers=1):
+    _require_config_filename(config_filename)
+    runs = [int(r) for r in runs]
+    gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
+    
+    def cache_fname_fn(run):
+        settings_hash = get_experiment_settings_hash(experiment, run, config_filename)
+        return os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{int(run)}_{gains_hash}_{settings_hash}.npy')
+        
+    def compute_fn(run):
+        counts_per_pad = get_quantity('pad_charge', experiment, [run], config_filename=config_filename)
+        return np.einsum('ij, j', counts_per_pad, gains)
+        
+    return _parallel_cache_loop(runs, cache_fname_fn, compute_fn, num_workers=num_workers)
+
+def get_angle(experiment_or_endpoints, runs=None, config_filename=None, num_workers=None):
+    '''Track angles from z from an endpoints array, or from (experiment, runs, config_filename), where the config is required.'''
+    if runs is None:
+        endpoints = np.array(experiment_or_endpoints)
+    else:
+        endpoints = np.array(get_quantity('endpoints', experiment_or_endpoints, runs, num_workers=num_workers, config_filename=config_filename))
+    dr = endpoints[:, 0] - endpoints[:, 1]
+    return np.arctan2(np.sqrt(dr[:,0]**2 + dr[:,1]**2), np.abs(dr[:,2]))
+
+def get_time_since_beam_off(experiment, runs, config_filename):
+    _require_config_filename(config_filename)
+    to_return = []
+    for run in runs:
+        times_since_start_of_window = []
+        ts = get_quantity('timestamps', experiment, [run], config_filename=config_filename)
+        time_since_last_event = ts - np.roll(ts, 1)
+        start_of_current_window = -np.inf
+        time_since_last_event[0] = np.inf
+        for t, dt in zip(ts, time_since_last_event):
+            if dt > 0.1:
+                start_of_current_window = t
+            times_since_start_of_window.append(t - start_of_current_window)
+        times_since_start_of_window = np.array(times_since_start_of_window)
+        to_return.append(times_since_start_of_window)
+    return np.concatenate(to_return, axis=0)
+
+def get_run_and_event_numbers(experiment, runs, config_filename=""):
+    runs = [int(r) for r in runs]
+    run_numbers = []
+    event_numbers = []
+    for run in runs:
+        h5 = get_h5_file(experiment, run, config_filename)
+        first, last  = h5.get_event_num_bounds()
+        if last < first: #empty file (attpc merger sets first to a large number until it reads the first event, and last will be 0)
+            event_numbers.append(np.array([], dtype=int))
+            run_numbers.append(np.array([], dtype=int))
+        else:
+            event_numbers.append(np.arange(first, last+1))
+            run_numbers.append(np.ones(last - first + 1)*run)
+    return np.concatenate(run_numbers, axis=0), np.concatenate(event_numbers, axis=0)

@@ -4,8 +4,9 @@ import scipy.optimize as opt
 import scipy.stats as stats
 import numpy as np
 
-from e23035_analysis import e23035_runs, spectrum_fitter
-from raw_viewer import ddas_interface
+from e23035_analysis import e23035_runs
+from analysis_tools import spectrum_fitter
+from tpc_and_decay_station import ddas_interface
 
 energies = []
 energy_resolutions = []

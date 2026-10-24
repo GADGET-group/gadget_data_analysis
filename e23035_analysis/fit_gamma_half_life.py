@@ -3,8 +3,10 @@ import os
 import ROOT
 import numpy as np
 
-from raw_viewer import ddas_interface, process_runs, degai
-from e23035_analysis import e23035_runs, fitting_tools, root_vis_tools
+from tpc_and_decay_station import ddas_interface, degai
+from tpc_data_processing import process_runs
+from e23035_analysis import e23035_runs
+from analysis_tools import fitting_tools, root_vis_tools
 
 experiment = 'e23035'
 
@@ -26,7 +28,7 @@ n_workers = len(runs)
 
 addback_ethresh = 150
 event_build_window = 500 #ns
-adj_dict =  degai.crystal_adj_dict
+adj_dict =  degai.get_crystal_adj_dict(experiment)
 cal_name = 'gm_511and2614_1'
 tpc_config = 'smart1_veto2_rpr_fzp.csv'
 nlc_name = 'c1'

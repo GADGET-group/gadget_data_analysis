@@ -1,13 +1,16 @@
-e23035_analysis/calibrations/
-e23035_analysis/clarion_cache
-e23035_analysis/hist_cache
-e23035_analysis/nonlinearity_corrections
+# per-experiment caches and calibration results, <exp>_analysis/...
+/*_analysis/calibrations/
+/*_analysis/clarion_cache/
+/*_analysis/hist_cache/
+/*_analysis/nonlinearity_corrections/
 e23035_analysis/tmp
 *.pyc
+__pycache__/
+*.egg-info/
 old_gm/
 old_mcmc_results/
 old_track_fitting/
-/raw_viewer/veto_conditioner/e23035
+/tpc_data_processing/veto_conditioner/e23035
 run124_mcmc/
 run124_palpha_mcmc
 *.pkl
