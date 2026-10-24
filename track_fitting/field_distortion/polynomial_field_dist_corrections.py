@@ -27,6 +27,14 @@ force_0_to_0 = True
 offset_endpoints = True
 correct_width_for_angle = True
 z_field_dist = True
+#basis of the r map and the z offset (see distortion_basis.py and README.md):
+# 'monomial' = the original code path below (sum a_ijk (r/rscale)^i (t/tscale)^j (w/wscale)^k, i+j+k <= N);
+# 'chebyshev' / 'monomial_mapped' = the same (r, t, w) product structure on the mapped domains, total degree N;
+# 'bernstein' = tensor index set, N = (Nr, Nt, Nw); with basis_monotone the map is non-decreasing in r by construction.
+basis_type = 'monomial'
+basis_monotone = False
+basis_domains = dict(r_domain=(0., 50.), t_domain=(0., 0.1), w_domain=(1.5, 4.1)) #mm, s, mm; t and w are clipped to these
+N_label = N if np.isscalar(N) else max(N) #for the pickle file name
 
 #list of (wieght, peak label) tuples. Objective function will include minimizing sum_i weight_i * std(peak i range)^2
 peak_widths_to_minimize = [(1, 'p1596'),(1, 'p770')]#, (1, 'a2153'), (1, 'a4434')]
@@ -226,7 +234,16 @@ for ax, ptype in zip(axs.reshape(-1), particles_to_plot):
 
 rscale, wscale, tscale, Dscale, vscale = 20, 3, 0.05, np.sqrt(0.09), 3000
 zscale = 200
-if exploit_symmetry:
+if basis_type != 'monomial':
+    assert not exploit_symmetry, 'the new bases replace the plain (r, t, w) product basis only'
+    from track_fitting.field_distortion.distortion_basis import DistortionBasis
+    distortion_basis = DistortionBasis(N, basis_type, force_0_to_0=force_0_to_0, monotone=basis_monotone, **basis_domains)
+    print(distortion_basis)
+    ijk_array = distortion_basis.ijk
+
+    def map_r(a_ijk, r, t, w, cosphi=0):
+        return distortion_basis.map_r(np.asarray(a_ijk, dtype=float), r, t, w)
+elif exploit_symmetry:
     ijk_array = []
     for i in range(0, N+1):
         for j in range(0, N-np.abs(i) + 1): 
@@ -290,7 +307,10 @@ else:
         #new_r[new_r > 61] = 61#charge can't be deposited outside the field cage
         return new_r
     
-if z_field_dist:
+if z_field_dist and basis_type != 'monomial':
+    def z_offset(b_ijk, r, t, w):
+        return distortion_basis.z_offset(np.asarray(b_ijk, dtype=float), r, t, w)
+elif z_field_dist:
     def z_offset(b_ijk, r, t, w):
         #force offset at center of detetor to be 0 always if force_0_to_0 is true
         r_scaled = r/rscale
@@ -387,9 +407,11 @@ if z_field_dist:
     fname_template = 'zdist_' + fname_template
 if correct_width_for_angle:
     fname_template = 'wcor_' + fname_template
+if basis_type != 'monomial':
+    fname_template = distortion_basis.tag() + '_' + fname_template
 fname_template = opt_method + '_' +fname_template
 package_directory = os.path.dirname(os.path.abspath(__file__))
-fname = os.path.join(package_directory,fname_template%(experiment, run, N))
+fname = os.path.join(package_directory,fname_template%(experiment, run, N_label))
 print('pickle file name: ', fname)
 if os.path.exists(fname):
     print('optimizer previously run, loading saved result')
@@ -397,9 +419,12 @@ if os.path.exists(fname):
         res =  pickle.load(file)
 else:
     print('optimizing a_ijk parameters')
-    previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N-1))
+    previous_fname = os.path.join(package_directory, fname_template%(experiment, run, N_label-1))
     #if a solution for N-1 exists, use this as starting guess. Otherwise guess r->r.
-    guess = [0 for i in range(len(ijk_array))]
+    if basis_type != 'monomial':
+        guess = list(distortion_basis.identity_params()) #r->r; not all zeros for the monotone parameterisation
+    else:
+        guess = [0 for i in range(len(ijk_array))]
     if z_field_dist:
         for i in range(len(ijk_array)):
             guess.append(0)

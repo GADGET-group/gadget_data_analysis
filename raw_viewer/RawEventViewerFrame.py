@@ -215,14 +215,19 @@ class RawEventViewerFrame(ttk.Frame):
         self.settings_entry_map['moving_average_exclude_width']=self.exclude_width_entry
 
         self.background_mode_var = tk.StringVar() #traced added later, after all entries are created
-        ttk.OptionMenu(settings_frame, self.background_mode_var, 'none', 'none', 'fixed window', 'convolution', 'smart', 'smart2').grid(row=2, column=0)
+        ttk.OptionMenu(settings_frame, self.background_mode_var, 'none', 'none', 'fixed window', 'convolution', 'smart', 'smart2', 'snip').grid(row=2, column=0)
         self.settings_optionmenu_map['background_mode']=self.background_mode_var
         self.remove_outlier_var = tk.IntVar()
         remove_outliers_check = ttk.Checkbutton(settings_frame, text='remove outlier pads', variable=self.remove_outlier_var, 
                                                          command=self.check_state_changed)
         self.settings_checkbutton_map['remove_outliers']=self.remove_outlier_var
         remove_outliers_check.grid(row=2, column=1)
-        self.background_mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        self.reconstruct_railed_var = tk.IntVar()
+        reconstruct_railed_check = ttk.Checkbutton(settings_frame, text='reconstruct railed traces', variable=self.reconstruct_railed_var, 
+                                                            command=self.check_state_changed)
+        self.settings_checkbutton_map['reconstruct_railed_traces']=self.reconstruct_railed_var
+        reconstruct_railed_check.grid(row=2, column=2)
+        self.reconstruct_railed_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
         
         ttk.Label(settings_frame, text='zscale (mm/time bin):').grid(row=3,column=0)
         self.zscale_entry = ttk.Entry(settings_frame)
@@ -267,6 +272,7 @@ class RawEventViewerFrame(ttk.Frame):
 
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        self.background_mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
         rve_cut_frame = ttk.LabelFrame(self, text='RvE Cut')
         ttk.Button(rve_cut_frame, text='edit cut on gui', command=self.define_cut_on_gui).grid(row=0, column=0)
@@ -293,28 +299,38 @@ class RawEventViewerFrame(ttk.Frame):
         self.check_state_changed()
     
     def browse_for_settings_file(self):
-        file_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/gui_configs', title='select GUI settings file', filetypes=([("gui config", ".gui_ini")]))
+        file_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/tpc_processing_configs', title='select GUI settings file', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]))
         self.settings_file_entry.delete(0, tk.END)
         self.settings_file_entry.insert(0, file_path)
 
     def load_settings_file(self):
-        config = configparser.ConfigParser()
         file_path = self.settings_file_entry.get()
+        if file_path.endswith('.csv'):
+            self.h5file.load_config(file_path)
+            self.sync_gui_from_h5file()
+            self.entry_changed(None)
+            self.check_state_changed()
+            return
+            
+        config = configparser.ConfigParser()
         config.read(file_path)
 
         for entry_name in config['ttk.Entry']:
-            entry = self.settings_entry_map[entry_name]
-            entry.delete(0, tk.END)
-            entry.insert(0, config['ttk.Entry'][entry_name])
+            if entry_name in self.settings_entry_map:
+                entry = self.settings_entry_map[entry_name]
+                entry.delete(0, tk.END)
+                entry.insert(0, config['ttk.Entry'][entry_name])
 
         for menu_name in config['ttk.OptionMenu']:
-            var_to_update = self.settings_optionmenu_map[menu_name]
-            var_to_update.set(config['ttk.OptionMenu'][menu_name])
+            if menu_name in self.settings_optionmenu_map:
+                var_to_update = self.settings_optionmenu_map[menu_name]
+                var_to_update.set(config['ttk.OptionMenu'][menu_name])
 
         
         for checkbox_name in config['ttk.CheckButton']:
-            var_to_update = self.settings_checkbutton_map[checkbox_name]
-            var_to_update.set(config['ttk.CheckButton'][checkbox_name])
+            if checkbox_name in self.settings_checkbutton_map:
+                var_to_update = self.settings_checkbutton_map[checkbox_name]
+                var_to_update.set(config['ttk.CheckButton'][checkbox_name])
 
         if 'other' in config:
             if config['other']['gain_match_path'] != 'no gain match loaded':
@@ -324,9 +340,64 @@ class RawEventViewerFrame(ttk.Frame):
         self.entry_changed(None)
         self.check_state_changed()
 
+    def sync_gui_from_h5file(self):
+        self.is_syncing = True
+        try:
+            def update_entry(entry, value):
+                entry.delete(0, tk.END)
+                entry.insert(0, str(value))
+                
+            update_entry(self.background_start_entry, self.h5file.num_background_bins[0])
+            update_entry(self.background_stop_entry, self.h5file.num_background_bins[1])
+            update_entry(self.length_threshold_entry, self.h5file.length_counts_threshold)
+            update_entry(self.energy_threshold_entry, self.h5file.ic_counts_threshold)
+            self.mode_var.set(self.h5file.data_select_mode)
+            update_entry(self.near_peak_window_entry, self.h5file.near_peak_window_width)
+            
+            if hasattr(self.h5file, 'require_peak_within'):
+                update_entry(self.peak_first_allowed_bin_entry, self.h5file.require_peak_within[0])
+                update_entry(self.peak_last_allowed_bin_entry, self.h5file.require_peak_within[1])
+                
+            def format_arr(arr):
+                if isinstance(arr, str): return arr
+                return ','.join(map(str, arr))
+                
+            if hasattr(self.h5file, 'asads'): update_entry(self.asads_entry, format_arr(self.h5file.asads))
+            if hasattr(self.h5file, 'cobos'): update_entry(self.cobos_entry, format_arr(self.h5file.cobos))
+            if hasattr(self.h5file, 'pads'): update_entry(self.pads_entry, format_arr(self.h5file.pads))
+            
+            self.background_mode_var.set(self.h5file.background_subtract_mode)
+            self.reconstruct_railed_var.set(1 if self.h5file.reconstruct_railed_pads else 0)
+            self.remove_outlier_var.set(1 if getattr(self.h5file, 'remove_outliers', False) else 0)
+            
+            if hasattr(self.h5file, 'smart_bins_away_to_check'):
+                update_entry(self.smart_bins_away_to_check_entry, self.h5file.smart_bins_away_to_check)
+            if hasattr(self.h5file, 'num_smart_background_ave_bins'):
+                update_entry(self.smart_num_background_bins_entry, self.h5file.num_smart_background_ave_bins)
+                
+            update_entry(self.zscale_entry, self.h5file.zscale)
+            
+            kernel = getattr(self.h5file, 'background_convolution_kernel', None)
+            if kernel is not None:
+                r_include = (len(kernel) - 1) // 2
+                zero_count = np.sum(kernel == 0)
+                r_exclude = zero_count // 2
+                update_entry(self.include_width_entry, r_include)
+                update_entry(self.exclude_width_entry, r_exclude)
+        finally:
+            self.is_syncing = False
+
     def save_settings_file(self,file_path=None):
         if file_path == None:
-            file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/gui_configs', title='GUI settings file save path', filetypes=([("gui config", ".gui_ini")]), defaultextension='.gui_ini')
+            file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/tpc_processing_configs', title='GUI settings file save path', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]), defaultextension='.csv')
+        
+        self.settings_file_entry.delete(0, tk.END)
+        self.settings_file_entry.insert(0, file_path)
+        
+        if file_path.endswith('.csv'):
+            self.h5file.save_config_file(file_path)
+            return
+
         config = configparser.ConfigParser()
         
         entries_to_save = {}
@@ -350,74 +421,90 @@ class RawEventViewerFrame(ttk.Frame):
             config.write(configfile)
 
     def process_run(self):
-        directory_path, h5_fname = os.path.split(self.h5file.file_path)
-        directory_path = '/egr/research-tpc/shared/proc_runs/e23035'
-        #make directory for processed data from this run, if it doesn't already exist
-        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0] + "_raw_viewer")
-        if not os.path.isdir(directory_path):
-            os.mkdir(directory_path)
-        #make directory for this export
-        settings_name = os.path.splitext(os.path.basename(self.settings_file_entry.get()))[0]
-        directory_path = os.path.join(directory_path, os.path.splitext(h5_fname)[0]+settings_name)
-        if  os.path.isdir(directory_path):
-            if not tkinter.messagebox.askyesno(title='overwrite files?', message='Export already exists, overwrite files?'):
-                return
+        import re
+        from raw_viewer import process_runs
+        
+        match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
+        if match:
+            experiment = match.group(1)
+            run = int(match.group(2))
         else:
-            os.mkdir(directory_path)
-
-        #copy gain match over if needed
-        if self.gain_match_label.cget("text") != 'no gain match loaded':
-            shutil.copy(self.gain_match_path, directory_path)
-            new_path = os.path.join(directory_path, os.path.split(self.gain_match_path)[-1])
-            self.load_gain_match(new_path)
-
-        self.save_settings_file(os.path.join(directory_path, 'config.gui_ini'))
-        #save git version info and modified files
-        with open(os.path.join(directory_path, 'git_info.txt'), 'w') as f:
-            subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], stdout=f)
-            subprocess.run(['git', 'status'], stdout=f)
-            subprocess.run(['git', 'diff'], stdout=f)
-        #copy channel mapping files
-        shutil.copy(self.h5file.flat_lookup_file_path, directory_path)
-        #save event timestamps array
-        self.timestamps = self.h5file.get_timestamps_array()
-        np.save(os.path.join(directory_path, 'timestamps.npy'), self.timestamps)
-        #save all the other properties
-        self.h5file.cache_enable = True
-        max_veto_counts, dxy, dz, counts, angles, pads_railed_list = self.h5file.get_histogram_arrays()
-        self.h5file.cache_enable = False
-        np.save(os.path.join(directory_path, 'counts.npy'), counts)
-        np.save(os.path.join(directory_path, 'dxy.npy'), dxy)
-        np.save(os.path.join(directory_path, 'dt.npy'), dz/self.h5file.zscale)
-        np.save(os.path.join(directory_path, 'angles.npy'), angles)
-        np.save(os.path.join(directory_path, 'veto.npy'), max_veto_counts)
-        with open(os.path.join(directory_path, 'pads_railed.csv'), 'w', newline='') as f:
-            #TODO: fix railed pads feature so it works with background subtraction turned on
-            writer = csv.writer(f)
-            writer.writerows(pads_railed_list)
-        self.max_veto_counts, self.dxys, self.dts, self.counts = max_veto_counts, dxy, dz/self.h5file.zscale, counts
-        #do zscale dependent calcuations of range and angle
+            print("Could not infer experiment and run from file path. Defaulting to e23035")
+            experiment = 'e23035'
+            match = re.search(r'run_?0*(\d+)\.h5', self.h5file.file_path)
+            run = int(match.group(1)) if match else 0
+            
+        settings_path = self.settings_file_entry.get()
+        if settings_path and settings_path.endswith('.csv'):
+            config_filename = os.path.basename(settings_path)
+            self.h5file.save_config_file(settings_path)
+        else:
+            config_filename = 'smart2_w_br.csv'
+            self.h5file.save_config_file(os.path.join(os.path.dirname(__file__), 'tpc_processing_configs', config_filename))
+            
+        print(f"Processing run {run} for experiment {experiment} with config {config_filename}")
+        process_runs.process_tpc_run(experiment, run, config_filename=config_filename)
+        
+        self.timestamps = process_runs.get_quantity('timestamps', experiment, [run], config_filename=config_filename)
+        self.max_veto_counts = process_runs.get_max_veto_counts(experiment, [run], config_filename=config_filename)
+        
+        endpoints = process_runs.get_quantity('endpoints', experiment, [run], config_filename=config_filename)
+        dr = endpoints[:, 0] - endpoints[:, 1]
+        self.dxys = np.sqrt(dr[:,0]**2 + dr[:,1]**2)
+        self.dts = np.abs(dr[:,2])
+        self.angles = process_runs.get_angle(experiment, [run], config_filename=config_filename)
+        
+        pad_charges = process_runs.get_quantity('pad_charge', experiment, [run], config_filename=config_filename)
+        if not self.h5file.include_counts_on_veto_pads:
+            veto_mask = np.zeros(1024, dtype=bool)
+            for i in raw_h5_file.VETO_PADS:
+                veto_mask[i] = True
+            pad_charges[:, veto_mask] = 0
+        self.counts = np.sum(pad_charges, axis=1)
+        
         self.entry_changed(None)
         
     def load_processed_run(self):
         '''
         Load exported data, and update GUI to match the settings used to export the given file.
         '''
-        #open file dialog in export for this run, and find which export should be opened
-        directory_path = os.path.splitext(self.h5file.file_path)[0] + '_raw_viewer'
-        directory_path = tk.filedialog.askdirectory (initialdir=directory_path, title='Select processed run to open')
-        #load GUI settings to from export
-        self.settings_file_entry.delete(0, tk.END)
-        settings_dir = os.path.join(directory_path, 'config.gui_ini')
-        self.settings_file_entry.insert(0, settings_dir)
-        self.load_settings_file()
-        #load histogram arrays
-        self.counts = np.load(os.path.join(directory_path, 'counts.npy'))
-        self.dxys = np.load(os.path.join(directory_path, 'dxy.npy'))
-        self.dts = np.abs(np.load(os.path.join(directory_path, 'dt.npy')))
-        self.max_veto_counts = np.load(os.path.join(directory_path, 'veto.npy'))
-        self.timestamps = np.load(os.path.join(directory_path, 'timestamps.npy'))
-        #do zscale dependent calcuations of range and angle
+        import re
+        from raw_viewer import process_runs
+        
+        match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
+        if match:
+            experiment = match.group(1)
+            run = int(match.group(2))
+        else:
+            print("Could not infer experiment and run from file path. Defaulting to e23035")
+            experiment = 'e23035'
+            match = re.search(r'run_?0*(\d+)\.h5', self.h5file.file_path)
+            run = int(match.group(1)) if match else 0
+            
+        settings_path = self.settings_file_entry.get()
+        if settings_path and settings_path.endswith('.csv'):
+            config_filename = os.path.basename(settings_path)
+            self.load_settings_file()
+        else:
+            config_filename = 'smart2_w_br.csv'
+            
+        self.timestamps = process_runs.get_quantity('timestamps', experiment, [run], config_filename=config_filename)
+        self.max_veto_counts = process_runs.get_max_veto_counts(experiment, [run], config_filename=config_filename)
+        
+        endpoints = process_runs.get_quantity('endpoints', experiment, [run], config_filename=config_filename)
+        dr = endpoints[:, 0] - endpoints[:, 1]
+        self.dxys = np.sqrt(dr[:,0]**2 + dr[:,1]**2)
+        self.dts = np.abs(dr[:,2])
+        self.angles = process_runs.get_angle(experiment, [run], config_filename=config_filename)
+        
+        pad_charges = process_runs.get_quantity('pad_charge', experiment, [run], config_filename=config_filename)
+        if not self.h5file.include_counts_on_veto_pads:
+            veto_mask = np.zeros(1024, dtype=bool)
+            for i in raw_h5_file.VETO_PADS:
+                veto_mask[i] = True
+            pad_charges[:, veto_mask] = 0
+        self.counts = np.sum(pad_charges, axis=1)
+        
         self.entry_changed(None)
 
 
@@ -571,6 +658,8 @@ class RawEventViewerFrame(ttk.Frame):
         HistogramFitFrame(new_window, data=xdata).pack()
 
     def entry_changed(self, event):
+        if getattr(self, 'is_syncing', False):
+            return
         self.h5file.num_background_bins = (int(self.background_start_entry.get()), int(self.background_stop_entry.get()))
         self.h5file.length_counts_threshold = float(self.length_threshold_entry.get())
         self.h5file.ic_counts_threshold = float(self.energy_threshold_entry.get())
@@ -593,6 +682,7 @@ class RawEventViewerFrame(ttk.Frame):
         else:
             self.h5file.pads = np.fromstring(pads, sep=',')
         self.h5file.background_subtract_mode=self.background_mode_var.get()
+        self.h5file.reconstruct_railed_pads = self.reconstruct_railed_var.get()
         r_include = int(self.include_width_entry.get())
         r_exclude = int(self.exclude_width_entry.get())
         self.h5file.background_convolution_kernel = np.ones(r_include*2+1)

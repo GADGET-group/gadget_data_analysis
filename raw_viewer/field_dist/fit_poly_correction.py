@@ -15,8 +15,9 @@ from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'
+TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'
 #get_runs = range(145, 150+1)
-get_runs = [286]
+get_runs = [299, 300, 301]
 ddas_runs = e23035_runs.get_DDAS_run_number(get_runs)
 
 max_index = -1
@@ -30,11 +31,11 @@ stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('4He', mater
 alpha_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_runs[0]))
 
 print('loading GET data')
-uncorrected_lengths =e23035_runs.get_length_mm(get_runs)
-uncorrected_widths = process_runs.get_quantity('charge_width', experiment, get_runs)
-uncorrected_angles = process_runs.get_angle(experiment, get_runs)
-energy_MeV = e23035_runs.get_energy_MeV(get_runs)
-endpoints = process_runs.get_quantity('endpoints', experiment, get_runs)
+uncorrected_lengths =e23035_runs.get_length_mm(get_runs, tpc_ini_filename=TPC_CONFIG)
+uncorrected_widths = process_runs.get_quantity('charge_width', experiment, get_runs, config_filename=TPC_CONFIG)
+uncorrected_angles = process_runs.get_angle(experiment, get_runs, config_filename=TPC_CONFIG)
+energy_MeV = e23035_runs.get_energy_MeV(get_runs, tpc_ini_filename=TPC_CONFIG)
+endpoints = process_runs.get_quantity('endpoints', experiment, get_runs, config_filename=TPC_CONFIG)
 
 print('loading times from DDAS')
 times_since_beam_off = []
@@ -44,7 +45,7 @@ for ddas_run in tqdm(ddas_runs):
 times_since_beam_off = np.concatenate(times_since_beam_off)
 
 if False:
-    get_times = process_runs.get_quantity('timestamps', experiment, get_runs)
+    get_times = process_runs.get_quantity('timestamps', experiment, get_runs, config_filename=TPC_CONFIG)
     ddas_es, ddas_ts, ddas_ms = ddas_interface.extract_get_event_data(experiment, ddas_runs)
     ddas_ts = ddas_ts[:, ddas_interface.CH_MAP.GET_TRIG_ACCEPTED]/1e9
     ddas_ts = ddas_ts[ddas_ts>0]
@@ -55,9 +56,9 @@ if False:
 
 #select events to use for fit
 #event_mask = e23035_runs.get_proton_mask(get_runs)&(energy_MeV>2.2)
-veto_mask = e23035_runs.get_veto_mask(get_runs)
+veto_mask = e23035_runs.get_veto_mask(get_runs, tpc_ini_filename=TPC_CONFIG)
 expected_proton_length = proton_srim_table.get_stopping_distance(energy_MeV)
-event_mask = veto_mask & (uncorrected_lengths < expected_proton_length+15) & (uncorrected_lengths > expected_proton_length-37) & (energy_MeV>0.5)
+event_mask = veto_mask & (uncorrected_lengths < expected_proton_length+15) & (uncorrected_lengths > expected_proton_length-20) & (energy_MeV>1.5)
 
 times_since_beam_off = times_since_beam_off[:max_index]
 energy_MeV = energy_MeV[:max_index]
@@ -162,7 +163,7 @@ if not mode_args[0]:
     poly_correction2.convert_to_cylindrical_coords()
 def callback(res):
     print(res, obj_func(res, *mode_args))
-save_fname = 'run269_field_dist.pkl'
+save_fname = 'run299_300_301_field_dist.pkl'
 if True:
     res = optimize.minimize(obj_func, get_init_guess(*mode_args), args=mode_args, callback=callback)
     with open(save_fname, 'wb') as f:
@@ -244,7 +245,7 @@ def show_xyze(xs,ys,zs,es, title='',ax=None):
 
 def show_corrected_event(evt_num, view_threshold=100):
     run = 145
-    h5file = process_runs.get_h5_file(experiment=experiment, run_number=run)
+    h5file = process_runs.get_h5_file(experiment=experiment, run_number=run, config_filename=TPC_CONFIG)
     xyze = np.array(h5file.get_xyze(evt_num, threshold=view_threshold))
     points = xyze.T[:,:3]
     correction = copy.copy(poly_correction1)

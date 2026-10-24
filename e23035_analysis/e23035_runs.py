@@ -28,13 +28,21 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
     final_beam_settings: only include runs with final beam settings (38 degree degrader and reduced momentum acceptance)
     TPC data valid: requires GET data to be in the merged tree
     '''
+    if good_low_energy_tpc or good_long_tracks_tpc:
+        assert tpc_data_valid 
     runs = []
     for run, get_run in zip(run_df['DDAS'][(run_df['Run Type']=='60Ga')], run_df['GET'][(run_df['Run Type']=='60Ga')]):
         if tpc_data_valid:
+            fc_status = run_df['Field Cage Functional?'][run_df['DDAS']==run].iloc[0]
+            if pd.notna(fc_status) and len(str(fc_status).strip()) != 0:
+                #I think all 60Ga runs have valid field cage data, so this isn't currently implemented.
+                # Revisit if I start putting things in this column.
+                print('field cage functional field is not empty for ddas run %d / GET %d'%(run, get_run), flush=True)
+                assert False
             if not np.isfinite(get_run):
                 continue
-        if np.isnan(run):
-            continue
+        if np.isnan(run) or run in runs:
+            continue #a DDAS run can appear on several rows when it spans multiple GET runs
         if final_beam_settings and run <149:
             continue
         if good_gamma and (run <150 or run in [174, 205, 237] or (run>=182 and run<=191) or run in [218, 238, 163]):
@@ -53,8 +61,7 @@ def get_ddas_60_Ga_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
         if good_long_tracks_tpc and run < 238:
             #run 238 has max readout depth and final gate delay. Only important above ~2.2 MeV
             continue
-        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
-            runs.append(run)
+        runs.append(run)
     return runs
 
 def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, final_beam_settings, tpc_data_valid=True):
@@ -66,25 +73,23 @@ def get_ddas_59_Zn_runs(good_gamma, good_low_energy_tpc, good_long_tracks_tpc, f
     TPC data valid: requires GET data to be in the merged tree
     '''
     runs = []
-
+    
+    run_selector = (run_df['Run Type']=='59Zn')
     if tpc_data_valid:
-        run_selector = (run_df['Run Type']=='59Zn')
-    else:
-        run_selector = (run_df['Run Type']=='59Zn') & (run_df['Field Cage Functional?']=='yes')
+        run_selector &= (run_df['Field Cage Functional?']=='yes')
 
     for run, get_run in zip(run_df['DDAS'][run_selector], run_df['GET'][run_selector]):
         if tpc_data_valid:
             if not np.isfinite(get_run):
                 continue        
-        if np.isnan(run):
-            continue
+        if np.isnan(run) or run in runs:
+            continue #a DDAS run can appear on several rows when it spans multiple GET runs
         if final_beam_settings and False: #TODO: currently this doesn't do anything, since the degrader was adjusted so many times
             continue
         if good_gamma and False: #TODO
             continue
         #SCA and GET settings are correct for all 59Zn runs, so don't need to exclude any runs for high/low proton energy
-        if os.path.exists(ddas_interface.get_merged_root_file_path(experiment, run)):
-            runs.append(run)
+        runs.append(run)
     return runs
 
 def is_iterable(obj):
@@ -105,37 +110,62 @@ def get_DDAS_run_number(get_run_number):
     return run_df['DDAS'][run_df['GET']==get_run_number].iloc[0]
 
 
-def get_veto_mask(get_run):
-    veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
-    for pad in process_runs.raw_h5_file.VETO_PADS:
-            veto_thresholds[pad] = 500#260
-    veto_thresholds[509]=500
-    
-    if is_iterable(get_run):
-        return process_runs.get_veto_mask(experiment, get_run, veto_thresholds)
-    return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds)
+def get_veto_mask(get_run=None, endpoints=None, max_veto_counts=None, tpc_ini_filename=""):
+    if max_veto_counts is not None:
+        veto_mask = max_veto_counts < 200
+    else:
+        if get_run is None:
+            raise ValueError("Must provide either max_veto_counts or get_run")
+        veto_thresholds = np.ones(process_runs.raw_h5_file.NUM_PADS)*np.inf
+        for pad in process_runs.raw_h5_file.VETO_PADS:
+                veto_thresholds[pad] = 200
+        
+        if is_iterable(get_run):
+            veto_mask = process_runs.get_veto_mask(experiment, get_run, veto_thresholds, config_filename=tpc_ini_filename)
+        else:
+            veto_mask = process_runs.get_veto_mask(experiment, [get_run], veto_thresholds, config_filename=tpc_ini_filename)
+            
+    if endpoints is None:
+        if get_run is None:
+            raise ValueError("Must provide either endpoints or get_run")
+        if not is_iterable(get_run):
+            get_run = [get_run]
+        endpoints = process_runs.get_quantity('endpoints', experiment, get_run, config_filename=tpc_ini_filename)
+        
+    min_z = np.min(endpoints[:,:,2], axis=1)
+    return veto_mask & (min_z > 5)
 
-def get_pad_gains(get_run):
+GAIN_MATCH_DIR = os.path.join(current_dir.parent, 'raw_viewer', 'pad_gain_match', 'gain_match_results')
+
+def get_pad_gain_path(tpc_ini_filename=""):
+    '''
+    Pad gain map for a TPC processing config. Configs whose main baseline is smart1 (smart1_rpr*, and the hybrid
+    smart1_veto2_rpr_fzp, which has smart1 on every energy pad) use the map made on hybrid charges (6 October 2026:
+    run 49 of e23035_prep_vault, veto-pad cut 200 ADC, raw_viewer/pad_gain_match/hybrid_regain/README.md); smart2
+    configs and no config keep the February 2026 map (run 49, smart2 charges), so that files made with smart2 energies
+    stay comparable with everything made before.
+    '''
+    if process_runs.get_config_background_mode(tpc_ini_filename) == 'smart':
+        return os.path.join(GAIN_MATCH_DIR, 'hybrid_v200_fft6_res3.pkl')
     #gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/plots/e23035_prep_runs61to63_gm.pkl'
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/fft6_res3.pkl'
+    return os.path.join(GAIN_MATCH_DIR, 'gm_old', 'fft6_res3.pkl')
+
+def get_pad_gains(tpc_ini_filename=""):
     #return np.ones(1024)*5.47e-6
-    with open(gain_match_path, 'rb') as f:
+    with open(get_pad_gain_path(tpc_ini_filename), 'rb') as f:
         gain_match_result = pickle.load(f)
     #return gain_match_result.x[:1024]
     return gain_match_result.pad_gains
 
-def get_length_mm(get_run):
+def get_length_mm(get_run, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    return process_runs.get_lengths(experiment, get_run)
+    return process_runs.get_lengths(experiment, get_run, config_filename=tpc_ini_filename)
 
-def get_energy_MeV(get_run):
+def get_energy_MeV(get_run, num_workers=1, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    to_return = []
-    for i in get_run:
-        to_return.append(process_runs.get_gm_ic(experiment, [i], get_pad_gains(i)))
-    return np.concatenate(to_return)
+    return process_runs.get_gm_ic(experiment, get_run, get_pad_gains(tpc_ini_filename), num_workers=num_workers, config_filename=tpc_ini_filename)
 
 def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     if not is_iterable(get_run):
@@ -143,26 +173,29 @@ def get_proton_mask_min_max_range(get_run, energies:np.ndarray):
     stopping_power_path = 'track_fitting/stopping_powers/%s_in_%s.txt'%('1H', 'P10')
     proton_srim_table = srim_interface.SRIM_Table(stopping_power_path, build_sim.get_gas_density('e23035', get_run[0]))
     expected_proton_length = proton_srim_table.get_stopping_distance(energies)
-    lower_band = expected_proton_length - 37
+    lower_band = expected_proton_length - 57
     upper_band = expected_proton_length + 20
 
-    x1, x2 = 0.81, 2
-    y1 = proton_srim_table.get_stopping_distance(x1)
-    y2 = proton_srim_table.get_stopping_distance(x2)-37
+    x1, x2 = 0.81, 2.14
+    y1 = proton_srim_table.get_stopping_distance(x1)-2
+    y2 = proton_srim_table.get_stopping_distance(x2)-57
     lower_band[energies<x2] = y1 + (y2-y1)/(x2-x1)*(energies[energies<x2]-x1)
 
-    xa, xb = 0.4, 1
+    xa, xb = 0.42, 1
     ya = y1 + (y2-y1)/(x2-x1)*(xa-x1)
     yb = proton_srim_table.get_stopping_distance(xb)+20
     upper_band[energies<xb] = ya + (yb-ya)/(xb-xa)*(energies[energies<xb]-xa)
     return lower_band, upper_band
 
-def get_proton_mask(get_run):
+def get_proton_mask(get_run, lengths=None, energy=None, veto_mask=None, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    lengths = get_length_mm(get_run)
-    energy = get_energy_MeV(get_run)
-    veto_mask = get_veto_mask(get_run)
+    if lengths is None:
+        lengths = get_length_mm(get_run, tpc_ini_filename)
+    if energy is None:
+        energy = get_energy_MeV(get_run, tpc_ini_filename=tpc_ini_filename)
+    if veto_mask is None:
+        veto_mask = get_veto_mask(get_run, tpc_ini_filename=tpc_ini_filename)
     lower_band, upper_band = get_proton_mask_min_max_range(get_run, energy)
     return veto_mask & (lengths < upper_band) & (lengths > lower_band)
 
@@ -174,15 +207,18 @@ def get_alpha_mask_min_max_range(get_run, energies:np.ndarray):
     expected_alpha_length = alpha_srim_table.get_stopping_distance(energies)
     lower_band = np.zeros(len(energies))
     lower_proton, upper_proton = get_proton_mask_min_max_range(get_run, energies)
-    upper_band = np.min([lower_proton-10, expected_alpha_length + 30], axis=0)
+    upper_band = np.min([lower_proton-10, expected_alpha_length + 22], axis=0)
     return lower_band, upper_band
 
-def get_alpha_mask(get_run):
+def get_alpha_mask(get_run, lengths=None, energy=None, veto_mask=None, tpc_ini_filename=""):
     if not is_iterable(get_run):
         get_run = [get_run]
-    lengths = get_length_mm(get_run)
-    energy = get_energy_MeV(get_run)
-    veto_mask = get_veto_mask(get_run)
+    if lengths is None:
+        lengths = get_length_mm(get_run, tpc_ini_filename)
+    if energy is None:
+        energy = get_energy_MeV(get_run, tpc_ini_filename=tpc_ini_filename)
+    if veto_mask is None:
+        veto_mask = get_veto_mask(get_run, tpc_ini_filename=tpc_ini_filename)
     lower_band, upper_band = get_alpha_mask_min_max_range(get_run, energy)    
     return veto_mask & (lengths > lower_band) & (lengths < upper_band)
 
@@ -219,7 +255,7 @@ def get_counts_in_pid_cut(ddas_run, species):
     global current_data
     if current_run != ddas_run:
         current_run = ddas_run
-        current_file = ROOT.TFile(get_merged_root_file_path(ddas_run), 'READ')
+        current_file = ROOT.TFile(get_ddas_root_file_path(ddas_run), 'READ')
         current_data = current_file.Get('merged_data')
     cut = get_pid_cut(ddas_run, species)
     cut_name = 'run%d_%s_cut'%(ddas_run, species)
