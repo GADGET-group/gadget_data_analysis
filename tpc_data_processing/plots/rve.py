@@ -12,9 +12,9 @@ from scipy import optimize
 from matplotlib.ticker import MultipleLocator
 from pathlib import Path
 
-from raw_viewer import process_runs
-from  raw_viewer import raw_h5_file
-from raw_viewer import ddas_interface
+from tpc_data_processing import process_runs
+from  tpc_data_processing import raw_h5_file
+from tpc_and_decay_station import ddas_interface
 from e23035_analysis import e23035_runs
 
 experiment = 'e25058'#_prep_vault'

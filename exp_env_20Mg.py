@@ -1,7 +1,7 @@
 import sys
 import importlib
 import multiprocessing
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 
 def import_or_reload(module_name):
     if module_name in sys.modules:
@@ -11,16 +11,16 @@ def import_or_reload(module_name):
         importlib.import_module(module_name)
 
 def rve():
-    import_or_reload('raw_viewer.plots.rve')
+    import_or_reload('tpc_data_processing.plots.rve')
 
 def rates():
-    import_or_reload('raw_viewer.plots.rates')
+    import_or_reload('tpc_data_processing.plots.rates')
     
 def rate_summary():
-    import_or_reload('raw_viewer.plots.rate_summary')
+    import_or_reload('tpc_data_processing.plots.rate_summary')
 
 def xy_centering():
-    import_or_reload('raw_viewer.plots.xy_centering')
+    import_or_reload('tpc_data_processing.plots.xy_centering')
 
 experiment = 'e25058'
 
