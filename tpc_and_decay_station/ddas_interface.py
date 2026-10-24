@@ -7,6 +7,7 @@ import pickle
 import gzip
 import subprocess
 from pathlib import Path
+import importlib
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -21,6 +22,46 @@ from tpc_data_processing import process_runs
 NUM_SLOTS = 10
 CH_PER_SLOT = 16
 NUM_TOTAL_CH = NUM_SLOTS*CH_PER_SLOT
+
+def get_experiment_dir(experiment):
+    '''
+    <repo root>/<experiment>_analysis: the folder holding runs.csv, channel_map.csv, <experiment>_runs.py and the
+    git-ignored caches (hist_cache, clarion_cache, calibrations, nonlinearity_corrections). Raises TypeError when
+    experiment is not a string (a run number or calibration name passed in its place) and FileNotFoundError when
+    the folder does not exist, so that nothing silently falls back to another experiment.
+    '''
+    if not isinstance(experiment, str):
+        raise TypeError(f'experiment must be a string such as "e23035", got {experiment!r}')
+    exp_dir = BASE_DIR / f'{experiment}_analysis'
+    if not exp_dir.is_dir():
+        raise FileNotFoundError(f'no experiment folder {exp_dir} (expected <repo>/{experiment}_analysis, see README.md)')
+    return exp_dir
+
+def get_runs_module(experiment):
+    '''The experiment's runs module, <experiment>_analysis.<experiment>_runs (interface in README.md).'''
+    return importlib.import_module(f'{experiment}_analysis.{experiment}_runs')
+
+def get_experiment_setting(experiment, name, default):
+    '''
+    Optional attribute of the runs module (e.g. bad_crystals); default when the experiment has no runs module or the
+    module lacks the attribute. An import error raised inside the runs module itself is not hidden.
+    '''
+    try:
+        module = get_runs_module(experiment)
+    except ModuleNotFoundError as e:
+        if e.name not in (f'{experiment}_analysis', f'{experiment}_analysis.{experiment}_runs'):
+            raise
+        return default
+    return getattr(module, name, default)
+
+def read_channel_map(experiment):
+    '''
+    (indexes, names, slopes, offsets) of <experiment>_analysis/channel_map.csv: header Index,Name,Slope,Offset and
+    rows such as "118, mesh_pre_amp, 1.000000, 0.000000" (comma + space separated).
+    '''
+    chmap = np.genfromtxt(get_experiment_dir(experiment) / 'channel_map.csv', delimiter=', ', dtype=str, skip_header=1)
+    return (np.array(chmap[:, 0], dtype=int), [str(s) for s in chmap[:, 1]],
+            np.array(chmap[:, 2], dtype=float), np.array(chmap[:, 3], dtype=float))
 
 class CH_MAP:
     MESH_PRE_AMP = 7*16+6
@@ -257,12 +298,9 @@ def make_ddas_root_file(experiment, ddas_run, version='default', rebuild=True, c
         log_file.write(f'version: {version}, rebuild: {rebuild}, window: +-{window_us} us around the trigger, mesh delay {mesh_delay_us} us, '
                        f'mesh gate {mesh_gate_us} us, chunk size {chunk_size}, sliding-scale random seed {int(ddas_run)}\n')
 
-        ddas_ch_map_path = os.path.join(BASE_DIR, f'{experiment}_analysis', 'channel_map.csv')
+        ddas_ch_map_path = get_experiment_dir(experiment) / 'channel_map.csv'
         log_file.write('loading DDAS channel map from %s\n' % ddas_ch_map_path)
-        chmap = np.genfromtxt(ddas_ch_map_path, delimiter=', ', dtype=str, skip_header=1)
-        ch_indexes = np.array(chmap[:, 0], dtype=int)
-        ch_names = [str(s) for s in chmap[:, 1]]
-        slopes, offsets = np.array(chmap[:, 2], dtype=float), np.array(chmap[:, 3], dtype=float)
+        ch_indexes, ch_names, slopes, offsets = read_channel_map(experiment)
         log_file.write('ch_names:' + str(ch_names) + '\n slopes: %s\n' % str(slopes))
         column = {int(ch): k for k, ch in enumerate(ch_indexes)}
         k_trig, k_mesh = column.get(CH_MAP.GET_TRIG_ACCEPTED), column.get(CH_MAP.MESH_PRE_AMP)
@@ -479,7 +517,7 @@ def friend_tree_metadata(experiment, tpc_ini_filename="", get_runs=()):
     import hashlib, datetime, importlib
     meta = {'tpc_config': tpc_ini_filename or '(none)'}
     try:
-        exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+        exp_runs = get_runs_module(experiment)
         gains = exp_runs.get_pad_gains(tpc_ini_filename) if 'tpc_ini_filename' in exp_runs.get_pad_gains.__code__.co_varnames else exp_runs.get_pad_gains()
         meta['pad_gain_file'] = exp_runs.get_pad_gain_path(tpc_ini_filename) if hasattr(exp_runs, 'get_pad_gain_path') else '(see get_pad_gains)'
         meta['pad_gain_hash'] = hashlib.sha256(np.asarray(gains).tobytes()).hexdigest()[:16]
@@ -517,7 +555,7 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename="", version='def
         
         import importlib
         try:
-            exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+            exp_runs = get_runs_module(experiment)
             get_runs = np.sort(exp_runs.run_df['GET'][(exp_runs.run_df['DDAS']==ddas_run) & np.isfinite(exp_runs.run_df['GET'])] )
         except (ImportError, AttributeError):
             log_file.write(f'no runs module or compatible run_df found for {experiment}, skipping GET data merge\n')
@@ -688,7 +726,7 @@ def check_friend_shadowing(tree, friend_tree, expressions, tree_file_path):
                          f"Remake the file without these branches, or refer to them explicitly as {friend_name}.<branch>.")
 
 def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename=""):
-    cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'hist_cache')
+    cache_dir = os.path.join(get_experiment_dir(experiment), 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
 
     # The input files have to exist before the cache key is made, since the key records which version of them was used
@@ -797,7 +835,7 @@ def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp,
             raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
         import importlib
         try:
-            exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+            exp_runs = get_runs_module(experiment)
             run_list_for_check = list(ddas_run) if is_iterable_runs(ddas_run) else [ddas_run]
             get_runs = np.unique(exp_runs.run_df['GET'][
                 (exp_runs.run_df['DDAS'].isin(run_list_for_check)) & np.isfinite(exp_runs.run_df['GET'])
@@ -971,3 +1009,38 @@ def show_selected_event(experiment, ddas_run, selection, index):
     
     import matplotlib.pyplot as plt
     plt.show(block=False)
+
+# What the library needs from an experiment folder (README.md, "Setting up a new experiment")
+REQUIRED_RUNS_ATTRS = ('run_df', 'get_energy_MeV', 'get_length_mm', 'get_veto_mask', 'get_proton_mask', 'get_alpha_mask', 'get_pad_gains')
+REQUIRED_CHANNELS = {'mesh_pre_amp': CH_MAP.MESH_PRE_AMP, 'get_trig_accepted': CH_MAP.GET_TRIG_ACCEPTED,
+                     'beam_off': CH_MAP.BEAM_OFF, 'chopper_off': CH_MAP.CHOPPER_OFF}
+
+def validate_experiment(experiment):
+    '''
+    Problems with <experiment>_analysis measured against the runs-module interface in README.md; an empty list means
+    the folder is usable. Checks the channel map's logic channels, the runs module's attributes and run_df columns,
+    and that degai can build the crystal list from the channel map.
+    '''
+    problems = []
+    try:
+        indexes, names, _, _ = read_channel_map(experiment)
+    except Exception as e:
+        return [f'channel_map.csv: {e!r}']
+    channel_of = dict(zip(names, indexes.tolist()))
+    problems += [f'channel_map.csv: {name} must be channel {ch}, found {channel_of.get(name)}'
+                 for name, ch in REQUIRED_CHANNELS.items() if channel_of.get(name) != ch]
+    try:
+        module = get_runs_module(experiment)
+    except Exception as e:
+        return problems + [f'runs module {experiment}_analysis.{experiment}_runs: {e!r}']
+    problems += [f'runs module lacks {attr}' for attr in REQUIRED_RUNS_ATTRS if not hasattr(module, attr)]
+    if hasattr(module, 'run_df'):
+        problems += [f'run_df lacks column {col}' for col in ('GET', 'DDAS') if col not in module.run_df.columns]
+    if getattr(module, 'experiment', experiment) != experiment:
+        problems.append(f'runs module says experiment = {module.experiment!r}')
+    from tpc_and_decay_station import degai
+    try:
+        degai.get_clover_list(experiment)
+    except Exception as e:
+        problems.append(f'degai crystal list: {e!r}')
+    return problems

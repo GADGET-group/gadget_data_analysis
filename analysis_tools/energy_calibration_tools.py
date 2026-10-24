@@ -6,8 +6,6 @@ import concurrent.futures
 import hashlib
 import sys
 
-BASE_DIR = Path(__file__).resolve().parent.parent / 'e23035_analysis'  # temporary: replaced by the experiment argument in the next commit
-
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import ROOT
@@ -18,32 +16,32 @@ from tqdm import tqdm
 from analysis_tools import fitting_tools
 from tpc_and_decay_station import ddas_interface
 
-experiment = 'e23035'
+_exp_dir = ddas_interface.get_experiment_dir   # <repo>/<experiment>_analysis: where calibrations/ and nonlinearity_corrections/ live
 
 
-def get_calibration_directory(ddas_run, calibration_name, branch_name):
+def get_calibration_directory(experiment, ddas_run, calibration_name, branch_name):
     ddas_run = int(ddas_run)
-    return str(BASE_DIR / "calibrations" / str(ddas_run) / calibration_name / branch_name)
+    return str(_exp_dir(experiment) / "calibrations" / str(ddas_run) / calibration_name / branch_name)
 
-def get_calibration_result(ddas_run, calibration_name, branch_name):
-    cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch_name))
+def get_calibration_result(experiment, ddas_run, calibration_name, branch_name):
+    cal_dir = Path(get_calibration_directory(experiment, ddas_run, calibration_name, branch_name))
     pkl_path = cal_dir / f"{calibration_name}.pkl"
     with open(pkl_path, 'rb') as f:
         calibration_results = pickle.load(f)
     return calibration_results
 
-def get_nonlinearity_correction_result(correction_name, branch_name):
+def get_nonlinearity_correction_result(experiment, correction_name, branch_name):
     """Loads a non-linearity correction result from its pickle file."""
-    correction_dir = BASE_DIR / "nonlinearity_corrections" / correction_name / branch_name
+    correction_dir = _exp_dir(experiment) / "nonlinearity_corrections" / correction_name / branch_name
     pkl_path = correction_dir / f"{correction_name}.pkl"
     if not pkl_path.exists():
         raise FileNotFoundError(f"Non-linearity correction file not found at {pkl_path}")
     with open(pkl_path, 'rb') as f:
         return pickle.load(f)
 
-def get_calibrated_energy_string(ddas_run, calibration_name, branch_name, nonlinearity_correction_name=None):
+def get_calibrated_energy_string(experiment, ddas_run, calibration_name, branch_name, nonlinearity_correction_name=None):
     # This part gets the initial calibration (e.g., ADC -> keV_measured)
-    calibration_results = get_calibration_result(ddas_run, calibration_name, branch_name)
+    calibration_results = get_calibration_result(experiment, ddas_run, calibration_name, branch_name)
     
     # New format with polynomial parameters
     if 'poly_params' in calibration_results:
@@ -67,7 +65,7 @@ def get_calibrated_energy_string(ddas_run, calibration_name, branch_name, nonlin
 
     # If a non-linearity correction is specified, wrap the base calibration string
     if nonlinearity_correction_name:
-        nlc_results = get_nonlinearity_correction_result(nonlinearity_correction_name, branch_name)
+        nlc_results = get_nonlinearity_correction_result(experiment, nonlinearity_correction_name, branch_name)
         nlc_params = nlc_results['poly_params']
         
         final_cal_str = ""
@@ -83,12 +81,13 @@ def get_calibrated_energy_string(ddas_run, calibration_name, branch_name, nonlin
     else:
         return base_cal_str
 
-def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
+def make_energy_calibration(experiment, ddas_run, calibration_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
                             selection_string='', data_source='gamma_adc', time_branch='', time_bin_size=1800,
                             normalization_dict=None, min_counts=30, peak_model='gaus', poly_degree=1):
     '''
     Fit peaks to get energy calibration
 
+    experiment: experiment name, e.g. 'e23035'; the calibration is saved under <experiment>_analysis/calibrations
     ddas_run: single run or iterable
     calibration_name: name by which the generated slope/offset will be saved and may be retrieved
     branch_name: name of the branch to retrieve data from (eg clover_1a_e, tpc_energy, etc)
@@ -117,7 +116,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
         num_workers = 1
 
     print(f"[{branch_name}] Building 1D Histogram...", flush=True)    
-    hist_to_fit = ddas_interface.get_histogram(experiment, ddas_run, binning_for_fit, branch_name, branch_name, branch_name, selection_string, num_workers)
+    hist_to_fit = ddas_interface.get_histogram(experiment, ddas_run, binning_for_fit, branch_name, branch_name, branch_name, selection_string, num_workers=num_workers)
 
     # Time-dependent histogram setup
     if time_branch == '':
@@ -148,7 +147,7 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
     )
 
     # Make folder using pathlib for clean cross-platform path handling
-    cal_dir = Path(get_calibration_directory(ddas_run, calibration_name, branch_name))
+    cal_dir = Path(get_calibration_directory(experiment, ddas_run, calibration_name, branch_name))
     cal_dir.mkdir(parents=True, exist_ok=True)
 
     # Open ROOT file to save the individual peak fit results safely
@@ -539,8 +538,8 @@ def make_energy_calibration(ddas_run, calibration_name:str, branch_name:str, bin
 
     return calibration_results
 
-def _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name):
-    cache_dir = os.path.join('e23035_analysis', 'hist_cache')
+def _fill_calibrated_histogram_worker(experiment, ddas_run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name):
+    cache_dir = os.path.join(_exp_dir(experiment), 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
     
     unique_string = str((ddas_run, tuple(binning), branch_name, 'cal_'+calibration_name, 'nlc_'+str(nonlinearity_correction_name), selection)).encode('utf-8')
@@ -584,7 +583,7 @@ def _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branc
         
     raw_hist = ROOT.TH1D(hash_name, "", *binning)
 
-    cal_string = get_calibrated_energy_string(ddas_run, calibration_name, branch_name, nonlinearity_correction_name)    
+    cal_string = get_calibrated_energy_string(experiment, ddas_run, calibration_name, branch_name, nonlinearity_correction_name)    
     tree.Draw(f'{cal_string}>>{hash_name}', selection, 'goff')
     raw_hist.SetDirectory(0)
     data_file.Close()
@@ -597,7 +596,7 @@ def _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branc
 
     return cache_file_path, hash_name
 
-def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, hist_title, branch_name, nonlinearity_correction_name=None, selection="", force_recreate=False, num_workers=1):
+def get_calibrated_histogram(experiment, ddas_run, calibration_name, binning, hist_name, hist_title, branch_name, nonlinearity_correction_name=None, selection="", force_recreate=False, num_workers=1):
     # --- MULTIPLE RUNS LOGIC ---
     if ddas_interface.is_iterable_runs(ddas_run):
         sum_hist = None
@@ -606,7 +605,7 @@ def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, his
         if num_workers > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
                 future_to_run = {
-                    executor.submit(_fill_calibrated_histogram_worker, run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name): run
+                    executor.submit(_fill_calibrated_histogram_worker, experiment, run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name): run
                     for run in run_list
                 }
                 
@@ -622,7 +621,7 @@ def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, his
                     if not temp_hist: # pragma: no cover
                         cf.Close()
                         print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
-                        cache_file_path, hash_name = _fill_calibrated_histogram_worker(run, calibration_name, binning, branch_name, selection, force_recreate=True, nonlinearity_correction_name=nonlinearity_correction_name)
+                        cache_file_path, hash_name = _fill_calibrated_histogram_worker(experiment, run, calibration_name, binning, branch_name, selection, force_recreate=True, nonlinearity_correction_name=nonlinearity_correction_name)
                         cf = ROOT.TFile.Open(cache_file_path, 'READ')
                         temp_hist = cf.Get(hash_name)
                         
@@ -640,7 +639,7 @@ def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, his
             # Forced stdout and dynamic columns
             for run in tqdm(run_list, desc=f"Filling {hist_name} (Sequential)", file=sys.stdout, dynamic_ncols=True, leave=True):
                 temp_name = f"{hist_name}_run{run}"
-                hist = get_calibrated_histogram(run, calibration_name, binning, temp_name, hist_title, branch_name, nonlinearity_correction_name, selection, force_recreate, num_workers=1)
+                hist = get_calibrated_histogram(experiment, run, calibration_name, binning, temp_name, hist_title, branch_name, nonlinearity_correction_name, selection, force_recreate, num_workers=1)
                 
                 if sum_hist is None:
                     sum_hist = hist.Clone(hist_name)
@@ -653,7 +652,7 @@ def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, his
 
     # --- SINGLE RUN LOGIC ---
     with tqdm(total=1, desc=f"Filling {hist_name} (Single)", file=sys.stdout, dynamic_ncols=True, leave=True) as pbar:
-        cache_file_path, hash_name = _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name)
+        cache_file_path, hash_name = _fill_calibrated_histogram_worker(experiment, ddas_run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name)
         pbar.update(1)
     
     cf = ROOT.TFile.Open(cache_file_path, 'READ')
@@ -662,7 +661,7 @@ def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, his
     if not temp_hist: # pragma: no cover
         cf.Close()
         print(f"\nWarning: Failsafe triggered. Cache {cache_file_path} missing histogram. Forcing recreate...")
-        cache_file_path, hash_name = _fill_calibrated_histogram_worker(ddas_run, calibration_name, binning, branch_name, selection, force_recreate=True, nonlinearity_correction_name=nonlinearity_correction_name)
+        cache_file_path, hash_name = _fill_calibrated_histogram_worker(experiment, ddas_run, calibration_name, binning, branch_name, selection, force_recreate=True, nonlinearity_correction_name=nonlinearity_correction_name)
         cf = ROOT.TFile.Open(cache_file_path, 'READ')
         temp_hist = cf.Get(hash_name)
         
@@ -673,9 +672,9 @@ def get_calibrated_histogram(ddas_run, calibration_name, binning, hist_name, his
     
     return final_hist
 
-def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
+def create_calibration_summary(experiment, cal_name, pvalue_threshold_dict, run_list=None):
     '''
-    Create a PDF file summarizing the calibration for all runs that have it.
+    Create a PDF file summarizing the calibration for all runs that have it (<experiment>_analysis/calibrations).
     
     cal_name: the name of the calibration to summarize
     pvalue_threshold_dict: Specifies threshold at which p-values should be flagged. 
@@ -694,15 +693,11 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
     # Convert run_list to a set for faster lookups (if it was provided)
     valid_runs = set(run_list) if run_list is not None else None
     
-    # Search specifically inside the known analysis directory structure
-    pkl_files = list(BASE_DIR.glob(f"calibrations/*/{cal_name}/*/{cal_name}.pkl"))
-    
-    # Fallback just in case the script is run from inside the calibrations folder itself
-    if not pkl_files:
-        pkl_files = list(Path('.').rglob(f"{cal_name}.pkl"))
+    cal_root = _exp_dir(experiment) / "calibrations"
+    pkl_files = list(cal_root.glob(f"*/{cal_name}/*/{cal_name}.pkl"))
 
     if not pkl_files:
-        print(f"No calibration files found for '{cal_name}'.")
+        print(f"No calibration files found for '{cal_name}' under {cal_root}.")
         return
 
     for pkl_path in pkl_files:
@@ -772,7 +767,7 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
                             flagged_issues.append(f"Run {run} [{branch}] - {peak_energy} keV Time-Indep p-value: {p_t:.2e}")
 
     # 3. Generate the PDF in the specified analysis directory
-    output_dir = BASE_DIR / "calibrations"
+    output_dir = _exp_dir(experiment) / "calibrations"
     output_dir.mkdir(parents=True, exist_ok=True)
     pdf_filename = output_dir / f"{cal_name}_summary.pdf"
     
@@ -882,18 +877,16 @@ def create_calibration_summary(cal_name, pvalue_threshold_dict, run_list=None):
 
     print(f"Summary saved to {pdf_filename}")
 
-def create_stability_summary(cal_name, binning, pvalue_threshold, energy_threshold, run_list=None):
+def create_stability_summary(experiment, cal_name, binning, pvalue_threshold, energy_threshold, run_list=None):
     '''
-    Generates a PDF summary of gain stability across runs for a given calibration.
+    Generates a PDF summary of gain stability across runs for a given calibration (<experiment>_analysis/calibrations).
     Builds a calibrated sum of all runs, compares each run to the sum, and calculates a p-value.
     '''
     original_batch_state = ROOT.gROOT.IsBatch()
     ROOT.gROOT.SetBatch(True)
 
     # 1. Scope out all valid runs and branches from the file system
-    pkl_files = list(BASE_DIR.glob(f"calibrations/*/{cal_name}/*/{cal_name}.pkl"))
-    if not pkl_files:
-        pkl_files = list(Path('.').rglob(f"{cal_name}.pkl"))
+    pkl_files = list((_exp_dir(experiment) / "calibrations").glob(f"*/{cal_name}/*/{cal_name}.pkl"))
         
     branch_run_map = {}
     for p in pkl_files:
@@ -936,7 +929,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
             # Dispatch all the runs to the worker pool
             future_to_run = {}
             for run in runs_for_ch:
-                cal_exp = get_calibrated_energy_string(run, cal_name, ch)
+                cal_exp = get_calibrated_energy_string(experiment, run, cal_name, ch)
                 hist_name = f'{ch}_{run}'
                 hist_title = f'{ch} Run {run}'
                 future = executor.submit(ddas_interface.get_histogram, experiment, run, binning, hist_name, hist_title, cal_exp, num_workers=1)
@@ -997,7 +990,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
             run_data.append((run, p_val, h_run, h_sum_scaled))
 
         # 4. Create the PDF Document using ROOT's TPDF Engine
-        out_dir = BASE_DIR / "calibrations" / cal_name
+        out_dir = _exp_dir(experiment) / "calibrations" / cal_name
         out_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = str(out_dir / f"{ch}_stability.pdf")
         
@@ -1105,7 +1098,7 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
         c.Print(pdf_path + "]") 
         
     # 5. Save P-Value Matrix to CSV
-    out_dir = BASE_DIR / "calibrations" / cal_name
+    out_dir = _exp_dir(experiment) / "calibrations" / cal_name
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / f"stability_p_values.csv"
     df_pvals = pd.DataFrame(p_value_matrix)
@@ -1116,11 +1109,11 @@ def create_stability_summary(cal_name, binning, pvalue_threshold, energy_thresho
     ROOT.gROOT.SetBatch(original_batch_state)
     print("Stability generation complete!")
 
-def create_nonlinearity_correction(runs:int|list, calibration_name:str, correction_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
+def create_nonlinearity_correction(experiment, runs:int|list, calibration_name:str, correction_name:str, branch_name:str, binning_for_fit:tuple, peaks:list, 
                                    peak_model:str, poly_degree:int):
     '''
     Fit peaks in calibrated spectrum to get peak locations, and then fit a polynomial to these peak locations to get a non-linearity correction.
-    Saves results in e23035_analysis/nonlinearity_corrections/correction_name/.
+    Saves results in <experiment>_analysis/nonlinearity_corrections/correction_name/.
     Results will include a pickle file with the polynomial coefficients and fit information, and a pdf showing the fit to each peak.
 
     runs: list of runs to use. Histograms from runs will be summed before fitting peaks.
@@ -1142,12 +1135,12 @@ def create_nonlinearity_correction(runs:int|list, calibration_name:str, correcti
         num_workers = 1
 
     print(f"[{branch_name}] Building calibrated histogram for non-linearity correction...", flush=True)
-    hist = get_calibrated_histogram(runs, calibration_name, binning_for_fit, f"{branch_name}_calibrated", f"{branch_name} Calibrated", branch_name, selection='', num_workers=num_workers)
+    hist = get_calibrated_histogram(experiment, runs, calibration_name, binning_for_fit, f"{branch_name}_calibrated", f"{branch_name} Calibrated", branch_name, selection='', num_workers=num_workers)
 
     measured_energies, measured_energy_errors, true_energies, true_energy_errors = [], [], [], []
     all_peak_fit_params = {}
 
-    correction_dir = BASE_DIR / "nonlinearity_corrections" / correction_name / branch_name
+    correction_dir = _exp_dir(experiment) / "nonlinearity_corrections" / correction_name / branch_name
     correction_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = str(correction_dir / f'{correction_name}_peak_fits.pdf')
 

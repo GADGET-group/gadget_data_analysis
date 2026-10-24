@@ -11,9 +11,11 @@ from e23035_analysis import e23035_runs
 from tpc_and_decay_station import degai
 from analysis_tools.spectrum_fitter import spectrum_fitter, load_spectrum_fitter_from_file
 
+experiment = 'e23035'
+
 addback_ethresh = 150
 event_build_window = 500 #ns
-adj_dict =  degai.get_adjacency_dict(30)
+adj_dict =  degai.get_adjacency_dict(experiment, 30)
 cal_name = 'gm_511and2614_1'
 
 gamma_bin_size = 0.25 #keV
@@ -38,7 +40,7 @@ if False:
 if True:
     gamma_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'addback_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
-    gamma_sum_hist = degai.get_histogram(experiment, runs, degai.crystal_adj_dict, cal_name, gamma_binning, 'sum_gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
+    gamma_sum_hist = degai.get_histogram(experiment, runs, degai.get_crystal_adj_dict(experiment), cal_name, gamma_binning, 'sum_gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,
                                     nonlinearity_correction_name=nlc_name)
 if True:
     gamma_150ns_build_window = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, '150ns_gamma_hist', 'gamma spectrum', 'addback_energy', '', 150, addback_ethresh, True,

@@ -4,8 +4,6 @@ import ROOT
 
 from tpc_and_decay_station import ddas_interface
 
-experiment = 'e23035'
-
 def draw_overlaid_histograms(hist_dict, title="Overlaid Histograms", x_label="X", y_label="Counts"):
     if not hist_dict:
         return None, None, None
@@ -109,11 +107,12 @@ def create_2d_hist_from_dict(hist_dict, title="Stacked 2D Histogram", y_label=""
 
     return canvas, th2
 
-def plot_crystal_vs_time(ddas_run, clover, seconds_per_tbin=360):
+def plot_crystal_vs_time(experiment, ddas_run, clover, seconds_per_tbin=360):
     """
     Retrieves and plots a 2D histogram of Energy vs Time for a specific clover crystal.
     
     Args:
+        experiment: experiment name, e.g. 'e23035'.
         ddas_run: The run object/data to analyze.
         clover (str): The crystal identifier (e.g., '3c', '1a').
         

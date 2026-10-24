@@ -318,7 +318,7 @@ apply_fit_to_csv(ecal_60Ga, '60Ga_low_energy_protons', 'alpha_cal')
 #mesh_spectrum = ddas_interface.get_histogram(ddas_runs, (1000,0,10000), "mesh_spectrum", "mesh_spectrum", 'mesh_pre_amp_cr',"tpc_particle_id==1", num_workers=200)
 
 coinc_runs = e23035_runs.get_ddas_60_Ga_runs(good_gamma=True, good_long_tracks_tpc=False, good_low_energy_tpc=False, final_beam_settings=True)
-adj_dict = degai.get_adjacency_dict(30)
+adj_dict = degai.get_adjacency_dict(experiment, 30)
 cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
 addback_ethresh = 150

@@ -28,7 +28,7 @@ n_workers = len(runs)
 
 addback_ethresh = 150
 event_build_window = 500 #ns
-adj_dict =  degai.crystal_adj_dict
+adj_dict =  degai.get_crystal_adj_dict(experiment)
 cal_name = 'gm_511and2614_1'
 tpc_config = 'smart1_veto2_rpr_fzp.csv'
 nlc_name = 'c1'

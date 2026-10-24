@@ -37,7 +37,7 @@ def make_tsbo_file(experiment, get_run, tpc_ini_filename=""):
     events get NaN and no cache file is written, so the next call tries again.
     '''
     get_run = int(get_run)
-    exp_runs = importlib.import_module(f"{experiment}_analysis.{experiment}_runs")
+    exp_runs = ddas_interface.get_runs_module(experiment)
     run_df = exp_runs.run_df
     ddas_runs = sorted({int(d) for d in run_df['DDAS'][run_df['GET'] == get_run] if np.isfinite(d)})
     _, event_numbers = process_runs.get_run_and_event_numbers(experiment, [get_run], config_filename=tpc_ini_filename)

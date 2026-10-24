@@ -27,7 +27,7 @@ n_workers = min(len(runs), 255) #cap at 150 so as not to murder the TPCGPU
 
 
 
-adj_dict =  degai.get_adjacency_dict(30)#degai.crystal_adj_dict#degai.clover_adj_dict#
+adj_dict =  degai.get_adjacency_dict(experiment, 30)#degai.get_crystal_adj_dict(experiment)#degai.get_clover_adj_dict(experiment)#
 cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
 gamma_bin_size = 0.25 #keV

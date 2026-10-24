@@ -22,7 +22,7 @@ event_build_window = 500 #ns
 
 # from e23035_analysis.gamma_energy_calibration import *
 
-adj_dict =  degai.crystal_adj_dict#degai.clover_adj_dict#
+adj_dict =  degai.get_crystal_adj_dict(experiment)#degai.get_clover_adj_dict(experiment)#
 cal_name = 'gm_511and2614_1'
 nlc_name = 'c1'
 gamma_hist = degai.get_histogram(experiment, runs, adj_dict, cal_name, gamma_binning, 'gamma_hist', 'gamma spectrum', 'addback_energy', '', event_build_window, addback_ethresh, True,

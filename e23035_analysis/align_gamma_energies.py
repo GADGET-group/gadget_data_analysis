@@ -60,22 +60,13 @@ print(f'total run time: {t_tot/3600} hours')
 n_workers=min(200, len(runs))
 
 #get pre-experiment energy calibration to make finding the 511 and 2614 keV peaks easier
-ddas_ch_map_path = 'e23035_analysis/channel_map.csv'
-chmap = np.genfromtxt(ddas_ch_map_path,delimiter=', ', dtype=str, skip_header=1)
-ch_indexes = np.array(chmap[:,0], dtype=int)
-ch_names = chmap[:,1]
-init_slopes, init_offsets = np.array(chmap[:,2], dtype=float), np.array(chmap[:,3], dtype=float)
+ch_indexes, ch_names, init_slopes, init_offsets = ddas_interface.read_channel_map(experiment)
 init_cal_dict = {} #maps channel name to slope, offset
 for i in range(len(ch_names)):
     init_cal_dict[ch_names[i]] = (init_slopes[i], init_offsets[i])
 
 
-clover_list = []
-for num in range(1, 12):
-    if num == 4 or num == 8:
-        continue
-    for letter in ['a', 'b', 'c', 'd']:
-        clover_list.append(f'{num}{letter}')
+clover_list = [s.removeprefix('clover_') for s in degai.get_clover_str_list(experiment, include_bad=True)] #'1a', '1b', ...
 
 # #true_locations = [510.99895069, 2614.511]
 # true_location_uncertainties =  [16e-7, 1e-2]
@@ -154,7 +145,7 @@ def do_gain_match(ddas_run, save_init_alignment_pdf=True):
     ddas_run = int(ddas_run)
     
     if not redo_existing:
-        fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/gain_match.pdf"
+        fname = os.path.join(ddas_interface.get_experiment_dir(experiment), 'calibrations', str(ddas_run), gm_name, 'gain_match.pdf')
         if os.path.exists(fname):
             return
 
@@ -173,7 +164,7 @@ def do_gain_match(ddas_run, save_init_alignment_pdf=True):
             #(true energy, true energy_uncertainty, location guess, location_wiggle, fit range start, fit range stop)
             peaks.append((true_locations[i], true_location_uncertainties[i],  (loc_guess*0.99, loc_guess*1.01), \
                            (-fit_window_width, fit_window_width), rebin_factors[i]))
-        energy_calibration_tools.make_energy_calibration(ddas_run, gm_name, adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict, 
+        energy_calibration_tools.make_energy_calibration(experiment, ddas_run, gm_name, adc_str, (2**16, 0, 2**16), peaks, time_bin_size=1800, normalization_dict=norm_dict, 
                                                          poly_degree=poly_degree, peak_model='gaus')
     if save_init_alignment_pdf:
         #save histogram showing energy alignment 
@@ -181,7 +172,7 @@ def do_gain_match(ddas_run, save_init_alignment_pdf=True):
         canvas, th2 = root_vis_tools.create_2d_hist_from_dict(crystal_e_hists, "pre-experiment energy calibration")
         ROOT.gPad.SetLogz(1)
         canvas.Update()
-        fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/initial_alignment.pdf"
+        fname = os.path.join(ddas_interface.get_experiment_dir(experiment), 'calibrations', str(ddas_run), gm_name, 'initial_alignment.pdf')
         os.makedirs(os.path.dirname(fname), exist_ok=True)
         canvas.Print(fname+'(')
         dE_to_plot = 100
@@ -199,7 +190,7 @@ def do_gain_match(ddas_run, save_init_alignment_pdf=True):
     ROOT.gPad.SetLogz(1)
     
     canvas.Update()
-    fname = f"e23035_analysis/calibrations/{ddas_run}/{gm_name}/gain_match.pdf"
+    fname = os.path.join(ddas_interface.get_experiment_dir(experiment), 'calibrations', str(ddas_run), gm_name, 'gain_match.pdf')
     os.makedirs(os.path.dirname(fname), exist_ok=True)
     canvas.Print(fname+'(')
     dE_to_plot = 100
@@ -290,10 +281,10 @@ def process_all():
     #make_nonlinearity_correction()
     
 def make_summary_pdf():
-    energy_calibration_tools.create_calibration_summary(gm_name, pvalue_threshold_dict, runs)
+    energy_calibration_tools.create_calibration_summary(experiment, gm_name, pvalue_threshold_dict, runs)
 
     stability_binning = (int(7000/5), 0, 7000)
-    energy_calibration_tools.create_stability_summary(gm_name, stability_binning, 0.01, 200, runs)
+    energy_calibration_tools.create_stability_summary(experiment, gm_name, stability_binning, 0.01, 200, runs)
 
 def make_nonlinearity_correction():
     peak_list = [('511', 510.99895069, 16e-7),
@@ -310,8 +301,8 @@ def make_nonlinearity_correction():
         #(true energy, true energy_uncertainty, (fit range start, fit range stop)
         peaks.append((true_locations[i], true_location_uncertainties[i], (-fit_window_width, fit_window_width)))
 
-    for clover_str in degai.clover_str_list:
-        energy_calibration_tools.create_nonlinearity_correction(runs, calibration_name=gm_name, correction_name='c1', branch_name=clover_str+'_cr',
+    for clover_str in degai.get_clover_str_list(experiment):
+        energy_calibration_tools.create_nonlinearity_correction(experiment, runs, calibration_name=gm_name, correction_name='c1', branch_name=clover_str+'_cr',
                                                                  binning_for_fit=gamma_binning, peaks=peaks, peak_model='bg_shift_gaus', poly_degree=2)
 
     

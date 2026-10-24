@@ -1,6 +1,8 @@
 from pathlib import Path
 import os
+import re
 import hashlib
+import functools
 import concurrent.futures
 import uuid
 
@@ -10,7 +12,6 @@ import ROOT
 import tqdm
 
 from tpc_and_decay_station import ddas_interface
-from track_fitting import srim_interface, build_sim
 from analysis_tools import energy_calibration_tools
 
 def is_iterable_runs(obj):
@@ -23,25 +24,36 @@ def is_iterable_runs(obj):
         return False
 
 current_dir = Path(__file__).parent.resolve()
-BASE_DIR = current_dir.parent
 det_loc_table = pd.read_csv(os.path.join(current_dir, 'clarion_det_locations.csv'))
 
-#include clover's used for the experiment here
-bad_clovers = [(1,'b'), (3, 'd'), (3, 'c')]
-clover_str_list = []
-clover_list = []
-for num in range(1, 12):
-    if num in [4,8]: #clovers not installed
-        continue
-    for letter, i in zip(['a', 'b', 'c', 'd'], range(1,5)):
-        if (num, letter) not in bad_clovers: #exclude bad clovers
-            clover_str_list.append(f'clover_{num}{letter}')
-            clover_list.append((num, i))
-clover_to_index = {clover_list[i]:i for i in range(len(clover_list))}
+# Crystal lists come from the experiment's channel_map.csv: every channel named clover_<n><a-d> (n = CLARION detector
+# number in clarion_det_locations.csv, a-d = crystals 1-4), minus the runs module's optional bad_crystals, e.g.
+# bad_crystals = [(1, 'b'), (3, 'c'), (3, 'd')]. The tuples are (clover:int, crystal:int) in ascending order, which is
+# the order the e23035 lists were built in before October 2026, so str(adj_dict) (the clarion_cache keys) is unchanged.
+_CRYSTAL_LETTERS = 'abcd'
+_CLOVER_NAME = re.compile(r'clover_(\d+)([abcd])')
 
-def get_clover_strings(hist_to_get='e'):
-    """Get list of strings as they appear in the merged root file."""
-    return [f'{s}_{hist_to_get}' for s in clover_str_list]
+@functools.lru_cache(maxsize=None)
+def _crystals(experiment, include_bad):
+    names = ddas_interface.read_channel_map(experiment)[1]
+    found = sorted({(int(m[1]), _CRYSTAL_LETTERS.index(m[2]) + 1) for m in map(_CLOVER_NAME.fullmatch, names) if m})
+    bad = {(int(clover), _CRYSTAL_LETTERS.index(letter) + 1)
+           for clover, letter in ddas_interface.get_experiment_setting(experiment, 'bad_crystals', [])}
+    if bad - set(found):
+        raise ValueError(f'{experiment} bad_crystals not in channel_map.csv: {sorted(bad - set(found))}')
+    return tuple(c for c in found if include_bad or c not in bad)
+
+def get_clover_list(experiment, include_bad=False):
+    '''[(clover, crystal), ...] with crystal 1-4 = a-d; bad crystals (runs module bad_crystals) left out unless include_bad.'''
+    return list(_crystals(experiment, include_bad))
+
+def get_clover_str_list(experiment, include_bad=False):
+    '''['clover_1a', 'clover_1c', ...] in the order of get_clover_list.'''
+    return [f'clover_{clover}{_CRYSTAL_LETTERS[crystal - 1]}' for clover, crystal in _crystals(experiment, include_bad)]
+
+def get_clover_strings(experiment, hist_to_get='e'):
+    """Branch names as they appear in the merged root file, e.g. clover_1a_e."""
+    return [f'{s}_{hist_to_get}' for s in get_clover_str_list(experiment)]
 
 def get_angle_between_crystals(clover1, crystal1, clover2, crystal2): # pragma: no cover
     theta1 = np.radians(det_loc_table['thetai'][(det_loc_table['det']==clover1)&(det_loc_table['deti']==crystal1)].iloc[0])
@@ -52,7 +64,9 @@ def get_angle_between_crystals(clover1, crystal1, clover2, crystal2): # pragma: 
     rhat2 = [np.sin(theta2)*np.cos(phi2), np.sin(theta2)*np.sin(phi2), np.cos(theta2)]
     return np.degrees(np.arccos(np.clip(np.dot(rhat1, rhat2), -1.0, 1.0)))
 
-def get_adjacency_dict(max_angle): # pragma: no cover
+@functools.lru_cache(maxsize=None)
+def _adjacency_dict(experiment, max_angle):
+    clover_list = get_clover_list(experiment)
     to_return = {}
     for clover, crystal  in clover_list:
         to_return[(clover, crystal)] = []
@@ -62,16 +76,42 @@ def get_adjacency_dict(max_angle): # pragma: no cover
                 to_return[(clover, crystal)].append((clover2, crystal2))
     return to_return
 
-#adjacency dictionairy which treats crystals as adjacent iff they are in the same clover
-clover_adj_dict = {}
-for clover, crystal in clover_list:
-    clover_adj_dict[(clover, crystal)] = []
-    for crystal2 in range(1,5):
-        if crystal2 != crystal and (clover, crystal2) in clover_list:
-            clover_adj_dict[(clover, crystal)].append((clover, crystal2))
+def get_adjacency_dict(experiment, max_angle):
+    '''Crystals are adjacent when the angle between them (CLARION geometry) is below max_angle degrees.'''
+    return {k: list(v) for k, v in _adjacency_dict(experiment, max_angle).items()}
 
-#no adjacency, equivalent to sum spectrum
-crystal_adj_dict = {(clover, crystal):[] for clover, crystal in clover_list}
+def get_clover_adj_dict(experiment):
+    '''Adjacency dictionary which treats crystals as adjacent iff they are in the same clover.'''
+    clover_list = get_clover_list(experiment)
+    clover_adj_dict = {}
+    for clover, crystal in clover_list:
+        clover_adj_dict[(clover, crystal)] = []
+        for crystal2 in range(1,5):
+            if crystal2 != crystal and (clover, crystal2) in clover_list:
+                clover_adj_dict[(clover, crystal)].append((clover, crystal2))
+    return clover_adj_dict
+
+def get_crystal_adj_dict(experiment):
+    '''No adjacency, equivalent to the sum spectrum.'''
+    return {(clover, crystal):[] for clover, crystal in get_clover_list(experiment)}
+
+def _check_adj_dict(experiment, adj_dict):
+    crystals = get_clover_list(experiment)
+    if set(adj_dict) != set(crystals):
+        raise ValueError(f'adj_dict was made for another crystal list than {experiment}\'s; build it with '
+                         f'degai.get_adjacency_dict / get_clover_adj_dict / get_crystal_adj_dict({experiment!r})')
+    return crystals
+
+_REMOVED_CONSTANTS = {'clover_str_list': 'get_clover_str_list(experiment)', 'clover_list': 'get_clover_list(experiment)',
+                      'clover_to_index': '{c: i for i, c in enumerate(get_clover_list(experiment))}',
+                      'clover_adj_dict': 'get_clover_adj_dict(experiment)', 'crystal_adj_dict': 'get_crystal_adj_dict(experiment)',
+                      'bad_clovers': "ddas_interface.get_experiment_setting(experiment, 'bad_crystals', [])",
+                      'BASE_DIR': 'ddas_interface.get_experiment_dir(experiment)'}
+
+def __getattr__(name):
+    if name in _REMOVED_CONSTANTS:
+        raise AttributeError(f'degai.{name} was removed (October 2026): the crystal list now depends on the experiment, use degai.{_REMOVED_CONSTANTS[name]}')
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
 
 def _worker_cache_crystal_run(experiment, run, binning, hist_to_get, cal_name, nonlinearity_correction_name):
     """
@@ -133,11 +173,11 @@ def get_crystal_histograms(experiment, ddas_run, binning, hist_to_get, cal_name=
     
     if hist_to_get == 'cal':
         s = 'cr' if sliding_scale else 'c'
-        clover_strings = [energy_calibration_tools.get_calibrated_energy_string(ddas_run, cal_name, s,\
-                            nonlinearity_correction_name=nonlinearity_correction_name) for s in get_clover_strings(s)]
-        names = get_clover_strings('keV')
+        clover_strings = [energy_calibration_tools.get_calibrated_energy_string(experiment, ddas_run, cal_name, s,\
+                            nonlinearity_correction_name=nonlinearity_correction_name) for s in get_clover_strings(experiment, s)]
+        names = get_clover_strings(experiment, 'keV')
     else:
-        clover_strings = get_clover_strings(hist_to_get)
+        clover_strings = get_clover_strings(experiment, hist_to_get)
         names = clover_strings
         
     for clover_string, name in zip(clover_strings, names):
@@ -193,8 +233,11 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     if time_alignment_ns is None:
         time_alignment_ns = {}
     time_align_str = str(sorted(time_alignment_ns.items())) if time_alignment_ns else ""
+    clover_list = _check_adj_dict(experiment, adj_dict)
+    clover_str_list = get_clover_str_list(experiment)
+    clover_to_index = {c: i for i, c in enumerate(clover_list)}
 
-    cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'clarion_cache', 'add_back_tree')
+    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'add_back_tree')
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
@@ -234,9 +277,9 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     max_degree = 1
     for s in clover_str_list:
         if sliding_scale:
-            res = energy_calibration_tools.get_calibration_result(ddas_run, cal_name, s+'_cr')
+            res = energy_calibration_tools.get_calibration_result(experiment, ddas_run, cal_name, s+'_cr')
         else:
-            res = energy_calibration_tools.get_calibration_result(ddas_run, cal_name, s+'_c')
+            res = energy_calibration_tools.get_calibration_result(experiment, ddas_run, cal_name, s+'_c')
         if 'poly_params' in res:
             params = res['poly_params']
             max_degree = max(max_degree, len(params) - 1)
@@ -255,9 +298,9 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
         nlc_max_degree = 1
         for s in clover_str_list:
             if sliding_scale:
-                nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(nonlinearity_correction_name, s+'_cr')
+                nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(experiment, nonlinearity_correction_name, s+'_cr')
             else:
-                nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(nonlinearity_correction_name, s+'_c')
+                nlc_res = energy_calibration_tools.get_nonlinearity_correction_result(experiment, nonlinearity_correction_name, s+'_c')
             nlc_params = nlc_res['poly_params']
             nlc_max_degree = max(nlc_max_degree, len(nlc_params) - 1)
             nlc_poly_params_list.append(nlc_params)
@@ -466,7 +509,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     input_fingerprints = str([ddas_interface.get_file_fingerprint(path) for path in input_files])
 
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + tpc_ini_filename + input_fingerprints + "v5").encode()).hexdigest()
-    cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'clarion_cache', 'histograms_flex')
+    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'histograms_flex')
     os.makedirs(cache_dir, exist_ok=True)
     
     hash_name = f"h_flex_{hash_str}"
@@ -587,7 +630,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
                 (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()
             ).hexdigest()
             
-            cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'clarion_cache', 'histograms')
+            cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'histograms')
             os.makedirs(cache_dir, exist_ok=True)
             
             combined_hist_name = f"gg_combined_{combined_hash_str}"
@@ -652,7 +695,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()).hexdigest()
-    cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'clarion_cache', 'histograms')
+    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"gg_{hash_str}"
@@ -801,10 +844,12 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     # 1. SETUP & CACHE CHECKING
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
+    clover_list = _check_adj_dict(experiment, adj_dict)
+    clover_str_list = get_clover_str_list(experiment)
     # CRITICAL: Add str(binning) to the hash so different binnings don't overwrite each other!
     hash_str = hashlib.md5((str(ddas_run) + str(binning) + str(adj_dict) + "v2").encode()).hexdigest()
     
-    cache_dir = os.path.join(BASE_DIR, f'{experiment}_analysis', 'clarion_cache', 'timing')
+    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'timing')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"dt_{hash_str}"

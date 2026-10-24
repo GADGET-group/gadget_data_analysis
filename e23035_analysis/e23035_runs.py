@@ -14,6 +14,8 @@ from tpc_and_decay_station import ddas_interface
 from track_fitting import srim_interface, build_sim
 
 experiment = 'e23035'
+#CLARION crystals left out of degai's crystal lists, (clover number, crystal letter); the list itself comes from channel_map.csv
+bad_crystals = [(1, 'b'), (3, 'c'), (3, 'd')]
 
 current_dir = Path(__file__).parent.resolve()
 run_df = pd.read_csv(os.path.join(current_dir, 'runs.csv'))

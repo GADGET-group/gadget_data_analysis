@@ -19,8 +19,7 @@ runs = [171]
 tpc_config = 'smart1_veto2_rpr_fzp.csv'
 n_workers = min(len(runs), 150) #cap at 150 so as not to murder the TPCGPU
 
-chmap = np.genfromtxt(os.path.join(ddas_interface.BASE_DIR, f'{experiment}_analysis', 'channel_map.csv'), delimiter=', ', dtype=str, skip_header=1)
-crystals = [name for name in chmap[:,1] if name.startswith('clover')]
+crystals = [name for name in ddas_interface.read_channel_map(experiment)[1] if name.startswith('clover')]
 
 #windows on mesh time - gamma time (us). The merged files rebuild each GET event's entry from the hits within 15 us of
 #the trigger, which comes 4.3 us after the mesh, so the entry holds gammas from 10.7 us before to 19.3 us after the mesh.

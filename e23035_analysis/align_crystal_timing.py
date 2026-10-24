@@ -18,20 +18,20 @@ def get_timing_hist(crystal1, crystal2):
                                         f"clover_{crystal1}_t-clover_{crystal2}_t", f"(clover_{crystal1}_m==1)&&(clover_{crystal2}_m==1)", num_workers=len(runs))
 
 d = {}
-for i in degai.clover_str_list:
+for i in degai.get_clover_str_list(experiment):
     i = i.split('_')[1]
-    #for j in degai.clover_str_list:
+    #for j in degai.get_clover_str_list(experiment):
     j = '5a'#j.split('_')[1]
     if i != j:
         d[(i,j)] = get_timing_hist(i,j)
 
 if False:
     import matplotlib.pyplot as plt
-    image = np.zeros((len(degai.clover_str_list), len(degai.clover_str_list)))
-    for i in range(len(degai.clover_str_list)):
-        for j in range(len(degai.clover_str_list)):
+    image = np.zeros((len(degai.get_clover_str_list(experiment)), len(degai.get_clover_str_list(experiment))))
+    for i in range(len(degai.get_clover_str_list(experiment))):
+        for j in range(len(degai.get_clover_str_list(experiment))):
             if i!= j:
-                image[i,j] = d[(degai.clover_str_list[i].split('_')[1], degai.clover_str_list[j].split('_')[1])].GetMean()
+                image[i,j] = d[(degai.get_clover_str_list(experiment)[i].split('_')[1], degai.get_clover_str_list(experiment)[j].split('_')[1])].GetMean()
     plt.imshow(image)
     plt.colorbar()
     plt.show()
