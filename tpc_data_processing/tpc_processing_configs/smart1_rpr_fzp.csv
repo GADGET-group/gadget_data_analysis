@@ -1,5 +1,5 @@
 zscale,float,1.088
-flat_lookup_file_path,str,raw_viewer/channel_mappings/flatlookup4cobos.csv
+flat_lookup_file_path,str,tpc_data_processing/channel_mappings/flatlookup4cobos.csv
 length_counts_threshold,float,100
 ic_counts_threshold,float,0
 background_subtract_mode,str,smart

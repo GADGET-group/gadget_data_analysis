@@ -16,7 +16,7 @@ import tqdm
 import ROOT
 import numpy as np
 
-from raw_viewer import process_runs, ddas_interface
+from tpc_data_processing import process_runs
 
 NUM_SLOTS = 10
 CH_PER_SLOT = 16
@@ -939,7 +939,7 @@ def show_selected_event(experiment, ddas_run, selection, index):
     and displays its corresponding GET TPC data.
     """
     import ROOT
-    from raw_viewer import process_runs
+    from tpc_data_processing import process_runs
     import os
     
     root_file_path = get_ddas_root_file_path(experiment, ddas_run)

@@ -56,7 +56,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from e23035_analysis import fitting_tools
+from analysis_tools import fitting_tools
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIT_DIR = os.path.join(HERE, 'tpc_spectrum_fitting')

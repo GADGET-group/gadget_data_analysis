@@ -5,10 +5,11 @@ import csv
 import numpy as np
 import ROOT
 
-from raw_viewer import ddas_interface
-from e23035_analysis import fitting_tools, root_vis_tools, e23035_runs
-from raw_viewer import degai
-from e23035_analysis.spectrum_fitter import spectrum_fitter
+from tpc_and_decay_station import ddas_interface
+from analysis_tools import fitting_tools, root_vis_tools
+from e23035_analysis import e23035_runs
+from tpc_and_decay_station import degai
+from analysis_tools.spectrum_fitter import spectrum_fitter
 
 experiment = 'e23035'
 runs = e23035_runs.get_ddas_60_Ga_runs()

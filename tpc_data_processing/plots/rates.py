@@ -8,8 +8,8 @@ from matplotlib.path import Path
 import matplotlib.colors
 import ROOT
 
-from raw_viewer import process_runs
-from  raw_viewer import raw_h5_file
+from tpc_data_processing import process_runs
+from  tpc_data_processing import raw_h5_file
 
 
 experiment = 'e23035'

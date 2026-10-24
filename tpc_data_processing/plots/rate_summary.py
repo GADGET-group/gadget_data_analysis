@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import ROOT
 import numpy as np
 
-from raw_viewer import process_runs
-from  raw_viewer import raw_h5_file
+from tpc_data_processing import process_runs
+from  tpc_data_processing import raw_h5_file
 
 
 if False: #background runs before experiment

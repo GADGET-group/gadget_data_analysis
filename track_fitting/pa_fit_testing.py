@@ -10,7 +10,7 @@ import sklearn.cluster as cluster
 import multiprocessing
 
 from track_fitting import ParticleAndPointDeposition, build_sim
-from raw_viewer import raw_h5_file
+from tpc_data_processing import raw_h5_file
 
 particle_type = 'proton'
 

@@ -1,10 +1,14 @@
 
+import os
 import time
 
 import numpy as np
 import matplotlib.pylab as plt
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 import scipy
+
+#padxy.txt and PadPlane.csv live with the TPC processing library
+_TPC_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tpc_data_processing')
 
 class SimulatedEvent:
     '''
@@ -29,7 +33,7 @@ class SimulatedEvent:
         self.pad_gain_match_uncertainty = 0.1 #unitless
         self.other_systematics = 4 #adc counts
 
-        self.padxy = np.loadtxt('raw_viewer/padxy.txt', delimiter=',')
+        self.padxy = np.loadtxt(os.path.join(_TPC_DATA_DIR, 'padxy.txt'), delimiter=',')
         self.xy_to_pad = {tuple(np.round(self.padxy[pad], 1)):pad for pad in range(len(self.padxy))}
         self.pad_to_xy = {a: b for b, a in self.xy_to_pad.items()}
         self.pad_width = 2.2 #mm
@@ -42,7 +46,7 @@ class SimulatedEvent:
         self.pads_to_sim = [pad for pad in self.pad_to_xy] #can be set automatically when loading real traces
         self.num_trace_bins = 512 #set to length of trimmed traces when trimmed traces are loaded
 
-        self.pad_plane = np.genfromtxt('raw_viewer/PadPlane.csv', delimiter=',', 
+        self.pad_plane = np.genfromtxt(os.path.join(_TPC_DATA_DIR, 'PadPlane.csv'), delimiter=',', 
                                        filling_values=-1, dtype=np.int64) #used for mapping pad numbers to a 2D grid
         self.pad_to_xy_index = {} #maps pad number to (x_index,y_index)
         for y in range(len(self.pad_plane)):

@@ -10,7 +10,7 @@ import sys
 
 # Add the root directory to path to import process_runs
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 
 def convert_pkl_to_root(experiment, run=None, force=False):
     save_path = process_runs.get_save_path(experiment)

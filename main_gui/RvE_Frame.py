@@ -9,13 +9,13 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patches as patches
 from matplotlib.path import Path
-from GadgetRunH5 import GadgetRunH5
+from main_gui.GadgetRunH5 import GadgetRunH5
 import numpy as np
 from tqdm import tqdm
 import pickle
 
-import gadget_widgets
-from prev_cut_select_window import PrevCutSelectWindow
+from main_gui import gadget_widgets
+from main_gui.prev_cut_select_window import PrevCutSelectWindow
 
 class RvE_Frame(ttk.Frame):
     def __init__(self, parent, run_data:GadgetRunH5):
@@ -274,7 +274,7 @@ class RvE_Frame(ttk.Frame):
         Input files should have an energy (MeV) followed by range (mm) on each line,
         with the values seperated by a space. 
         '''
-        fname = tkinter.filedialog.askopenfile(initialdir=os.getcwd())
+        fname = tkinter.filedialog.askopenfile(initialdir=os.path.dirname(os.path.abspath(__file__)))
         points = np.loadtxt(fname)
         self.save_cut_files(points)
 
@@ -283,6 +283,6 @@ class RvE_Frame(ttk.Frame):
         Input files should have an energy (MeV) followed by range (mm) on each line,
         with the values seperated by a space. 
         '''
-        fname = tkinter.filedialog.askopenfile(initialdir=os.getcwd())
+        fname = tkinter.filedialog.askopenfile(initialdir=os.path.dirname(os.path.abspath(__file__)))
         points = np.loadtxt(fname)
         self.save_cut_files(points, use_raw_data=True)

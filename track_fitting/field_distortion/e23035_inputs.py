@@ -1,6 +1,6 @@
 '''
-Inputs of the field-distortion fit for e23035, from the processed files (raw_viewer.process_runs) and the
-time-since-beam-off cache (raw_viewer.get_tsbo). Nothing is reprocessed here.
+Inputs of the field-distortion fit for e23035, from the processed files (tpc_data_processing.process_runs) and the
+time-since-beam-off cache (tpc_and_decay_station.get_tsbo). Nothing is reprocessed here.
 
     data = load(get_runs, config_filename='smart1_veto2_rpr_fzp.csv')
         endpoints (n, 2, 3) mm (z = bucket x 1.088), t (n,) s = time since beam off (NaN if no DDAS match),
@@ -16,7 +16,8 @@ A script that calls load() with num_workers > 1 must guard its top level with `i
 '''
 import numpy as np
 
-from raw_viewer import process_runs, get_tsbo
+from tpc_data_processing import process_runs
+from tpc_and_decay_station import get_tsbo
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 

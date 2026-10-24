@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patches as patches
 from matplotlib.path import Path
-from GadgetRunH5 import GadgetRunH5
+from main_gui.GadgetRunH5 import GadgetRunH5
 import numpy as np
 from tqdm import tqdm
-import gadget_widgets
-from prev_cut_select_window import PrevCutSelectWindow
+from main_gui import gadget_widgets
+from main_gui.prev_cut_select_window import PrevCutSelectWindow
 from tkinter import filedialog
 import torch
 import torch.nn as nn

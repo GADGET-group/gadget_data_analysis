@@ -2,7 +2,7 @@ import uuid
 
 import ROOT
 
-from raw_viewer import ddas_interface
+from tpc_and_decay_station import ddas_interface
 
 experiment = 'e23035'
 

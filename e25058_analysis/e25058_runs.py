@@ -9,7 +9,8 @@ import pandas as pd
 import numpy as np
 from skimage.measure import points_in_poly
 
-from raw_viewer import process_runs, ddas_interface
+from tpc_data_processing import process_runs
+from tpc_and_decay_station import ddas_interface
 from track_fitting import srim_interface, build_sim
 
 experiment = 'e25058'
@@ -68,7 +69,7 @@ def get_veto_mask(get_run, tpc_ini_filename=""):
         return process_runs.get_veto_mask(experiment, get_run, veto_thresholds, config_filename=tpc_ini_filename)
     return process_runs.get_veto_mask(experiment, [get_run], veto_thresholds, config_filename=tpc_ini_filename)
 
-GAIN_MATCH_DIR = os.path.join(current_dir.parent, 'raw_viewer', 'pad_gain_match', 'gain_match_results')
+GAIN_MATCH_DIR = os.path.join(current_dir.parent, 'tpc_data_processing', 'pad_gain_match', 'gain_match_results')
 
 def get_pad_gain_path(tpc_ini_filename=""):
     '''

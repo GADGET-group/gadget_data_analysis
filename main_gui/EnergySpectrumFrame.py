@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-import gadget_widgets
+from main_gui import gadget_widgets
 
 import matplotlib.pyplot as plt
 import numpy as np

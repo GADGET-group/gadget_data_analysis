@@ -3,7 +3,8 @@ import importlib
 import multiprocessing
 import os
 
-from raw_viewer import process_runs, ddas_interface
+from tpc_data_processing import process_runs
+from tpc_and_decay_station import ddas_interface
 
 def import_or_reload(module_name):
     if module_name in sys.modules:
@@ -14,16 +15,16 @@ def import_or_reload(module_name):
 
 def rve():
     import_or_reload('e23035_analysis.e23035_runs')
-    import_or_reload('raw_viewer.plots.rve')
+    import_or_reload('tpc_data_processing.plots.rve')
 
 def rates():
-    import_or_reload('raw_viewer.plots.rates')
+    import_or_reload('tpc_data_processing.plots.rates')
     
 def rate_summary():
-    import_or_reload('raw_viewer.plots.rate_summary')
+    import_or_reload('tpc_data_processing.plots.rate_summary')
 
 def xy_centering():
-    import_or_reload('raw_viewer.plots.xy_centering')
+    import_or_reload('tpc_data_processing.plots.xy_centering')
 
 experiment = 'e23035'
 

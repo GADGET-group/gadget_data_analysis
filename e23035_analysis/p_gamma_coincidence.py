@@ -3,9 +3,11 @@ import os
 import ROOT
 import numpy as np
 
-from raw_viewer import ddas_interface, process_runs
-from e23035_analysis import e23035_runs, fitting_tools, root_vis_tools
-from raw_viewer import degai
+from tpc_and_decay_station import ddas_interface
+from tpc_data_processing import process_runs
+from e23035_analysis import e23035_runs
+from analysis_tools import fitting_tools, root_vis_tools
+from tpc_and_decay_station import degai
 
 experiment = 'e23035'
 

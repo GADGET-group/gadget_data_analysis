@@ -6,12 +6,12 @@ import scipy.stats
 
 from sklearn.neighbors import NearestNeighbors
 
-import gadget_widgets
+from main_gui import gadget_widgets
 from fit_gui.FitFrame import FitFrame
 
 from skspatial.objects import Line
 
-from raw_viewer.RawEventViewerFrame import RawEventViewerFrame
+from tpc_data_processing.RawEventViewerFrame import RawEventViewerFrame
 
 class IndividualEventFrame(ttk.Frame):
     def __init__(self, parent, run_data):
@@ -63,7 +63,7 @@ class IndividualEventFrame(ttk.Frame):
 
     def open_raw_viewer(self):
         new_window = tk.Toplevel(self)
-        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='tpc_data_processing/channel_mappings/flatlookup4cobos.csv')
         self.viewer_frame.pack()
 
     

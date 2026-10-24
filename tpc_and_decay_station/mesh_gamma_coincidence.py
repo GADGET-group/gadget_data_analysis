@@ -12,7 +12,7 @@ import os
 import ROOT
 import numpy as np
 
-from raw_viewer import ddas_interface
+from tpc_and_decay_station import ddas_interface
 
 experiment = 'e25058'
 runs = [171]

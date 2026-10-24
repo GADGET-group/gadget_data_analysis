@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from tqdm import tqdm
 
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 from e23035_analysis import e23035_runs
 
 # Configurations
@@ -37,7 +37,7 @@ print(f'Runs to analyze: {get_runs}')
 num_workers = min(max_workers, len(get_runs))
 
 # Load gain match calibration
-gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
+gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/tpc_data_processing/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
 with open(gain_match_path, 'rb') as f:
     gain_match_result = pickle.load(f)
 pad_gains = gain_match_result.pad_gains

@@ -11,7 +11,7 @@ import contextlib
 from tqdm import tqdm
 import numpy as np
 
-from raw_viewer import raw_h5_file
+from tpc_data_processing import raw_h5_file
 
 OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,1014,752,751,743,742,732,720,707,693,678,663,
                    647,631,614,597,580,563,545,527,272,290,308,325,342,359,376,392,408,423,438,452,465,477,488,487,497,496,
@@ -257,7 +257,7 @@ def get_h5_file(experiment, run_number, config_filename=""):
     raw_h5_path = get_h5_path(experiment, run_number)
     
     # Defaults in case not all are in config
-    h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+    h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='tpc_data_processing/channel_mappings/flatlookup4cobos.csv')
     
     if config_filename and config_filename != 'none':
         config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)

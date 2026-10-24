@@ -2,7 +2,7 @@ import os
 
 import matplotlib.pyplot as plt
 
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 
 
 def save_images(experiment, runs, events_per_run=100):

@@ -1,6 +1,7 @@
 import ROOT
-from raw_viewer import ddas_interface
-from e23035_analysis import root_vis_tools, e23035_runs
+from tpc_and_decay_station import ddas_interface
+from analysis_tools import root_vis_tools
+from e23035_analysis import e23035_runs
 experiment = '23035'
 num_workers = 10
 

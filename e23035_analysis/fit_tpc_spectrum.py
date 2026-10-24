@@ -5,8 +5,10 @@ from pathlib import Path
 import ROOT
 import numpy as np
 
-from raw_viewer import ddas_interface, process_runs, degai
-from e23035_analysis import e23035_runs, fitting_tools, spectrum_fitter, root_vis_tools
+from tpc_and_decay_station import ddas_interface, degai
+from tpc_data_processing import process_runs
+from e23035_analysis import e23035_runs
+from analysis_tools import fitting_tools, spectrum_fitter, root_vis_tools
 
 experiment = 'e23035'
 tpc_config = 'smart1_veto2_rpr_fzp.csv'

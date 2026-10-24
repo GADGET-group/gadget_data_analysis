@@ -23,8 +23,8 @@ import scipy.fft
 from tqdm import tqdm
 
 from fit_gui.HistogramFitFrame import HistogramFitFrame
-from raw_viewer import raw_h5_file
-from raw_viewer import heritage_h5_file
+from tpc_data_processing import raw_h5_file
+from tpc_data_processing import heritage_h5_file
 
 class RawEventViewerFrame(ttk.Frame):
     def __init__(self, parent, file_path=None, flat_lookup_path=None, heritage_file=False):
@@ -38,7 +38,7 @@ class RawEventViewerFrame(ttk.Frame):
                     init_dir = "/mnt/analysis/e21072/h5test/"
                 file_path = tk.filedialog.askopenfilename(initialdir=init_dir, title='Select H5 File', filetypes=[('H5', ".h5")])
             if flat_lookup_path == None:
-                flat_lookup_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/channel_mappings', title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
+                flat_lookup_path = tk.filedialog.askopenfilename(initialdir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'channel_mappings'), title='Select Channel Mapping FIle', filetypes=[('CSV', ".csv")])
             self.h5file = raw_h5_file.raw_h5_file(file_path, flat_lookup_csv=flat_lookup_path, zscale=1.45)
         else:
             if file_path == None:
@@ -299,7 +299,7 @@ class RawEventViewerFrame(ttk.Frame):
         self.check_state_changed()
     
     def browse_for_settings_file(self):
-        file_path = tk.filedialog.askopenfilename(initialdir='./raw_viewer/tpc_processing_configs', title='select GUI settings file', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]))
+        file_path = tk.filedialog.askopenfilename(initialdir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_processing_configs'), title='select GUI settings file', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]))
         self.settings_file_entry.delete(0, tk.END)
         self.settings_file_entry.insert(0, file_path)
 
@@ -389,7 +389,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def save_settings_file(self,file_path=None):
         if file_path == None:
-            file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/tpc_processing_configs', title='GUI settings file save path', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]), defaultextension='.csv')
+            file_path = tk.filedialog.asksaveasfilename(initialdir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tpc_processing_configs'), title='GUI settings file save path', filetypes=([("CSV config", ".csv"), ("gui config", ".gui_ini")]), defaultextension='.csv')
         
         self.settings_file_entry.delete(0, tk.END)
         self.settings_file_entry.insert(0, file_path)
@@ -422,7 +422,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def process_run(self):
         import re
-        from raw_viewer import process_runs
+        from tpc_data_processing import process_runs
         
         match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
         if match:
@@ -469,7 +469,7 @@ class RawEventViewerFrame(ttk.Frame):
         Load exported data, and update GUI to match the settings used to export the given file.
         '''
         import re
-        from raw_viewer import process_runs
+        from tpc_data_processing import process_runs
         
         match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
         if match:
@@ -814,7 +814,7 @@ class RawEventViewerFrame(ttk.Frame):
         fig.show()
 
     def browse_for_rve_cut(self):
-        file_path = tk.filedialog.asksaveasfilename(initialdir='./raw_viewer/rve_cuts/', title='select RvE cut', filetypes=([("csv", ".csv")]))
+        file_path = tk.filedialog.asksaveasfilename(initialdir=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rve_cuts'), title='select RvE cut', filetypes=([("csv", ".csv")]))
         self.rve_cut_entry.delete(0, tk.END)
         self.rve_cut_entry.insert(0, file_path)
     

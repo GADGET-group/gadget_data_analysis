@@ -8,9 +8,9 @@ import matplotlib.colors
 import cupy as cp
 from scipy import optimize
 
-from raw_viewer.field_dist.polynomial_correction import PolynomialCorrection
-from raw_viewer import ddas_interface
-from raw_viewer import process_runs
+from tpc_data_processing.field_dist.polynomial_correction import PolynomialCorrection
+from tpc_and_decay_station import ddas_interface
+from tpc_data_processing import process_runs
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 

@@ -7,8 +7,8 @@ import matplotlib.pylab as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 
-from raw_viewer import process_runs
-from raw_viewer.raw_h5_file import VETO_PADS
+from tpc_data_processing import process_runs
+from tpc_data_processing.raw_h5_file import VETO_PADS
 
 def save_images(experiment, runs, config_filename='smart2_rpr.csv', skip_existing=False):
     if not isinstance(runs, (list, tuple, np.ndarray)):

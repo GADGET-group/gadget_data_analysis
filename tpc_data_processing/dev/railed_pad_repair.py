@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pylab as plt
 from scipy.optimize import curve_fit
-from raw_viewer import process_runs 
+from tpc_data_processing import process_runs 
 
 import numpy as np
 import matplotlib.pylab as plt
@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 from scipy.special import erf
 import math
 import numba
-# from raw_viewer import process_runs
+# from tpc_data_processing import process_runs
 
 def skew_normal(x, amplitude, center, sigma, alpha, baseline):
     """

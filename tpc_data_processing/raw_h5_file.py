@@ -13,7 +13,7 @@ import matplotlib.cm
 from matplotlib.colors import LinearSegmentedColormap
 import tqdm
 from sklearn import datasets, linear_model
-from raw_viewer.dev import railed_pad_repair
+from tpc_data_processing.dev import railed_pad_repair
 import scipy.signal
 import numba
 

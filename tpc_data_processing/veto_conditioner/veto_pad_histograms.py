@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 
 experiment = 'e23035'
 bins = np.linspace(0, 4096, 1000)

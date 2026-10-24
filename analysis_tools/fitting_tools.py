@@ -5,8 +5,6 @@ import uuid
 import ROOT
 import numpy as np
 
-from e23035_analysis import e23035_runs
-
 import ROOT
 import numpy as np
 import uuid

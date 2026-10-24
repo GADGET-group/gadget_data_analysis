@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 import matplotlib.pylab as plt
 
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 
 experiment = 'e23035'
 TPC_CONFIG = 'smart1_veto2_rpr_fzp.csv'

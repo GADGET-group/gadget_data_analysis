@@ -10,9 +10,9 @@ import numpy as np
 from tqdm import tqdm
 from scipy import optimize
 
-from raw_viewer import process_runs
-from  raw_viewer import raw_h5_file
-from raw_viewer import ddas_interface
+from tpc_data_processing import process_runs
+from  tpc_data_processing import raw_h5_file
+from tpc_and_decay_station import ddas_interface
 from e23035_analysis import e23035_runs
 from track_fitting import srim_interface, build_sim
 
@@ -115,13 +115,13 @@ if experiment == 'e23035':
     if True: #use default gain match
         energy = e23035_runs.get_energy_MeV(get_runs, num_workers=num_workers, tpc_ini_filename=tpc_config)
     else:
-        # gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/fft6_res3.pkl'
+        # gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/tpc_data_processing/pad_gain_match/gain_match_results/fft6_res3.pkl'
         # with open(gain_match_path, 'rb') as f:
         #     gain_match_result = pickle.load(f)
         # pad_gains = gain_match_result.pad_gains
         energy = process_runs.get_gm_ic(experiment, get_runs, pad_gains, num_workers=num_workers, config_filename=tpc_config) 
 else:
-    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/raw_viewer/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
+    gain_match_path = '/egr/research-tpc/adamsa52/gadget_analysis/tpc_data_processing/pad_gain_match/gain_match_results/gm_old/fft6_res3.pkl'
     with open(gain_match_path, 'rb') as f:
         gain_match_result = pickle.load(f)
     #pad_gains = gain_match_result.x[:1024]

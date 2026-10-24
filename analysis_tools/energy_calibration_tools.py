@@ -6,7 +6,7 @@ import concurrent.futures
 import hashlib
 import sys
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent / 'e23035_analysis'  # temporary: replaced by the experiment argument in the next commit
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -15,8 +15,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from e23035_analysis import fitting_tools
-from raw_viewer import ddas_interface
+from analysis_tools import fitting_tools
+from tpc_and_decay_station import ddas_interface
 
 experiment = 'e23035'
 

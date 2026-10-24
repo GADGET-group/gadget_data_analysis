@@ -1,3 +1,5 @@
+import os
+
 from tkinter import ttk
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -24,4 +26,4 @@ class GEntry(ttk.Entry):
 
 def get_background_image():
     return ImageTk.PhotoImage(Image.open(
-               './art_GADGETII.PNG').resize((500,500)))
+               os.path.join(os.path.dirname(os.path.abspath(__file__)), 'art_GADGETII.PNG')).resize((500,500)))

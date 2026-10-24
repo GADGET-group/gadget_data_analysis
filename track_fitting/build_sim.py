@@ -9,7 +9,7 @@ import numpy as np
 #import emcee 
 import matplotlib.pylab as plt
 
-from raw_viewer.raw_h5_file import raw_h5_file
+from tpc_data_processing.raw_h5_file import raw_h5_file
 from track_fitting.SimulatedEvent import SimulatedEvent
 from track_fitting.SingleParticleEvent import SingleParticleEvent
 from track_fitting.MultiParticleEvent import MultiParticleEvent, MultiParticleDecay
@@ -80,7 +80,7 @@ def get_rawh5_object(experiment:str, run:int)->raw_h5_file:
     if experiment == 'e21072':
         h5file = raw_h5_file(file_path=get_raw_h5_path(experiment, run),
                                     zscale=get_zscale(experiment, run),
-                                    flat_lookup_csv='raw_viewer/channel_mappings/flatlookup4cobos.csv')
+                                    flat_lookup_csv='tpc_data_processing/channel_mappings/flatlookup4cobos.csv')
         h5file.background_subtract_mode='smart'
         h5file.data_select_mode='all data' 
         h5file.remove_outliers=True
@@ -129,7 +129,7 @@ def configure_sim_for_event(sim:SimulatedEvent, experiment:str, run:int, event:i
         sim.pad_threshold = 54.8
         sim.counts_per_MeV =get_adc_counts_per_MeV(experiment, run)
 
-        with open('./raw_viewer/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
+        with open('./tpc_data_processing/h5_utils/timing_offsets_e21072_run%d.pkl'%run, 'rb') as f:
             sim.timing_offsets = pickle.load(f)
         for pad in sim.timing_offsets:
             if pad != 1:

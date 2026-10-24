@@ -1,6 +1,6 @@
 import numpy as np
 
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 
 def get_cobos_present(experiment, run, num_events_to_check = 100):
     num_asads_expected = 4 #terminate once 4 asads have been seen

@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize as opt
 
-from raw_viewer import process_runs
+from tpc_data_processing import process_runs
 
 e23035_run148 = np.array([
     1,0,0,0,0,0,0,0,0,0,
@@ -62,7 +62,7 @@ plt.ylabel('total outer ring pad charge')
 
 plt.show(block=False)
 
-from raw_viewer import raw_h5_file
+from tpc_data_processing import raw_h5_file
 run = 148
 h5file = process_runs.get_h5_file('e23035', run)
 h5file.cache_enable = False

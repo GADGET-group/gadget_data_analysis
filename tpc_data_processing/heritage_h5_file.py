@@ -5,7 +5,7 @@ stored in /mnt/analysis/e17023/alphadata_h5/
 import os
 import numpy as np
 from numpy.core import inf
-import raw_viewer.raw_h5_file as raw_h5_file
+import tpc_data_processing.raw_h5_file as raw_h5_file
 
 class heritage_h5_file(raw_h5_file.raw_h5_file):
     def __init__(self, file_path):
