@@ -753,7 +753,7 @@ def get_quantity(qname, experiment, runs, config_filename, show_load_progress=Fa
     ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress,
                      gpus_to_use=gpus_to_use, num_workers=num_workers)
     if num_workers is None:
-        num_workers = 1
+        num_workers = 10
 
     if show_load_progress:
         print(f'loading {qnames} for {runs}')

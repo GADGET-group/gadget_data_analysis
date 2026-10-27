@@ -20,8 +20,8 @@ from e23035_analysis import e23035_runs
 experiment = 'e25058'#_prep_vault'
  
 if experiment =='e25058':
-    #run_range=[71, 72, 76, 77, 78, 79, 80, 81, 82, 83]
-    run_range = [136, 137, 145, 147, 149, 151, 153, 154, 156, 158, 160, 162, 164, 165, 167, 169, 171, 173, 175, 177, 178, 180, 182, 184, 186, 188, 190, 192, 194, 196, 198, 200, 202, 204, 206, 215, 216, 218, 220, 222, 224, 226, 228, 229, 231, 233, 235, 237, 239, 241, 242, 244, 246, 248, 250, 252, 254, 255, 257, 260, 263, 265, 267, 269, 270, 275, 277, 279]
+    run_range=[71, 72, 76, 77, 78, 79, 80, 81, 82, 83]
+    #run_range = [136, 137, 145, 147, 149, 151, 153, 154, 156, 158, 160, 162, 164, 165, 167, 169, 171, 173, 175, 177, 178, 180, 182, 184, 186, 188, 190, 192, 194, 196, 198, 200, 202, 204, 206, 215, 216, 218, 220, 222, 224, 226, 228, 229, 231, 233, 235, 237, 239, 241, 242, 244, 246, 248, 250, 252, 254, 255, 257, 260, 263, 265, 267, 269, 270, 275, 277, 279]
     #run_range= [123, 124, 125, 126, 127, 128, 129, 130, 132, 133, 136, 137, 145, 147, 149, 151, 153, 154, 200, 277]#,81,82,83,71,72
 if experiment =='e25058_20Mg':
     run_range = [] #[216,228,255,260,269]
@@ -44,13 +44,13 @@ for run in run_range:
     if not np.isnan(run):
         if run not in exclude_runs and os.path.exists(process_runs.get_h5_path(experiment, run)):
             get_runs.append(run)
-get_runs=[177]
+
 get_runs = np.sort(get_runs)
 print('get_runs:', get_runs)
 
 load_ddas = False
 
-tpc_processing_config = 'smart1_veto2_rpr_fzp.csv'
+tpc_processing_config = 'smart1_nrpr_fzp.csv'
 
 lengths = process_runs.get_lengths(experiment, get_runs, config_filename=tpc_processing_config)
 
