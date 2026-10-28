@@ -739,8 +739,8 @@ def ensure_processed(experiment, runs, config_filename, show_progress=True, gpus
 def get_quantity(qname, experiment, runs, config_filename, show_load_progress=False, num_workers=None, gpus_to_use=None):
     '''
     config_filename: required, a config in tpc_processing_configs ('none' for the raw_h5_file defaults).
-    num_workers: None (default) -> missing runs are processed with the mode-based default
-                 (ensure_processed) and loading uses 1 process, as before;
+    num_workers: None (default) -> the processing default of ensure_processed, len(gpus_to_use) *
+                 get_default_workers_per_gpu(config), for both stages (loading: capped by the number of runs);
                  a number -> used for both the processing and the loading stage.
     gpus_to_use: GPUs for both stages (default TPC_PROCESSING_GPUS).
     '''
@@ -752,15 +752,18 @@ def get_quantity(qname, experiment, runs, config_filename, show_load_progress=Fa
 
     ensure_processed(experiment, runs, config_filename=config_filename, show_progress=show_load_progress,
                      gpus_to_use=gpus_to_use, num_workers=num_workers)
+    if gpus_to_use is None:
+        gpus_to_use = TPC_PROCESSING_GPUS
     if num_workers is None:
-        num_workers = 1
+        #the processing default (ensure_processed), so that loading runs at the full rate; capped by the number
+        #of runs, each spawned worker costs a few seconds of start-up
+        num_workers = len(gpus_to_use) * get_default_workers_per_gpu(config_filename)
+    num_workers = max(1, min(int(num_workers), len(runs)))
 
     if show_load_progress:
         print(f'loading {qnames} for {runs}')
         
     settings_hash = get_experiment_settings_hash(experiment, runs[0] if runs else 0, config_filename)
-    if gpus_to_use is None:
-        gpus_to_use = TPC_PROCESSING_GPUS
     args_list = [(experiment, run, qnames, settings_hash, config_filename, gpus_to_use) for i, run in enumerate(runs)]
     
     if num_workers > 1:
