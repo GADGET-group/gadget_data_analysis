@@ -43,6 +43,8 @@ DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config doe
 
 CONFIG_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs')   # the library presets
 
+_override_warned = set()   # experiment config overrides already reported in this process
+
 def get_config_path(config_filename, experiment=None):
     '''
     Path of a processing config. The library presets in tpc_processing_configs/ are the default; an experiment package
@@ -59,8 +61,9 @@ def get_config_path(config_filename, experiment=None):
             return preset
         local = os.path.join(package_dir, 'tpc_processing_configs', config_filename)
         if os.path.isfile(local):
-            if os.path.isfile(preset):
+            if os.path.isfile(preset) and local not in _override_warned:
                 import filecmp
+                _override_warned.add(local)
                 if not filecmp.cmp(local, preset, shallow=False):
                     print(f'process_runs: {experiment} overrides the library preset {config_filename} with {local}', file=sys.stderr, flush=True)
             return local
