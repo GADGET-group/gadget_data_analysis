@@ -38,6 +38,7 @@ ZERO_PAD_PROBE_EVENTS = 20 #events probed per file to detect zero padding (remov
 #veto_smart_bins_away_to_check); used only when veto_background_subtract_mode is set
 VETO_BASELINE_PARAMS = ('smart_bins_away_to_check', 'num_smart_background_ave_bins', 'ic_counts_threshold',
                         'smart2_min_bins_in_peak', 'smart2_min_sigma', 'require_peak_within',
+                        'smart_walk_threshold', 'smart_one_sided_baseline',
                         'num_background_bins', 'background_convolution_kernel')
 
 class _BaselineParams:
@@ -325,12 +326,14 @@ def _pairwise_sum(a, n):
 
 
 @numba.njit(cache=True)
-def _smart1_baselines_2d(traces, bins_away, ave_bins, threshold, peak_lo, peak_hi):
+def _smart1_baselines_2d(traces, bins_away, ave_bins, walk_threshold, peak_lo, peak_hi, one_sided_flat):
     '''
     numba version of the 'smart' (smart1) branch of calculate_background_2d. Same operations in the same
     order (np.argmax semantics, same walk, same fit samples, int64 sums of x and x^2, numpy pairwise sums
     of y and x*y, same slope/offset expressions), so the result is bit-identical to the Python loop.
-    traces: C-contiguous float64 (B, N).
+    traces: C-contiguous float64 (B, N). walk_threshold: margin of the peak walk (smart_walk_threshold, or
+    ic_counts_threshold when that is None). one_sided_flat: flat baseline at the mean of the flanking bins when
+    they lie on one side of the peak only (smart_one_sided_baseline 'flat'), else the line through them.
     '''
     B, N = traces.shape
     out = np.empty_like(traces)
@@ -358,23 +361,31 @@ def _smart1_baselines_2d(traces, bins_away, ave_bins, threshold, peak_lo, peak_h
         i = peak
         while i > 0:
             j = max(0, i - bins_away)
-            if t[i] < t[j] + threshold:
+            if t[i] < t[j] + walk_threshold:
                 break
             i -= 1
         peak_start = i
         i = peak
         while i < N - 1:
             j = min(N - 1, i + bins_away)
-            if t[i] < t[j] + threshold:
+            if t[i] < t[j] + walk_threshold:
                 break
             i += 1
         peak_end = i
         n = 0
         for x in range(max(0, peak_start - ave_bins), peak_start):
             xs[n] = x; n += 1
+        n_left = n
         for x in range(peak_end, min(peak_end + ave_bins, N)):
             xs[n] = x; n += 1
-        if n > 1:
+        if one_sided_flat and n > 0 and (n_left == 0 or n_left == n):
+            #flanking bins on one side of the peak only (the walk reached a trace edge): flat baseline at their
+            #mean; a line through them would be extrapolated over the whole peak region
+            for k in range(n):
+                ys[k] = t[xs[k]]
+            slope = 0.0
+            offset = _pairwise_sum(ys, n) / n
+        elif n > 1:
             sum_x = 0
             sum_x2 = 0
             for k in range(n):
@@ -501,6 +512,14 @@ class raw_h5_file:
         self.num_smart_background_ave_bins = 5 
         #number of bins to go left/right when finding the start/end of a peak, when comparting difference to ic_threshold
         self.smart_bins_away_to_check = 3
+        #margin (ADC) of the smart peak walk: the peak region grows while the trace is at least this much above the
+        #trace smart_bins_away_to_check bins further out. None (default): ic_counts_threshold, as before 2026-10-28.
+        #With a threshold of 0 a slowly rising pedestal or a negative-going pulse carries the walk to a trace edge.
+        self.smart_walk_threshold = None
+        #baseline under the peak when the flanking bins lie on one side of the peak only (the walk reached a trace
+        #edge): 'flat' (default) = their mean; 'line' = the line through them, extrapolated over the peak region
+        #(the behaviour before 2026-10-28, which gave +-2000 ADC ramps on 127-bin e25058 traces)
+        self.smart_one_sided_baseline = 'flat'
         self.smart2_min_bins_in_peak = 10
         self.smart2_min_sigma = 2
         self.smart2_ransac_percentile = 100
@@ -1180,11 +1199,16 @@ class raw_h5_file:
                 p.smart2_min_sigma
             )
 
+        if mode == 'smart':
+            walk_thr = p.ic_counts_threshold if p.smart_walk_threshold is None else p.smart_walk_threshold
+            if p.smart_one_sided_baseline not in ('flat', 'line'):
+                raise ValueError("smart_one_sided_baseline must be 'flat' or 'line', not %r" % (p.smart_one_sided_baseline,))
+            one_sided_flat = p.smart_one_sided_baseline == 'flat'
         if mode == 'smart' and not debug_plots and traces_2d.dtype == np.float64:
             #numba version of the loop below, bit-identical (get_data always passes float64)
             return _smart1_baselines_2d(np.ascontiguousarray(traces_2d), int(p.smart_bins_away_to_check),
-                                        int(p.num_smart_background_ave_bins), float(p.ic_counts_threshold),
-                                        float(p.require_peak_within[0]), float(p.require_peak_within[1]))
+                                        int(p.num_smart_background_ave_bins), float(walk_thr),
+                                        float(p.require_peak_within[0]), float(p.require_peak_within[1]), one_sided_flat)
 
         B, N = traces_2d.shape
         baselines = np.zeros_like(traces_2d)
@@ -1207,11 +1231,11 @@ class raw_h5_file:
                     baselines[b] = trace
                     continue
                 #find  start of the peak, defined as where the going bin smart_bins_away_to_check
-                #is no longer at least ic_counts_threshold below the current bin
+                #is no longer at least walk_thr below the current bin
                 i = peak_index
                 while i>0:
                     j = max(0, i - p.smart_bins_away_to_check)
-                    if trace[i] < trace[j] + p.ic_counts_threshold:
+                    if trace[i] < trace[j] + walk_thr:
                         break
                     i -= 1
                 peak_start = i
@@ -1219,7 +1243,7 @@ class raw_h5_file:
                 i = peak_index
                 while i < len(trace) - 1:
                     j = min(len(trace) - 1, i + p.smart_bins_away_to_check)
-                    if trace[i] < trace[j] + p.ic_counts_threshold:
+                    if trace[i] < trace[j] + walk_thr:
                         break
                     i += 1
                 peak_end = i
@@ -1229,7 +1253,11 @@ class raw_h5_file:
                 ys = trace[xs]
                 
                 n = len(xs)
-                if n > 1:
+                n_left = peak_start - max(0, peak_start - p.num_smart_background_ave_bins)
+                if one_sided_flat and n > 0 and (n_left == 0 or n_left == n):
+                    #flanking bins on one side only: flat baseline at their mean (see _smart1_baselines_2d)
+                    slope, offset = 0.0, np.sum(ys) / n
+                elif n > 1:
                     sum_x = np.sum(xs)
                     sum_y = np.sum(ys)
                     sum_x2 = np.sum(xs * xs)
@@ -1425,6 +1453,14 @@ class raw_h5_file:
         #2026-10-23) keeps the hashes of the files processed with it
         if self.reconstruct_railed_pads and self.railed_pad_repair_method != 'scipy':
             settings['railed_pad_repair_method'] = self.railed_pad_repair_method
+        #smart (smart1) walk threshold and one-sided rule: added only when a smart baseline is in use and they deviate
+        #from the behaviour before 2026-10-28 (walk with ic_counts_threshold, line through one-sided flanking bins),
+        #so the hashes of the existing configurations and of their processed files are unchanged
+        if self.background_subtract_mode == 'smart' or self.veto_background_subtract_mode == 'smart':
+            if self.smart_walk_threshold is not None:
+                settings['smart_walk_threshold'] = self.smart_walk_threshold
+            if self.smart_one_sided_baseline != 'line':
+                settings['smart_one_sided_baseline'] = self.smart_one_sided_baseline
         #likewise the hybrid (veto-pad) baseline settings, only when the veto mode is set
         if self.veto_background_subtract_mode is not None:
             settings['veto_background_subtract_mode'] = self.veto_background_subtract_mode

@@ -269,10 +269,20 @@ class RawEventViewerFrame(ttk.Frame):
         self.smart_num_background_bins_entry.grid(row=8, column=1)
         self.settings_entry_map['smart_num_background_bins'] = self.smart_num_background_bins_entry
         self.smart_num_background_bins_entry.bind('<FocusOut>', self.entry_changed)
+        ttk.Label(settings_frame, text='smart: walk threshold (blank = energy ic threshold)').grid(row=9, column=0)
+        self.smart_walk_threshold_entry = ttk.Entry(settings_frame)
+        self.smart_walk_threshold_entry.grid(row=9, column=1)
+        self.smart_walk_threshold_entry.bind('<FocusOut>', self.entry_changed)
+        self.settings_entry_map['smart_walk_threshold'] = self.smart_walk_threshold_entry
+        ttk.Label(settings_frame, text='smart: baseline when flanking bins are on one side only').grid(row=10, column=0)
+        self.smart_one_sided_var = tk.StringVar() #traced below, after all entries are created
+        ttk.OptionMenu(settings_frame, self.smart_one_sided_var, 'flat', 'flat', 'line').grid(row=10, column=1)
+        self.settings_optionmenu_map['smart_one_sided_baseline'] = self.smart_one_sided_var
 
         settings_frame.grid()
         self.mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
         self.background_mode_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
+        self.smart_one_sided_var.trace_add('write', lambda x,y,z: self.entry_changed(None))
 
         rve_cut_frame = ttk.LabelFrame(self, text='RvE Cut')
         ttk.Button(rve_cut_frame, text='edit cut on gui', command=self.define_cut_on_gui).grid(row=0, column=0)
@@ -374,6 +384,9 @@ class RawEventViewerFrame(ttk.Frame):
                 update_entry(self.smart_bins_away_to_check_entry, self.h5file.smart_bins_away_to_check)
             if hasattr(self.h5file, 'num_smart_background_ave_bins'):
                 update_entry(self.smart_num_background_bins_entry, self.h5file.num_smart_background_ave_bins)
+            walk = getattr(self.h5file, 'smart_walk_threshold', None)
+            update_entry(self.smart_walk_threshold_entry, '' if walk is None else walk)
+            self.smart_one_sided_var.set(getattr(self.h5file, 'smart_one_sided_baseline', 'flat'))
                 
             update_entry(self.zscale_entry, self.h5file.zscale)
             
@@ -690,6 +703,9 @@ class RawEventViewerFrame(ttk.Frame):
         self.h5file.background_convolution_kernel /= np.sum(self.h5file.background_convolution_kernel)
         self.h5file.smart_bins_away_to_check = int(self.smart_bins_away_to_check_entry.get())
         self.h5file.num_smart_background_ave_bins = int(self.smart_num_background_bins_entry.get())
+        walk = self.smart_walk_threshold_entry.get().strip()
+        self.h5file.smart_walk_threshold = float(walk) if walk else None
+        self.h5file.smart_one_sided_baseline = self.smart_one_sided_var.get()
 
         #update zscale, and recalculate range and angles with new z_scale, if it is different than before
         zscale_old = self.h5file.zscale

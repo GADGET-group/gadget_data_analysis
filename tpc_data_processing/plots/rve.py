@@ -50,7 +50,7 @@ print('get_runs:', get_runs)
 
 load_ddas = False
 
-tpc_processing_config = 'smart1_nrpr_fzp.csv'
+tpc_processing_config = 'smart1.csv'#'smart1_nrpr_fzp.csv'#
 
 lengths = process_runs.get_lengths(experiment, get_runs, config_filename=tpc_processing_config)
 
