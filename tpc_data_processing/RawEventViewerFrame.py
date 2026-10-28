@@ -537,6 +537,7 @@ class RawEventViewerFrame(ttk.Frame):
             res = pickle.load(f)
         print(res)
         self.h5file.pad_gains = res.x
+        self.h5file.invalidate_cache()
         self.gain_match_label['text'] = 'gain match loaded: %s'%file_path
         self.gain_match_path = file_path
 
@@ -619,6 +620,7 @@ class RawEventViewerFrame(ttk.Frame):
     def check_state_changed(self):
         self.h5file.remove_outliers = (self.remove_outlier_var.get() == 1)
         self.h5file.apply_gain_match = (self.apply_gain_match_var.get() == 1)
+        self.h5file.invalidate_cache()
 
     def get_hist_data_from_name(self, name):
         if name == 'adc counts':
@@ -710,6 +712,7 @@ class RawEventViewerFrame(ttk.Frame):
         #update zscale, and recalculate range and angles with new z_scale, if it is different than before
         zscale_old = self.h5file.zscale
         self.h5file.zscale = float(self.zscale_entry.get())
+        self.h5file.invalidate_cache() #the caches are keyed on the event number, not on the settings
         if type(self.dts) != type(None):
             if  zscale_old != self.h5file.zscale or type(self.dzs) == type(None):
                 self.dzs = self.dts*self.h5file.zscale

@@ -1,4 +1,5 @@
 import os
+import re
 import pickle
 
 
@@ -46,6 +47,11 @@ class _BaselineParams:
     Read-only view of the baseline settings of a raw_h5_file. With veto=True, an attribute X is taken from
     'veto_X' when that is set (not None), e.g. background_subtract_mode -> veto_background_subtract_mode;
     otherwise (and always with veto=False) from X itself.
+
+    None therefore means "not set for the veto pads", never "use the default": a veto_X of None falls through to
+    X, whatever X is set to. In particular veto_smart_walk_threshold = None does not ask for the ic threshold on
+    the veto pads once smart_walk_threshold is set; to walk the veto pads with the ic threshold, set
+    veto_smart_walk_threshold to that threshold's value (veto_ic_counts_threshold or ic_counts_threshold).
     '''
     def __init__(self, h5, veto):
         self._h5 = h5
@@ -58,6 +64,22 @@ class _BaselineParams:
         return getattr(self._h5, name)
 FIRST_DATA_BIN = 6 #first time bin is dumped, because it is junk
 NUM_PADS = 1024
+
+#instance attributes that hold cached results or properties of the open file rather than settings: never written by
+#save_config_file and ignored by load_config (configs saved before 2026-10-28 contain them)
+_CONFIG_STATE_KEYS = frozenset(('cached_event', 'cached_event_xyte', 'cached_event_xyze', 'cached_data', 'cached_xyte',
+                                'cached_xyze', 'batched_data_cache', 'num_time_bins'))
+
+def _literal(s):
+    '''
+    ast.literal_eval of the str() of a list/tuple of numbers, also accepting what literal_eval rejects: inf and -inf
+    (how str() writes infinite floats, e.g. the default require_peak_within) and numpy scalar reprs such as
+    np.float64(1.5) (numpy >= 2).
+    '''
+    import ast
+    s = re.sub(r'\bnp\.(?:float|int|uint|bool)[0-9_]*\(([^()]*)\)', r'\1', s)
+    s = re.sub(r'(?<![\w.])inf\b', '1e999', s) #1e999 is parsed as float inf
+    return ast.literal_eval(s)
 
 _M32 = 0xFFFFFFFF
 
@@ -87,8 +109,11 @@ def _ransac_sample_indices(traces, max_iterations, device):
     draw = _hash32((torch.arange(2 * max_iterations, dtype=torch.int64, device=device) + 0x85EBCA6B) & _M32)
     return (_hash32(key[:, None] ^ draw[None, :]) % N).view(B, max_iterations, 2)
 
-def batched_line_fit_2d(traces, device=torch.device('cuda')):
-    # traces: numpy array (B, 512)
+def batched_line_fit_2d(traces, device=None):
+    # traces: numpy array (B, 512). device: torch device, default cuda, resolved here rather than in the signature so
+    # that the module imports without torch (calculate_background_2d then uses the sklearn RANSAC)
+    if device is None:
+        device = torch.device('cuda')
     if traces.shape[0] == 0:
         return np.empty((0, traces.shape[1]), dtype=np.float32)
 
@@ -333,7 +358,10 @@ def _smart1_baselines_2d(traces, bins_away, ave_bins, walk_threshold, peak_lo, p
     of y and x*y, same slope/offset expressions), so the result is bit-identical to the Python loop.
     traces: C-contiguous float64 (B, N). walk_threshold: margin of the peak walk (smart_walk_threshold, or
     ic_counts_threshold when that is None). one_sided_flat: flat baseline at the mean of the flanking bins when
-    they lie on one side of the peak only (smart_one_sided_baseline 'flat'), else the line through them.
+    they lie on one side of the peak only (smart_one_sided_baseline 'flat'), else the line through them. With
+    one_sided_flat a walk that reaches the last bin leaves no right flank (the last bin belongs to the peak region,
+    as bin 0 does when the walk reaches the left edge) and a walk that reaches both edges zeroes the trace; without
+    it the last bin is the single right flank bin, as before 2026-10-28.
     '''
     B, N = traces.shape
     out = np.empty_like(traces)
@@ -372,6 +400,14 @@ def _smart1_baselines_2d(traces, bins_away, ave_bins, walk_threshold, peak_lo, p
                 break
             i += 1
         peak_end = i
+        if one_sided_flat and peak_end == N - 1:
+            #the walk reached the last bin: no right flank, as there is no left flank when it reaches bin 0 (the
+            #right flank would otherwise be the last sample alone, which lies on the pulse)
+            peak_end = N
+            if peak_start == 0:
+                #both edges reached: no flanking bins at all, so no baseline estimate; the trace is its own
+                #baseline (zeroed), as for a peak outside require_peak_within
+                continue
         n = 0
         for x in range(max(0, peak_start - ave_bins), peak_start):
             xs[n] = x; n += 1
@@ -518,7 +554,10 @@ class raw_h5_file:
         self.smart_walk_threshold = None
         #baseline under the peak when the flanking bins lie on one side of the peak only (the walk reached a trace
         #edge): 'flat' (default) = their mean; 'line' = the line through them, extrapolated over the peak region
-        #(the behaviour before 2026-10-28, which gave +-2000 ADC ramps on 127-bin e25058 traces)
+        #(the behaviour before 2026-10-28, which gave +-2000 ADC ramps on 127-bin e25058 traces). With 'flat' a walk
+        #that reaches the last bin leaves no right flank (the last bin belongs to the peak region, as bin 0 does at
+        #the left edge) and a walk that reaches both edges zeroes the trace; with 'line' the last bin is the single
+        #right flank bin.
         self.smart_one_sided_baseline = 'flat'
         self.smart2_min_bins_in_peak = 10
         self.smart2_min_sigma = 2
@@ -552,8 +591,10 @@ class raw_h5_file:
         self.cobos='all'
         self.pads='all'
 
-        #caching avoids redoing baseline subtraction unecessarily. If enabled and any parameters are changed,
-        #  should set self.cached_event to np.inf to force recompute.
+        #caching avoids redoing baseline subtraction unnecessarily. The caches are keyed on the event number (and,
+        #for xyte/xyze, on the threshold and include_veto_pads) and know nothing about the settings: call
+        #invalidate_cache() after changing any setting that affects get_data (it also clears batched_data_cache,
+        #which keeps the processed events of the current batch whatever cache_enable is).
         self.cache_enable = False
         self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
         self.cached_data = None
@@ -565,8 +606,9 @@ class raw_h5_file:
         #look at first event and figure out number of time bins
         try:
             first_event_data = self._get_event_dataset(self.get_event_num_bounds()[0], kind='data')
-            self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
-        except KeyError:
+            #from the dataset shape: an event without any rows still carries the trace length
+            self.num_time_bins = first_event_data.shape[1]-FIRST_DATA_BIN
+        except (KeyError, IndexError):
             self.num_time_bins = 512 # Default value if there are no events in the h5 file
 
     def _event_dataset_path(self, event_number, kind='data'):
@@ -678,55 +720,76 @@ class raw_h5_file:
             self.h5_file = None
         self.__dict__.pop('_get_group_id', None)
 
+    def invalidate_cache(self):
+        '''
+        Forget every cached result: the per-event data, xyte and xyze caches, the processed events of the current
+        batch (batched_data_cache) and the railed-pad cache. Call after changing any setting that affects get_data
+        or get_xyze (baseline mode and parameters, data_select_mode, outlier removal, gain match, zero-pad removal,
+        the cobo/asad/pad selection, zscale, ...): the caches are keyed on the event number only. load_config and
+        the raw event viewer call it; the per-file caches (zero padding, channel tables) are kept.
+        '''
+        self.cached_event = self.cached_event_xyte = self.cached_event_xyze = np.inf
+        self.cached_data = self.cached_xyte = self.cached_xyze = None
+        self.batched_data_cache.clear()
+        self.__dict__.pop('_railed_pads_cache', None)
+
     def load_config(self, config_path):
+        '''
+        Apply the settings of a csv config (rows name,type,value, as written by save_config_file). Every row is
+        parsed before any is applied, so a bad row leaves the instance unchanged (ValueError). Rows naming cached
+        state or properties of the file (_CONFIG_STATE_KEYS, written by save_config_file before 2026-10-28) are
+        ignored. The caches are invalidated afterwards.
+        '''
         import csv
-        import ast
+        values = {}
         with open(config_path, 'r') as f:
-            reader = csv.reader(f)
-            for row in reader:
+            for row in csv.reader(f):
                 if len(row) < 3:
                     continue
                 name = row[0].strip()
                 type_name = row[1].strip()
                 val_str = row[2].strip()
-                
+                if name in _CONFIG_STATE_KEYS:
+                    continue
                 if type_name == 'str':
                     val = val_str
                 elif type_name == 'int':
                     val = int(val_str)
                 elif type_name == 'float':
-                    if val_str == 'inf':
-                        val = np.inf
-                    elif val_str == '-inf':
-                        val = -np.inf
-                    else:
-                        val = float(val_str)
+                    val = float(val_str) #accepts inf and -inf
                 elif type_name == 'bool':
                     val = val_str.lower() in ('true', '1', 't', 'y', 'yes')
                 elif type_name in ('list', 'tuple'):
-                    val = ast.literal_eval(val_str)
-                    if type_name == 'tuple':
-                        val = tuple(val)
-                    else:
-                        val = list(val)
+                    val = _literal(val_str)
+                    val = tuple(val) if type_name == 'tuple' else list(val)
                 elif type_name == 'ndarray':
-                    val = np.array(ast.literal_eval(val_str))
+                    val = np.array(_literal(val_str))
                 else:
                     continue
-                
-                setattr(self, name, val)
+                values[name] = val
+        for name, val in values.items():
+            setattr(self, name, val)
+        self.invalidate_cache()
 
     def save_config_file(self, config_path):
+        '''
+        Write the settings as a csv config (name,type,value) that load_config reads back. Lookup tables, the open
+        file and the cached state (_CONFIG_STATE_KEYS) are not written. A setting that is None cannot be expressed
+        and is skipped, so a config cannot unset a setting that is set.
+        '''
         import csv
         import os
-        exclude = {'xy_to_pad', 'xy_to_chnls', 'xy_index_to_pad', 'pad_plane', 'padxy', 'flat_lookup', 
+        exclude = {'xy_to_pad', 'xy_to_chnls', 'xy_index_to_pad', 'pad_plane', 'padxy', 'flat_lookup',
                    'pad_to_xy_index', 'chnls_to_pad', 'chnls_to_xy_coord', 'chnls_to_xy_index', 'pad_to_chnl',
-                   'cmap', 'cached_data', 'cached_xyte', 'cached_xyze', 'h5_file', 'pad_backgrounds', 'file_path'}
+                   'cmap', 'h5_file', 'pad_backgrounds', 'file_path'} | _CONFIG_STATE_KEYS
+        def plain(x):
+            #python scalars inside lists/tuples, so that str() writes literals (1.5, not np.float64(1.5))
+            return x.item() if isinstance(x, np.generic) else x
         os.makedirs(os.path.dirname(os.path.abspath(config_path)), exist_ok=True)
         with open(config_path, 'w', newline='') as f:
             writer = csv.writer(f)
             for k, v in self.__dict__.items():
-                if k in exclude or k.startswith('__'):
+                if k in exclude or k.startswith('_'):
                     continue
                 t = type(v)
                 if t == str:
@@ -738,7 +801,7 @@ class raw_h5_file:
                 elif t == bool or isinstance(v, np.bool_):
                     writer.writerow([k, 'bool', str(v)])
                 elif t in (list, tuple):
-                    writer.writerow([k, t.__name__, str(v)])
+                    writer.writerow([k, t.__name__, str(t(plain(x) for x in v))])
                 elif t == np.ndarray:
                     writer.writerow([k, 'ndarray', str(v.tolist())])
 
@@ -1247,6 +1310,12 @@ class raw_h5_file:
                         break
                     i += 1
                 peak_end = i
+                if one_sided_flat and peak_end == len(trace) - 1:
+                    #no right flank when the walk reaches the last bin (see _smart1_baselines_2d)
+                    peak_end = len(trace)
+                    if peak_start == 0:
+                        baselines[b] = trace #both edges reached: zero the trace
+                        continue
                 #fit a line through the points just outside the peak region
                 xs = np.concatenate([np.arange(max(0, peak_start - p.num_smart_background_ave_bins), peak_start),
                                                np.arange(peak_end, min(peak_end + p.num_smart_background_ave_bins, len(trace)))])
@@ -1275,21 +1344,21 @@ class raw_h5_file:
                 x_peak = np.arange(peak_start, peak_end)
                 baselines[b, x_peak] = offset + slope * x_peak
             elif mode == 'snip':
-                p = p.smart_bins_away_to_check#20 # window size
+                window = p.smart_bins_away_to_check # window size (p is the parameter view, needed for the next trace)
                 
                 # LLS transform: log(log(y + 1) + 1)
                 y = np.array(trace, dtype=float, copy=True)
                 baseline = np.log(np.log(y + 1) + 1)
                 
                 # Pad with reflection to handle boundary bins cleanly
-                baseline = np.pad(baseline, pad_width=p, mode='reflect')
+                baseline = np.pad(baseline, pad_width=window, mode='reflect')
                 
-                for i in range(1, p + 1):
+                for i in range(1, window + 1):
                     temp = (baseline[:-2*i] + baseline[2*i:]) / 2.0
                     baseline[i:-i] = np.minimum(baseline[i:-i], temp)
                 
                 # Remove padding
-                baseline = baseline[p:-p]
+                baseline = baseline[window:-window]
                 
                 # Inverse LLS transform
                 baseline = np.exp(np.exp(baseline) - 1) - 1
@@ -1307,9 +1376,12 @@ class raw_h5_file:
                  eg, (xs[i], ys[i], ts[i]) gives the position of a pad and time bin number,
                  and es[i] gives the charge that arrived at that pad at the given time.
                  Only data where the charge deposition is greater than the threshold is included.
+        With cache_enable the result is cached per (event_number, threshold, include_veto_pads), and copies of the
+        cached arrays are handed out so that a caller may modify them in place.
         '''
-        if self.cache_enable and self.cached_event_xyte == event_number:
-            return self.cached_xyte
+        key = (event_number, threshold, include_veto_pads)
+        if self.cache_enable and isinstance(self.cached_event_xyte, tuple) and self.cached_event_xyte == key:
+            return tuple(np.array(a, copy=True) for a in self.cached_xyte)
         event_data =  self.get_data(event_number)
         #rows with a pad mapping (minus veto pads unless requested); channels without a mapping are skipped
         rows, pads = self._event_rows(event_data, include_veto_pads)
@@ -1333,23 +1405,26 @@ class raw_h5_file:
             ts = ts[es>threshold]
             es = es[es>threshold]
         if self.cache_enable:
-            self.cached_event_xyte = event_number
+            self.cached_event_xyte = key
             self.cached_xyte = (xs, ys, ts, es)
+            return tuple(np.array(a, copy=True) for a in self.cached_xyte)
         return xs, ys, ts, es
-    
+
     def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
-        Same as xyte, but scales time bins to get z coordinate
+        Same as xyte, but scales time bins to get z coordinate. Cached and copied like get_xyte.
         '''
-        if self.cache_enable and self.cached_event_xyze == event_number:
-            return self.cached_xyze
+        key = (event_number, threshold, include_veto_pads)
+        if self.cache_enable and isinstance(self.cached_event_xyze, tuple) and self.cached_event_xyze == key:
+            return tuple(np.array(a, copy=True) for a in self.cached_xyze)
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
         to_return = (x,y, t*self.zscale ,e)
         if self.cache_enable:
             self.cached_xyze= to_return
-            self.cached_event_xyze = event_number
+            self.cached_event_xyze = key
+            return tuple(np.array(a, copy=True) for a in to_return)
         return to_return
-    
+
     def get_track_axis(self, event=None, threshold=None, return_all_svd_results=False, xyze=None, return_np=True):
         '''
         Uses SVD on all points above some threshold to get track direction.
@@ -1406,9 +1481,26 @@ class raw_h5_file:
 
     
     def get_event_num_bounds(self):
-        #returns first event number, last event number
-        return int(self.h5_file['meta']['meta'][0]), int(self.h5_file['meta']['meta'][2])
-        #return int(self.h5_file['meta']['meta'][0]), np.min((int(self.h5_file['meta']['meta'][2]), int(self.h5_file['meta']['meta'][0])+10000))#TODO
+        '''
+        Returns first event number, last event number (inclusive). The merger writes [meta][meta] as
+        [first event, its timestamp, last event, its timestamp] and then appends one more event after the one it
+        recorded as last, so a file holds events first..meta[2]+1 (seen on every e23035 and e25058 file checked).
+        The last event is therefore the last consecutive event dataset from meta[2] on. Determined once per
+        instance. For an empty file (first > last) the meta values are returned as they are.
+        '''
+        bounds = self.__dict__.get('_event_bounds_cache')
+        if bounds is None:
+            meta = self.h5_file['meta']['meta']
+            first, last = int(meta[0]), int(meta[2])
+            if last >= first:
+                get_group = self.h5_file['get']
+                for _ in range(8): #the merger appends one event; a bounded walk in case that ever changes
+                    if self._event_dataset_path(last + 1, 'data') not in get_group:
+                        break
+                    last += 1
+            bounds = (first, last)
+            self.__dict__['_event_bounds_cache'] = bounds
+        return bounds
 
     def get_settings_str(self):
         import json
@@ -1859,20 +1951,32 @@ class raw_h5_file:
     def show_traces_w_baseline_estimate(self, event_num, block=True, fig_name=None, pad_to_plot=None):
         '''
         plots traces without background subtraction, with backgrounds shown as ... lines
-        If pad is specified, plot only the one pad
+        If pad_to_plot is specified, plot only the one pad
         '''
         plt.figure(fig_name)
         plt.clf()
+        #read the raw traces of this one event with the baseline subtraction and data selection off; the caches are
+        #invalidated before and after, so that neither the processed events of a cached batch nor the raw read of
+        #this one leak across the settings change
         old_background_mode = self.background_subtract_mode
         old_cache = self.cache_enable
-        self.cache_enable = False
-        self.background_subtract_mode = 'none' #will set back after drawing traces
+        old_batch = self.batch_event_cache_size
         old_mode = self.data_select_mode
+        self.invalidate_cache()
+        self.cache_enable = False
+        self.batch_event_cache_size = 1
+        self.background_subtract_mode = 'none'
         self.data_select_mode = 'all data'
-        pads, pad_data = self.get_pad_traces(event_num)
-        self.cache_enable = old_cache
+        try:
+            pads, pad_data = self.get_pad_traces(event_num)
+        finally:
+            self.cache_enable = old_cache
+            self.batch_event_cache_size = old_batch
+            self.background_subtract_mode = old_background_mode
+            self.data_select_mode = old_mode
+            self.invalidate_cache()
         for pad, data in zip(pads, pad_data):
-            if type(pad) != type(None) and pad != pad_to_plot:
+            if pad_to_plot is not None and pad != pad_to_plot:
                 continue
             r = pad/1024*.8
             g = (pad%512)/512*.8
@@ -1881,15 +1985,12 @@ class raw_h5_file:
                 plt.plot(data, '--', color=(r,g,b), label='%d'%pad)
             else:
                 plt.plot(data, color=(r,g,b), label='%d'%pad)
-        self.background_subtract_mode = old_background_mode
         for pad, data in zip(pads, pad_data):
-            if type(pad) != type(None) and pad != pad_to_plot:
-                continue 
+            if pad_to_plot is not None and pad != pad_to_plot:
+                continue
             r = pad/1024*.8
             g = (pad%512)/512*.8
             b = (pad%256)/256*.8
             plt.plot(self.calculate_background(data, pad=pad), '.', color=(r,g,b), label='%d baseline'%pad)
-        self.data_select_mode = old_mode
         plt.legend(loc='upper right')
         plt.show(block=block)
-
