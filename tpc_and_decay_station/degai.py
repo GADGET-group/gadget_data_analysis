@@ -237,7 +237,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     clover_str_list = get_clover_str_list(experiment)
     clover_to_index = {c: i for i, c in enumerate(clover_list)}
 
-    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'add_back_tree')
+    cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'add_back_tree')
     os.makedirs(cache_dir, exist_ok=True)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
@@ -511,7 +511,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     input_fingerprints = str([ddas_interface.get_file_fingerprint(path) for path in input_files])
 
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + tpc_ini_filename + input_fingerprints + "v5").encode()).hexdigest()
-    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'histograms_flex')
+    cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'histograms_flex')
     os.makedirs(cache_dir, exist_ok=True)
     
     hash_name = f"h_flex_{hash_str}"
@@ -634,7 +634,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
                 (str(sorted_runs) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()
             ).hexdigest()
             
-            cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'histograms')
+            cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'histograms')
             os.makedirs(cache_dir, exist_ok=True)
             
             combined_hist_name = f"gg_combined_{combined_hash_str}"
@@ -700,7 +700,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
     # ---------------------------------------------------------
     ddas_run = int(ddas_run)
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()).hexdigest()
-    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'histograms')
+    cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'histograms')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"gg_{hash_str}"
@@ -856,7 +856,7 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     # CRITICAL: Add str(binning) to the hash so different binnings don't overwrite each other!
     hash_str = hashlib.md5((str(ddas_run) + str(binning) + str(adj_dict) + "v2").encode()).hexdigest()
     
-    cache_dir = os.path.join(ddas_interface.get_experiment_dir(experiment), 'clarion_cache', 'timing')
+    cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'timing')
     os.makedirs(cache_dir, exist_ok=True)
     
     hist_name = f"dt_{hash_str}"

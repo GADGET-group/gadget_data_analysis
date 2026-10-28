@@ -24,19 +24,60 @@ NUM_SLOTS = 10
 CH_PER_SLOT = 16
 NUM_TOTAL_CH = NUM_SLOTS*CH_PER_SLOT
 
+SHARED_DATA_ROOT = '/egr/research-tpc/shared/proc_runs'   # <root>/<experiment>/{ddas,proc_pkl,analysis_cache}
+
 def get_experiment_dir(experiment):
     '''
-    <repo root>/<experiment>_analysis: the folder holding runs.csv, channel_map.csv, <experiment>_runs.py and the
-    git-ignored caches (hist_cache, clarion_cache, calibrations, nonlinearity_corrections). Raises TypeError when
-    experiment is not a string (a run number or calibration name passed in its place) and FileNotFoundError when
-    the folder does not exist, so that nothing silently falls back to another experiment.
+    Folder of the installed experiment package <experiment>_analysis (runs.csv, channel_map.csv, <experiment>_runs.py,
+    calibrations/, nonlinearity_corrections/, optional tpc_processing_configs/ and pad_gains/). Each experiment lives
+    in its own repository, installed next to this library with `pip install -e`. Raises TypeError when experiment is
+    not a string (a run number or calibration name passed in its place) and FileNotFoundError when the package is not
+    installed, so that nothing silently falls back to another experiment.
     '''
     if not isinstance(experiment, str):
         raise TypeError(f'experiment must be a string such as "e23035", got {experiment!r}')
-    exp_dir = BASE_DIR / f'{experiment}_analysis'
-    if not exp_dir.is_dir():
-        raise FileNotFoundError(f'no experiment folder {exp_dir} (expected <repo>/{experiment}_analysis, see README.md)')
-    return exp_dir
+    try:
+        package = importlib.import_module(f'{experiment}_analysis')
+    except ModuleNotFoundError as e:
+        if e.name != f'{experiment}_analysis':
+            raise
+        raise FileNotFoundError(f'no installed experiment package {experiment}_analysis: clone its repository and run '
+                                f'`pip install -e .` in it (README.md, "Setting up a new experiment")') from None
+    paths = list(getattr(package, '__path__', []))
+    if not paths:
+        raise FileNotFoundError(f'{experiment}_analysis is not a package (no folder): {package}')
+    return Path(paths[0]).resolve()
+
+_library_dirty = None
+def library_has_local_changes():
+    '''True when this library runs from a git checkout with uncommitted changes to tracked files (checked once per process).'''
+    global _library_dirty
+    if _library_dirty is None:
+        try:
+            out = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no'], capture_output=True, text=True,
+                                 check=True, cwd=BASE_DIR, timeout=60).stdout
+            _library_dirty = bool(out.strip())
+        except Exception:
+            _library_dirty = False
+    return _library_dirty
+
+_cache_dirs = {}
+def get_cache_dir(experiment):
+    '''
+    Root of the experiment's derived-data caches (hist_cache/, clarion_cache/), shared by everyone working on the
+    experiment: the experiment package's CACHE_DIR, or <SHARED_DATA_ROOT>/<experiment>/analysis_cache. A library
+    checkout with uncommitted changes writes to its own dev_<user>/ subfolder instead, so that unreviewed code never
+    fills the shared cache with files other people would trust. Budgeted by cache_maintenance (CACHE_MAX_GB).
+    '''
+    if experiment not in _cache_dirs:
+        root = get_experiment_setting(experiment, 'CACHE_DIR', None)
+        root = Path(root) if root else Path(SHARED_DATA_ROOT) / experiment / 'analysis_cache'
+        if library_has_local_changes():
+            import getpass
+            root = root / f'dev_{getpass.getuser()}'
+        root.mkdir(parents=True, exist_ok=True)
+        _cache_dirs[experiment] = root
+    return _cache_dirs[experiment]
 
 def get_runs_module(experiment):
     '''The experiment's runs module, <experiment>_analysis.<experiment>_runs (interface in README.md).'''
@@ -727,7 +768,7 @@ def check_friend_shadowing(tree, friend_tree, expressions, tree_file_path):
                          f"Remake the file without these branches, or refer to them explicitly as {friend_name}.<branch>.")
 
 def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename=""):
-    cache_dir = os.path.join(get_experiment_dir(experiment), 'hist_cache')
+    cache_dir = os.path.join(get_cache_dir(experiment), 'hist_cache')
     os.makedirs(cache_dir, exist_ok=True)
 
     # The input files have to exist before the cache key is made, since the key records which version of them was used

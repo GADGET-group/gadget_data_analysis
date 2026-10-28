@@ -12,4 +12,3 @@ reconstruct_railed_pads,bool,True
 cache_enable,bool,True
 batch_event_cache_size,int,50
 remove_zero_pad,bool,True
-railed_pad_repair_method,str,scipy

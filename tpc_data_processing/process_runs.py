@@ -1,4 +1,5 @@
 import os
+import sys
 import uproot
 import awkward as ak
 import hashlib
@@ -40,7 +41,32 @@ TPC_MAX_TOTAL_WORKERS = 48            #all light modes; throughput still rose fr
 TPC_WORKERS_PER_GPU_BY_MODE = {}      #explicit per-mode overrides ('mode' or 'mode+veto_vetomode'); empty = use the memory rule
 DEFAULT_BACKGROUND_SUBTRACT_MODE = 'none' #raw_h5_file default when a config does not set the mode
 
-def get_config_background_mode(config_filename="", key='background_subtract_mode'):
+CONFIG_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs')   # the library presets
+
+def get_config_path(config_filename, experiment=None):
+    '''
+    Path of a processing config. The library presets in tpc_processing_configs/ are the default; an experiment package
+    may carry its own <experiment>_analysis/tpc_processing_configs/<name> for a variant the presets lack or for a copy
+    it must keep as it was (its processed files are named after the config name, not its content), and that file then
+    takes precedence, with a warning when it differs from a preset of the same name.
+    '''
+    preset = os.path.join(CONFIG_DIR, config_filename)
+    if experiment:
+        try:
+            import importlib
+            package_dir = list(importlib.import_module(f'{experiment}_analysis').__path__)[0]
+        except Exception:
+            return preset
+        local = os.path.join(package_dir, 'tpc_processing_configs', config_filename)
+        if os.path.isfile(local):
+            if os.path.isfile(preset):
+                import filecmp
+                if not filecmp.cmp(local, preset, shallow=False):
+                    print(f'process_runs: {experiment} overrides the library preset {config_filename} with {local}', file=sys.stderr, flush=True)
+            return local
+    return preset
+
+def get_config_background_mode(config_filename="", key='background_subtract_mode', experiment=None):
     '''
     background_subtract_mode (or another key, e.g. veto_background_subtract_mode) set by a config in
     tpc_processing_configs (parsed from the CSV, no h5 file opened). If the config is empty, missing, or does not
@@ -48,7 +74,7 @@ def get_config_background_mode(config_filename="", key='background_subtract_mode
     '''
     import csv
     if config_filename and config_filename != 'none':
-        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
+        config_path = get_config_path(config_filename, experiment)
         try:
             with open(config_path, 'r') as f:
                 for row in csv.reader(f):
@@ -260,7 +286,7 @@ def get_h5_file(experiment, run_number, config_filename=""):
     h5file = raw_h5_file.raw_h5_file(raw_h5_path, zscale=1.088, flat_lookup_csv='tpc_data_processing/channel_mappings/flatlookup4cobos.csv')
     
     if config_filename and config_filename != 'none':
-        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'tpc_processing_configs', config_filename)
+        config_path = get_config_path(config_filename, experiment)
         if os.path.exists(config_path):
             h5file.load_config(config_path)
         else:

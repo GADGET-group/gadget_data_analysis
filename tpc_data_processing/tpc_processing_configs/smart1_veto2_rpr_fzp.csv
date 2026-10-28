@@ -14,5 +14,4 @@ batch_event_cache_size,int,50
 remove_zero_pad,bool,True
 veto_background_subtract_mode,str,smart2
 veto_smart_bins_away_to_check,int,3
-railed_pad_repair_method,str,scipy
 smart_one_sided_baseline,str,line

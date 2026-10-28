@@ -16,15 +16,19 @@ experiments (e21072, e23035_prep_*) still appear in the path tables.
 
 | folder | contents |
 |---|---|
-| `tpc_data_processing/` | `raw_h5_file.py` (GET h5 reader, baseline subtraction, pad geometry from `padxy.txt`, `PadPlane.csv`, `channel_mappings/flatlookup4cobos.csv`), `process_runs.py` (per-run processing to ROOT files: `process_tpc_run`, `ensure_processed`, `get_quantity`, `get_save_path`, `get_h5_path`), `tpc_processing_configs/*.csv`, `pad_gain_match/` (pad gain maps in `gain_match_results/`), `plots/` (`rve.py` and other plotting scripts), `field_dist/`, `h5_utils/`, `veto_conditioner/`, `dev/`, `heritage_h5_file.py`, `check_cobos_present.py`, `RawEventViewerFrame.py`, `file_formats.txt` |
+| `tpc_data_processing/` | `raw_h5_file.py` (GET h5 reader, baseline subtraction, pad geometry from `padxy.txt`, `PadPlane.csv`, `channel_mappings/flatlookup4cobos.csv`), `process_runs.py` (per-run processing to ROOT files: `process_tpc_run`, `ensure_processed`, `get_quantity`, `get_save_path`, `get_h5_path`, `get_config_path`), `tpc_processing_configs/*.csv` (the preset configs), `pad_gain_match/` (tools that make pad gain maps), `field_dist/polynomial_correction.py`, `h5_utils/`, `dev/railed_pad_repair.py`, `heritage_h5_file.py`, `check_cobos_present.py`, `RawEventViewerFrame.py`, `file_formats.txt` |
 | `tpc_and_decay_station/` | `ddas_interface.py` (merging DDAS files with TPC events, histogram cache), `degai.py` (CLARION add-back, gamma-gamma, timing), `get_tsbo.py` (time since beam off per GET event), `mesh_gamma_coincidence.py`, `clarion_det_locations.csv`, `degai-angles-table.pdf` |
 | `analysis_tools/` | `energy_calibration_tools.py`, `fitting_tools.py`, `root_vis_tools.py`, `spectrum_fitter.py` |
 | `main_gui/` | tkinter analysis GUI and raw event viewer |
-| `e23035_analysis/`, `e25058_analysis/` | one folder per experiment: `runs.csv`, `channel_map.csv`, `<exp>_runs.py`, `__init__.py`, the experiment's own scripts, and git-ignored caches (`hist_cache/`, `clarion_cache/`, `calibrations/`, `nonlinearity_corrections/`) |
 | `fit_gui/` | fit GUI frames |
-| `track_fitting/` | track simulation, SRIM tables (`stopping_powers/`), field-distortion studies, `build_sim.get_gas_density` |
+| `track_fitting/` | track simulation, SRIM tables (`stopping_powers/`), `build_sim.get_gas_density` |
 | `detector_efficiency/` | efficiency simulations |
-| repo root | `setup.py` (distribution `gadget_analysis`, `find_packages()`), `exp_env.py` (the owner's interactive driver script), `.gitignore` |
+| repo root | `setup.py` (distribution `gadget_analysis`, `find_packages()`), `.gitignore` |
+
+Experiments live in their own repositories, one installable package each (`e23035_analysis`, `e25058_analysis`, and
+`gadget_experiment_template` to start the next one): `runs.csv`, `channel_map.csv`, `<exp>_runs.py`, pad gain maps,
+calibrations, config overrides and the experiment's own scripts. The library never imports an experiment at import
+time; it finds one by name when asked (see "The experiment repository").
 
 ## Installation
 
@@ -41,20 +45,22 @@ pip install torch torch-ransac3d   # the e23035 env has torch 2.5.1+cu121; match
 pip install scikit-spatial
 ```
 
-Install the repository in editable mode from its root:
+Install the library and the experiment repository you work on, both in editable mode:
 
 ```bash
-cd /egr/research-tpc/adamsa52/gadget_analysis
-pip uninstall -y e23035_analysis e25058_analysis   # old distribution names, if the env has them
-pip install -e .
+pip install -e /path/to/gadget_analysis        # this repository (or a tagged release: pip install git+...@v0.1.0)
+pip install -e /path/to/e23035_analysis        # the experiment package(s) you use
 ```
 
 Rules:
 
-- Re-run `pip install -e .` after adding any new top-level package (for example a new `<exp>_analysis/` with its
-  `__init__.py`). The editable finder's package map is written at install time and does not see new folders.
-- One env per checkout. The editable install binds package names (`tpc_data_processing`, `e23035_analysis`, ...) to
-  one checkout's folders, so the main checkout uses env `e23035` and the e25058 worktree uses env `gadget_analysis`.
+- The editable finder's package map is written at install time: re-run `pip install -e .` in a repository after it
+  gains a new top-level package.
+- One env per library checkout. The editable install binds `tpc_data_processing`, `tpc_and_decay_station`, ... to
+  one checkout's folders. Developers use an editable checkout; everyone else installs a tagged release.
+- Library changes go to this repository by pull request against `main`, never into a copy inside an experiment
+  repository. A library checkout with uncommitted changes writes its caches to a private `dev_<user>/` folder (see
+  "Caches"), so unreviewed code never fills the shared cache.
 - Activate the env (`conda activate`, or `conda run -n <env> ...`). Calling the env's python by its full path without
   activation breaks PyROOT's JIT.
 - Run scripts and sessions from the repo root. Some paths are still relative to the working directory: the
@@ -98,12 +104,12 @@ library function takes `experiment` first.
 | 3. TPC friend tree | `ddas_interface.make_tpc_friend_file(exp, ddas_run, tpc_ini_filename)`, made on first use when `tpc_*`, `get_timestamp`, `get_event_id` or `get_run_id` appear in an expression (`tpc_ini_filename` is then required) | merged file, runs module, processed ROOT | `run<N>_tpc_<config>_v2.root` + log |
 | 3b. time since beam off | `get_tsbo.get_time_since_beam_off(exp, get_runs, tpc_ini_filename=cfg)` | merged files and friend trees (never made here) | `<exp>_run<GET>_get_tsbo_v2.root` |
 | 4. histograms | `ddas_interface.get_histogram(exp, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename="")`; `ddas_run` may be a list (summed) | merged (+ friend) | `<exp>_analysis/hist_cache/h_<md5>.root` |
-| 5. gamma gain match | copy of `e23035_analysis/align_gamma_energies.py`, which calls `energy_calibration_tools.make_energy_calibration` on the `clover_*_cr` branches | merged files | `<exp>_analysis/calibrations/<run>/<cal>/<branch>/` |
+| 5. gamma gain match | copy of `align_gamma_energies.py` from the e23035 repository, which calls `energy_calibration_tools.make_energy_calibration` on the `clover_*_cr` branches | merged files | `<exp>_analysis/calibrations/<run>/<cal>/<branch>/` |
 | 6. add-back, coincidences | `degai.get_addback_tree`, `degai.get_histogram`, `degai.get_addback_coincidence_spectrum`, `get_gated_projection`, `get_bg_subtracted_projection` | merged files, calibrations | `<exp>_analysis/clarion_cache/` |
 | 7. peak fitting | `analysis_tools.spectrum_fitter` (`spectrum_fitter`, `multi_spectrum_fitter`), `analysis_tools.fitting_tools` | histograms | your choice |
 
 e23035's TPC proton and alpha fit stack (`stepwise_fit.py`, `fit_tpc_spectrum_simultaneous.py`, `fit_ledger.py`,
-`fit_diagnostics.py`) stays in `e23035_analysis/` and builds on `analysis_tools`.
+`fit_diagnostics.py`) lives in the `e23035_analysis` repository and builds on `analysis_tools`.
 
 `get_quantity` names: `track_center`, `principle_axes`, `variance_along_axes`, `pad_charge`, `endpoints`,
 `charge_width`, `width_above_threshold`, `pad_max`, `timestamps`, `railed_pads` (events tree) and `settings_hash`,
@@ -170,12 +176,24 @@ h_ab_p = degai.get_histogram(exp, ddas_run, adj, 'gm_511and2614_1', (4000, 0, 40
 calibration under `cal_name` for every crystal of that run. Other adjacency choices: `degai.get_clover_adj_dict(exp)`
 (same clover only) and `degai.get_crystal_adj_dict(exp)` (no add-back).
 
-## The experiment folder
+## The experiment repository
 
-`<exp>_analysis/` holds `__init__.py`, `runs.csv`, `channel_map.csv`, `<exp>_runs.py` and the experiment's own
-scripts. Library code never imports it at import time: `ddas_interface.get_experiment_dir(exp)` finds
-`<repo>/<exp>_analysis`, `ddas_interface.read_channel_map(exp)` reads `channel_map.csv`, and
-`ddas_interface.get_runs_module(exp)` imports `<exp>_analysis.<exp>_runs`.
+An experiment is an installed package `<exp>_analysis` (its own repository, started from
+`gadget_experiment_template`) holding `__init__.py`, `runs.csv`, `channel_map.csv`, `<exp>_runs.py`, `pad_gains/`
+(the pad gain maps the runs module points at), optional `tpc_processing_configs/` (see below), `calibrations/` and
+`nonlinearity_corrections/` (results, committed), and the experiment's own scripts. Library code never imports it at
+import time: `ddas_interface.get_experiment_dir(exp)` imports `<exp>_analysis` and uses its folder,
+`ddas_interface.read_channel_map(exp)` reads `channel_map.csv`, `ddas_interface.get_runs_module(exp)` imports
+`<exp>_analysis.<exp>_runs`, and `ddas_interface.get_cache_dir(exp)` gives the shared cache root.
+
+### Processing configs
+
+`process_runs.get_config_path(name, experiment)` resolves a config name. The library presets in
+`tpc_data_processing/tpc_processing_configs/` are the default and the place for new generally useful variants. An
+experiment package may carry `tpc_processing_configs/<name>` of its own, either a variant the presets lack or a copy
+it must keep exactly as its files were processed (processed-file names carry the config name, not its content); a
+file of the same name as a preset takes precedence and the library prints a warning. e23035 keeps copies with
+`railed_pad_repair_method,str,scipy` until its runs are reprocessed with the current method.
 
 ### runs.csv
 
@@ -247,13 +265,16 @@ Run it after every change to the experiment folder.
 | merged file | `ddas/run<N>_merged_v2.root` | no: made when missing; delete it after editing `channel_map.csv` or the merge constants |
 | TPC friend tree | `ddas/run<N>_tpc_<config>_v2.root` | no: made when missing; delete it after changing pad gains, masks, `runs.csv` pairings or the merged file |
 | time since beam off | `proc_pkl/<exp>_run<GET>_get_tsbo_v2.root` | no: written only when all its DDAS runs have merged and friend files; delete it after remaking them |
-| `ddas_interface.get_histogram` | `<exp>_analysis/hist_cache/` | yes (key has run, binning, expressions, config name and input-file fingerprints) |
-| `energy_calibration_tools.get_calibrated_histogram` | `<exp>_analysis/hist_cache/` | no (key has no fingerprint); pass `force_recreate=True` |
-| add-back trees, add-back histograms | `<exp>_analysis/clarion_cache/add_back_tree/`, `histograms_flex/` | after a re-merge yes (merged-file fingerprint); after recalibrating under the same `cal_name` no |
-| gamma-gamma matrices, timing spectra | `<exp>_analysis/clarion_cache/histograms/`, `timing/` | no |
+| `ddas_interface.get_histogram` | `<cache>/hist_cache/` | yes (key has run, binning, expressions, config name and input-file fingerprints) |
+| `energy_calibration_tools.get_calibrated_histogram` | `<cache>/hist_cache/` | no (key has no fingerprint); pass `force_recreate=True` |
+| add-back trees, add-back histograms | `<cache>/clarion_cache/add_back_tree/`, `histograms_flex/` | after a re-merge yes (merged-file fingerprint); after recalibrating under the same `cal_name` no |
+| gamma-gamma matrices, timing spectra | `<cache>/clarion_cache/histograms/`, `timing/` | no |
 
-The `.gitignore` excludes `/*_analysis/{calibrations,clarion_cache,hist_cache,nonlinearity_corrections}/` for every
-experiment folder. It also excludes `*.pkl` and `*.root`, so a new pad-gain map needs `git add -f`.
+`<cache>` is `ddas_interface.get_cache_dir(exp)`: the experiment's `CACHE_DIR` if its runs module declares one,
+otherwise `/egr/research-tpc/shared/proc_runs/<exp>/analysis_cache/`, shared by everyone working on the experiment.
+A library checkout with uncommitted changes to tracked files uses `<cache>/dev_<user>/` instead, so that files made
+by unreviewed code are never picked up by others; commit (or stash) and the shared cache is used again.
+Calibrations and non-linearity corrections are results, not caches: they are committed in the experiment repository.
 
 ### Cache budget
 
@@ -261,7 +282,7 @@ Add-back trees are large (one to three GB for a long run), so each experiment ca
 `CACHE_MAX_GB` (and optionally `CACHE_KEEP_DAYS`, default 7) in `<exp>_runs.py`; e23035 and e25058 use 150 GB.
 Whenever a library function writes a new file into `clarion_cache/` or `hist_cache/` and the total is above the
 budget, `tpc_and_decay_station.cache_maintenance` deletes the least recently read files until it fits, never a
-file read in the last `CACHE_KEEP_DAYS` days, and appends what it removed to `<exp>_analysis/cache_prune.log`.
+file read in the last `CACHE_KEEP_DAYS` days, and appends what it removed to `cache_prune.log` in the cache root.
 "Last read" is the file's access time: every cache hit refreshes it, so files in use stay. Without `CACHE_MAX_GB`
 nothing is ever deleted. To see the state or prune by hand (dry run unless `--apply`):
 
@@ -288,57 +309,47 @@ issues); the raw event viewer is the working one.
 
 ## Setting up a new experiment
 
-1. Create `<exp>_analysis/` with an empty `__init__.py`.
-2. Write `runs.csv` (columns `GET`, `DDAS` at least, plus whatever your run selectors need).
-3. Write `channel_map.csv` from the DDAS cabling: logic channels at the `CH_MAP` numbers, PID detectors, every
-   germanium crystal as `clover_<n><a-d>`, with pre-experiment slopes and offsets where known.
-4. Copy `e25058_analysis/e25058_runs.py` to `<exp>_analysis/<exp>_runs.py` and edit:
-   - `experiment`;
-   - veto thresholds in `get_veto_mask`;
-   - PID bands in `get_proton_mask_min_max_range` and `get_alpha_mask_min_max_range` (SRIM range plus margins);
-   - `get_pad_gain_path` / `GAIN_MATCH_DIR` (start from the e23035 maps in
-     `tpc_data_processing/pad_gain_match/gain_match_results/`; a new map is made with the scripts in
-     `pad_gain_match/` (check));
-   - `bad_crystals`;
-   - the run selectors (`get_ddas_runs` is a placeholder);
-   - `get_pid_cut` polygons and variables.
-5. Add a branch for the experiment to `track_fitting/build_sim.get_gas_density` (it asserts for unknown names).
-6. Data paths: put the raw h5 files in `/egr/research-tpc/shared/experiments/<exp>/h5/` and the event-builder files in
-   `/egr/research-tpc/shared/proc_runs/<exp>/ddas/`, and create `/egr/research-tpc/shared/proc_runs/<exp>/proc_pkl/`.
+Start from the template repository `gadget_experiment_template` (its README has the full checklist and
+`rename_experiment.py` renames the placeholders):
+
+1. Clone the template as `<exp>_analysis`, run `python3 rename_experiment.py <exp>`, write `runs.csv` (columns `GET`,
+   `DDAS` at least) and `channel_map.csv` (logic channels at the `CH_MAP` numbers, PID detectors, every germanium
+   crystal as `clover_<n><a-d>`, pre-experiment slopes and offsets where known).
+2. Edit `<exp>_runs.py` at its `TODO` marks: veto thresholds, PID bands, pad gain map in `pad_gains/`, `bad_crystals`,
+   run selectors, `get_pid_cut`, `CACHE_MAX_GB`.
+3. Add a branch for the experiment to `track_fitting/build_sim.get_gas_density` in this library (pull request).
+4. Data paths: raw h5 files in `/egr/research-tpc/shared/experiments/<exp>/h5/`, event-builder files in
+   `/egr/research-tpc/shared/proc_runs/<exp>/ddas/`, and an empty `/egr/research-tpc/shared/proc_runs/<exp>/proc_pkl/`.
    Other hosts need a branch in `process_runs.get_save_path` and `get_h5_path`.
-7. `pip install -e .` so the new package is found.
-8. `ddas_interface.validate_experiment('<exp>')` until it returns `[]`.
-9. Process one GET run (`process_runs.process_tpc_run('<exp>', run, cfg)`), then look at
-   `get_energy_MeV` and `get_length_mm` (for example a range vs energy plot with `tpc_data_processing/plots/rve.py`)
-   and check the energy scale on a known line.
-10. Merge one DDAS run with `ddas_interface.make_ddas_root_file('<exp>', ddas_run)` and read
-    `run<N>_merge_v2.log`. The last line has the counters. In e23035 run 241, `mesh_in_window` is 22159 of 31543
-    `triggers` (70 %; low-energy events leave no mesh hit above the DDAS threshold); a much lower fraction means the
-    mesh delay or gate is wrong for this setup. Measure the delay with
-    `get_histogram(exp, run, (200, 0, 10e-6), 'dt', 'trigger - mesh', 'get_trig_accepted_t - mesh_pre_amp_t', 'get_trig_accepted_m>=1 && mesh_pre_amp_m>=1')`.
-11. First histograms: `ddas_interface.get_histogram(exp, run, (8000, 0, 8000), 'h', 'clover 1a', 'clover_1a_e')`
-    for a crystal, then `tpc_energy` with `tpc_ini_filename=cfg`. The friend log
-    (`run<N>_tpc_<config>_v2.log`) reports `GET run N: matched X of Y GET events`; a low fraction means a GET/DDAS
-    pairing problem in `runs.csv`.
-12. Gamma gain match: copy `e23035_analysis/align_gamma_energies.py` into your folder and adapt `experiment`, the run
-    selection (`runs_to_align_desc`), the calibration peaks (`gm_label`; the name becomes `gm_<label>_<degree>`, for
-    e23035 `gm_511and2614_1`, `gm_511and1301_1`, `gm_1461and2614_1`) and the non-linearity peak list. Then call
-    `do_gain_match(run)` on one run and look at `calibrations/<run>/<gm_name>/gain_match.pdf`, then `process_all()`,
-    `make_summary_pdf()` and optionally `make_nonlinearity_correction()` (e23035 correction `c1`).
-13. Add-back and coincidences with `degai` as in the worked session.
+5. `pip install -e .` in the experiment repository, then `ddas_interface.validate_experiment('<exp>')` until it
+   returns `[]`.
+6. Process one GET run (`process_runs.process_tpc_run('<exp>', run, cfg)`) and look at `get_energy_MeV` and
+   `get_length_mm` on a known line.
+7. Merge one DDAS run with `ddas_interface.make_ddas_root_file('<exp>', ddas_run)` and read `run<N>_merge_v2.log`.
+   The last line has the counters. In e23035 run 241, `mesh_in_window` is 22159 of 31543 `triggers` (70 %; low-energy
+   events leave no mesh hit above the DDAS threshold); a much lower fraction means the mesh delay or gate is wrong for
+   this setup. Measure the delay with
+   `get_histogram(exp, run, (200, 0, 10e-6), 'dt', 'trigger - mesh', 'get_trig_accepted_t - mesh_pre_amp_t', 'get_trig_accepted_m>=1 && mesh_pre_amp_m>=1')`.
+8. First histograms: `ddas_interface.get_histogram(exp, run, (8000, 0, 8000), 'h', 'clover 1a', 'clover_1a_e')` for a
+   crystal, then `tpc_energy` with `tpc_ini_filename=cfg`. The friend log (`run<N>_tpc_<config>_v2.log`) reports
+   `GET run N: matched X of Y GET events`; a low fraction means a GET/DDAS pairing problem in `runs.csv`.
+9. Gamma gain match: copy `align_gamma_energies.py` from the e23035 repository and adapt `experiment`, the run
+   selection, the calibration peaks (the name becomes `gm_<label>_<degree>`) and the non-linearity peak list; call
+   `do_gain_match(run)` on one run and look at `calibrations/<run>/<gm_name>/gain_match.pdf`, then `process_all()`,
+   `make_summary_pdf()` and optionally `make_nonlinearity_correction()`.
+10. Add-back and coincidences with `degai` as in the worked session.
 
-## Branches and worktrees
+## Branches and releases
 
-| checkout | branch | env |
-|---|---|---|
-| `/egr/research-tpc/adamsa52/gadget_analysis` | `e23035` | `e23035` |
-| `/egr/research-tpc/adamsa52/gadget_analysis_e25058` (git worktree) | `e25058-run-processing` | `gadget_analysis` |
+`main` is the library. Changes arrive by pull request; tag a release (`v0.1.0`, ...) when experiments should pin
+it. Experiment repositories pin the library version they were run with (`gadget_analysis>=0.1` in their
+`pyproject.toml`) and record the library commit in every friend tree and processed file (`git_version`).
 
-The worktree is e25058's checkout, shared with the e25058 students, and is kept current by merging `e23035` into
-it. Library changes go to `e23035` first. A new experiment can live on either branch; it needs its own env if it gets
-its own checkout.
+Until October 2026 everything lived in this repository on per-experiment branches (`e23035`,
+`e25058-run-processing`, ...). Those branches hold the history of the experiment code that now lives in
+`e23035_analysis` and `e25058_analysis`.
 
-## Experiment-specific constants outside the experiment folder
+## Experiment-specific constants outside the experiment repository
 
 | constant | where | what to do |
 |---|---|---|

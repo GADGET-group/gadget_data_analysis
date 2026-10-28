@@ -1669,7 +1669,7 @@ class raw_h5_file:
 
 
     def do_gain_match(self, event_numbers:list, save_results:bool, save_path='', show_debug_figures=False, 
-                      mode='raw', bounds=(0.5, 2), thresh_to_replace=2000):
+                      mode='raw', bounds=(0.1, 10), thresh_to_replace=2000):
         print('gain matching using %d events'%len(event_numbers))
         print('getting list of energy per pad for each event')
         pad_counts = []
@@ -1721,10 +1721,13 @@ class raw_h5_file:
         print('average event adc counts:', np.mean(event_adc_counts))
         pad_counts /= np.mean(event_adc_counts)
         print('performing minimization')
+        pad_counts_dev = cp.asarray(pad_counts)
+        num_events = len(pad_counts)
         def raw_objective_function(gains):
             #print(np.shape(pad_counts), np.shape(gains))
-            adc_counts_in_each_event = np.einsum('ij,j', pad_counts, gains)
-            return np.sqrt(np.sum((adc_counts_in_each_event - 1)**2)/len(adc_counts_in_each_event))*2.355
+            #on the GPU when cupy is available (cp is numpy otherwise): the einsum dominates the Powell search
+            adc_counts_in_each_event = cp.einsum('ij,j', pad_counts_dev, cp.asarray(gains))
+            return float(np.sqrt(float(cp.asnumpy(cp.sum((adc_counts_in_each_event - 1)**2)))/num_events)*2.355)
         
         num_grid_points = 20
         pad_xy_index = np.array([self.pad_to_xy_index[pad] if pad in self.pad_to_xy_index else (0,0) for pad in range(NUM_PADS)])

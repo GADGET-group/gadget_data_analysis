@@ -1,7 +1,7 @@
 '''
-Budgeted maintenance of an experiment's derived-data caches: <exp>_analysis/clarion_cache (add-back trees,
-add-back histograms, gamma-gamma matrices, timing spectra) and <exp>_analysis/hist_cache (ddas_interface and
-calibrated histograms). Everything in them is rebuilt on demand, so the policy is simply "keep the most recently
+Budgeted maintenance of an experiment's derived-data caches under ddas_interface.get_cache_dir(experiment)
+(/egr/research-tpc/shared/proc_runs/<exp>/analysis_cache by default): clarion_cache (add-back trees, add-back
+histograms, gamma-gamma matrices, timing spectra) and hist_cache (ddas_interface and calibrated histograms). Everything in them is rebuilt on demand, so the policy is simply "keep the most recently
 read files":
 
 - the runs module may declare CACHE_MAX_GB (and CACHE_KEEP_DAYS, default 7); when a library function writes a new
@@ -9,7 +9,7 @@ read files":
   the budget, never touching a file read within CACHE_KEEP_DAYS. Without CACHE_MAX_GB nothing is ever deleted.
 - "last read" is the file's access time (the share is mounted relatime, and every cache hit also calls touch()),
   or its modification time if that is newer.
-- deletions are appended to <exp>_analysis/cache_prune.log.
+- deletions are appended to cache_prune.log in the cache root.
 
 Command line (dry run unless --apply):
     python -m tpc_and_decay_station.cache_maintenance e23035 [--max-gb 150] [--keep-days 7] [--apply]
@@ -25,11 +25,12 @@ LOG_NAME = 'cache_prune.log'
 STAMP_NAME = 'cache_prune.stamp'
 _SKIP = {LOG_NAME, STAMP_NAME}
 
-def _experiment_dir(experiment, exp_dir=None):
+def _cache_root(experiment, exp_dir=None):
+    '''The cache root (exp_dir overrides it, for tests).'''
     if exp_dir is not None:
         return str(exp_dir)
     from tpc_and_decay_station import ddas_interface   # lazy: ddas_interface imports this module
-    return str(ddas_interface.get_experiment_dir(experiment))
+    return str(ddas_interface.get_cache_dir(experiment))
 
 def touch(path):
     '''Record a cache hit: set the access time to now, keeping the modification time.'''
@@ -40,8 +41,8 @@ def touch(path):
         pass
 
 def cache_files(experiment, exp_dir=None):
-    '''[(path, size_bytes, last_read_epoch), ...] of every file in the experiment's caches.'''
-    root = _experiment_dir(experiment, exp_dir)
+    '''[(path, size_bytes, last_read_epoch), ...] of every file in the experiment's caches (clarion_cache, hist_cache under the cache root).'''
+    root = _cache_root(experiment, exp_dir)
     out = []
     for sub in CACHE_SUBDIRS:
         top = os.path.join(root, sub)
@@ -67,7 +68,7 @@ def cache_files(experiment, exp_dir=None):
 
 def cache_report(experiment, exp_dir=None):
     '''Size, file count and last-read range per cache folder, as a printable string.'''
-    root = _experiment_dir(experiment, exp_dir)
+    root = _cache_root(experiment, exp_dir)
     files = cache_files(experiment, exp_dir)
     now = time.time()
     groups = {}
@@ -90,7 +91,7 @@ def prune_cache(experiment, max_gb, keep_days=7, dry_run=True, exp_dir=None, ver
     in the last keep_days. Returns (deleted, freed_bytes, total_before, total_after) with deleted = [(path, size,
     days_since_read), ...]. With dry_run the list is computed and printed but nothing is removed.
     '''
-    root = _experiment_dir(experiment, exp_dir)
+    root = _cache_root(experiment, exp_dir)
     files = cache_files(experiment, exp_dir)
     now = time.time()
     total = sum(size for _, size, _ in files)
@@ -145,7 +146,7 @@ def maybe_prune(experiment, min_interval_s=600):
         if max_gb is None:
             return
         keep_days = ddas_interface.get_experiment_setting(experiment, 'CACHE_KEEP_DAYS', 7)
-        root = str(ddas_interface.get_experiment_dir(experiment))
+        root = str(ddas_interface.get_cache_dir(experiment))
         stamp = os.path.join(root, STAMP_NAME)
         try:
             if time.time() - os.stat(stamp).st_mtime < min_interval_s:
