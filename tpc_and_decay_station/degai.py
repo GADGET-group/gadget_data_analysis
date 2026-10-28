@@ -11,7 +11,7 @@ import numpy as np
 import ROOT
 import tqdm
 
-from tpc_and_decay_station import ddas_interface
+from tpc_and_decay_station import ddas_interface, cache_maintenance
 from analysis_tools import energy_calibration_tools
 
 def is_iterable_runs(obj):
@@ -262,6 +262,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
             else:
                 out_tree = read_file.Get('add_back')
                 if out_tree: 
+                    cache_maintenance.touch(cache_file_path)
                     out_tree._keepalive_file = read_file
                     return out_tree
                 else:
@@ -439,6 +440,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
 
     read_file = ROOT.TFile.Open(cache_file_path, 'READ')
     out_tree = read_file.Get('add_back')
+    cache_maintenance.maybe_prune(experiment)
     out_tree._keepalive_file = read_file
     return out_tree
 
@@ -528,6 +530,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
                     final_hist.SetTitle(hist_title)
                     final_hist.SetDirectory(0)
                     cf.Close()
+                    cache_maintenance.touch(cache_file_path)
                     return final_hist
                 cf.Close()
                 os.remove(cache_file_path)
@@ -569,6 +572,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     raw_hist.Write()
     cf.Close()
+    cache_maintenance.maybe_prune(experiment)
 
     final_hist = raw_hist.Clone(hist_name)
     final_hist.SetTitle(hist_title)
@@ -684,6 +688,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
                 cf = ROOT.TFile.Open(combined_cache_file, 'RECREATE')
                 total_hist.Write()
                 cf.Close()
+                cache_maintenance.maybe_prune(experiment)
                         
             return total_hist
             
@@ -715,6 +720,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
                 if isinstance(hist, ROOT.TH2): 
                     hist.SetDirectory(0)
                     cf.Close()
+                    cache_maintenance.touch(cache_file_path)
                     return hist
                 cf.Close()
                 os.remove(cache_file_path)
@@ -739,8 +745,9 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
     hist.SetDirectory(0) 
     
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
-    hist.Write() 
+    hist.Write()
     cf.Close()
+    cache_maintenance.maybe_prune(experiment)
 
     return hist
 
@@ -866,6 +873,7 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
                 if isinstance(hist, ROOT.TH1) and hist.GetDimension() == 1: 
                     hist.SetDirectory(0)
                     cf.Close()
+                    cache_maintenance.touch(cache_file_path)
                     return hist
                 cf.Close()
                 os.remove(cache_file_path)
@@ -940,5 +948,6 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     hist.Write()
     cf.Close()
+    cache_maintenance.maybe_prune(experiment)
 
     return hist

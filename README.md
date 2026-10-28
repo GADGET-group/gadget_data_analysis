@@ -255,6 +255,24 @@ Run it after every change to the experiment folder.
 The `.gitignore` excludes `/*_analysis/{calibrations,clarion_cache,hist_cache,nonlinearity_corrections}/` for every
 experiment folder. It also excludes `*.pkl` and `*.root`, so a new pad-gain map needs `git add -f`.
 
+### Cache budget
+
+Add-back trees are large (one to three GB for a long run), so each experiment can cap its caches. Declare
+`CACHE_MAX_GB` (and optionally `CACHE_KEEP_DAYS`, default 7) in `<exp>_runs.py`; e23035 and e25058 use 150 GB.
+Whenever a library function writes a new file into `clarion_cache/` or `hist_cache/` and the total is above the
+budget, `tpc_and_decay_station.cache_maintenance` deletes the least recently read files until it fits, never a
+file read in the last `CACHE_KEEP_DAYS` days, and appends what it removed to `<exp>_analysis/cache_prune.log`.
+"Last read" is the file's access time: every cache hit refreshes it, so files in use stay. Without `CACHE_MAX_GB`
+nothing is ever deleted. To see the state or prune by hand (dry run unless `--apply`):
+
+```bash
+python -m tpc_and_decay_station.cache_maintenance e23035 --max-gb 100
+python -m tpc_and_decay_station.cache_maintenance e23035 --max-gb 100 --apply
+```
+
+Deleted files are rebuilt on demand the next time they are asked for. Trees keyed to a superseded merged-file
+version (for example the pre-October-2026 legacy merges) are never read again and are the first to go.
+
 ## GUIs
 
 All need an X display.

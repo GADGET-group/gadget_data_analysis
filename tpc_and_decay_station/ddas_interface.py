@@ -18,6 +18,7 @@ import ROOT
 import numpy as np
 
 from tpc_data_processing import process_runs
+from tpc_and_decay_station import cache_maintenance
 
 NUM_SLOTS = 10
 CH_PER_SLOT = 16
@@ -778,6 +779,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
             pass
             
         if is_healthy:
+            cache_maintenance.touch(cache_file_path)
             return cache_file_path, hash_name
         else:
             # The file exists but is corrupted/empty. Delete it.
@@ -823,6 +825,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
     raw_hist.SetDirectory(0)
     cache_file.Close()
 
+    cache_maintenance.maybe_prune(experiment)
     return cache_file_path, hash_name
 
 

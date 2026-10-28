@@ -14,6 +14,10 @@ from tpc_and_decay_station import ddas_interface
 from track_fitting import srim_interface, build_sim
 
 experiment = 'e25058'
+#Budget for the caches in this folder (clarion_cache + hist_cache): when a new cache file takes the total above it, the
+#least recently read files are deleted, never ones read in the last CACHE_KEEP_DAYS (default 7) days.
+#Dry run / report: python -m tpc_and_decay_station.cache_maintenance e25058
+CACHE_MAX_GB = 150
 
 current_dir = Path(__file__).parent.resolve()
 run_df = pd.read_csv(os.path.join(current_dir, 'runs.csv'))

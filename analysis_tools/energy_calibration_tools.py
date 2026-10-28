@@ -14,7 +14,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from analysis_tools import fitting_tools
-from tpc_and_decay_station import ddas_interface
+from tpc_and_decay_station import ddas_interface, cache_maintenance
 
 _exp_dir = ddas_interface.get_experiment_dir   # <repo>/<experiment>_analysis: where calibrations/ and nonlinearity_corrections/ live
 
@@ -561,6 +561,7 @@ def _fill_calibrated_histogram_worker(experiment, ddas_run, calibration_name, bi
             pass
             
         if is_healthy:
+            cache_maintenance.touch(cache_file_path)
             return cache_file_path, hash_name
         else:
             # The file exists but is corrupted/empty. Delete it.
@@ -594,6 +595,7 @@ def _fill_calibrated_histogram_worker(experiment, ddas_run, calibration_name, bi
     raw_hist.SetDirectory(0)
     cache_file.Close()
 
+    cache_maintenance.maybe_prune(experiment)
     return cache_file_path, hash_name
 
 def get_calibrated_histogram(experiment, ddas_run, calibration_name, binning, hist_name, hist_title, branch_name, nonlinearity_correction_name=None, selection="", force_recreate=False, num_workers=1):

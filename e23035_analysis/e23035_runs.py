@@ -16,6 +16,10 @@ from track_fitting import srim_interface, build_sim
 experiment = 'e23035'
 #CLARION crystals left out of degai's crystal lists, (clover number, crystal letter); the list itself comes from channel_map.csv
 bad_crystals = [(1, 'b'), (3, 'c'), (3, 'd')]
+#Budget for the caches in this folder (clarion_cache + hist_cache): when a new cache file takes the total above it, the
+#least recently read files are deleted, never ones read in the last CACHE_KEEP_DAYS (default 7) days.
+#Dry run / report: python -m tpc_and_decay_station.cache_maintenance e23035
+CACHE_MAX_GB = 150
 
 current_dir = Path(__file__).parent.resolve()
 run_df = pd.read_csv(os.path.join(current_dir, 'runs.csv'))

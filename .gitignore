@@ -3,6 +3,8 @@
 /*_analysis/clarion_cache/
 /*_analysis/hist_cache/
 /*_analysis/nonlinearity_corrections/
+/*_analysis/cache_prune.log
+/*_analysis/cache_prune.stamp
 e23035_analysis/tmp
 *.pyc
 __pycache__/
