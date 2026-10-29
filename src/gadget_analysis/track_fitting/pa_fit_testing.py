@@ -9,8 +9,8 @@ import scipy.optimize as opt
 import sklearn.cluster as cluster
 import multiprocessing
 
-from track_fitting import ParticleAndPointDeposition, build_sim
-from tpc_data_processing import raw_h5_file
+from gadget_analysis.track_fitting import ParticleAndPointDeposition, build_sim
+from gadget_analysis.tpc_data_processing import raw_h5_file
 
 particle_type = 'proton'
 

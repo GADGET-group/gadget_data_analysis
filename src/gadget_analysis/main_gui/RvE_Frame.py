@@ -9,13 +9,13 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patches as patches
 from matplotlib.path import Path
-from main_gui.GadgetRunH5 import GadgetRunH5
+from gadget_analysis.main_gui.GadgetRunH5 import GadgetRunH5
 import numpy as np
 from tqdm import tqdm
 import pickle
 
-from main_gui import gadget_widgets
-from main_gui.prev_cut_select_window import PrevCutSelectWindow
+from gadget_analysis.main_gui import gadget_widgets
+from gadget_analysis.main_gui.prev_cut_select_window import PrevCutSelectWindow
 
 class RvE_Frame(ttk.Frame):
     def __init__(self, parent, run_data:GadgetRunH5):

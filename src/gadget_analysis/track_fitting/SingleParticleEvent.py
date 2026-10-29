@@ -6,8 +6,8 @@ import time
 
 import numpy as np
 
-from track_fitting import srim_interface
-from track_fitting.SimulatedEvent import SimulatedEvent
+from gadget_analysis.track_fitting import srim_interface
+from gadget_analysis.track_fitting.SimulatedEvent import SimulatedEvent
 
 class SingleParticleEvent(SimulatedEvent):
     '''

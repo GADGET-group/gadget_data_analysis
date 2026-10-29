@@ -6,12 +6,12 @@ import scipy.stats
 
 from sklearn.neighbors import NearestNeighbors
 
-from main_gui import gadget_widgets
-from fit_gui.FitFrame import FitFrame
+from gadget_analysis.main_gui import gadget_widgets
+from gadget_analysis.fit_gui.FitFrame import FitFrame
 
 from skspatial.objects import Line
 
-from tpc_data_processing.RawEventViewerFrame import RawEventViewerFrame
+from gadget_analysis.tpc_data_processing.RawEventViewerFrame import RawEventViewerFrame
 
 class IndividualEventFrame(ttk.Frame):
     def __init__(self, parent, run_data):

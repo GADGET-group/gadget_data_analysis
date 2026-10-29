@@ -8,9 +8,9 @@ import numpy as np
 import argparse
 import sys
 
-# Add the root directory to path to import process_runs
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from tpc_data_processing import process_runs
+# Make the library importable when this file is run as a script from the checkout (src/ on the path)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+from gadget_analysis.tpc_data_processing import process_runs
 
 def convert_pkl_to_root(experiment, run=None, force=False):
     save_path = process_runs.get_save_path(experiment)

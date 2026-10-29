@@ -1,4 +1,4 @@
-from track_fitting.SingleParticleEvent import SingleParticleEvent
+from gadget_analysis.track_fitting.SingleParticleEvent import SingleParticleEvent
 
 class ParticleAndPointDeposition(SingleParticleEvent):
     def __init__(self, gas_density, particle):

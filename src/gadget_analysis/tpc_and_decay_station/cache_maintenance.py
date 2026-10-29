@@ -12,7 +12,7 @@ read files":
 - deletions are appended to cache_prune.log in the cache root.
 
 Command line (dry run unless --apply):
-    python -m tpc_and_decay_station.cache_maintenance e23035 [--max-gb 150] [--keep-days 7] [--apply]
+    python -m gadget_analysis.tpc_and_decay_station.cache_maintenance e23035 [--max-gb 150] [--keep-days 7] [--apply]
 '''
 import os
 import sys
@@ -29,7 +29,7 @@ def _cache_root(experiment, exp_dir=None):
     '''The cache root (exp_dir overrides it, for tests).'''
     if exp_dir is not None:
         return str(exp_dir)
-    from tpc_and_decay_station import ddas_interface   # lazy: ddas_interface imports this module
+    from gadget_analysis.tpc_and_decay_station import ddas_interface   # lazy: ddas_interface imports this module
     return str(ddas_interface.get_cache_dir(experiment))
 
 def touch(path):
@@ -141,7 +141,7 @@ def maybe_prune(experiment, min_interval_s=600):
     folder), and never lets a maintenance problem break the analysis call.
     '''
     try:
-        from tpc_and_decay_station import ddas_interface
+        from gadget_analysis.tpc_and_decay_station import ddas_interface
         max_gb = ddas_interface.get_experiment_setting(experiment, 'CACHE_MAX_GB', None)
         if max_gb is None:
             return
@@ -166,7 +166,7 @@ def main(argv=None):
     ap.add_argument('--keep-days', type=float, default=None, help="never delete files read this recently; default: the runs module's CACHE_KEEP_DAYS or 7")
     ap.add_argument('--apply', action='store_true', help='delete (default is a dry run)')
     args = ap.parse_args(argv)
-    from tpc_and_decay_station import ddas_interface
+    from gadget_analysis.tpc_and_decay_station import ddas_interface
     print(cache_report(args.experiment))
     max_gb = args.max_gb if args.max_gb is not None else ddas_interface.get_experiment_setting(args.experiment, 'CACHE_MAX_GB', None)
     if max_gb is None:

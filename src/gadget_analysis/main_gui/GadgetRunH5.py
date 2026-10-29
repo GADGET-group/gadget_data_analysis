@@ -23,8 +23,8 @@ from BaselineRemoval import BaselineRemoval
 from sklearn.cluster import DBSCAN
 from scipy.signal import savgol_filter
 from skspatial.objects import Line
-from tpc_data_processing.raw_h5_file import raw_h5_file
-from tpc_data_processing.raw_h5_file import raw_h5_file
+from gadget_analysis.tpc_data_processing.raw_h5_file import raw_h5_file
+from gadget_analysis.tpc_data_processing.raw_h5_file import raw_h5_file
 
 zscale = 1.45
 

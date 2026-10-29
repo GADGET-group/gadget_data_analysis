@@ -2,7 +2,7 @@ import uuid
 
 import ROOT
 
-from tpc_and_decay_station import ddas_interface
+from gadget_analysis.tpc_and_decay_station import ddas_interface
 
 def draw_overlaid_histograms(hist_dict, title="Overlaid Histograms", x_label="X", y_label="Counts"):
     if not hist_dict:

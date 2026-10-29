@@ -20,8 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import uproot
 
-from tpc_data_processing import process_runs
-from tpc_and_decay_station import ddas_interface
+from gadget_analysis.tpc_data_processing import process_runs
+from gadget_analysis.tpc_and_decay_station import ddas_interface
 
 
 def get_tsbo_file_path(experiment, get_run):

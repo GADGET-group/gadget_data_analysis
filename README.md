@@ -14,7 +14,11 @@ experiments (e21072, e23035_prep_*) still appear in the path tables.
 
 ## Repository layout
 
-| folder | contents |
+All library code is the import package `gadget_analysis` in `src/gadget_analysis/`; everything is imported as
+`gadget_analysis.<package>` (for example `from gadget_analysis.tpc_data_processing import process_runs`). The folders
+below are its sub-packages (paths in this README are relative to `src/gadget_analysis/`).
+
+| sub-package | contents |
 |---|---|
 | `tpc_data_processing/` | `raw_h5_file.py` (GET h5 reader, baseline subtraction, pad geometry from `padxy.txt`, `PadPlane.csv`, `channel_mappings/flatlookup4cobos.csv`), `process_runs.py` (per-run processing to ROOT files: `process_tpc_run`, `ensure_processed`, `get_quantity`, `get_save_path`, `get_h5_path`, `get_config_path`), `tpc_processing_configs/*.csv` (the preset configs), `pad_gain_match/` (tools that make pad gain maps), `field_dist/polynomial_correction.py`, `h5_utils/`, `dev/railed_pad_repair.py`, `heritage_h5_file.py`, `check_cobos_present.py`, `RawEventViewerFrame.py`, `file_formats.txt` |
 | `tpc_and_decay_station/` | `ddas_interface.py` (merging DDAS files with TPC events, histogram cache), `degai.py` (CLARION add-back, gamma-gamma, timing), `get_tsbo.py` (time since beam off per GET event), `mesh_gamma_coincidence.py`, `clarion_det_locations.csv`, `degai-angles-table.pdf` |
@@ -54,17 +58,22 @@ pip install -e /path/to/e23035_analysis        # the experiment package(s) you u
 
 Rules:
 
-- The editable finder's package map is written at install time: re-run `pip install -e .` in a repository after it
-  gains a new top-level package.
-- One env per library checkout. The editable install binds `tpc_data_processing`, `tpc_and_decay_station`, ... to
-  one checkout's folders. Developers use an editable checkout; everyone else installs a tagged release.
+- One env per library checkout. The editable install puts this checkout's `src/` on the path, so `gadget_analysis`
+  resolves to one checkout. Developers use an editable checkout; everyone else installs a tagged release. Check with
+  `python -c "import gadget_analysis; print(gadget_analysis.__file__)"`.
+- The `src/` layout means the library is importable only when installed (also from the repo root). A plain folder
+  named `gadget_analysis` in the working directory (a clone of this repository, say) cannot shadow the installed
+  package. A folder that is itself a package can: the pre-split monorepo checkout has an empty `__init__.py` at its
+  root, so from its parent directory `import gadget_analysis` would load that old checkout. Delete that file or do
+  not start Python there.
 - Library changes go to this repository by pull request against `main`, never into a copy inside an experiment
   repository. A library checkout with uncommitted changes writes its caches to a private `dev_<user>/` folder (see
   "Caches"), so unreviewed code never fills the shared cache.
 - Activate the env (`conda activate`, or `conda run -n <env> ...`). Calling the env's python by its full path without
   activation breaks PyROOT's JIT.
-- Run scripts and sessions from the repo root. Some paths are still relative to the working directory: the
-  `flat_lookup_file_path` rows of the processing configs, `track_fitting/stopping_powers/...` in the runs modules.
+- Relative paths such as the `flat_lookup_file_path` rows of the processing configs and
+  `track_fitting/stopping_powers/...` resolve against the `gadget_analysis` package folder when they do not exist in
+  the working directory.
 
 ## Data locations on tpcgpu
 
@@ -106,7 +115,7 @@ library function takes `experiment` first.
 | 4. histograms | `ddas_interface.get_histogram(exp, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename="")`; `ddas_run` may be a list (summed) | merged (+ friend) | `<exp>_analysis/hist_cache/h_<md5>.root` |
 | 5. gamma gain match | copy of `align_gamma_energies.py` from the e23035 repository, which calls `energy_calibration_tools.make_energy_calibration` on the `clover_*_cr` branches | merged files | `<exp>_analysis/calibrations/<run>/<cal>/<branch>/` |
 | 6. add-back, coincidences | `degai.get_addback_tree`, `degai.get_histogram`, `degai.get_addback_coincidence_spectrum`, `get_gated_projection`, `get_bg_subtracted_projection` | merged files, calibrations | `<exp>_analysis/clarion_cache/` |
-| 7. peak fitting | `analysis_tools.spectrum_fitter` (`spectrum_fitter`, `multi_spectrum_fitter`), `analysis_tools.fitting_tools` | histograms | your choice |
+| 7. peak fitting | `gadget_analysis.analysis_tools.spectrum_fitter` (`spectrum_fitter`, `multi_spectrum_fitter`), `gadget_analysis.analysis_tools.fitting_tools` | histograms | your choice |
 
 e23035's TPC proton and alpha fit stack (`stepwise_fit.py`, `fit_tpc_spectrum_simultaneous.py`, `fit_ledger.py`,
 `fit_diagnostics.py`) lives in the `e23035_analysis` repository and builds on `analysis_tools`.
@@ -138,9 +147,9 @@ number of workers against free RAM before a large parallel launch.
 ### Worked session
 
 ```python
-# from the repo root, env activated
-from tpc_data_processing import process_runs
-from tpc_and_decay_station import ddas_interface, degai
+# env activated, any working directory
+from gadget_analysis.tpc_data_processing import process_runs
+from gadget_analysis.tpc_and_decay_station import ddas_interface, degai
 
 exp = 'e23035'
 cfg = 'smart1_veto2_rpr_fzp.csv'
@@ -281,14 +290,14 @@ Calibrations and non-linearity corrections are results, not caches: they are com
 Add-back trees are large (one to three GB for a long run), so each experiment can cap its caches. Declare
 `CACHE_MAX_GB` (and optionally `CACHE_KEEP_DAYS`, default 7) in `<exp>_runs.py`; e23035 and e25058 use 150 GB.
 Whenever a library function writes a new file into `clarion_cache/` or `hist_cache/` and the total is above the
-budget, `tpc_and_decay_station.cache_maintenance` deletes the least recently read files until it fits, never a
+budget, `gadget_analysis.tpc_and_decay_station.cache_maintenance` deletes the least recently read files until it fits, never a
 file read in the last `CACHE_KEEP_DAYS` days, and appends what it removed to `cache_prune.log` in the cache root.
 "Last read" is the file's access time: every cache hit refreshes it, so files in use stay. Without `CACHE_MAX_GB`
 nothing is ever deleted. To see the state or prune by hand (dry run unless `--apply`):
 
 ```bash
-python -m tpc_and_decay_station.cache_maintenance e23035 --max-gb 100
-python -m tpc_and_decay_station.cache_maintenance e23035 --max-gb 100 --apply
+python -m gadget_analysis.tpc_and_decay_station.cache_maintenance e23035 --max-gb 100
+python -m gadget_analysis.tpc_and_decay_station.cache_maintenance e23035 --max-gb 100 --apply
 ```
 
 Deleted files are rebuilt on demand the next time they are asked for. Trees keyed to a superseded merged-file
@@ -300,9 +309,9 @@ All need an X display.
 
 | command | what |
 |---|---|
-| `python -m main_gui` | tkinter analysis GUI (run selection, energy spectrum, range vs energy, individual events) |
-| `python -m main_gui.RawDataGUI` | raw event viewer (`tpc_data_processing/RawEventViewerFrame.py`) for GET h5 files |
-| `python -m main_gui.RawDataGUI -old` | raw event viewer for heritage e17023 files (`heritage_h5_file.py`) |
+| `python -m gadget_analysis.main_gui` | tkinter analysis GUI (run selection, energy spectrum, range vs energy, individual events) |
+| `python -m gadget_analysis.main_gui.RawDataGUI` | raw event viewer (`tpc_data_processing/RawEventViewerFrame.py`) for GET h5 files |
+| `python -m gadget_analysis.main_gui.RawDataGUI -old` | raw event viewer for heritage e17023 files (`heritage_h5_file.py`) |
 
 `main_gui/The_GADGET_GUI.py` is the legacy GUI. Loading a run in the analysis GUI is currently broken (see Known
 issues); the raw event viewer is the working one.

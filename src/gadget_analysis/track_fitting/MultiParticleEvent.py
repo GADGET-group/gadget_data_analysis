@@ -1,7 +1,7 @@
 import numpy as np
 
-from track_fitting.SingleParticleEvent import SingleParticleEvent
-from track_fitting.SimulatedEvent import SimulatedEvent
+from gadget_analysis.track_fitting.SingleParticleEvent import SingleParticleEvent
+from gadget_analysis.track_fitting.SimulatedEvent import SimulatedEvent
 
 class MultiParticleEvent(SimulatedEvent):
     def __init__(self, sims:list[SingleParticleEvent]):

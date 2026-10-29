@@ -5,8 +5,8 @@ Simulate tracks in a material
 @author: Alex Adams
 """
 
-from detector_efficiency import star_reader
-from detector_efficiency import physical_constants as pc
+from gadget_analysis.detector_efficiency import star_reader
+from gadget_analysis.detector_efficiency import physical_constants as pc
 import numpy as np
 import matplotlib.pylab as plt
 

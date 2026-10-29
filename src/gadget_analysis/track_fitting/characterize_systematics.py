@@ -12,7 +12,7 @@ import matplotlib.pylab as plt
 import matplotlib as mpl
 import scipy.optimize as opt
 
-from track_fitting import SingleParticleEvent, build_sim
+from gadget_analysis.track_fitting import SingleParticleEvent, build_sim
 
 start_time = time.time()
 

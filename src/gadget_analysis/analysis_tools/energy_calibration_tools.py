@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from analysis_tools import fitting_tools
-from tpc_and_decay_station import ddas_interface, cache_maintenance
+from gadget_analysis.analysis_tools import fitting_tools
+from gadget_analysis.tpc_and_decay_station import ddas_interface, cache_maintenance
 
 _exp_dir = ddas_interface.get_experiment_dir   # <repo>/<experiment>_analysis: where calibrations/ and nonlinearity_corrections/ live
 

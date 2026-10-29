@@ -15,7 +15,7 @@ signifigantly overpredict stopping distance for low energy particles
 import pandas as pd
 import numpy as np
 import os
-from detector_efficiency import physical_constants as pc
+from gadget_analysis.detector_efficiency import physical_constants as pc
 
 class Material:
     def __init__(self, filename, density):

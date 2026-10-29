@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pylab as plt
 from scipy.optimize import curve_fit
-from tpc_data_processing import process_runs 
+from gadget_analysis.tpc_data_processing import process_runs 
 
 import numpy as np
 import matplotlib.pylab as plt

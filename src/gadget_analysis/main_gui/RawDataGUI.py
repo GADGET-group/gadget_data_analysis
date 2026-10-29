@@ -2,7 +2,7 @@ import sys
 
 import tkinter as tk
 
-from tpc_data_processing.RawEventViewerFrame import RawEventViewerFrame
+from gadget_analysis.tpc_data_processing.RawEventViewerFrame import RawEventViewerFrame
 
 if __name__ == '__main__':
     root = tk.Tk()

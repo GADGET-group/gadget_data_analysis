@@ -9,7 +9,7 @@ import scipy.optimize as opt
 import sklearn.cluster as cluster
 import multiprocessing
 
-from track_fitting import build_sim
+from gadget_analysis.track_fitting import build_sim
 
 particle_type = 'proton'
 

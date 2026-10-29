@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors
 import numpy as np
 
-from track_fitting import SingleParticleEvent
+from gadget_analysis.track_fitting import SingleParticleEvent
 
 class TraceFit3D(ttk.Frame):
     def __init__(self, parent):

@@ -6,7 +6,7 @@ import corner
 import numpy as np
 import sklearn.cluster as cluster
 
-from track_fitting import build_sim
+from gadget_analysis.track_fitting import build_sim
 
 def process_h5(mcmc_filepath, run, event, labels, Ea_Ep_labels=None, summary_file=None):
     base_fname = os.path.splitext(mcmc_filepath)[0]

@@ -31,7 +31,7 @@ from matplotlib.path import Path
 import matplotlib.colors
 from scipy import fftpack
 
-from tpc_data_processing import process_runs
+from gadget_analysis.tpc_data_processing import process_runs
 
 gpu_devices = [0,1,3]
 load_result1 = False

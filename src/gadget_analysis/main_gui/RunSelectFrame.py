@@ -1,5 +1,5 @@
 from tkinter import ttk
-from main_gui import gadget_widgets, GadgetRunH5
+from gadget_analysis.main_gui import gadget_widgets, GadgetRunH5
 
 import tkinter as tk
 import tkinter.filedialog

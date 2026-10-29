@@ -1,14 +1,14 @@
 import os
-from main_gui import gadget_widgets
+from gadget_analysis.main_gui import gadget_widgets
 import subprocess
 import socket
 
 from tkinter import ttk
 import tkinter as tk
-from main_gui.RunSelectFrame import RunSelectFrame
-from main_gui.EnergySpectrumFrame import EnergySpectrumFrame
-from main_gui.RvE_Frame import RvE_Frame
-from main_gui.IndividualEventFrame import IndividualEventFrame
+from gadget_analysis.main_gui.RunSelectFrame import RunSelectFrame
+from gadget_analysis.main_gui.EnergySpectrumFrame import EnergySpectrumFrame
+from gadget_analysis.main_gui.RvE_Frame import RvE_Frame
+from gadget_analysis.main_gui.IndividualEventFrame import IndividualEventFrame
 
 import matplotlib.pyplot
 

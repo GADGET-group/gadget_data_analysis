@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 import importlib
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent   # the gadget_analysis package (src/gadget_analysis in a checkout)
 
 import concurrent.futures
 import tqdm
@@ -17,8 +17,8 @@ import tqdm
 import ROOT
 import numpy as np
 
-from tpc_data_processing import process_runs
-from tpc_and_decay_station import cache_maintenance
+from gadget_analysis.tpc_data_processing import process_runs
+from gadget_analysis.tpc_and_decay_station import cache_maintenance
 
 NUM_SLOTS = 10
 CH_PER_SLOT = 16
@@ -1021,7 +1021,7 @@ def show_selected_event(experiment, ddas_run, selection, index):
     and displays its corresponding GET TPC data.
     """
     import ROOT
-    from tpc_data_processing import process_runs
+    from gadget_analysis.tpc_data_processing import process_runs
     import os
     
     root_file_path = get_ddas_root_file_path(experiment, ddas_run)
@@ -1082,7 +1082,7 @@ def validate_experiment(experiment):
         problems += [f'run_df lacks column {col}' for col in ('GET', 'DDAS') if col not in module.run_df.columns]
     if getattr(module, 'experiment', experiment) != experiment:
         problems.append(f'runs module says experiment = {module.experiment!r}')
-    from tpc_and_decay_station import degai
+    from gadget_analysis.tpc_and_decay_station import degai
     try:
         degai.get_clover_list(experiment)
     except Exception as e:

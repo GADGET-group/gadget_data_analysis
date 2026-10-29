@@ -10,7 +10,7 @@ import sys
 #import raw_h5_file
 
 #import srim_interface
-from track_fitting import build_sim
+from gadget_analysis.track_fitting import build_sim
 
 def gaussian_fft(shape, sigmas):
     '''

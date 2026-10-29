@@ -9,11 +9,11 @@ import numpy as np
 #import emcee 
 import matplotlib.pylab as plt
 
-from tpc_data_processing.raw_h5_file import raw_h5_file
-from track_fitting.SimulatedEvent import SimulatedEvent
-from track_fitting.SingleParticleEvent import SingleParticleEvent
-from track_fitting.MultiParticleEvent import MultiParticleEvent, MultiParticleDecay
-from track_fitting.SimGui import SimGui
+from gadget_analysis.tpc_data_processing.raw_h5_file import raw_h5_file
+from gadget_analysis.track_fitting.SimulatedEvent import SimulatedEvent
+from gadget_analysis.track_fitting.SingleParticleEvent import SingleParticleEvent
+from gadget_analysis.track_fitting.MultiParticleEvent import MultiParticleEvent, MultiParticleDecay
+from gadget_analysis.track_fitting.SimGui import SimGui
 
 read_data_mode = 'unchanged'
 

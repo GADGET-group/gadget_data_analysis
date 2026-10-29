@@ -6,8 +6,8 @@ import  numpy as np
 import matplotlib.pylab as plt
 import scipy.optimize as opt
 
-from track_fitting.SimulatedEvent import SimulatedEvent
-from track_fitting. MultiParticleEvent import MultiParticleEvent
+from gadget_analysis.track_fitting.SimulatedEvent import SimulatedEvent
+from gadget_analysis.track_fitting.MultiParticleEvent import MultiParticleEvent
 
 class SimGui(ttk.Frame):
     def __init__(self, parent, sim:SimulatedEvent, expose_arrays={'initial_point':float}):

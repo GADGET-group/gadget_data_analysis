@@ -22,9 +22,9 @@ import scipy.fft
 
 from tqdm import tqdm
 
-from fit_gui.HistogramFitFrame import HistogramFitFrame
-from tpc_data_processing import raw_h5_file
-from tpc_data_processing import heritage_h5_file
+from gadget_analysis.fit_gui.HistogramFitFrame import HistogramFitFrame
+from gadget_analysis.tpc_data_processing import raw_h5_file
+from gadget_analysis.tpc_data_processing import heritage_h5_file
 
 class RawEventViewerFrame(ttk.Frame):
     def __init__(self, parent, file_path=None, flat_lookup_path=None, heritage_file=False):
@@ -435,7 +435,7 @@ class RawEventViewerFrame(ttk.Frame):
 
     def process_run(self):
         import re
-        from tpc_data_processing import process_runs
+        from gadget_analysis.tpc_data_processing import process_runs
         
         match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
         if match:
@@ -482,7 +482,7 @@ class RawEventViewerFrame(ttk.Frame):
         Load exported data, and update GUI to match the settings used to export the given file.
         '''
         import re
-        from tpc_data_processing import process_runs
+        from gadget_analysis.tpc_data_processing import process_runs
         
         match = re.search(r'([eE]\d{5}[^/]*)/h5/run_?0*(\d+)\.h5', self.h5file.file_path)
         if match:

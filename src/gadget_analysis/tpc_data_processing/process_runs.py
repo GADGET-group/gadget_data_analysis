@@ -12,7 +12,7 @@ import contextlib
 from tqdm import tqdm
 import numpy as np
 
-from tpc_data_processing import raw_h5_file
+from gadget_analysis.tpc_data_processing import raw_h5_file
 
 OUTER_RING_PADS = [762,761,760,1015,1016,1017,759,758,757,756,1011,1012,1013,1014,752,751,743,742,732,720,707,693,678,663,
                    647,631,614,597,580,563,545,527,272,290,308,325,342,359,376,392,408,423,438,452,465,477,488,487,497,496,

@@ -8,7 +8,7 @@ from tkinter import ttk
 from PIL import ImageTk, Image
 import h5py
 
-from main_gui.view_cut_images_window import ViewCutImagesWindow
+from gadget_analysis.main_gui.view_cut_images_window import ViewCutImagesWindow
 
 class PrevCutSelectWindow(tk.Toplevel):
     def __init__(self, parent, run_data, **kwargs):

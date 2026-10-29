@@ -11,8 +11,8 @@ import numpy as np
 import ROOT
 import tqdm
 
-from tpc_and_decay_station import ddas_interface, cache_maintenance
-from analysis_tools import energy_calibration_tools
+from gadget_analysis.tpc_and_decay_station import ddas_interface, cache_maintenance
+from gadget_analysis.analysis_tools import energy_calibration_tools
 
 def is_iterable_runs(obj):
     if isinstance(obj, (str, bytes)):

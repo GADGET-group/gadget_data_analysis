@@ -7,7 +7,7 @@ import ROOT
 import numpy as np
 from tqdm import tqdm
 
-from analysis_tools import fitting_tools
+from gadget_analysis.analysis_tools import fitting_tools
 
 ROOT.gInterpreter.Declare("""
 #ifndef SYNC_AXES_MACRO
@@ -923,7 +923,7 @@ def load_spectrum_fitter_from_file(file_path) -> 'spectrum_fitter':
             res_dict['canvas_2d'] = canvas_2d
             
             if f'peak_{i}_pm_names' in python_state:
-                from analysis_tools import fitting_tools
+                from gadget_analysis.analysis_tools import fitting_tools
                 pm = fitting_tools.ParamManager()
                 pm.names = python_state[f'peak_{i}_pm_names']
                 if f'peak_{i}_bg_func_name' in python_state:
