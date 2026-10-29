@@ -75,7 +75,7 @@ def get_cache_dir(experiment):
         if library_has_local_changes():
             import getpass
             root = root / f'dev_{getpass.getuser()}'
-        root.mkdir(parents=True, exist_ok=True)
+        cache_maintenance.make_shared_dir(root)     # writable by everyone working on the experiment, whoever made it
         _cache_dirs[experiment] = root
     return _cache_dirs[experiment]
 
@@ -325,6 +325,7 @@ def make_ddas_root_file(experiment, ddas_run, version='default', rebuild=True, c
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
     log_path = os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_merge{_version_suffix(version)}.log')
     output_path = get_ddas_root_file_path(experiment, ddas_run, version)
+    cache_maintenance.make_shared_dir(os.path.dirname(output_path))   # a new experiment's ddas/ folder, writable by everyone
     # Write to a temporary path and rename once the merge finishes, so a failed merge doesn't leave a file at output_path.
     # The temporary path is unique to this process, so two processes making the same file don't write to or rename each other's output
     partial_output_path = f'{output_path}.{os.getpid()}.partial'
@@ -770,7 +771,7 @@ def check_friend_shadowing(tree, friend_tree, expressions, tree_file_path):
 
 def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename=""):
     cache_dir = os.path.join(get_cache_dir(experiment), 'hist_cache')
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_maintenance.make_shared_dir(cache_dir)
 
     # The input files have to exist before the cache key is made, since the key records which version of them was used
     data_file_path = get_ddas_root_file_path(experiment, run)
@@ -865,6 +866,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
     raw_hist.Write("", ROOT.TObject.kOverwrite)
     raw_hist.SetDirectory(0)
     cache_file.Close()
+    cache_maintenance.share_file(cache_file_path)
 
     cache_maintenance.maybe_prune(experiment)
     return cache_file_path, hash_name

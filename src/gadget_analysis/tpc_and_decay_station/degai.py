@@ -239,7 +239,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
     clover_to_index = {c: i for i, c in enumerate(clover_list)}
 
     cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'add_back_tree')
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_maintenance.make_shared_dir(cache_dir)
     
     # --- CRITICAL: Add dt_window_ns to the hash so it generates a new cache! ---
     adj_hash = hashlib.md5((str(adj_dict) + str(dt_window_ns) + str(e_thresh) + "v6" + str(nonlinearity_correction_name) + time_align_str).encode()).hexdigest()
@@ -438,6 +438,7 @@ def get_addback_tree(experiment, ddas_run, adj_dict, cal_name, dt_window_ns, e_t
 
     cf.Write()
     cf.Close()
+    cache_maintenance.share_file(cache_file_path)
 
     read_file = ROOT.TFile.Open(cache_file_path, 'READ')
     out_tree = read_file.Get('add_back')
@@ -512,7 +513,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
 
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + var_exp + selection + str(adj_dict) + str(dt_window_ns) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + tpc_ini_filename + input_fingerprints + "v5").encode()).hexdigest()
     cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'histograms_flex')
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_maintenance.make_shared_dir(cache_dir)
     
     hash_name = f"h_flex_{hash_str}"
     cache_file_path = os.path.join(cache_dir, f"{hash_name}.root")
@@ -572,6 +573,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     raw_hist.Write()
     cf.Close()
+    cache_maintenance.share_file(cache_file_path)
     cache_maintenance.maybe_prune(experiment)
 
     final_hist = raw_hist.Clone(hist_name)
@@ -635,7 +637,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
             ).hexdigest()
             
             cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'histograms')
-            os.makedirs(cache_dir, exist_ok=True)
+            cache_maintenance.make_shared_dir(cache_dir)
             
             combined_hist_name = f"gg_combined_{combined_hash_str}"
             if not sliding_scale:
@@ -688,6 +690,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
                 cf = ROOT.TFile.Open(combined_cache_file, 'RECREATE')
                 total_hist.Write()
                 cf.Close()
+                cache_maintenance.share_file(combined_cache_file)
                 cache_maintenance.maybe_prune(experiment)
                         
             return total_hist
@@ -701,7 +704,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
     ddas_run = int(ddas_run)
     hash_str = hashlib.md5((str(ddas_run) + cal_name + str(binning) + str(adj_dict) + str(min_dt) + str(max_dt) + str(addback_dt) + str(e_thresh) + str(sliding_scale) + str(nonlinearity_correction_name) + time_align_str + "v5").encode()).hexdigest()
     cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'histograms')
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_maintenance.make_shared_dir(cache_dir)
     
     hist_name = f"gg_{hash_str}"
     if not sliding_scale:
@@ -747,6 +750,7 @@ def get_addback_coincidence_spectrum(experiment, ddas_run, adj_dict, cal_name, b
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     hist.Write()
     cf.Close()
+    cache_maintenance.share_file(cache_file_path)
     cache_maintenance.maybe_prune(experiment)
 
     return hist
@@ -857,7 +861,7 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     hash_str = hashlib.md5((str(ddas_run) + str(binning) + str(adj_dict) + "v2").encode()).hexdigest()
     
     cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'clarion_cache', 'timing')
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_maintenance.make_shared_dir(cache_dir)
     
     hist_name = f"dt_{hash_str}"
     cache_file_path = os.path.join(cache_dir, f"dt_{hash_str}.root")
@@ -948,6 +952,7 @@ def get_adjacent_timing_spectrum(experiment, ddas_run, adj_dict, binning):
     cf = ROOT.TFile.Open(cache_file_path, 'RECREATE')
     hist.Write()
     cf.Close()
+    cache_maintenance.share_file(cache_file_path)
     cache_maintenance.maybe_prune(experiment)
 
     return hist

@@ -10,6 +10,8 @@ read files":
 - "last read" is the file's access time (the share is mounted relatime, and every cache hit also calls touch()),
   or its modification time if that is newer.
 - deletions are appended to cache_prune.log in the cache root.
+- the share is NFS without ACL inheritance, so make_shared_dir() and share_file() give what the library creates
+  there the permission bits that let every user of the experiment write, replace and prune it (README, Caches).
 
 Command line (dry run unless --apply):
     python -m gadget_analysis.tpc_and_decay_station.cache_maintenance e23035 [--max-gb 150] [--keep-days 7] [--apply]
@@ -25,6 +27,43 @@ LOG_NAME = 'cache_prune.log'
 STAMP_NAME = 'cache_prune.stamp'
 _SKIP = {LOG_NAME, STAMP_NAME}
 
+# Permission bits for what the library creates in the shared data tree. The share is NFSv4 without ACL inheritance:
+# the parents are setgid (new entries keep the group) but umask 022 would leave every new folder rwxr-xr-x, owned by
+# whoever ran first, and nobody else could write there afterwards. Directories get rwx for everyone plus setgid, never
+# the sticky bit (pruning has to delete other users' files); cache files get rw for everyone so that any user's cache
+# hit can touch() them.
+SHARED_DIR_MODE = 0o2777
+SHARED_FILE_MODE = 0o666
+
+def make_shared_dir(path, mode=SHARED_DIR_MODE):
+    '''
+    os.makedirs(path, exist_ok=True) for a folder in the shared data tree, then chmod the components this call created
+    to mode (they belong to the caller, so the chmod cannot be refused, and umask does not apply to chmod). Folders that
+    already exist are left as they are: only their owner can change them. Returns path as given.
+    '''
+    missing = []
+    p = os.path.abspath(path)
+    while not os.path.isdir(p):
+        missing.append(p)
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    os.makedirs(path, exist_ok=True)
+    for d in reversed(missing):
+        try:
+            os.chmod(d, mode)
+        except OSError:
+            pass                      # created by someone else between the check and the makedirs: theirs to set
+    return path
+
+def share_file(path, mode=SHARED_FILE_MODE):
+    '''chmod a file this process has just written (cache file, log) so that other users can touch() and append to it; a file owned by someone else is left alone.'''
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
 def _cache_root(experiment, exp_dir=None):
     '''The cache root (exp_dir overrides it, for tests).'''
     if exp_dir is not None:
@@ -33,10 +72,16 @@ def _cache_root(experiment, exp_dir=None):
     return str(ddas_interface.get_cache_dir(experiment))
 
 def touch(path):
-    '''Record a cache hit: set the access time to now, keeping the modification time.'''
+    '''
+    Record a cache hit: set the access time to now. The file's owner keeps its modification time; anyone else may only
+    set both times to now (explicit times need ownership), which the eviction policy treats the same.
+    '''
     try:
         st = os.stat(path)
-        os.utime(path, (time.time(), st.st_mtime))
+        try:
+            os.utime(path, (time.time(), st.st_mtime))
+        except PermissionError:
+            os.utime(path, None)
     except OSError:
         pass
 
@@ -122,17 +167,32 @@ def prune_cache(experiment, max_gb, keep_days=7, dry_run=True, exp_dir=None, ver
             except OSError as e:
                 print(f'cache_maintenance: could not delete {path}: {e}', file=sys.stderr, flush=True)
         try:
-            with open(os.path.join(root, LOG_NAME), 'a') as log:
+            log_path = os.path.join(root, LOG_NAME)
+            is_new = not os.path.exists(log_path)
+            with open(log_path, 'a') as log:
                 stamp = datetime.datetime.now().isoformat(timespec='seconds')
                 log.write(f'{stamp} prune: total {total/1e9:.1f} GB, budget {max_gb} GB, keep {keep_days} d, '
                           f'deleted {len(removed)} files, {sum(s for _, s, _ in removed)/1e9:.1f} GB\n')
                 for path, size, days in removed:
                     log.write(f'{stamp}   {size/1e9:.2f} GB last read {days:.1f} d ago {os.path.relpath(path, root)}\n')
+            if is_new:
+                share_file(log_path)
         except OSError:
             pass
         deleted = removed
         freed = sum(s for _, s, _ in removed)
     return deleted, freed, total, total - (freed if not dry_run else 0)
+
+def _write_stamp(stamp):
+    '''
+    Set the stamp's time to now by replacing the file: os.replace needs only write access to the folder, so any user can
+    take the prune turn whoever wrote the previous stamp (appending to it would need to own that file).
+    '''
+    tmp = f'{stamp}.{os.getpid()}.tmp'
+    with open(tmp, 'w'):
+        pass
+    share_file(tmp)
+    os.replace(tmp, stamp)
 
 def maybe_prune(experiment, min_interval_s=600):
     '''
@@ -153,8 +213,7 @@ def maybe_prune(experiment, min_interval_s=600):
                 return
         except OSError:
             pass
-        with open(stamp, 'a'):
-            os.utime(stamp, None)
+        _write_stamp(stamp)
         prune_cache(experiment, max_gb, keep_days=keep_days, dry_run=False, verbose=False)
     except Exception as e:                    # pragma: no cover
         print(f'cache_maintenance: skipped ({e!r})', file=sys.stderr, flush=True)

@@ -317,6 +317,18 @@ python -m gadget_analysis.tpc_and_decay_station.cache_maintenance e23035 --max-g
 Deleted files are rebuilt on demand the next time they are asked for. Trees keyed to a superseded merged-file
 version (for example the pre-October-2026 legacy merges) are never read again and are the first to go.
 
+### Permissions on the shared tree
+
+`/egr/research-tpc/shared` is NFS without ACL inheritance: the parent folders are setgid, so new entries keep the
+group, but the umask leaves every folder a plain `makedirs` creates `rwxr-xr-x`, owned by whoever ran first, and from
+then on nobody else can write there. The library therefore creates its folders in the shared tree (`analysis_cache/`
+and its subfolders, a new experiment's `ddas/`) through `cache_maintenance.make_shared_dir`, which chmods what it
+created to `2777` (never the sticky bit: pruning deletes other users' files), and chmods the cache files it writes to
+`666` so that any user's cache hit can refresh their access time. Folders made before October 2026 keep their old
+bits until their owner runs `chmod 2777` on them, and an old `cache_prune.stamp` or `cache_prune.log` needs `666`.
+Data products (`proc_pkl/*.root`, merged and friend files) stay `644`: they are only ever replaced whole, which needs
+write access to the folder, not to the file.
+
 ## GUIs
 
 All need an X display.

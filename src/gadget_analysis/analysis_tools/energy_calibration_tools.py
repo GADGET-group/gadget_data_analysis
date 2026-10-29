@@ -540,7 +540,7 @@ def make_energy_calibration(experiment, ddas_run, calibration_name:str, branch_n
 
 def _fill_calibrated_histogram_worker(experiment, ddas_run, calibration_name, binning, branch_name, selection, force_recreate, nonlinearity_correction_name):
     cache_dir = os.path.join(ddas_interface.get_cache_dir(experiment), 'hist_cache')
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_maintenance.make_shared_dir(cache_dir)
     
     unique_string = str((ddas_run, tuple(binning), branch_name, 'cal_'+calibration_name, 'nlc_'+str(nonlinearity_correction_name), selection)).encode('utf-8')
     hash_name = "h_" + hashlib.md5(unique_string).hexdigest()
@@ -594,6 +594,7 @@ def _fill_calibrated_histogram_worker(experiment, ddas_run, calibration_name, bi
     raw_hist.Write("", ROOT.TObject.kOverwrite)
     raw_hist.SetDirectory(0)
     cache_file.Close()
+    cache_maintenance.share_file(cache_file_path)
 
     cache_maintenance.maybe_prune(experiment)
     return cache_file_path, hash_name
