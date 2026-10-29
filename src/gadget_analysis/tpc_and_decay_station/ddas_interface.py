@@ -1056,6 +1056,7 @@ def show_selected_event(experiment, ddas_run, selection, index):
 
 # What the library needs from an experiment folder (README.md, "Setting up a new experiment")
 REQUIRED_RUNS_ATTRS = ('run_df', 'get_energy_MeV', 'get_length_mm', 'get_veto_mask', 'get_proton_mask', 'get_alpha_mask', 'get_pad_gains')
+RUNS_DATA_FUNCTIONS = ('get_energy_MeV', 'get_length_mm', 'get_veto_mask', 'get_proton_mask', 'get_alpha_mask')
 REQUIRED_CHANNELS = {'mesh_pre_amp': CH_MAP.MESH_PRE_AMP, 'get_trig_accepted': CH_MAP.GET_TRIG_ACCEPTED,
                      'beam_off': CH_MAP.BEAM_OFF, 'chopper_off': CH_MAP.CHOPPER_OFF}
 
@@ -1078,6 +1079,16 @@ def validate_experiment(experiment):
     except Exception as e:
         return problems + [f'runs module {experiment}_analysis.{experiment}_runs: {e!r}']
     problems += [f'runs module lacks {attr}' for attr in REQUIRED_RUNS_ATTRS if not hasattr(module, attr)]
+    for name in RUNS_DATA_FUNCTIONS:    #signature rule: (get_runs, tpc_ini_filename="") positional, extras keyword-only
+        fn = getattr(module, name, None)
+        if fn is None:
+            continue
+        import inspect
+        params = list(inspect.signature(fn).parameters.values())
+        positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        if len(positional) != 2 or positional[1].name != 'tpc_ini_filename':
+            problems.append(f'{name}{inspect.signature(fn)}: must take (get_runs, tpc_ini_filename="") positionally, '
+                            'with any other option keyword-only after a *')
     if hasattr(module, 'run_df'):
         problems += [f'run_df lacks column {col}' for col in ('GET', 'DDAS') if col not in module.run_df.columns]
     if getattr(module, 'experiment', experiment) != experiment:

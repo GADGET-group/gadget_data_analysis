@@ -238,7 +238,11 @@ Index,Name,Slope,Offset
 ### Runs-module interface
 
 Required (called by library code with `get_runs` = array of GET run numbers and the keyword `tpc_ini_filename=`;
-arrays are per GET event, runs concatenated in `process_runs` order):
+arrays are per GET event, runs concatenated in `process_runs` order). Signature rule, checked by `validate_experiment`:
+the data functions take `(get_runs, tpc_ini_filename="")` positionally, in that order, and any experiment-specific
+option comes after a `*` as a keyword-only argument (e.g. `get_energy_MeV(get_runs, tpc_ini_filename="", *,
+num_workers=1)`, `get_proton_mask(get_runs, tpc_ini_filename="", *, lengths=None, energy=None, veto_mask=None)`), so
+that a call written for one experiment means the same for every other.
 
 - `run_df`: `pandas.DataFrame` read from `runs.csv`, one row per GET/DDAS pairing; numeric columns `GET` and `DDAS`
   (`pd.to_numeric(errors='coerce')`, NaN when absent). A DDAS run spanning several GET runs has several rows.
