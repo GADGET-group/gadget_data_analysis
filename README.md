@@ -25,7 +25,7 @@ below are its sub-packages (paths in this README are relative to `src/gadget_ana
 | `analysis_tools/` | `energy_calibration_tools.py`, `fitting_tools.py`, `root_vis_tools.py`, `spectrum_fitter.py` |
 | `main_gui/` | tkinter analysis GUI and raw event viewer |
 | `fit_gui/` | fit GUI frames |
-| `track_fitting/` | track simulation, SRIM tables (`stopping_powers/`), `build_sim.get_gas_density` |
+| `track_fitting/` | track simulation, SRIM tables (`stopping_powers/`), `build_sim` (gas density from the runs module) |
 | `detector_efficiency/` | efficiency simulations |
 | repo root | `setup.py` (distribution `gadget_analysis`, `find_packages()`), `.gitignore` |
 
@@ -261,6 +261,9 @@ that a call written for one experiment means the same for every other.
 - `get_proton_mask(...)`, `get_alpha_mask(...)`: bool; `tpc_particle_id` = 1 proton, 2 alpha, 0 other, -1 unmatched.
 - `get_pad_gains(tpc_ini_filename="")`: per-pad gains used by `get_energy_MeV`; hashed into the friend-tree
   provenance.
+- `get_gas_density(get_runs)`: gas density in mg/cm^3 (float) of the run or runs, from the experiment's pressure and
+  temperature (per run if they changed); behind the SRIM range tables of the particle-ID masks and used by
+  `track_fitting.build_sim.get_gas_density(exp, run)`, which only delegates to it.
 
 Optional:
 
@@ -352,7 +355,8 @@ Start from the template repository `gadget_experiment_template` (its README has 
    crystal as `clover_<n><a-d>`, pre-experiment slopes and offsets where known).
 2. Edit `<exp>_runs.py` at its `TODO` marks: veto thresholds, PID bands, pad gain map in `pad_gains/`, `bad_crystals`,
    run selectors, `get_pid_cut`, `CACHE_MAX_GB`.
-3. Add a branch for the experiment to `track_fitting/build_sim.get_gas_density` in this library (pull request).
+3. Gas density: the pressure and temperature in `<exp>_runs.get_gas_density` (per run if they changed during the
+   experiment); nothing in the library needs editing for it.
 4. Data paths: raw h5 files in `/egr/research-tpc/shared/experiments/<exp>/h5/`, event-builder files in
    `/egr/research-tpc/shared/proc_runs/<exp>/ddas/`, and an empty `/egr/research-tpc/shared/proc_runs/<exp>/proc_pkl/`.
    Other hosts need a branch in `process_runs.get_save_path` and `get_h5_path`.
@@ -393,7 +397,6 @@ Until October 2026 everything lived in this repository on per-experiment branche
 | `show_pid` PID expression and ranges | `ddas_interface.py` | e23035 values (`msx100_e` vs `cross_scint_b2_t - db_5_scint_t`) |
 | `get_save_path`, `get_h5_path` | `tpc_data_processing/process_runs.py` | hostname and experiment tables; the `else` branches give the tpcgpu paths, other hosts need a branch |
 | `zscale=1.088` | `process_runs.get_h5_file` and the `zscale` row of each config | mm per time bucket; set from drift speed and sampling clock |
-| `get_gas_density` | `track_fitting/build_sim.py` | branch per experiment (P10 at 860.3 torr for e23035 and e25058) |
 | `VETO_PADS`, `OUTER_RING_PADS` | `raw_h5_file.py`, `process_runs.py` | pad-plane geometry; unchanged for the GADGET II pad plane |
 | `TPC_PROCESSING_GPUS` and worker defaults | `process_runs.py` | host specific (four GPUs on tpcgpu) |
 

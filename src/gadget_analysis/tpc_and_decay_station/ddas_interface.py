@@ -1058,7 +1058,8 @@ def show_selected_event(experiment, ddas_run, selection, index):
     plt.show(block=False)
 
 # What the library needs from an experiment folder (README.md, "Setting up a new experiment")
-REQUIRED_RUNS_ATTRS = ('run_df', 'get_energy_MeV', 'get_length_mm', 'get_veto_mask', 'get_proton_mask', 'get_alpha_mask', 'get_pad_gains')
+REQUIRED_RUNS_ATTRS = ('run_df', 'get_energy_MeV', 'get_length_mm', 'get_veto_mask', 'get_proton_mask', 'get_alpha_mask', 'get_pad_gains',
+                       'get_gas_density')
 RUNS_DATA_FUNCTIONS = ('get_energy_MeV', 'get_length_mm', 'get_veto_mask', 'get_proton_mask', 'get_alpha_mask')
 REQUIRED_CHANNELS = {'mesh_pre_amp': CH_MAP.MESH_PRE_AMP, 'get_trig_accepted': CH_MAP.GET_TRIG_ACCEPTED,
                      'beam_off': CH_MAP.BEAM_OFF, 'chopper_off': CH_MAP.CHOPPER_OFF}

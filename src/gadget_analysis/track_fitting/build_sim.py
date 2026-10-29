@@ -47,18 +47,21 @@ def get_stopping_material(experiment:str, run:int):
         return 'P10'
 
 def get_gas_density(experiment:str, run:int)->float:
+    '''
+    Gas density in mg/cm^3 for a run: the experiment's own setting, <experiment>_runs.get_gas_density(run) (README.md,
+    "Runs-module interface"). e21072 predates the experiment packages and keeps its value here with its other settings.
+    '''
     if experiment == 'e21072':
         rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
         T = 20+273.15 #K
         P = 860.3 #torr
         return rho0*(P/760)*(300./T)
-    if experiment == 'e23035' or experiment == 'e25058':
-        #TODO: verify pressure and temperature
-        rho0 = 1.5256 #mg/cm^3, P10 at 300K and 760 torr
-        T = 20+273.15 #K
-        P = 860.3 #torr
-        return rho0*(P/760)*(300./T)
-    assert False
+    import importlib                                   # lazy: the runs modules import this module
+    runs_module = importlib.import_module(f'{experiment}_analysis.{experiment}_runs')
+    if not hasattr(runs_module, 'get_gas_density'):
+        raise AttributeError(f'{runs_module.__name__} defines no get_gas_density(get_run): the gas density is an experiment '
+                             'setting (library README.md, "Runs-module interface")')
+    return runs_module.get_gas_density(run)
     
 def get_zscale(experiment:str, run:int):
     if experiment == 'e21072':
