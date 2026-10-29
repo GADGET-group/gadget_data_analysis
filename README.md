@@ -152,7 +152,7 @@ from gadget_analysis.tpc_data_processing import process_runs
 from gadget_analysis.tpc_and_decay_station import ddas_interface, degai
 
 exp = 'e23035'
-cfg = 'smart1_veto2_rpr_fzp.csv'
+cfg = 'smart1_veto2_rpr_fzp.csv'   # or leave config arguments out: the runs module's DEFAULT_TPC_CONFIG is used
 
 print(ddas_interface.validate_experiment(exp) or 'experiment folder OK')
 
@@ -203,6 +203,14 @@ experiment package may carry `tpc_processing_configs/<name>` of its own, either 
 it must keep exactly as its files were processed (processed-file names carry the config name, not its content); a
 file of the same name as a preset takes precedence and the library prints a warning. e23035 keeps copies with
 `railed_pad_repair_method,str,scipy` until its runs are reprocessed with the current method.
+
+The runs module names the experiment's default config, `DEFAULT_TPC_CONFIG = 'smart1.csv'` (e23035: the hybrid
+`smart1_veto2_rpr_fzp.csv`). `process_runs` (processing, loading, `get_h5_file`, the settings hash,
+`get_config_background_mode` when given the experiment), `ddas_interface` (friend trees, histograms that use `tpc_*`
+variables) and `degai` use it whenever a call gives no config; `process_runs.resolve_config_filename(experiment,
+config)` is the one place that decides. The string `'none'` still means the raw `raw_h5_file` defaults. Without a
+`DEFAULT_TPC_CONFIG`, processing and loading calls without a config raise, as before. Histograms without TPC variables
+never resolve a config, so their cache keys are unchanged.
 
 ### runs.csv
 
@@ -257,6 +265,8 @@ that a call written for one experiment means the same for every other.
 Optional:
 
 - `experiment = '<name>'`
+- `DEFAULT_TPC_CONFIG = '<config>.csv'`: the processing config used when a call gives none (see "Processing configs");
+  `validate_experiment` checks that it names an existing config
 - `get_pad_gain_path(tpc_ini_filename="")` (provenance string)
 - `bad_crystals = [(clover:int, 'a'..'d'), ...]` (default `[]`)
 

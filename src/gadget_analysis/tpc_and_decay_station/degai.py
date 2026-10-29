@@ -12,6 +12,7 @@ import ROOT
 import tqdm
 
 from gadget_analysis.tpc_and_decay_station import ddas_interface, cache_maintenance
+from gadget_analysis.tpc_data_processing import process_runs
 from gadget_analysis.analysis_tools import energy_calibration_tools
 
 def is_iterable_runs(obj):
@@ -502,8 +503,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
     input_files = [merged_file_path]
     needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
     if needs_tpc:
-        if not tpc_ini_filename:
-            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+        tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)   #given, or the experiment's DEFAULT_TPC_CONFIG
         tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
         if not os.path.exists(tpc_friend_path):
             ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)

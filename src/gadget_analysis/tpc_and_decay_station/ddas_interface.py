@@ -281,6 +281,7 @@ def get_ddas_root_file_path(experiment, ddas_run, version='default'):
 def get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename="", version='default'):
     '''The TPC friend tree of a merged file; it carries the merged file's version suffix because its entries follow that file.'''
     root_file_path = get_root_file_path(experiment=experiment, run=ddas_run)
+    tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)
     ini_prefix = os.path.splitext(tpc_ini_filename)[0]
     return os.path.join(os.path.split(root_file_path)[0], f'run{int(ddas_run)}_tpc_{ini_prefix}{_version_suffix(version)}.root')
 
@@ -556,6 +557,7 @@ def friend_tree_metadata(experiment, tpc_ini_filename="", get_runs=()):
     pad-gain file and the hash of its gains (the same hash as in the gm_ic cache names), the processing settings hash of
     the first GET run, the git commit, and the time. Readable with uproot: f[key].member('fTitle').
     '''
+    tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)
     import hashlib, datetime, importlib
     meta = {'tpc_config': tpc_ini_filename or '(none)'}
     try:
@@ -583,8 +585,7 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename="", version='def
     The TPC friend tree (one entry per entry of the merged file, TPC quantities on the entries with a matched GET event).
     version picks the merged file (see MERGED_VERSION); the friend file carries the same suffix.
     '''
-    if not tpc_ini_filename:
-        raise ValueError(f"tpc_ini_filename is required to make the TPC friend tree of DDAS run {ddas_run}: without it the GET runs would be processed with the empty default config")
+    tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)   #given, or the experiment's DEFAULT_TPC_CONFIG
     merged_path = get_ddas_root_file_path(experiment, ddas_run, version)
     if not os.path.exists(merged_path):
         make_ddas_root_file(experiment, ddas_run, version)
@@ -779,8 +780,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
 
     needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
     if needs_tpc:
-        if not tpc_ini_filename:
-            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+        tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)
         tpc_friend_path = get_tpc_friend_file_path(experiment, run, tpc_ini_filename)
         if not os.path.exists(tpc_friend_path):
             try:
@@ -873,10 +873,11 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
 def get_histogram(experiment, ddas_run, binning, hist_name, hist_title, var_exp, selection="", force_recreate=False, num_workers=1, tpc_ini_filename=""):
     needs_tpc = any(kw in var_exp or kw in selection for kw in ['tpc_', 'get_timestamp', 'get_event_id', 'get_run_id'])
     if needs_tpc:
-        # A TPC config is required whenever friend-tree variables are used: without it the GET runs would be processed
-        # with the empty default config (and the friend trees built from that), which is never what an analysis wants.
-        if not tpc_ini_filename:
-            raise ValueError(f"tpc_ini_filename is required because TPC or GET variables are used in var_exp or selection (var_exp: '{var_exp}', selection: '{selection}')")
+        # Friend-tree variables need a TPC config: the one given, else the experiment's DEFAULT_TPC_CONFIG (an error
+        # when there is neither, so the GET runs are never processed with the raw defaults). Resolved here so that the
+        # cache key and the friend file carry the config's name; histograms without TPC variables keep tpc_ini_filename
+        # as given (and their cache keys).
+        tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)
         import importlib
         try:
             exp_runs = get_runs_module(experiment)
@@ -1089,6 +1090,12 @@ def validate_experiment(experiment):
         if len(positional) != 2 or positional[1].name != 'tpc_ini_filename':
             problems.append(f'{name}{inspect.signature(fn)}: must take (get_runs, tpc_ini_filename="") positionally, '
                             'with any other option keyword-only after a *')
+    default_config = getattr(module, 'DEFAULT_TPC_CONFIG', None)
+    if default_config is not None:
+        if not isinstance(default_config, str) or not default_config:
+            problems.append(f'DEFAULT_TPC_CONFIG must be a config file name, got {default_config!r}')
+        elif not os.path.isfile(process_runs.get_config_path(default_config, experiment)):
+            problems.append(f'DEFAULT_TPC_CONFIG {default_config!r}: no such config in the library presets or {experiment}_analysis/tpc_processing_configs')
     if hasattr(module, 'run_df'):
         problems += [f'run_df lacks column {col}' for col in ('GET', 'DDAS') if col not in module.run_df.columns]
     if getattr(module, 'experiment', experiment) != experiment:
