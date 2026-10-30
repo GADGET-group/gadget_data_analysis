@@ -552,32 +552,69 @@ def match_get_to_ddas(ddas_trigger_times, get_timestamps, get_run_ids, log_file)
     log_file.write(f'{np.sum(matches < 0)} of {len(matches)} DDAS triggers have no GET event\n')
     return matches
 
-def friend_tree_metadata(experiment, tpc_ini_filename="", get_runs=()):
+def _git_head(cwd):
+    '''HEAD commit of the git checkout containing cwd, "-dirty" appended when tracked files are modified; 'unknown' outside a checkout.'''
+    try:
+        head = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, cwd=cwd, timeout=60).stdout.strip()
+        status = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no'], capture_output=True, text=True, check=True, cwd=cwd, timeout=60).stdout
+        return head + ('-dirty' if status.strip() else '')
+    except Exception:
+        return 'unknown'
+
+def _file_fingerprint_str(path):
+    '''"size,mtime_ns" of a file, the form recorded in the friend trees.'''
+    st = os.stat(path)
+    return f'{st.st_size},{st.st_mtime_ns}'
+
+def get_runs_of_ddas_run(experiment, ddas_run):
+    '''The GET runs paired with a DDAS run in the runs module's run_df, sorted ints; [] without a runs module or run_df.'''
+    try:
+        run_df = get_runs_module(experiment).run_df
+    except (ImportError, AttributeError):
+        return []
+    return [int(r) for r in np.sort(run_df['GET'][(run_df['DDAS'] == int(ddas_run)) & np.isfinite(run_df['GET'])])]
+
+def _pad_gain_provenance(experiment, tpc_ini_filename):
+    '''(the pad gain file as recorded in friend trees: relative to the experiment package when inside it; hash of the gains, as in the gm_ic cache names).'''
+    exp_runs = get_runs_module(experiment)
+    gains = exp_runs.get_pad_gains(tpc_ini_filename) if 'tpc_ini_filename' in exp_runs.get_pad_gains.__code__.co_varnames else exp_runs.get_pad_gains()
+    gain_hash = hashlib.sha256(np.asarray(gains).tobytes()).hexdigest()[:16]
+    if not hasattr(exp_runs, 'get_pad_gain_path'):
+        return '(see get_pad_gains)', gain_hash
+    path = os.path.abspath(exp_runs.get_pad_gain_path(tpc_ini_filename))
+    exp_dir = os.path.dirname(os.path.abspath(exp_runs.__file__))
+    return (os.path.relpath(path, exp_dir) if path.startswith(exp_dir + os.sep) else path), gain_hash
+
+def friend_tree_metadata(experiment, tpc_ini_filename="", get_runs=(), merged_path=None):
     '''
-    Provenance written into every friend tree as TNamed objects (name = key, title = value): the processing config, the
-    pad-gain file and the hash of its gains (the same hash as in the gm_ic cache names), the processing settings hash of
-    the first GET run, the git commit, and the time. Readable with uproot: f[key].member('fTitle').
+    Provenance written into every friend tree as TNamed objects (name = key, title = value) and compared with the
+    current inputs on every read (check_friend_provenance): the processing config, the pad-gain file (relative to the
+    experiment package) and the hash of its gains (the same hash as in the gm_ic cache names), the processing settings
+    hash of the first GET run, the GET runs paired with the DDAS run, the merged file and its fingerprint (size,mtime),
+    the library and experiment commits, and the time. Readable with read_friend_provenance(path), or with uproot:
+    f[key].member('fTitle').
     '''
     tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)
-    import hashlib, datetime, importlib
+    import datetime
     meta = {'tpc_config': tpc_ini_filename or '(none)'}
     try:
-        exp_runs = get_runs_module(experiment)
-        gains = exp_runs.get_pad_gains(tpc_ini_filename) if 'tpc_ini_filename' in exp_runs.get_pad_gains.__code__.co_varnames else exp_runs.get_pad_gains()
-        meta['pad_gain_file'] = exp_runs.get_pad_gain_path(tpc_ini_filename) if hasattr(exp_runs, 'get_pad_gain_path') else '(see get_pad_gains)'
-        meta['pad_gain_hash'] = hashlib.sha256(np.asarray(gains).tobytes()).hexdigest()[:16]
+        meta['pad_gain_file'], meta['pad_gain_hash'] = _pad_gain_provenance(experiment, tpc_ini_filename)
     except Exception as e:
         meta['pad_gain_file'] = f'unknown ({e!r})'
+    if len(get_runs) > 0:
+        meta['tpc_settings_hash'] = _settings_hash_of(experiment, get_runs, tpc_ini_filename)
+    meta['get_runs'] = ','.join(str(int(r)) for r in get_runs)
+    if merged_path is not None:
+        meta['merged_file'] = os.path.basename(merged_path)
+        try:
+            meta['merged_file_fingerprint'] = _file_fingerprint_str(merged_path)
+        except OSError as e:
+            meta['merged_file_fingerprint'] = f'unknown ({e!r})'
+    meta['git_version'] = _git_head(BASE_DIR)
     try:
-        if len(get_runs) > 0:
-            meta['tpc_settings_hash'] = process_runs.get_experiment_settings_hash(experiment, int(get_runs[0]), tpc_ini_filename)
-    except Exception as e:
-        meta['tpc_settings_hash'] = f'unknown ({e!r})'
-    try:
-        import subprocess
-        meta['git_version'] = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).stdout.strip()
+        meta['experiment_git_version'] = _git_head(os.path.dirname(os.path.abspath(get_runs_module(experiment).__file__)))
     except Exception:
-        meta['git_version'] = 'unknown'
+        meta['experiment_git_version'] = 'unknown'
     meta['created'] = datetime.datetime.now().isoformat(timespec='seconds')
     return meta
 
@@ -686,7 +723,7 @@ def make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename="", version='def
             
         output_file.WriteObject(out_tree, "tpc_data")
         # provenance (6 October 2026): which pad gains, processing settings and code made the energies of this friend tree
-        for key, value in friend_tree_metadata(experiment, tpc_ini_filename, get_runs).items():
+        for key, value in friend_tree_metadata(experiment, tpc_ini_filename, get_runs, merged_path=merged_path).items():
             output_file.WriteObject(ROOT.TNamed(key, str(value)), key)
             log_file.write(f'{key}: {value}\n')
 
@@ -769,6 +806,138 @@ def check_friend_shadowing(tree, friend_tree, expressions, tree_file_path):
         raise ValueError(f"{tree_file_path} has its own copies of branches {shadowed}, which hide the ones in friend tree '{friend_name}'. "
                          f"Remake the file without these branches, or refer to them explicitly as {friend_name}.<branch>.")
 
+class FriendProvenanceError(RuntimeError):
+    '''A TPC friend tree was not made with the current inputs (check_friend_provenance).'''
+
+PROVENANCE_EPOCH = '6 October 2026'   # friend trees made before carry no provenance
+
+def _friend_file_info(path):
+    '''(provenance {key: value} of a friend file, entries of its tpc_data tree); the dict is empty for a file made before PROVENANCE_EPOCH.'''
+    import uproot
+    meta = {}
+    with uproot.open(path) as f:
+        for key, classname in f.classnames().items():
+            if classname == 'TNamed':
+                meta[key.split(';')[0]] = f[key].member('fTitle')
+        entries = f['tpc_data'].num_entries
+    return meta, entries
+
+def _tree_entries(path, tree_name):
+    import uproot
+    with uproot.open(path) as f:
+        return f[tree_name].num_entries
+
+def read_friend_provenance(path):
+    '''The provenance of a friend file (the TNamed objects of friend_tree_metadata) as {key: value}; {} for a file made before 6 October 2026.'''
+    return _friend_file_info(path)[0]
+
+def _settings_hash_of(experiment, get_runs, tpc_ini_filename):
+    '''
+    The processing settings hash of a config (process_runs.get_experiment_settings_hash, which opens the raw h5 file of
+    one GET run), taken from the first of get_runs whose h5 file can be opened; 'unknown (...)' when none can.
+    '''
+    error = None
+    for run in get_runs:
+        try:
+            return process_runs.get_experiment_settings_hash(experiment, int(run), tpc_ini_filename)
+        except Exception as e:
+            error = e
+    return f'unknown ({error!r})'
+
+_provenance_checked = set()   # (friend-file fingerprint, config, energies) found current in this process
+
+def friend_provenance_problems(experiment, ddas_run, tpc_ini_filename="", version='default', energies=True):
+    '''
+    How the friend file of a DDAS run differs from what make_tpc_friend_file would write now, as a list of strings
+    (empty when the file is current). Compared with the provenance the file carries: the config name; with
+    energies=True (the default; get_tsbo passes False because the GET-DDAS matching does not depend on them) the
+    pad-gain hash and the processing settings hash; the GET runs paired with the DDAS run (runs.csv) and the merged
+    file's fingerprint for files that recorded them (made since 30 October 2026), else the entry counts of the friend
+    and merged trees. A file without provenance (before 6 October 2026) is one problem. Not covered: the veto
+    thresholds and PID bands of the runs module (tpc_should_veto, tpc_particle_id); delete the friend files by hand
+    after changing them. A file found current is not read again in this process unless it changes (size or mtime).
+    '''
+    ddas_run = int(ddas_run)
+    tpc_ini_filename = process_runs.resolve_config_filename(experiment, tpc_ini_filename)
+    friend_path = get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename, version)
+    merged_path = get_ddas_root_file_path(experiment, ddas_run, version)
+    cache_key = (get_file_fingerprint(friend_path), tpc_ini_filename, energies)
+    if cache_key in _provenance_checked:
+        return []
+    stored, friend_entries = _friend_file_info(friend_path)
+    if not stored:
+        return [f'no provenance recorded (made before {PROVENANCE_EPOCH}: pad gains and processing settings unknown)']
+    problems = []
+    def compare(key, current, meaning):
+        if key not in stored:
+            problems.append(f'{key} not recorded in the file; now {current!r} ({meaning})')
+        elif stored[key] != current:
+            problems.append(f'{key} was {stored[key]!r} when the file was made, now {current!r} ({meaning})')
+    compare('tpc_config', tpc_ini_filename, 'processing config')
+    get_runs = get_runs_of_ddas_run(experiment, ddas_run)
+    if 'get_runs' in stored:
+        compare('get_runs', ','.join(map(str, get_runs)), 'GET runs paired with this DDAS run in runs.csv')
+    if energies:
+        try:
+            _, gain_hash = _pad_gain_provenance(experiment, tpc_ini_filename)
+        except Exception as e:
+            gain_hash = f'unknown ({e!r})'
+        compare('pad_gain_hash', gain_hash, f"hash of get_pad_gains({tpc_ini_filename!r}); the file was made with {stored.get('pad_gain_file')}")
+        if get_runs:
+            compare('tpc_settings_hash', _settings_hash_of(experiment, get_runs, tpc_ini_filename), 'processing settings of the config')
+    if 'merged_file_fingerprint' in stored:
+        compare('merged_file_fingerprint', _file_fingerprint_str(merged_path), f'size,mtime_ns of {os.path.basename(merged_path)}: the merged file was remade')
+    else:
+        merged_entries = _tree_entries(merged_path, 'merged_data')
+        if merged_entries != friend_entries:
+            problems.append(f'{friend_entries} entries in the friend tree, {merged_entries} in {os.path.basename(merged_path)}: the merged file was remade')
+    if not problems:
+        _provenance_checked.add(cache_key)
+    return problems
+
+def check_friend_provenance(experiment, ddas_run, tpc_ini_filename="", version='default', energies=True):
+    '''
+    Raise FriendProvenanceError when the friend file of a DDAS run was not made with the current inputs
+    (friend_provenance_problems says what is compared). Called before every read of a friend tree (ddas_interface and
+    degai histograms, also when the histogram comes from the cache; get_tsbo). The file is never remade here: two
+    people with different pad gains under one config name would otherwise remake each other's file in turn.
+    '''
+    problems = friend_provenance_problems(experiment, ddas_run, tpc_ini_filename, version, energies)
+    if problems:
+        friend_path = get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename, version)
+        raise FriendProvenanceError(
+            f'TPC friend tree {friend_path} was not made with the current inputs:\n  - ' + '\n  - '.join(problems) +
+            '\nDelete the file (and its .log) and it is remade on the next call. To keep both results, give the other pad gain '
+            f'map a config of its own (row {process_runs.PAD_GAIN_FILE_KEY} in tpc_processing_configs): friend trees, gm_ic caches and '
+            'histograms are kept apart by the config name.')
+
+def audit_friend_files(experiment, tpc_ini_filename=None, energies=True):
+    '''
+    {friend file: problems} for every run<N>_tpc_<config>_v2.root in the experiment's DDAS folder (one config when
+    tpc_ini_filename is given); [] marks a current file. Reports only, nothing is raised or deleted; a file whose
+    config no longer exists, or that cannot be read, gets that as its problem.
+    '''
+    import glob, re
+    ddas_dir = os.path.dirname(get_root_file_path(experiment, 0))
+    suffix = _version_suffix('default')
+    pattern = re.compile(rf'^run(\d+)_tpc_(.+){re.escape(suffix)}\.root$')
+    report = {}
+    for path in sorted(glob.glob(os.path.join(ddas_dir, f'run*_tpc_*{suffix}.root'))):
+        m = pattern.match(os.path.basename(path))
+        if not m:
+            continue
+        run, config = int(m.group(1)), m.group(2) + '.csv'
+        if tpc_ini_filename is not None and config != tpc_ini_filename:
+            continue
+        if not os.path.isfile(process_runs.get_config_path(config, experiment)):
+            report[path] = [f'no config {config} in the library presets or {experiment}_analysis/tpc_processing_configs']
+            continue
+        try:
+            report[path] = friend_provenance_problems(experiment, run, config, energies=energies)
+        except Exception as e:
+            report[path] = [f'could not be checked: {e!r}']
+    return report
+
 def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreate, tpc_ini_filename=""):
     cache_dir = os.path.join(get_cache_dir(experiment), 'hist_cache')
     cache_maintenance.make_shared_dir(cache_dir)
@@ -799,6 +968,7 @@ def _worker_fill_run(experiment, run, binning, var_exp, selection, force_recreat
                     except OSError:
                         pass
                 raise
+        check_friend_provenance(experiment, run, tpc_ini_filename)   # made with the current pad gains, settings, pairing and merged file
         input_files.append(tpc_friend_path)
 
     input_fingerprints = [get_file_fingerprint(path) for path in input_files]
@@ -1099,6 +1269,18 @@ def validate_experiment(experiment):
             problems.append(f'DEFAULT_TPC_CONFIG must be a config file name, got {default_config!r}')
         elif not os.path.isfile(process_runs.get_config_path(default_config, experiment)):
             problems.append(f'DEFAULT_TPC_CONFIG {default_config!r}: no such config in the library presets or {experiment}_analysis/tpc_processing_configs')
+    if hasattr(module, 'get_pad_gains') and isinstance(default_config, str) and default_config:
+        try:
+            gains = np.asarray(module.get_pad_gains(default_config))
+            if gains.ndim != 1 or len(gains) == 0:
+                problems.append(f'get_pad_gains({default_config!r}) must return one gain per pad, got shape {gains.shape}')
+        except Exception as e:
+            problems.append(f'get_pad_gains({default_config!r}): {e!r}')
+    import glob
+    for path in sorted(glob.glob(str(get_experiment_dir(experiment) / 'tpc_processing_configs' / '*.csv'))):
+        if process_runs.get_config_value(os.path.basename(path), process_runs.PAD_GAIN_FILE_KEY, experiment) is None:
+            problems.append(f'{experiment}_analysis/tpc_processing_configs/{os.path.basename(path)} names no pad gain map '
+                            f'(row {process_runs.PAD_GAIN_FILE_KEY},str,<file>)')
     if hasattr(module, 'run_df'):
         problems += [f'run_df lacks column {col}' for col in ('GET', 'DDAS') if col not in module.run_df.columns]
     if getattr(module, 'experiment', experiment) != experiment:

@@ -54,6 +54,9 @@ def make_tsbo_file(experiment, get_run, tpc_ini_filename=""):
             print(f'WARNING: GET run {get_run}: no merged file or TPC friend tree for DDAS run {d}; its events get NaN and the time since beam off is not cached')
             complete = False
             continue
+        #the matching must come from a friend tree of the current merged file and GET pairing; the pad gains and
+        #processing settings do not matter for it (energies=False)
+        ddas_interface.check_friend_provenance(experiment, d, tpc_ini_filename, energies=False)
         with uproot.open(friend_path) as f:
             friend = f['tpc_data'].arrays(['get_run_id', 'get_event_id'], library='np')
         with uproot.open(merged_path) as f:

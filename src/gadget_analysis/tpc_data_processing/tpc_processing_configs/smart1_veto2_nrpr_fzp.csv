@@ -14,3 +14,4 @@ batch_event_cache_size,int,50
 remove_zero_pad,bool,True
 veto_background_subtract_mode,str,smart2
 veto_smart_bins_away_to_check,int,3
+pad_gain_file,str,hybrid_v200_fft6_res3.pkl

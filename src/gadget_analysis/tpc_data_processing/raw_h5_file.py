@@ -585,6 +585,10 @@ class raw_h5_file:
 
         self.apply_gain_match = False
         self.pad_gains=np.ones(NUM_PADS)
+        #pad gain map of a processing config (row pad_gain_file,str,<path>, relative to <exp>_analysis/pad_gains/). Not
+        #used by the processing and not part of the settings hash: the runs module's get_pad_gains applies it to the
+        #processed per-pad charges (process_runs.get_config_pad_gain_file), so gain maps coexist as differently named configs.
+        self.pad_gain_file = None
 
         #cobo and asad selction. Can be "all" or a list of ints
         self.asads='all'

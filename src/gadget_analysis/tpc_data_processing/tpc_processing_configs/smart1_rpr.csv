@@ -12,3 +12,4 @@ reconstruct_railed_pads,bool,True
 cache_enable,bool,True
 batch_event_cache_size,int,50
 smart_one_sided_baseline,str,line
+pad_gain_file,str,hybrid_v200_fft6_res3.pkl

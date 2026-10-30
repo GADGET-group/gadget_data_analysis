@@ -20,7 +20,7 @@ below are its sub-packages (paths in this README are relative to `src/gadget_ana
 
 | sub-package | contents |
 |---|---|
-| `tpc_data_processing/` | `raw_h5_file.py` (GET h5 reader, baseline subtraction, pad geometry from `padxy.txt`, `PadPlane.csv`, `channel_mappings/flatlookup4cobos.csv`), `process_runs.py` (per-run processing to ROOT files: `process_tpc_run`, `ensure_processed`, `get_quantity`, `get_save_path`, `get_h5_path`, `get_config_path`), `tpc_processing_configs/*.csv` (the preset configs), `pad_gain_match/` (tools that make pad gain maps), `field_dist/polynomial_correction.py`, `h5_utils/`, `dev/railed_pad_repair.py`, `heritage_h5_file.py`, `check_cobos_present.py`, `RawEventViewerFrame.py`, `file_formats.txt` |
+| `tpc_data_processing/` | `raw_h5_file.py` (GET h5 reader, baseline subtraction, pad geometry from `padxy.txt`, `PadPlane.csv`, `channel_mappings/flatlookup4cobos.csv`), `process_runs.py` (per-run processing to ROOT files: `process_tpc_run`, `ensure_processed`, `get_quantity`, `get_save_path`, `get_h5_path`, `get_config_path`, `get_config_pad_gain_file`), `tpc_processing_configs/*.csv` (the preset configs), `pad_gain_match/` (tools that make pad gain maps), `field_dist/polynomial_correction.py`, `h5_utils/`, `dev/railed_pad_repair.py`, `heritage_h5_file.py`, `check_cobos_present.py`, `RawEventViewerFrame.py`, `file_formats.txt` |
 | `tpc_and_decay_station/` | `ddas_interface.py` (merging DDAS files with TPC events, histogram cache), `degai.py` (CLARION add-back, gamma-gamma, timing), `get_tsbo.py` (time since beam off per GET event), `mesh_gamma_coincidence.py`, `clarion_det_locations.csv`, `degai-angles-table.pdf` |
 | `analysis_tools/` | `energy_calibration_tools.py`, `fitting_tools.py`, `root_vis_tools.py`, `spectrum_fitter.py` |
 | `main_gui/` | tkinter analysis GUI and raw event viewer |
@@ -94,7 +94,7 @@ new experiment name falls into their `else` branches and gets the paths above wi
 | `<exp>_run<GET>_get_tsbo_v2.root` | `proc_pkl/` | `get_tsbo` | tree `events`: `time_since_beam_off`, `ddas_run`, `ddas_entry` per GET event |
 | `run-NNNN.root` | `ddas/` | DDAS event builder (outside this repo) | tree `tree`: 160-channel arrays `energies`, `times`, `multiplicity` |
 | `run<DDAS>_merged_v2.root`, `run<DDAS>_merge_v2.log` | `ddas/` | `ddas_interface.make_ddas_root_file` | tree `merged_data`: per channel `<name>_e` (keV), `_t` (s), `_m`, `_c` (ADC), `_cr` (ADC + uniform [-0.5, 0.5]); plus `time_since_beam_off`, `time_since_chopper_off`, `rebuilt_window`, `anchor_t`, `n_source_entries`, `mesh_in_window` |
-| `run<DDAS>_tpc_<config>_v2.root`, `.log` | `ddas/` | `ddas_interface.make_tpc_friend_file` | tree `tpc_data`, one entry per merged entry: `tpc_energy` (keV), `tpc_track_length` (mm), `tpc_particle_id`, `tpc_should_veto`, `tpc_track_angle` (deg), `get_timestamp`, `tpc_track_centroid[3]`, `get_event_id`, `get_run_id`; provenance as `TNamed` objects |
+| `run<DDAS>_tpc_<config>_v2.root`, `.log` | `ddas/` | `ddas_interface.make_tpc_friend_file` | tree `tpc_data`, one entry per merged entry: `tpc_energy` (keV), `tpc_track_length` (mm), `tpc_particle_id`, `tpc_should_veto`, `tpc_track_angle` (deg), `get_timestamp`, `tpc_track_centroid[3]`, `get_event_id`, `get_run_id`; provenance as `TNamed` objects (`read_friend_provenance`, checked on every read by `check_friend_provenance`) |
 
 The `_v2` suffix is `ddas_interface.MERGED_VERSION` (the trigger-anchored rebuild of October 2026). Files without it
 are the legacy merged files.
@@ -204,6 +204,14 @@ it must keep exactly as its files were processed (processed-file names carry the
 file of the same name as a preset takes precedence and the library prints a warning. e23035 keeps copies with
 `railed_pad_repair_method,str,scipy` until its runs are reprocessed with the current method.
 
+Every config also names its pad gain map in a row `pad_gain_file,str,<path>`, a path relative to
+`<exp>_analysis/pad_gains/` (the smart1-based presets name `hybrid_v200_fft6_res3.pkl`, the smart2 presets
+`gm_old/fft6_res3.pkl`). The row is not one of the processing settings, so it changes neither the processed files nor
+their names; it only decides which gains the runs module's `get_energy_MeV` applies
+(`process_runs.get_config_pad_gain_file`, `load_pad_gains`). To compare two gain maps, copy a config under a new name
+with the other map in its row: friend trees, `gm_ic` caches and histograms are kept apart by the config name. A config
+without the row raises, so the map in use is never an implicit choice.
+
 The runs module names the experiment's default config, `DEFAULT_TPC_CONFIG = 'smart1.csv'` (e23035: the hybrid
 `smart1_veto2_rpr_fzp.csv`). `process_runs` (processing, loading, `get_h5_file`, the settings hash,
 `get_config_background_mode` when given the experiment), `ddas_interface` (friend trees, histograms that use `tpc_*`
@@ -259,8 +267,9 @@ that a call written for one experiment means the same for every other.
 - `get_length_mm(get_runs, tpc_ini_filename="")`: track length (mm).
 - `get_veto_mask(get_runs, tpc_ini_filename="")`: bool, True = keep; stored inverted as `tpc_should_veto`.
 - `get_proton_mask(...)`, `get_alpha_mask(...)`: bool; `tpc_particle_id` = 1 proton, 2 alpha, 0 other, -1 unmatched.
-- `get_pad_gains(tpc_ini_filename="")`: per-pad gains used by `get_energy_MeV`; hashed into the friend-tree
-  provenance.
+- `get_pad_gains(tpc_ini_filename="")`: per-pad gains of the map the config's `pad_gain_file` row names
+  (`process_runs.load_pad_gains(get_pad_gain_path(cfg))`), used by `get_energy_MeV`; their hash is recorded in the
+  friend trees and checked on every read.
 - `get_gas_density(get_runs)`: gas density in mg/cm^3 (float) of the run or runs, from the experiment's pressure and
   temperature (per run if they changed); behind the SRIM range tables of the particle-ID masks and used by
   `track_fitting.build_sim.get_gas_density(exp, run)`, which only delegates to it.
@@ -270,7 +279,8 @@ Optional:
 - `experiment = '<name>'`
 - `DEFAULT_TPC_CONFIG = '<config>.csv'`: the processing config used when a call gives none (see "Processing configs");
   `validate_experiment` checks that it names an existing config
-- `get_pad_gain_path(tpc_ini_filename="")` (provenance string)
+- `get_pad_gain_path(tpc_ini_filename="")`: the map's path, `process_runs.get_config_pad_gain_file(exp, cfg,
+  base_dir=GAIN_MATCH_DIR)`; recorded in the friend trees
 - `bad_crystals = [(clover:int, 'a'..'d'), ...]` (default `[]`)
 
 Conventions: paths relative to `Path(__file__).parent`, never the working directory; import-time work limited to
@@ -289,7 +299,7 @@ Run it after every change to the experiment folder.
 | processed TPC ROOT file | `proc_pkl/<exp>_run<GET>_<config>.root` | no: made once per config name; `get_quantity` raises if the config's settings hash differs from the file's; use `process_tpc_run(..., force_reprocess=True)` |
 | `process_runs` `.npy` caches | `proc_pkl/*.npy` | yes (settings and gain/threshold hashes in the names) |
 | merged file | `ddas/run<N>_merged_v2.root` | no: made when missing; delete it after editing `channel_map.csv` or the merge constants |
-| TPC friend tree | `ddas/run<N>_tpc_<config>_v2.root` | no: made when missing; delete it after changing pad gains, masks, `runs.csv` pairings or the merged file |
+| TPC friend tree | `ddas/run<N>_tpc_<config>_v2.root` | no, but checked: `check_friend_provenance` runs before every read and raises when the pad gains, processing settings, GET pairing or merged file differ from those recorded in the file (delete it, it is remade); changes to the veto thresholds or PID bands are not detected, delete the files by hand |
 | time since beam off | `proc_pkl/<exp>_run<GET>_get_tsbo_v2.root` | no: written only when all its DDAS runs have merged and friend files; delete it after remaking them |
 | `ddas_interface.get_histogram` | `<cache>/hist_cache/` | yes (key has run, binning, expressions, config name and input-file fingerprints) |
 | `energy_calibration_tools.get_calibrated_histogram` | `<cache>/hist_cache/` | no (key has no fingerprint); pass `force_recreate=True` |
@@ -298,6 +308,23 @@ Run it after every change to the experiment folder.
 
 `<cache>` is `ddas_interface.get_cache_dir(exp)`: the experiment's `CACHE_DIR` if its runs module declares one,
 otherwise `/egr/research-tpc/shared/proc_runs/<exp>/analysis_cache/`, shared by everyone working on the experiment.
+
+### Friend-tree provenance
+
+`make_tpc_friend_file` records in every friend tree what it was made from, as `TNamed` objects: `tpc_config`,
+`pad_gain_file` and `pad_gain_hash` (the hash in the `gm_ic` cache names), `tpc_settings_hash`, `get_runs` (the GET
+runs paired with the DDAS run), `merged_file` and `merged_file_fingerprint` (size and mtime), `git_version` and
+`experiment_git_version` (`-dirty` appended when the checkout had uncommitted changes), `created`.
+`ddas_interface.check_friend_provenance(exp, ddas_run, cfg)` compares them with the current inputs and raises
+`FriendProvenanceError`, naming each difference, when they disagree, and for a file without provenance (made before
+6 October 2026). It runs before every read of a friend tree: in `ddas_interface.get_histogram` and
+`degai.get_histogram`, also when the histogram comes from the cache, and in `get_tsbo` (with `energies=False`, since
+the GET-DDAS matching does not depend on the gains or settings). Files made before 30 October 2026 lack `get_runs`
+and the merged-file fingerprint; for them the entry counts of the friend and merged trees are compared instead.
+Nothing is remade automatically: two people with different gains under one config name would otherwise remake each
+other's file in turn; give the second map a config of its own. Not covered: the veto thresholds and PID bands of the
+runs module. `audit_friend_files(exp)` reports every friend file of an experiment without raising;
+`read_friend_provenance(path)` returns the recorded values.
 A library checkout with uncommitted changes to tracked files uses `<cache>/dev_<user>/` instead, so that files made
 by unreviewed code are never picked up by others; commit (or stash) and the shared cache is used again.
 Calibrations and non-linearity corrections are results, not caches: they are committed in the experiment repository.
@@ -353,8 +380,9 @@ Start from the template repository `gadget_experiment_template` (its README has 
 1. Clone the template as `<exp>_analysis`, run `python3 rename_experiment.py <exp>`, write `runs.csv` (columns `GET`,
    `DDAS` at least) and `channel_map.csv` (logic channels at the `CH_MAP` numbers, PID detectors, every germanium
    crystal as `clover_<n><a-d>`, pre-experiment slopes and offsets where known).
-2. Edit `<exp>_runs.py` at its `TODO` marks: veto thresholds, PID bands, pad gain map in `pad_gains/`, `bad_crystals`,
-   run selectors, `get_pid_cut`, `CACHE_MAX_GB`.
+2. Edit `<exp>_runs.py` at its `TODO` marks: veto thresholds, PID bands, `bad_crystals`, run selectors, `get_pid_cut`,
+   `CACHE_MAX_GB`; put the pad gain maps the presets name in their `pad_gain_file` rows (`hybrid_v200_fft6_res3.pkl`,
+   `gm_old/fft6_res3.pkl`) in `pad_gains/`.
 3. Gas density: the pressure and temperature in `<exp>_runs.get_gas_density` (per run if they changed during the
    experiment); nothing in the library needs editing for it.
 4. Data paths: raw h5 files in `/egr/research-tpc/shared/experiments/<exp>/h5/`, event-builder files in

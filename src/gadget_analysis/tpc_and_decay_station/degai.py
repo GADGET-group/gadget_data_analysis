@@ -508,6 +508,7 @@ def get_histogram(experiment, ddas_run, adj_dict, cal_name, binning, hist_name, 
         tpc_friend_path = ddas_interface.get_tpc_friend_file_path(experiment, ddas_run, tpc_ini_filename)
         if not os.path.exists(tpc_friend_path):
             ddas_interface.make_tpc_friend_file(experiment, ddas_run, tpc_ini_filename)
+        ddas_interface.check_friend_provenance(experiment, ddas_run, tpc_ini_filename)   # current pad gains, settings, pairing, merged file
         input_files.append(tpc_friend_path)
     input_fingerprints = str([ddas_interface.get_file_fingerprint(path) for path in input_files])
 

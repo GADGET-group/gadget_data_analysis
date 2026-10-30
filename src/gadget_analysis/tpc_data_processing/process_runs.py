@@ -3,6 +3,7 @@ import sys
 import uproot
 import awkward as ak
 import hashlib
+import pickle
 import multiprocessing as mp
 import subprocess
 import socket
@@ -69,11 +70,12 @@ def get_config_path(config_filename, experiment=None):
             return local
     return preset
 
-def get_config_background_mode(config_filename="", key='background_subtract_mode', experiment=None):
+def get_config_value(config_filename, key, experiment=None):
     '''
-    background_subtract_mode (or another key, e.g. veto_background_subtract_mode) set by a config in
-    tpc_processing_configs (parsed from the CSV, no h5 file opened). If the config is empty, missing, or does not
-    set it: the raw_h5_file default for background_subtract_mode, None for any other key.
+    The value of one key of a processing config, as the string in its CSV row (name,type,value), parsed without
+    opening an h5 file; None when the config is empty, missing or 'none', or does not set the key. With experiment, an
+    empty config_filename resolves to the experiment's DEFAULT_TPC_CONFIG and the experiment's own copy of a config
+    takes precedence (get_config_path).
     '''
     import csv
     if experiment is not None:
@@ -87,7 +89,52 @@ def get_config_background_mode(config_filename="", key='background_subtract_mode
                         return row[2].strip()
         except OSError:
             pass
+    return None
+
+def get_config_background_mode(config_filename="", key='background_subtract_mode', experiment=None):
+    '''
+    background_subtract_mode (or another key, e.g. veto_background_subtract_mode) set by a config in
+    tpc_processing_configs (parsed from the CSV, no h5 file opened). If the config is empty, missing, or does not
+    set it: the raw_h5_file default for background_subtract_mode, None for any other key.
+    '''
+    value = get_config_value(config_filename, key, experiment)
+    if value is not None:
+        return value
     return DEFAULT_BACKGROUND_SUBTRACT_MODE if key == 'background_subtract_mode' else None
+
+PAD_GAIN_FILE_KEY = 'pad_gain_file'   # config row pad_gain_file,str,<path>: the pad gain map the runs module's get_energy_MeV applies
+
+def get_config_pad_gain_file(experiment, config_filename="", base_dir=None):
+    '''
+    Absolute path of the pad gain map named by a processing config's pad_gain_file row (pad_gain_file,str,<path>); a
+    relative path is taken from base_dir, by default <experiment>_analysis/pad_gains/. The row is not one of the
+    processing settings (raw_h5_file.get_settings_str), so it changes neither the processed files nor their names: it
+    only decides which gains the runs module's get_energy_MeV applies, and since friend trees, gm_ic caches and
+    histograms are kept apart by the config name, two gain maps coexist as two configs (copy a config under a new
+    name and change the row). A config without the row raises, so that the map in use is never an implicit choice;
+    'none' (the raw defaults) has no map.
+    '''
+    config_filename = resolve_config_filename(experiment, config_filename)
+    if config_filename == 'none':
+        raise ValueError(f"the raw defaults ('none') name no pad gain map: energies need a config in tpc_processing_configs "
+                         f"with a row '{PAD_GAIN_FILE_KEY},str,<file>'")
+    value = get_config_value(config_filename, PAD_GAIN_FILE_KEY, experiment)
+    if not value:
+        raise ValueError(f"config {config_filename!r} names no pad gain map: add the row '{PAD_GAIN_FILE_KEY},str,<file>' "
+                         f"(a path relative to {experiment}_analysis/pad_gains/) to {get_config_path(config_filename, experiment)}")
+    if base_dir is None:
+        import importlib
+        base_dir = os.path.join(list(importlib.import_module(f'{experiment}_analysis').__path__)[0], 'pad_gains')
+    path = os.path.abspath(os.path.join(base_dir, os.path.expanduser(value)))   # an absolute value is kept as it is
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"pad gain map {path} ({PAD_GAIN_FILE_KEY} = {value!r} in config {config_filename!r}) does not exist")
+    return path
+
+def load_pad_gains(path):
+    '''The per-pad gains (one float per pad) of a pickled gain-match result: a scipy OptimizeResult with .pad_gains, as pad_gain_match/ writes it.'''
+    with open(path, 'rb') as f:
+        result = pickle.load(f)
+    return np.asarray(result.pad_gains)
 
 def get_default_workers_per_gpu(config_filename=""):
     '''
