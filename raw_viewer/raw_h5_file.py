@@ -123,12 +123,11 @@ class raw_h5_file:
         self.cobos='all'
         self.pads='all'
 
-        #caching avoids redoing baseline subtraction unecessarily. If enabled and any parameters are changed,
-        #  should set self.cached_event to np.inf to force recompute.
+
+        # Cache keys include processing settings and point-selection parameters.
+        # invalidate_cache() also supports callers changing custom processing state.
         self.cache_enable = False
-        self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
-        self.cached_data = None
-        self.cached_xyte = self.cached_xyze = None
+        self.invalidate_cache()
         
         # Cache for fast lookup of new bucketed group structure
         self._batch_existence_cache = {}
@@ -137,6 +136,33 @@ class raw_h5_file:
         first_event = self.get_event_num_bounds()[0]
         first_event_data = self._get_event_dataset(first_event, kind='data')
         self.num_time_bins = len(first_event_data[0])-FIRST_DATA_BIN
+
+    def invalidate_cache(self):
+        """Invalidate processed traces and both derived point representations."""
+        self.cached_event = self.cached_event_xyze = self.cached_event_xyte = np.inf
+        self.cached_data = self.cached_xyte = self.cached_xyze = None
+        self._cached_data_key = self._cached_xyte_key = self._cached_xyze_key = None
+
+
+    def _data_cache_key(self, event_number):
+        # Freeze mutable arrays/lists too: in-place gain or kernel changes must
+        # not reuse processed traces from the previous configuration.
+        def freeze(value):
+            if isinstance(value, np.ndarray):
+                return (value.dtype.str, value.shape, value.tobytes())
+            if isinstance(value, (list, tuple)):
+                return tuple(freeze(item) for item in value)
+            return value
+        names = ('background_subtract_mode', 'background_convolution_kernel',
+                 'remove_outliers', 'num_background_bins', 'ic_counts_threshold',
+                 'data_select_mode', 'near_peak_window_width',
+                 'num_smart_background_ave_bins', 'smart_bins_away_to_check',
+                 'smart2_min_bins_in_peak', 'smart2_min_sigma',
+                 'smart2_ransac_percentile', 'require_peak_within',
+                 'apply_gain_match', 'asads', 'cobos', 'pads')
+        return (event_number, tuple(freeze(getattr(self, name)) for name in names),
+                freeze(self.pad_gains) if self.apply_gain_match else None)
+
 
     def _get_event_dataset(self, event_number, kind='data'):
         """
@@ -216,8 +242,13 @@ class raw_h5_file:
         Veto pads should NOT be removed during outlier removal.
         Does NOT apply thresholding. However, this is applied in get_xyte and and get_xyze.
         '''
-        if self.cache_enable and event_number == self.cached_event:
+        cache_key = self._data_cache_key(event_number) if self.cache_enable else None
+        if (self.cache_enable and event_number == self.cached_event
+                and self._cached_data_key == cache_key):
             return np.array(self.cached_data, copy=True)
+
+        # Also honor legacy callers that reset only cached_event to np.inf.
+        self.cached_event_xyte = self.cached_event_xyze = np.inf
 
         data = self._get_event_dataset(event_number, kind='data')
 
@@ -305,8 +336,9 @@ class raw_h5_file:
                     pad = self.chnls_to_pad[chnl_info]
                     line[FIRST_DATA_BIN:] *= self.pad_gains[pad]  
         if self.cache_enable:
-            self.cached_data = data
+            self.cached_data = np.array(data, copy=True)
             self.cached_event = event_number
+            self._cached_data_key = cache_key
         return data
 
     def calculate_background(self, trace, debug_plots=False):
@@ -447,8 +479,11 @@ class raw_h5_file:
                  and es[i] gives the charge that arrived at that pad at the given time.
                  Only data where the charge deposition is greater than the threshold is included.
         '''
-        if self.cache_enable and self.cached_event_xyte == event_number:
-            return self.cached_xyte
+        cache_key = (self._data_cache_key(event_number), threshold, include_veto_pads)
+        if (self.cache_enable and self.cached_event == event_number
+                and self.cached_event_xyte == event_number
+                and self._cached_xyte_key == cache_key):
+            return tuple(np.array(value, copy=True) for value in self.cached_xyte)
         xs, ys, es = [], [], []
         event_data =  self.get_data(event_number)
         #after this look, xs=[x1, x2, ...], same for ys, es=[[1st pad data], [2nd pad data], ...]
@@ -481,20 +516,25 @@ class raw_h5_file:
             es = es[es>threshold]
         if self.cache_enable:
             self.cached_event_xyte = event_number
-            self.cached_xyte = (xs, ys, ts, es)
+            self._cached_xyte_key = cache_key
+            self.cached_xyte = tuple(np.array(value, copy=True) for value in (xs, ys, ts, es))
         return xs, ys, ts, es
     
     def get_xyze(self, event_number, threshold=-np.inf, include_veto_pads=False):
         '''
         Same as xyte, but scales time bins to get z coordinate
         '''
-        if self.cache_enable and self.cached_event_xyze == event_number:
-            return self.cached_xyze
+        cache_key = (self._data_cache_key(event_number), threshold, include_veto_pads, self.zscale)
+        if (self.cache_enable and self.cached_event == event_number
+                and self.cached_event_xyze == event_number
+                and self._cached_xyze_key == cache_key):
+            return tuple(np.array(value, copy=True) for value in self.cached_xyze)
         x,y,t,e = self.get_xyte(event_number, threshold=threshold, include_veto_pads=include_veto_pads)
         to_return = (x,y, t*self.zscale ,e)
         if self.cache_enable:
-            self.cached_xyze= to_return
+            self.cached_xyze = tuple(np.array(value, copy=True) for value in to_return)
             self.cached_event_xyze = event_number
+            self._cached_xyze_key = cache_key
         return to_return
     
     def get_track_axis(self, event=None, threshold=None, return_all_svd_results=False, xyze=None, return_np=True):
@@ -502,7 +542,6 @@ class raw_h5_file:
         Uses SVD on all points above some threshold to get track direction.
         Returns point, unit vector in track direction.
         If threshold==None, uses track length ic threshold.
-        
         Either event number must be passed, or xyze which contans tuple of cupy arrays of 
         xyze points. This can be useful to avoid transfering data to GPU twice
 

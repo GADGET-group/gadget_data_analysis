@@ -73,6 +73,8 @@ class RvE_Frame(ttk.Frame):
                                            values=self.run_data.run_nums, width=12)
         self.event_run_combo.set(str(self.run_data.run_nums[0]))
         self.event_run_combo.grid(row=2, column=1)
+        self.event_status = ttk.Label(self.view_frame, text='', wraplength=650)
+        self.event_status.grid(row=3, column=0, columnspan=2)
 
         # --- Cut tools ---
         self.cut_tools_frame = ttk.LabelFrame(self, text='cut tools')
@@ -191,9 +193,9 @@ class RvE_Frame(ttk.Frame):
         if self.poly_selector is not None:
             self.poly_selector.verts = self.rve_cut_verticies
 
-    def refresh_selection(self):
+    def refresh_selection(self, base_mask=None):
         inside = polygon_mask(self.run_data.counts, self.run_data.ranges, self.rve_cut_verticies)
-        self.rve_cut_select_mask = inside & self.get_processed_event_mask()
+        self.rve_cut_select_mask = inside & (self.get_processed_event_mask() if base_mask is None else base_mask)
         count = int(self.rve_cut_select_mask.sum())
         source = ', '.join(str(r) for r in self.cut_source_runs)
         self.cut_status.configure(text=f'Cut source: {self.run_data.experiment}, runs {source}. '
@@ -216,7 +218,7 @@ class RvE_Frame(ttk.Frame):
         self.selected_rve_path = Path(self.rve_cut_verticies)
         self.refresh_selection()
 
-    def get_processed_event_mask(self):
+    def get_filter_values(self):
         values = {name: float(getattr(self, name + '_entry').get()) for name in (
             'veto_threshold', 'range_min', 'range_max', 'angle_min', 'angle_max',
             'ic_min', 'ic_max', 'railed_pads_max', 'beam_off_min')}
@@ -225,15 +227,43 @@ class RvE_Frame(ttk.Frame):
         for lo, hi in (('range_min', 'range_max'), ('angle_min', 'angle_max'), ('ic_min', 'ic_max')):
             if values[lo] >= values[hi]:
                 raise ValueError(f'{lo} must be smaller than {hi}.')
+        return values
+
+    def get_filter_checks(self, values=None, index=None):
+        """Use the same comparisons for plotting, exporting and event inspection."""
+        values = self.get_filter_values() if values is None else values
         data = self.run_data
-        return np.logical_and.reduce((
-            data.max_veto_counts < values['veto_threshold'],
-            data.ranges > values['range_min'], data.ranges < values['range_max'],
-            data.angles > values['angle_min'], data.angles < values['angle_max'],
-            data.counts > values['ic_min'], data.counts < values['ic_max'],
-            data.num_railed_pads <= values['railed_pads_max'],
-            data.time_since_beam_off > values['beam_off_min'],
-        ))
+        checks = []
+        for field, setting, label, compare, symbol in (
+                ('max_veto_counts', 'veto_threshold', 'Max veto', np.less, '<'),
+                ('ranges', 'range_min', 'Range (mm)', np.greater, '>'),
+                ('ranges', 'range_max', 'Range (mm)', np.less, '<'),
+                ('angles', 'angle_min', 'Angle (degrees)', np.greater, '>'),
+                ('angles', 'angle_max', 'Angle (degrees)', np.less, '<'),
+                ('counts', 'ic_min', f'Energy ({data.energy_units})', np.greater, '>'),
+                ('counts', 'ic_max', f'Energy ({data.energy_units})', np.less, '<'),
+                ('num_railed_pads', 'railed_pads_max', 'Railed pads', np.less_equal, '<='),
+                ('time_since_beam_off', 'beam_off_min', 'Time since beam off (s)', np.greater, '>')):
+            actual = getattr(data, field)
+            if index is not None:
+                actual = actual[index]
+            rule = f'{label} must be {symbol} {values[setting]:.9g}'
+            if index is not None:
+                rule += f'; event value = {actual:.9g}'
+            checks.append((rule, compare(actual, values[setting])))
+        return checks
+
+    def get_processed_event_mask(self, values=None):
+        return np.logical_and.reduce([passed for _, passed in self.get_filter_checks(values)])
+
+    def get_event_selection_details(self, index):
+        failures = [rule for rule, passed in self.get_filter_checks(index=index) if not passed]
+        inside = None
+        if self.rve_cut_verticies:
+            inside = bool(polygon_mask(self.run_data.counts[index:index + 1],
+                                       self.run_data.ranges[index:index + 1], self.rve_cut_verticies)[0])
+        return {'passes_filters': not failures, 'inside_polygon': inside,
+                'selected': inside and not failures, 'failures': failures}
 
     def get_bins(self):
         bins = (int(self.energy_bins_entry.get()), int(self.range_bins_entry.get()))
@@ -256,6 +286,8 @@ class RvE_Frame(ttk.Frame):
 
     def plot_spectrum(self, fig_name='RvE', clear=True, show=True):
         mask = self.get_processed_event_mask()
+        if self.rve_cut_verticies:
+            self.refresh_selection(base_mask=mask)
         print(int(mask.sum()), 'events after mask applied', len(mask), 'total events')
         fig, ax = plt.subplots(num=fig_name, clear=clear)
         self._draw_histogram(ax, mask)
@@ -338,10 +370,27 @@ class RvE_Frame(ttk.Frame):
             index = self.run_data.get_index(event_num, run_num=run_num)
             fig, ax = self.plot_spectrum()
             energy, track_range = self.run_data.counts[index], self.run_data.ranges[index]
-            ax.plot(energy, track_range, 'ro', picker=5)
-            ax.annotate(f'Run {run_num}, event {event_num}', (energy, track_range),
+            details = self.get_event_selection_details(index)
+            if not details['passes_filters']:
+                state = 'Excluded by filters'
+            elif details['inside_polygon'] is False:
+                state = 'Outside polygon'
+            elif details['inside_polygon'] is None:
+                state = 'Passes filters; no polygon selected'
+            else:
+                state = 'Selected by polygon and filters'
+            marker = 'rx' if not details['passes_filters'] else 'go'
+            ax.plot(energy, track_range, marker, picker=5)
+            ax.annotate(f'Run {run_num}, event {event_num}\n{state}', (energy, track_range),
                         textcoords='offset points', xytext=(-15, 7), ha='center', fontsize=10,
                         bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', edgecolor='black'))
+            explanation = f'Run {run_num}, event {event_num}: {state}.'
+            if details['inside_polygon'] is not None:
+                explanation += ' Inside polygon.' if details['inside_polygon'] else ' Outside polygon.'
+            if details['failures']:
+                explanation += '\n' + '\n'.join(details['failures'])
+            self.event_status.configure(text=explanation)
+            print(explanation)
             fig.canvas.draw_idle()
         except (ValueError, IndexError) as exc:
             messagebox.showerror('Cannot locate event', str(exc), parent=self)
@@ -362,19 +411,37 @@ class RvE_Frame(ttk.Frame):
             self.update_idletasks()
             result = self.save_cut_files(self.rve_cut_verticies, output_base=base)
             if result:
-                messagebox.showinfo('Images saved', '\n'.join(result), parent=self)
+                lines, incomplete = self.export_summary(result)
+                if incomplete:
+                    messagebox.showwarning('Export needs attention', '\n'.join(lines), parent=self)
+                else:
+                    messagebox.showinfo('Images saved', '\n'.join(lines), parent=self)
         except Exception as exc:
             messagebox.showerror('Image export failed', str(exc), parent=self)
         finally:
             self.configure(cursor='')
 
+    @staticmethod
+    def export_summary(folders):
+        lines, incomplete = [], False
+        for folder in folders:
+            with open(os.path.join(folder, 'export_status.json'), encoding='utf-8') as handle:
+                status = json.load(handle)
+            incomplete |= status['status'] != 'complete'
+            lines.append(f"Run {status['run']}: {status['selected_count']} selected, "
+                         f"{status['exported_count']} saved, "
+                         f"{len(status['skipped_empty_events'])} empty, "
+                         f"{len(status.get('failed_events', []))} failed.\n{folder}")
+        return lines, incomplete
+
     def save_cut_files(self, points, output_base=None, date=None):
-        """Export separate run/date folders. Never overwrite an earlier export."""
+        """Export each selected event and record its outcome incrementally."""
         from PIL import Image
         definition = validate_cut({'experiment': self.run_data.experiment,
                                    'source_runs': self.cut_source_runs, 'vertices': points})
-        # Evaluate current filters once, so counts, manifests and PNGs agree.
-        base_mask = self.get_processed_event_mask()
+        # Snapshot filters once: selection, manifests and metadata must agree.
+        filter_values = self.get_filter_values()
+        base_mask = self.get_processed_event_mask(filter_values)
         selected_mask = polygon_mask(self.run_data.counts, self.run_data.ranges, points) & base_mask
         self.rve_cut_select_mask = selected_mask
         indices = np.flatnonzero(selected_mask)
@@ -398,61 +465,127 @@ class RvE_Frame(ttk.Frame):
                 raise FileExistsError(f'An export already exists: {folder}. '
                                       'Choose a different export parent folder to keep both cuts.')
             targets.append((run_num, run_indices, folder, preview))
-        # Check all target names before creating any output.
-        for _, _, folder, _ in targets:
-            os.mkdir(folder)
         renderer = TraceImageRenderer()
         outputs = []
         for run_num, run_indices, folder, preview in targets:
+            os.mkdir(folder)
             print('NEW DIRECTORY', folder)
-            save_cut(os.path.join(folder, 'cut_definition.json'), definition)
             selected_events = np.asarray(self.run_data.get_event_num(run_indices), dtype=np.int64)
-            with open(os.path.join(folder, 'selected_events.csv'), 'w', newline='', encoding='utf-8') as handle:
-                writer = csv.writer(handle)
-                writer.writerow(('run', 'event', 'filename'))
-                writer.writerows((run_num, int(evt), f'run{run_num}_event{int(evt)}.png')
-                                 for evt in selected_events)
-            status = {'experiment': self.run_data.experiment, 'run': run_num,
+            run = self.run_data.get_run(run_num)
+            # Infinity is represented as text so this remains standard JSON.
+            settings = {name: value if np.isfinite(value) else str(value)
+                        for name, value in filter_values.items()}
+            status = {'format_version': 2, 'experiment': self.run_data.experiment, 'run': run_num,
+                      'created_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                      'loaded_runs': list(self.run_data.run_nums),
+                      'filter_settings': settings, 'energy_units': self.run_data.energy_units,
+                      'filter_comparisons': 'veto < max; range/angle/energy strictly between bounds; '
+                                            'railed pads <= max; time since beam off > min',
+                      'beam_off_method': 'framework timestamp gaps > 0.1 s, separately for each run',
+                      'image_hit_threshold_adc': float(run.image_hit_threshold),
+                      'image_include_veto_pads': False,
+                      'raw_h5': os.fspath(run.file_path),
                       'selected_count': len(run_indices), 'exported_count': 0,
-                      'skipped_empty_events': [], 'status': 'in_progress'}
+                      'skipped_empty_events': [], 'failed_events': [],
+                      'unprocessed_events': [int(evt) for evt in selected_events],
+                      'status': 'in_progress'}
             status_path = os.path.join(folder, 'export_status.json')
-            def write_status():
-                with open(status_path, 'w', encoding='utf-8') as handle:
-                    json.dump(status, handle, indent=2)
-                    handle.write('\n')
-            write_status()
             exported_events = []
             expected = {f'run{run_num}_event{int(evt)}.png': int(evt) for evt in selected_events}
+
+            def write_status():
+                status['exported_count'] = len(exported_events)
+                status['unprocessed_events'] = list(expected.values())
+                temporary = status_path + '.tmp'
+                with open(temporary, 'w', encoding='utf-8') as handle:
+                    json.dump(status, handle, indent=2, allow_nan=False)
+                    handle.write('\n')
+                os.replace(temporary, status_path)
+                # The H5-copy tool must only receive events with saved PNGs,
+                # including when an export is interrupted by a later failure.
+                pickle_path = os.path.join(folder, 'cut_indices_H5list.pkl')
+                with open(pickle_path + '.tmp', 'wb') as handle:
+                    pickle.dump(np.asarray(exported_events, dtype=np.int64), handle)
+                os.replace(pickle_path + '.tmp', pickle_path)
+
+            write_status()
+            fig = None
             try:
+                save_cut(os.path.join(folder, 'cut_definition.json'), definition)
+                with open(os.path.join(folder, 'selected_events.csv'), 'w', newline='', encoding='utf-8') as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(('run', 'event', 'filename'))
+                    writer.writerows((run_num, int(evt), f'run{run_num}_event{int(evt)}.png')
+                                     for evt in selected_events)
                 fig, ax = plt.subplots()
                 self._draw_histogram(ax, base_mask & (self.run_data.event_runs == run_num), points)
                 ax.set_title(f'{self.run_data.experiment}: run {run_num}')
                 fig.savefig(preview)
                 plt.close(fig)
-                for start in tqdm(range(0, len(run_indices), 100), desc=f'Export run {run_num}'):
-                    chunk = run_indices[start:start + 100]
-                    for pad_plane, trace, title, filename in self.run_data.save_cutImages(chunk):
+                fig = None
+                with open(os.path.join(folder, 'export_results.csv'), 'w', newline='', encoding='utf-8') as journal:
+                    writer = csv.writer(journal)
+                    writer.writerow(('run', 'event', 'filename', 'status', 'error'))
+                    journal.flush()
+
+                    def record(filename, outcome, error=''):
+                        event = expected.pop(filename)
+                        writer.writerow((run_num, event, filename, outcome, error))
+                        journal.flush()
+                        if outcome == 'exported':
+                            exported_events.append(event)
+                        elif outcome == 'empty':
+                            status['skipped_empty_events'].append(event)
+                        else:
+                            status['failed_events'].append({'event': event, 'filename': filename,
+                                                            'stage': outcome, 'error': error})
+                        # Keep progress recoverable even if a later event fails.
+                        write_status()
+
+                    def build_error(source_run, event, exc):
+                        if source_run != run_num:
+                            raise ValueError(f'Image error routed to wrong run: {source_run}')
+                        record(f'run{run_num}_event{event}.png', 'build_failed',
+                               f'{type(exc).__name__}: {exc}')
+
+                    for pad_plane, trace, title, filename in self.run_data.iter_cutImages(
+                            run_indices, on_error=build_error):
                         if filename not in expected:
                             raise ValueError(f'Unexpected or duplicate event filename: {filename}')
-                        image = renderer.compose(pad_plane, trace)
-                        Image.fromarray(image).save(os.path.join(folder, filename))
-                        exported_events.append(expected.pop(filename))
-                    status['exported_count'] = len(exported_events)
-                    write_status()
-                # The existing builder skips events without hits above the image threshold.
-                status['skipped_empty_events'] = list(expected.values())
-                with open(os.path.join(folder, 'cut_indices_H5list.pkl'), 'wb') as handle:
-                    pickle.dump(np.asarray(exported_events, dtype=np.int64), handle)
-                status['status'] = 'complete'
+                        path = os.path.join(folder, filename)
+                        created = False
+                        try:
+                            image = renderer.compose(pad_plane, trace)
+                            with open(path, 'xb') as handle:
+                                created = True
+                                Image.fromarray(image).save(handle, format='PNG')
+                        except Exception as exc:
+                            if created:
+                                os.unlink(path)  # Remove our incomplete image only.
+                            record(filename, 'image_failed', f'{type(exc).__name__}: {exc}')
+                            continue
+                        record(filename, 'exported')
+                    # A successful traversal omitted only events with zero image hits.
+                    for filename in list(expected):
+                        record(filename, 'empty')
+                if status['failed_events']:
+                    status['status'] = 'complete_with_errors'
+                elif status['skipped_empty_events']:
+                    status['status'] = 'complete_with_skips'
+                else:
+                    status['status'] = 'complete'
                 write_status()
             except Exception as exc:
                 status['status'] = 'failed'
-                status['error'] = str(exc)
-                status['exported_count'] = len(exported_events)
+                status['error'] = f'{type(exc).__name__}: {exc}'
                 write_status()
-                raise
+                raise RuntimeError(f'Export stopped for run {run_num}; progress is saved in '
+                                   f'{folder}. {exc}') from exc
+            finally:
+                if fig is not None:
+                    plt.close(fig)
             print(f"Run {run_num}: {len(selected_events)} selected, {len(exported_events)} PNGs saved, "
-                  f"{len(status['skipped_empty_events'])} skipped (no image hits)")
+                  f"{len(status['skipped_empty_events'])} empty, {len(status['failed_events'])} failed")
             outputs.append(folder)
         return outputs
 

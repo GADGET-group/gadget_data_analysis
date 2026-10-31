@@ -587,6 +587,16 @@ class GadgetRunH5:
         Returns a list of (pad_plane, trace, title, filename) tuples.
         '''
 
+        return list(self.iter_cutImages(cut_indices))
+
+    def iter_cutImages(self, cut_indices, on_error=None):
+        """Yield each image as it is built, retaining earlier events on failure.
+
+        Without on_error, errors still propagate to the caller. With a callback,
+        report (run, event, exception) and continue to the next selected event.
+        Empty hit sets retain the existing skip behavior.
+        """
+
         def make_box(mm_grid):
             """
             Draws the box for the energy bar
@@ -876,55 +886,52 @@ class GadgetRunH5:
             return pad_plane
 
 
-        def plot_track(cut_indices):
-            all_image_data = []  # List to store the results
-            pbar = tqdm(total=len(cut_indices))
-
+        with tqdm(total=len(cut_indices)) as pbar:
             for index in cut_indices:
                 event_num = self.get_event_num(index)
                 file = self.h5_file
+                try:
+                    xHit, yHit, zHit, eHit = file.get_xyze(event_num,threshold=self.image_hit_threshold,include_veto_pads=False)
+                    if len(eHit) == 0:
+                        continue
+                    energy = np.sum(eHit)
+                    pads,pad_data = file.get_pad_traces(event_num)
+                    pads = np.array(pads)
+                    pad_data = np.array(pad_data)
+                    is_not_veto = ~np.isin(pads, VETO_PADS)
+                    pad_data = pad_data[is_not_veto]
+                    trace = np.sum(pad_data, axis=0)
+                    max_val = np.argmax(trace)
+                    low_bound = max_val - 75
+                    if low_bound < 0:
+                        low_bound = 5
+                    upper_bound = max_val + 75
+                    if upper_bound > 512:
+                        upper_bound = 506
+                    trace = trace[low_bound:upper_bound]
+                    trace = smooth_trace(trace)
+                    trace = remove_noise(trace)
 
-                xHit, yHit, zHit, eHit = file.get_xyze(event_num,threshold=self.image_hit_threshold,include_veto_pads=False)
-                if len(eHit) == 0:
-                    pbar.update(n=1)
+                    # Call pt_shift function to move all 2D pts to pad centers
+                    dset_0_copyx, dset_0_copyy = pt_shift(xHit, yHit)
+
+                    # Call fill_padplane to create 2D pad plane image
+                    pad_plane = fill_padplane(dset_0_copyx, dset_0_copyy, eHit, energy, global_grid)
+
+                    # Prepare the data necessary for plotting
+                    image_title = f' Image {event_num} of Particle Track Event'
+                    image_filename = f"run{self.run_num}_event{event_num}.png"
+
+                    image_data = (pad_plane, trace, image_title, image_filename)
+                except Exception as exc:
+                    if on_error is None:
+                        raise
+                    on_error(self.run_num, int(event_num), exc)
                     continue
-                energy = np.sum(eHit)
-                pads,pad_data = file.get_pad_traces(event_num)
-                pads = np.array(pads)
-                pad_data = np.array(pad_data)
-                is_not_veto = ~np.isin(pads, VETO_PADS)
-                pad_data = pad_data[is_not_veto]
-                trace = np.sum(pad_data, axis=0)
-                max_val = np.argmax(trace)
-                low_bound = max_val - 75
-                if low_bound < 0:
-                    low_bound = 5
-                upper_bound = max_val + 75
-                if upper_bound > 512:
-                    upper_bound = 506
-                trace = trace[low_bound:upper_bound]
-                trace = smooth_trace(trace)
-                trace = remove_noise(trace)
+                finally:
+                    pbar.update(n=1)
+                yield image_data
 
-                # Call pt_shift function to move all 2D pts to pad centers
-                dset_0_copyx, dset_0_copyy = pt_shift(xHit, yHit)
-
-                # Call fill_padplane to create 2D pad plane image
-                pad_plane = fill_padplane(dset_0_copyx, dset_0_copyy, eHit, energy, global_grid)
-
-                # Prepare the data necessary for plotting
-                image_title = f' Image {event_num} of Particle Track Event'
-                image_filename = f"run{self.run_num}_event{event_num}.png"
-
-                all_image_data.append((pad_plane, trace, image_title, image_filename))  # Append the result to the list
-
-                pbar.update(n=1)
-
-            return all_image_data  # Return the list of all results after the loop
-
-
-        result = plot_track(cut_indices)
-        return result
 
     def get_RvE_cut_indexes(self, verticies):
         '''

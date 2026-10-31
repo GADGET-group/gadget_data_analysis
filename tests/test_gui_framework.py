@@ -26,6 +26,8 @@ except ImportError:
         def __init__(self, iterable=(), **kwargs): self.iterable = iterable
         def __iter__(self): return iter(self.iterable)
         def update(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
     progress_module.tqdm = Progress
     sys.modules['tqdm'] = progress_module
 
@@ -123,6 +125,7 @@ class IntegrationTests(unittest.TestCase):
         for name, value in defaults.items(): setattr(frame, name + '_entry', Entry(value))
         frame.log_scale_var = types.SimpleNamespace(get=lambda: True)
         frame.cut_status = Entry('')
+        frame.event_status = Entry('')
         frame.poly_selector = None
         frame.rve_cut_verticies = []
         frame.rve_cut_select_mask = None
@@ -225,7 +228,12 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(status['selected_count'], 3)
         self.assertEqual(status['exported_count'], 2)
         self.assertEqual(status['skipped_empty_events'], [102])
-        self.assertEqual(status['status'], 'complete')
+        self.assertEqual(status['status'], 'complete_with_skips')
+        self.assertEqual(status['unprocessed_events'], [])
+        self.assertEqual(status['filter_settings']['beam_off_min'], .1)
+        self.assertEqual(status['filter_settings']['angle_min'], '-inf')
+        self.assertEqual(status['image_hit_threshold_adc'], 20)
+        self.assertTrue(frame.export_summary(outputs)[1])
         before = {p: p.read_bytes() for folder in outputs for p in Path(folder).iterdir() if p.is_file()}
         with self.assertRaises(FileExistsError):
             frame.save_cut_files(frame.rve_cut_verticies, date='2026_10_18')
@@ -320,11 +328,123 @@ class IntegrationTests(unittest.TestCase):
 
     def test_rve_event_annotation_identifies_run(self):
         frame = self.frame(self.data())
+        frame.apply_cut_definition(self.cut())
         frame.event_run_combo = Entry(147)
         frame.event_num_entry = Entry(100)
         with mock.patch('RvE_Frame.plt.show'):
             frame.show_event()
-        self.assertIn('Run 147, event 100', [text.get_text() for text in plt.gca().texts])
+        self.assertTrue(any('Run 147, event 100' in text.get_text() for text in plt.gca().texts))
+        self.assertIn('Selected by polygon and filters', frame.event_status.text)
+
+    def test_inspection_explains_event_inside_polygon_failing_time(self):
+        frame = self.frame(self.data())
+        frame.apply_cut_definition(self.cut())
+        frame.event_run_combo = Entry(145)
+        frame.event_num_entry = Entry(102)
+        details = frame.get_event_selection_details(2)
+        self.assertTrue(details['inside_polygon'])
+        self.assertFalse(details['selected'])
+        self.assertEqual(len(details['failures']), 1)
+        self.assertIn('Time since beam off (s) must be > 0.1; event value = 0.05', details['failures'][0])
+        with mock.patch('RvE_Frame.plt.show'):
+            frame.show_event()
+        self.assertIn('Excluded by filters', frame.event_status.text)
+        self.assertIn('Inside polygon', frame.event_status.text)
+        self.assertEqual(plt.gca().lines[-1].get_marker(), 'x')
+
+    def test_build_error_keeps_good_events_before_and_after_bad_event(self):
+        data = self.data((147,))
+        frame = self.frame(data)
+        frame.apply_cut_definition(self.cut())
+        raw = data.h5_file
+        original = raw.get_xyze
+        def fail_middle(event, **kwargs):
+            if event == 101:
+                raise ValueError('synthetic corrupt event')
+            return original(event, **kwargs)
+        with mock.patch.object(raw, 'get_xyze', side_effect=fail_middle):
+            folder, = frame.save_cut_files(frame.rve_cut_verticies, date='test')
+        folder = Path(folder)
+        self.assertEqual(sorted(p.name for p in folder.glob('*.png')),
+                         ['run147_event100.png', 'run147_event102.png'])
+        status = json.loads((folder / 'export_status.json').read_text())
+        self.assertEqual(status['status'], 'complete_with_errors')
+        self.assertEqual(status['selected_count'], 3)
+        self.assertEqual(status['exported_count'], 2)
+        self.assertEqual(status['skipped_empty_events'], [])
+        self.assertEqual(status['unprocessed_events'], [])
+        self.assertEqual(status['failed_events'][0]['event'], 101)
+        self.assertEqual(status['failed_events'][0]['stage'], 'build_failed')
+        with (folder / 'export_results.csv').open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([(row['event'], row['status']) for row in rows],
+                         [('100', 'exported'), ('101', 'build_failed'), ('102', 'exported')])
+
+    def test_render_error_is_recorded_without_losing_neighbor_images(self):
+        from event_image_io import TraceImageRenderer
+        frame = self.frame(self.data((147,)))
+        frame.apply_cut_definition(self.cut())
+        original = TraceImageRenderer.compose
+        calls = []
+        def fail_middle(renderer, pad, trace):
+            calls.append(1)
+            if len(calls) == 2:
+                raise ValueError('synthetic invalid trace')
+            return original(renderer, pad, trace)
+        with mock.patch.object(TraceImageRenderer, 'compose', fail_middle):
+            folder, = frame.save_cut_files(frame.rve_cut_verticies, date='test')
+        status = json.loads((Path(folder) / 'export_status.json').read_text())
+        self.assertEqual(status['exported_count'], 2)
+        self.assertEqual(status['failed_events'][0]['event'], 101)
+        self.assertEqual(status['failed_events'][0]['stage'], 'image_failed')
+        self.assertEqual(len(list(Path(folder).glob('*.png'))), 2)
+
+    def test_fatal_stream_error_preserves_progress_and_marks_unprocessed(self):
+        data = self.data((147,))
+        frame = self.frame(data)
+        frame.apply_cut_definition(self.cut())
+        original = data.iter_cutImages
+        def interrupted(indices, **kwargs):
+            stream = original(indices, **kwargs)
+            try:
+                yield next(stream)
+                raise RuntimeError('synthetic stream interruption')
+            finally:
+                stream.close()
+        with mock.patch.object(data, 'iter_cutImages', interrupted):
+            with self.assertRaisesRegex(RuntimeError, 'stream interruption'):
+                frame.save_cut_files(frame.rve_cut_verticies, date='test')
+        folder = Path(data.folder_path) / 'run147_test'
+        status = json.loads((folder / 'export_status.json').read_text())
+        self.assertEqual(status['status'], 'failed')
+        self.assertEqual(status['exported_count'], 1)
+        self.assertEqual(status['unprocessed_events'], [101, 102])
+        self.assertEqual(status['skipped_empty_events'], [])
+        self.assertTrue((folder / 'run147_event100.png').exists())
+        with (folder / 'cut_indices_H5list.pkl').open('rb') as handle:
+            np.testing.assert_array_equal(pickle.load(handle), [100])
+
+    def test_filter_edits_update_plot_selection_count_and_export_snapshot(self):
+        frame = self.frame(self.data((147,)))
+        frame.apply_cut_definition(self.cut())
+        frame.beam_off_min_entry.value = '.2'
+        frame.plot_spectrum(show=False)
+        self.assertIn('0 selected with current filters', frame.cut_status.text)
+        frame.beam_off_min_entry.value = '.075'
+        folder, = frame.save_cut_files(frame.rve_cut_verticies, date='test')
+        frame.beam_off_min_entry.value = '.9'
+        status = json.loads((Path(folder) / 'export_status.json').read_text())
+        self.assertEqual(status['filter_settings']['beam_off_min'], .075)
+        self.assertEqual(status['status'], 'complete')
+        self.assertFalse(frame.export_summary([folder])[1])
+        self.assertEqual(set(load_cut(Path(folder) / 'cut_definition.json')),
+                         {'experiment', 'source_runs', 'vertices'})
+
+    def test_legacy_cut_loader_alias_does_not_raise_after_loading(self):
+        frame = self.frame(self.data())
+        with mock.patch.object(frame, 'load_cut_definition') as load:
+            frame.cut_from_file()
+        load.assert_called_once()
 
     def test_run_load_success_closes_previous_dataset(self):
         from RunSelectFrame import RunSelectFrame

@@ -128,18 +128,20 @@ class GadgetRunCollection:
 
     def save_cutImages(self, cut_indices):
         """Route global event-array indices to their original H5 files."""
+        return list(self.iter_cutImages(cut_indices))
+
+    def iter_cutImages(self, cut_indices, on_error=None):
+        """Stream images with run/event identity; optionally report build errors."""
         indices = np.asarray(cut_indices)
         if indices.ndim != 1 or (indices.size and not np.issubdtype(indices.dtype, np.integer)):
             raise ValueError('Image selection must be a one-dimensional integer index array.')
         indices = indices.astype(np.int64)
         if np.any(indices < 0) or np.any(indices >= len(self.counts)):
             raise IndexError('Image selection contains an out-of-bounds event index.')
-        result = []
         for run_num in self.run_nums:
             local = indices[self.event_runs[indices] == run_num] - self._offsets[run_num]
             if len(local):
-                result.extend(self._runs[run_num].save_cutImages(local))
-        return result
+                yield from self._runs[run_num].iter_cutImages(local, on_error=on_error)
 
     def get_RvE_cut_indexes(self, vertices):
         self.rve_cut_select_mask = polygon_mask(self.counts, self.ranges, vertices)
