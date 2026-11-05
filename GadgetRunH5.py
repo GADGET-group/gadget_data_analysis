@@ -94,10 +94,11 @@ class GadgetRunH5:
                 pass
         self.folder_path = folder_path
 
-        root_file = os.path.join(save_path, f'{experiment}_run{self.run_num}.root')
+        root_file = process_runs.get_root_file_path(experiment, self.run_num)
+        self.root_file = root_file
         if require_processed and not os.path.exists(root_file):
-            raise FileNotFoundError(f'{root_file} does not exist: process the run first, e.g. '
-                                    f'process_runs.process_tpc_run({experiment!r}, {self.run_num})')
+            raise FileNotFoundError(f'Required processed ROOT file not found: {root_file}. '
+                                    'Create the expected processed file before loading this run.')
 
         # raw h5 file, configured (zscale, thresholds, background subtraction) by process_runs
         self.h5_file = process_runs.get_h5_file(experiment, self.run_num)

@@ -1,5 +1,6 @@
 """Synthetic-data integration checks; no detector files or desktop are required."""
 import csv
+import ast
 import importlib
 import json
 import os
@@ -43,6 +44,14 @@ raw_package.raw_h5_file = raw_module
 sys.modules['raw_viewer'] = raw_package
 sys.modules['raw_viewer.process_runs'] = backend
 sys.modules['raw_viewer.raw_h5_file'] = raw_module
+
+# Use the real ROOT naming helpers while keeping external detector I/O synthetic.
+_source = Path(__file__).resolve().parents[1] / 'raw_viewer' / 'process_runs.py'
+_helpers = [node for node in ast.parse(_source.read_text()).body
+            if isinstance(node, ast.FunctionDef) and node.name in
+            ('get_root_stem', 'get_root_file_path', '_get_cache_file_path')]
+backend.os = os
+exec(compile(ast.Module(body=_helpers, type_ignores=[]), str(_source), 'exec'), backend.__dict__)
 
 from GadgetRunCollection import GadgetRunCollection
 from GadgetRunH5 import GadgetRunH5
@@ -292,6 +301,29 @@ class IntegrationTests(unittest.TestCase):
 
     def test_missing_processed_run_fails_before_loading_any_h5(self):
         with self.assertRaises(FileNotFoundError): GadgetRunCollection([145, 147])
+        self.assertEqual(self.raws, [])
+
+    def test_mg21_and_mg20_collection_preflight_uses_selected_root_paths(self):
+        for run in (71, 145):
+            Path(backend.get_root_file_path('e25058', run)).touch()
+        data = GadgetRunCollection([71, 145], folder_path=os.path.join(self.temp.name, 'exports'))
+        self.addCleanup(data.close)
+        self.assertTrue(data.get_run(71).root_file.endswith('e25058_run71_smart1_veto2_rpr_fzp.root'))
+        self.assertTrue(data.get_run(145).root_file.endswith('e25058_run145.root'))
+        self.assertEqual(data.get_event_identity(0), (71, 100))
+        self.assertEqual(data.get_event_identity(3), (145, 100))
+
+    def test_mg21_other_root_variants_do_not_pass_collection_preflight(self):
+        for suffix in ('', '_smart1', '_smart1_nrpr_fzp'):
+            Path(self.temp.name, 'e25058_run71' + suffix + '.root').touch()
+        with self.assertRaisesRegex(FileNotFoundError, 'e25058_run71_smart1_veto2_rpr_fzp.root'):
+            GadgetRunCollection([71])
+        self.assertEqual(self.raws, [])
+
+    def test_mg21_single_run_preflight_also_checks_selected_variant(self):
+        Path(self.temp.name, 'e25058_run71.root').touch()
+        with self.assertRaisesRegex(FileNotFoundError, 'e25058_run71_smart1_veto2_rpr_fzp.root'):
+            GadgetRunH5(71, folder_path=os.path.join(self.temp.name, 'exports'))
         self.assertEqual(self.raws, [])
 
     def individual_module(self):

@@ -27,11 +27,10 @@ class GadgetRunCollection:
         self._offsets = {}
         self._raw_total_counts = None
         if require_processed:
-            save_path = process_runs.get_save_path(experiment)
-            missing = [r for r in self.run_nums if not os.path.isfile(
-                os.path.join(save_path, f'{experiment}_run{r}.root'))]
+            paths = [process_runs.get_root_file_path(experiment, r) for r in self.run_nums]
+            missing = [path for path in paths if not os.path.isfile(path)]
             if missing:
-                raise FileNotFoundError(f'Process these runs before loading them: {missing}')
+                raise FileNotFoundError('Required processed ROOT files not found:\n' + '\n'.join(missing))
         try:
             offset = 0
             for run in self.run_nums:

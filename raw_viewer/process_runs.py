@@ -39,6 +39,26 @@ def get_save_path(experiment):
         if experiment == 'e25058':
             return '/Volumes/e25058_v1/e25058/proc_pkl'
 
+def get_root_stem(experiment, run_number):
+    """Select the requested processed variant without guessing among ROOT files."""
+    if experiment == 'e25058' and 70 <= run_number <= 83:
+        return f'{experiment}_run{run_number}_smart1'
+    else:
+        return f'{experiment}_run{run_number}'
+
+
+def get_root_file_path(experiment, run_number):
+    """Shared ROOT filename selection for readers and GUI preflight checks."""
+    return os.path.join(get_save_path(experiment), get_root_stem(experiment, run_number) + '.root')
+
+
+def _get_cache_file_path(quantity, experiment, run_number, tag=''):
+    # Retain existing standard-run cache names, but isolate each ROOT variant.
+    suffix = '_' + tag if tag else ''
+    return os.path.join(get_save_path(experiment),
+                        f'{quantity}_{get_root_stem(experiment, run_number)}{suffix}.npy')
+
+
 def get_h5_path(experiment, run_number):
     h5_base_path = ''
     if socket.gethostname() == 'tpcgpu':
@@ -285,8 +305,13 @@ def process_tpc_run(experiment, run_number, force_reprocess=False):
 def get_quantity(qname, experiment, runs):
     to_return = []
     for run in runs:
-        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{run}.root')
+        fname = get_root_file_path(experiment, run)
         if not os.path.exists(fname):
+            if get_root_stem(experiment, run) != f'{experiment}_run{run}':
+                raise FileNotFoundError(
+                    f'Selected processed ROOT file not found: {fname}. '
+                    'This processing variant must already exist; automatic standard '
+                    'processing cannot generate the selected variant.')
             process_tpc_run(experiment, run)
             
         with uproot.open(fname) as file:
@@ -319,7 +344,7 @@ def get_lengths(experiment, runs):
 def get_veto_counts(experiment, runs):
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'veto_counts_{experiment}_run{run}.npy')
+        cache_fname = _get_cache_file_path('veto_counts', experiment, run)
         if os.path.exists(cache_fname):
             veto_counts = np.load(cache_fname)
         else:
@@ -335,7 +360,7 @@ def get_veto_mask(experiment, runs, veto_thresholds):
     thresh_hash = hashlib.sha256(veto_thresholds.tobytes()).hexdigest()[:16]
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'veto_mask_{experiment}_run{run}_{thresh_hash}.npy')
+        cache_fname = _get_cache_file_path('veto_mask', experiment, run, thresh_hash)
         if os.path.exists(cache_fname):
             veto_mask = np.load(cache_fname)
         else:
@@ -351,7 +376,7 @@ def get_max_veto_counts(experiment, runs):
     '''
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'max_veto_counts_{experiment}_run{run}.npy')
+        cache_fname = _get_cache_file_path('max_veto_counts', experiment, run)
         if os.path.exists(cache_fname):
             max_pad_counts = np.load(cache_fname)
         else:
@@ -367,7 +392,7 @@ def get_max_veto_counts(experiment, runs):
 def get_outer_ring_counts(experiment, runs):
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'outer_ring_counts_{experiment}_run{run}.npy')
+        cache_fname = _get_cache_file_path('outer_ring_counts', experiment, run)
         if os.path.exists(cache_fname):
             counts = np.load(cache_fname)
         else:
@@ -382,7 +407,7 @@ def get_outer_ring_counts(experiment, runs):
 def get_outer_ring_max_counts(experiment, runs):
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'max_outer_ring_counts_{experiment}_run{run}.npy')
+        cache_fname = _get_cache_file_path('max_outer_ring_counts', experiment, run)
         if os.path.exists(cache_fname):
             max_pad_counts = np.load(cache_fname)
         else:
@@ -399,7 +424,7 @@ def get_gm_ic(experiment, runs, gains):
     gains_hash = hashlib.sha256(gains.tobytes()).hexdigest()[:16]
     to_return = []
     for run in runs:
-        cache_fname = os.path.join(get_save_path(experiment), f'gm_ic_{experiment}_run{run}_{gains_hash}.npy')
+        cache_fname = _get_cache_file_path('gm_ic', experiment, run, gains_hash)
         if os.path.exists(cache_fname):
             gm_ic = np.load(cache_fname)
         else:

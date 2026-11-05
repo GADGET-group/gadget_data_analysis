@@ -97,7 +97,7 @@ def select_peaks(prediction, threshold=0.6, track_label=None, bragg_label=None):
         valid = [d for d in valid if not is_overlapping(d["box"], best["box"])]
     width = track["box"][2] - track["box"][0]
     height = track["box"][3] - track["box"][1]
-    separation = 0 if width * height < 2700 else min(width, height) * 0.3
+    separation = 0 if width * height < 2700 else min(width, height) * 0.6
     remove = set()
     for i, first in enumerate(peaks):
         for j in range(i + 1, len(peaks)):
@@ -218,7 +218,7 @@ def run_scan(args):
     root = Path(args.images).expanduser().resolve()
     weights = Path(args.weights).expanduser().resolve()
     output = (Path(args.output).expanduser().resolve() if args.output else
-              root.parent / (root.name + "_Threshold_0.3_Seperation_0.3"))
+              root.parent / (root.name + "_Threshold_0.6_Seperation_0.6"))
     if not root.is_dir():
         raise FileNotFoundError(f"Image directory not found: {root}")
     if not weights.is_file():
@@ -327,10 +327,10 @@ def run_scan(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--images", default="/egr/research-tpc/shared/proc_runs/e25058/new_h5/cut_images/October31", help="Directory containing the run/date image folders",)
+    parser.add_argument("--images", default="/egr/research-tpc/shared/proc_runs/e25058/new_h5/cut_images/21Mg", help="Directory containing the run/date image folders",)
     parser.add_argument("--weights",default="/egr/research-tpc/shared/ObjDet/best_model.pth", help="Trained Faster R-CNN state_dict checkpoint",)
     parser.add_argument("--output", help="New results directory; default is a sibling of --images")
-    parser.add_argument("--score-threshold", type=float, default=0.3)
+    parser.add_argument("--score-threshold", type=float, default=0.6)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--limit", type=int, help="Process only the first N images as a smoke check")
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, cuda:0, cuda:1, ...")
