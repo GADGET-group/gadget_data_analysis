@@ -62,8 +62,12 @@ class IndividualEventFrame(ttk.Frame):
         trace_frame.pack()
 
     def open_raw_viewer(self):
+        '''Raw event viewer on this run's h5 file, with the run's processing config loaded.'''
         new_window = tk.Toplevel(self)
-        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path, flat_lookup_path='tpc_data_processing/channel_mappings/flatlookup4cobos.csv')
+        self.viewer_frame = RawEventViewerFrame(new_window, file_path=self.run_data.h5_file_path,
+                                                flat_lookup_path=self.run_data.h5_file.flat_lookup_file_path)
+        self.viewer_frame.settings_file_entry.insert(0, self.run_data.config_path)
+        self.viewer_frame.load_settings_file()
         self.viewer_frame.pack()
 
     
@@ -71,13 +75,8 @@ class IndividualEventFrame(ttk.Frame):
     def project_trace(self):
         debug = True
 
-        index = self.run_data.get_index(int(self.event_num_entry.get()))
         bandwidth = float(self.bandwidth_entry.get())
-
-        xHit = self.run_data.xHit_list[index]
-        yHit = self.run_data.yHit_list[index]
-        zHit = self.run_data.zHit_list[index]
-        eHit = self.run_data.eHit_list[index]
+        xHit, yHit, zHit, eHit = self.run_data.get_hit_lists(int(self.event_num_entry.get()))
 
         extend_bins = 10 #TODO: this should probably be relaed to the bandwidth
         if debug:
@@ -118,7 +117,9 @@ class IndividualEventFrame(ttk.Frame):
 
     def show_plot(self, xHit, yHit, zHit, eHit):
         event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
+        if len(xHit) == 0:
+            raise ValueError(f'event {event_num} has no points above the length_counts_threshold of the config')
+        status = self.run_data.get_event_status(event_num)
         fig = plt.figure(figsize=(6,6))
         ax = plt.axes(projection='3d')
         ax.set_xlim3d(-35, 35)
@@ -127,28 +128,25 @@ class IndividualEventFrame(ttk.Frame):
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_zlabel("z")
-        ax.set_title(f"3D Point-cloud of Event {event_num}", fontdict = {'fontsize' : 10})
+        ax.set_title(f"3D Point-cloud of Event {event_num}" + ('' if status == 'selected' else f' ({status})'), fontdict = {'fontsize' : 10})
         ax.scatter(xHit, yHit, zHit-np.min(zHit), c=eHit, cmap='RdBu_r')
         cbar = fig.colorbar(ax.get_children()[0])
         plt.show(block=False) 
 
     def track_w_trace(self):
         event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
         plt.figure()
-        self.run_data.make_image(index, show=True)
+        self.run_data.make_image(event_num, show=True)
 
     def track_w_trace_raw(self):
         event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
         plt.figure()
-        self.run_data.make_image(index, use_raw_data = True, show=True)
+        self.run_data.make_image(event_num, use_raw_data = True, show=True)
 
     def track_w_trace_raw_smooth(self):
         event_num = int(self.event_num_entry.get())
-        index = self.run_data.get_index(event_num)
         plt.figure()
-        self.run_data.make_image(index, use_raw_data = True, show=True, smoothen = True)
+        self.run_data.make_image(event_num, use_raw_data = True, show=True, smoothen = True)
 
 
     def show_point_cloud(self):

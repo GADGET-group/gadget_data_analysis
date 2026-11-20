@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import ImageTk, Image
 import h5py
+from tkinter import messagebox
 
 from gadget_analysis.main_gui.view_cut_images_window import ViewCutImagesWindow
 
@@ -16,7 +17,11 @@ class PrevCutSelectWindow(tk.Toplevel):
         self.run_data = run_data
         #get previous cut information
         prev_cut_path = os.path.join(self.run_data.folder_path, "*.jpg")
-        self.image_path_list = glob.glob(prev_cut_path)
+        self.image_path_list = sorted(glob.glob(prev_cut_path))
+        if not self.image_path_list:
+            messagebox.showinfo('No saved cuts', f'No cuts have been saved for this run yet ({self.run_data.folder_path}).', parent=parent)
+            self.destroy()
+            return
         self.image_list = []
         for i in range(len(self.image_path_list)):
             self.image_list.append(ImageTk.PhotoImage(Image.open(self.image_path_list[i])))
@@ -77,31 +82,18 @@ class PrevCutSelectWindow(tk.Toplevel):
         with open(cut_indicies_path, "rb") as file:
                 cut_indices_H5list = pickle.load(file)
 
-        str_file = f"/mnt/analysis/e21072/h5test/run_{self.run_data.run_num}.h5"
-
-        # Open the original h5 file
-        with h5py.File(str_file, 'r') as original:
-            # Get the Event and Trace groups
-            cloud_group = original['clouds']
-            trace_group = original['get']
-
-            # Create a new h5 file
-            h5_str = f"h5_cut.h5"
-            h5_path = os.path.join(dir_select, h5_str)
-            with h5py.File(h5_path, 'w') as new:
-                # Create the Event and Trace groups in the new file
-                new_cloud_group = new.create_group('clouds')
-                new_trace_group = new.create_group('get')
-
-                # Loop over the indices and extract the corresponding datasets
-                pbar = tqdm(total=len(cut_indices_H5list))
-                for i in cut_indices_H5list:
-                    cloud_dataset = cloud_group[f'evt{i}_cloud']
-                    trace_dataset = trace_group[f'evt{i}_data']
-
-                    # Copy the datasets to the new file
-                    new_cloud_group.create_dataset(f'evt{i}_cloud', data=cloud_dataset)
-                    new_trace_group.create_dataset(f'evt{i}_data', data=trace_dataset)
-                    pbar.update(n=1)
+        # copy the meta group and the GET datasets of the cut's events (same paths, so raw_h5_file reads the new file;
+        # its [meta][meta] event range is the run's, events outside the cut are absent)
+        source = self.run_data.h5_file
+        h5_path = os.path.join(dir_select, "h5_cut.h5")
+        with h5py.File(self.run_data.h5_file_path, 'r') as original, h5py.File(h5_path, 'w') as new:
+            original.copy('meta', new)
+            new_trace_group = new.create_group('get')
+            for i in tqdm(cut_indices_H5list):
+                for kind in ('data', 'header'):
+                    path = source._event_dataset_path(int(i), kind)
+                    if path in original['get']:
+                        original['get'].copy(path, new_trace_group, name=path)
+        print('wrote', h5_path)
 
         self.destroy()

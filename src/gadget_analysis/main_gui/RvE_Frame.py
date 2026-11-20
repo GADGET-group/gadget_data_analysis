@@ -110,10 +110,11 @@ class RvE_Frame(ttk.Frame):
         else:
             plt.figure('RvE')  # switch focus back to RvE plot
         event_num = int(self.event_num_entry.get())
-        event_index = self.run_data.get_index(event_num)
-        plt.plot(self.run_data.total_energy_MeV[event_index], self.run_data.len_list[event_index], 'ro', picker=5) 
-        plt.annotate(f"Evt#: {event_num}", (self.run_data.total_energy_MeV[event_index], 
-                    self.run_data.len_list[event_index]), textcoords="offset points", xytext=(-15,7),
+        energy, length = self.run_data.get_event_energy_MeV(event_num), self.run_data.get_event_length(event_num)
+        status = self.run_data.get_event_status(event_num)
+        label = f"Evt#: {event_num}" + ('' if status == 'selected' else f' ({status})')
+        plt.plot(energy, length, 'ro', picker=5)
+        plt.annotate(label, (energy, length), textcoords="offset points", xytext=(-15,7),
                     ha='center', fontsize=10, color='black',
                     bbox=dict(boxstyle="round,pad=0.5", facecolor="yellow", edgecolor="black"))
         plt.show(block=False)
@@ -193,72 +194,15 @@ class RvE_Frame(ttk.Frame):
         print("Total Number of Image:", num_images)
         num_chunks = (num_images + chunk_size - 1) // chunk_size
         print("Total Number of Chunks:", num_chunks)
-        chunk_num = 1
-
-        import io
-        from PIL import Image
 
         pbar = tqdm(total=num_chunks)
         for chunk_idx in range(num_chunks):
             print(f"Processing Chunk {chunk_idx+1} of {num_chunks}")
             start_idx = chunk_idx * chunk_size
             end_idx = min((chunk_idx + 1) * chunk_size, num_images)
-
-            chunk_indices = cut_indices[start_idx:end_idx]
-            image_data = self.run_data.save_cutImages(chunk_indices, use_raw_data=use_raw_data)
-
-            my_dpi = 96
-            fig_size = (224/my_dpi, 73/my_dpi)  # Fig size to be used in the main thread
-            fig, ax = plt.subplots(figsize=fig_size)
-            ax.tick_params(top=False, bottom=False, left=False, right=False, labelleft=False, labelbottom=False)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['bottom'].set_visible(False)
-            ax.spines['left'].set_visible(False)
-
-			# Plot and save images in the main thread
-            for pad_plane, trace, title, filename in image_data:
-				# Plot trace
-				# Plot trace
-                ax.clear()
-                x = np.linspace(0, len(trace)-1, len(trace))
-                ax.fill_between(x, trace, color='b', alpha=1)
-
-                # Assuming pad_plane is a NumPy array with shape (height, width, 3)
-                alpha_channel = np.ones((pad_plane.shape[0], pad_plane.shape[1], 1), dtype=pad_plane.dtype) * 255
-                pad_plane_rgba = np.concatenate((pad_plane, alpha_channel), axis=2)
-                # Now pad_plane_rgba has an additional alpha channel and can be concatenated with trace_img
-
-                # Ensure trace image is saved as PNG and read it
-                buf = io.BytesIO()
-                fig.savefig(buf, format='png', dpi=my_dpi)
-                buf.seek(0)
-                with Image.open(buf) as im:
-                    trace_img_png = np.array(im)
-                buf.close()
-
-                # Concatenate pad_plane_rgba and trace_img_png
-                complete_image = np.append(pad_plane_rgba, trace_img_png, axis=0)
-
-                # Convert image data to uint8 if it's not already
-                if complete_image.dtype != np.uint8:
-                    if complete_image.max() > 1:
-                        complete_image = complete_image.astype(np.uint8)
-                    else:
-                        complete_image = (255 * complete_image).astype(np.uint8)
-
-                # Save the final concatenated image as PNG
-                plt.imsave(os.path.join(imageCut_path, filename), complete_image)
-                # Close the figure to free memory
-                plt.close(fig)
-
-
-                chunk_num += 1
-                pbar.update(n=1)
-
-			# Update the GUI and process pending events
-            # root.update_idletasks()
-            # root.update()
+            for image, title, filename in self.run_data.get_cut_images(cut_indices[start_idx:end_idx], use_raw_data=use_raw_data):
+                plt.imsave(os.path.join(imageCut_path, filename), image)
+            pbar.update(n=1)
 
         print("All images have been processed")
 		
@@ -274,7 +218,9 @@ class RvE_Frame(ttk.Frame):
         Input files should have an energy (MeV) followed by range (mm) on each line,
         with the values seperated by a space. 
         '''
-        fname = tkinter.filedialog.askopenfile(initialdir=os.path.dirname(os.path.abspath(__file__)))
+        fname = tkinter.filedialog.askopenfilename(initialdir=os.path.dirname(os.path.abspath(__file__)))
+        if not fname:
+            return
         points = np.loadtxt(fname)
         self.save_cut_files(points)
 
@@ -283,6 +229,8 @@ class RvE_Frame(ttk.Frame):
         Input files should have an energy (MeV) followed by range (mm) on each line,
         with the values seperated by a space. 
         '''
-        fname = tkinter.filedialog.askopenfile(initialdir=os.path.dirname(os.path.abspath(__file__)))
+        fname = tkinter.filedialog.askopenfilename(initialdir=os.path.dirname(os.path.abspath(__file__)))
+        if not fname:
+            return
         points = np.loadtxt(fname)
         self.save_cut_files(points, use_raw_data=True)

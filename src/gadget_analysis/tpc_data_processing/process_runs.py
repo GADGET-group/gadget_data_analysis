@@ -307,6 +307,11 @@ def get_save_path(experiment):
         if experiment == 'e25058':
             return '/Volumes/e25058_v1/e25058/proc_pkl'
 
+def get_processed_file_path(experiment, run_number, config_filename):
+    '''Path of the processed ROOT file of a GET run (<experiment>_run<N>_<config name>.root in get_save_path); config_filename must already be resolved.'''
+    config_name = os.path.splitext(config_filename)[0]
+    return os.path.join(get_save_path(experiment), f'{experiment}_run{int(run_number)}_{config_name}.root')
+
 def get_h5_path(experiment, run_number):
     run_number = int(run_number)
     h5_base_path = ''
@@ -416,8 +421,7 @@ def _process_tpc_run(experiment, run_number, config_filename, force_reprocess, g
     
     #save_path = os.path.dirname(os.path.abspath(__file__))
     h5file = get_h5_file(experiment, run_number, config_filename)
-    config_name = os.path.splitext(config_filename)[0]
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run_number)}_{config_name}.root')
+    fname = get_processed_file_path(experiment, run_number, config_filename)
 
     if force_reprocess:
         import glob
@@ -453,9 +457,18 @@ def _process_tpc_run(experiment, run_number, config_filename, force_reprocess, g
         os.replace(partial_fname, fname)
 
 def _run_metadata(h5file):
-    '''The metadata tree of a processed run: git state of the code, and the processing settings of h5file.'''
+    '''
+    The metadata tree of a processed run: git state of the library checkout (not of the working directory, which may
+    be another repository or none), and the processing settings of h5file. Outside a git checkout (an installed
+    release) the git fields read 'unknown'.
+    '''
+    library_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     def git(*args):
-        return subprocess.run(['git', *args], capture_output=True, text=True, check=True, errors='replace').stdout
+        try:
+            return subprocess.run(['git', *args], capture_output=True, text=True, check=True, errors='replace',
+                                  cwd=library_dir, timeout=120).stdout
+        except (OSError, subprocess.SubprocessError):
+            return 'unknown'
     return {'git_version':[git('rev-parse', '--verify', 'HEAD')], 'git_status':[git('status')], 'git_diff':[git('diff')],
             'settings_hash':[h5file.get_settings_hash()], 'settings_json':[h5file.get_settings_str()]}
 
@@ -597,8 +610,7 @@ def _load_run_quantities(args):
     else:
         experiment, run, qnames, settings_hash, config_filename = args
         gpu_to_use = 0
-    config_name = os.path.splitext(config_filename)[0]
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+    fname = get_processed_file_path(experiment, run, config_filename)
     if not os.path.exists(fname):
         import multiprocessing
         if multiprocessing.current_process().name != 'MainProcess':
@@ -665,8 +677,7 @@ def _worker_ensure_processed(args):
     else:
         gpu_to_use = gpus_to_use[0]
         
-    config_name = os.path.splitext(config_filename)[0]
-    fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+    fname = get_processed_file_path(experiment, run, config_filename)
     if not os.path.exists(fname):
         process_tpc_run(experiment, run, config_filename=config_filename, gpu_to_use=gpu_to_use)
 
@@ -731,12 +742,11 @@ def _process_runs_split(experiment, runs, config_filename, gpus_to_use, max_work
     '''
     import multiprocessing
     from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
-    config_name = os.path.splitext(config_filename)[0]
     plans = []
     for run in runs:
         h5file = get_h5_file(experiment, run, config_filename)
         first, last = h5file.get_event_num_bounds()
-        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+        fname = get_processed_file_path(experiment, run, config_filename)
         plans.append({'run': run, 'first': first, 'n': max(last - first + 1, 0), 'fname': fname,
                       'partial': f'{fname}.{os.getpid()}.partial', 'metadata': _run_metadata(h5file)})
         h5file.close()
@@ -803,12 +813,11 @@ def ensure_processed(experiment, runs, config_filename=None, show_progress=True,
     '''
     config_filename = resolve_config_filename(experiment, config_filename)
     runs = [int(r) for r in runs]
-    config_name = os.path.splitext(config_filename)[0]
     
     # Filter for runs that actually need processing
     runs_to_process = []
     for run in runs:
-        fname = os.path.join(get_save_path(experiment), f'{experiment}_run{int(run)}_{config_name}.root')
+        fname = get_processed_file_path(experiment, run, config_filename)
         if not os.path.exists(fname):
             runs_to_process.append(run)
             

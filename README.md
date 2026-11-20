@@ -20,7 +20,7 @@ below are its sub-packages (paths in this README are relative to `src/gadget_ana
 
 | sub-package | contents |
 |---|---|
-| `tpc_data_processing/` | `raw_h5_file.py` (GET h5 reader, baseline subtraction, pad geometry from `padxy.txt`, `PadPlane.csv`, `channel_mappings/flatlookup4cobos.csv`), `process_runs.py` (per-run processing to ROOT files: `process_tpc_run`, `ensure_processed`, `get_quantity`, `get_save_path`, `get_h5_path`, `get_config_path`, `get_config_pad_gain_file`), `tpc_processing_configs/*.csv` (the preset configs), `pad_gain_match/` (tools that make pad gain maps), `field_dist/polynomial_correction.py`, `h5_utils/`, `dev/railed_pad_repair.py`, `heritage_h5_file.py`, `check_cobos_present.py`, `RawEventViewerFrame.py`, `file_formats.txt` |
+| `tpc_data_processing/` | `raw_h5_file.py` (GET h5 reader, baseline subtraction, pad geometry from `padxy.txt`, `PadPlane.csv`, `channel_mappings/flatlookup4cobos.csv`), `process_runs.py` (per-run processing to ROOT files: `process_tpc_run`, `ensure_processed`, `get_quantity`, `get_save_path`, `get_h5_path`, `get_processed_file_path`, `get_config_path`, `get_config_pad_gain_file`), `tpc_processing_configs/*.csv` (the preset configs), `pad_gain_match/` (tools that make pad gain maps), `field_dist/polynomial_correction.py`, `h5_utils/`, `dev/railed_pad_repair.py`, `heritage_h5_file.py`, `check_cobos_present.py`, `RawEventViewerFrame.py`, `file_formats.txt` |
 | `tpc_and_decay_station/` | `ddas_interface.py` (merging DDAS files with TPC events, histogram cache), `degai.py` (CLARION add-back, gamma-gamma, timing), `get_tsbo.py` (time since beam off per GET event), `mesh_gamma_coincidence.py`, `clarion_det_locations.csv`, `degai-angles-table.pdf` |
 | `analysis_tools/` | `energy_calibration_tools.py`, `fitting_tools.py`, `root_vis_tools.py`, `spectrum_fitter.py` |
 | `main_gui/` | tkinter analysis GUI and raw event viewer |
@@ -361,7 +361,7 @@ write access to the folder, not to the file.
 
 ## GUIs
 
-All need an X display.
+All need an X display and run from any working directory.
 
 | command | what |
 |---|---|
@@ -369,8 +369,16 @@ All need an X display.
 | `python -m gadget_analysis.main_gui.RawDataGUI` | raw event viewer (`tpc_data_processing/RawEventViewerFrame.py`) for GET h5 files |
 | `python -m gadget_analysis.main_gui.RawDataGUI -old` | raw event viewer for heritage e17023 files (`heritage_h5_file.py`) |
 
-`main_gui/The_GADGET_GUI.py` is the legacy GUI. Loading a run in the analysis GUI is currently broken (see Known
-issues); the raw event viewer is the working one.
+The analysis GUI's run tab takes an experiment (the installed `<exp>_analysis` packages), a TPC processing config
+(the presets plus the experiment's own, defaulting to its `DEFAULT_TPC_CONFIG`) and a GET run. "Process Run" runs
+`process_runs.ensure_processed` with that config; "Load Run" offers to process first when the processed file is missing.
+`main_gui/GadgetRunH5.py` reads the run through the library: the raw h5 file with the config applied
+(`process_runs.get_h5_file`: zscale, channel map, baseline subtraction, thresholds), track lengths and angles from the
+processed file, MeV from the runs module's `get_energy_MeV` (the config's pad gain map), adc counts as the integrated
+charge on the non-veto pads, and optionally the runs module's `get_veto_mask`. Point clouds and summed traces for the
+event images are read from the h5 file on demand. Saved RvE cuts go to
+`/egr/research-tpc/shared/proc_runs/<exp>/main_gui_cuts/<exp>_run<N>_<config>/`. The raw event viewer opened from the
+"Individual Events" tab loads the run's config. `main_gui/The_GADGET_GUI.py` is the legacy GUI.
 
 ## Setting up a new experiment
 
@@ -430,9 +438,9 @@ Until October 2026 everything lived in this repository on per-experiment branche
 
 ## Known issues
 
-- The analysis GUI's "Load" fails: `main_gui/GadgetRunH5.py` calls `raw_h5_file()` without the required `zscale`,
-  and the `pca` and `BaselineRemoval` PyPI packages it imports are missing from the envs.
-- `main_gui/IndividualEventFrame.py` references a nonexistent `h5_file_path`.
+- zscale outside the configs: the raw event viewer started on its own (`RawDataGUI`) uses 1.45 mm per time bucket
+  until a `.csv` config is loaded in its settings box; `track_fitting/SimulatedEvent.py` defaults to 1.45 and
+  `build_sim.get_zscale` knows only e21072 (any other experiment fails on an undefined `drift_speed`).
 - `fit_gui/FitElementFrame.py` loads `p10_alpha_850torr.npy` relative to the working directory (the file is in
   `fit_gui/`).
 - `process_runs.get_save_path` returns None on unknown hosts; on `gadget*` hosts `get_h5_path` tests for `'23035'`
